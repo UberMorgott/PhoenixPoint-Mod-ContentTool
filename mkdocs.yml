@@ -86,6 +86,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Working demos: demos.md
   - Shipping a content mod: SHIPPING-A-CONTENT-MOD.md
   - Recipes:
       - Pick your rung: guides/index.md

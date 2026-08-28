@@ -52,8 +52,49 @@ namespace Morgott.ContentTool
         /// </summary>
         internal static string PatchedDir(string modId)
         {
-            return Path.Combine(Path.Combine(Path.Combine(
-                UnityEngine.Application.persistentDataPath, "ContentTool"), "Patched"), modId);
+            return Path.Combine(Path.Combine(PatchedRoot, InstallTag), modId);
+        }
+
+        /// <summary>The folder every install's patched copies live under - what the startup sweep
+        /// walks (Project.PatchCache.Prune).</summary>
+        internal static string PatchedRoot
+        {
+            get
+            {
+                return Path.Combine(Path.Combine(
+                    UnityEngine.Application.persistentDataPath, "ContentTool"), "Patched");
+            }
+        }
+
+        /// <summary>THIS installation, hashed. persistentDataPath is per user and per product, so
+        /// without it the player's Steam copy and his second test instance share one folder and
+        /// overwrite each other's copies. dataPath is the install's own, read-only here.</summary>
+        internal static string InstallTag
+        {
+            get { return Project.PatchCache.InstallTag(UnityEngine.Application.dataPath); }
+        }
+
+        /// <summary>
+        /// Every project id whose patched copies are still someone's: the ENABLED content mods, via
+        /// the one discovery every route shares (Project.ContentMods.Enabled - never a second one),
+        /// plus ContentTool's own subprojects, which no mod manager lists and `ct_route7 apply
+        /// &lt;name&gt;` bakes. Throwing rather than guessing is deliberate: the caller's catch turns
+        /// "I could not read the roster" into no sweep at all, which is the safe answer.
+        /// </summary>
+        private static List<string> LiveProjectIds()
+        {
+            List<string> ids = new List<string>();
+            int skipped;
+            foreach (string dir in Project.ContentMods.Enabled(ModDir, Project.ContentMods.Manifest,
+                                                               Project.ModRoster.Build(), null, out skipped))
+                ids.Add(Project.ContentProject.LoadDeclared(dir).Id);
+
+            DirectoryInfo own = string.IsNullOrEmpty(ModDir) ? null : new DirectoryInfo(ModDir);
+            if (own != null && own.Exists)
+                foreach (DirectoryInfo sub in own.GetDirectories())
+                    if (File.Exists(Path.Combine(sub.FullName, Project.ContentMods.Manifest)))
+                        ids.Add(Project.ContentProject.LoadDeclared(sub.FullName).Id);
+            return ids;
         }
 
         public override void OnModEnabled()
@@ -112,6 +153,15 @@ namespace Morgott.ContentTool
             // redirections and published keys are session-only, so every ENABLED content mod has to
             // have them installed again on this launch, and a mod switched off BEFORE launch never
             // reaches the SetEnabled postfix at all. Silent unless there is something to say.
+            // BEFORE the reconcile, and only here: this is the last instant at which no bundle has
+            // been installed for this session, so nothing the sweep deletes can be loaded. It reads
+            // the SAME final roster the reconcile below does.
+            try
+            {
+                string swept = Project.PatchCache.Prune(PatchedRoot, InstallTag, LiveProjectIds());
+                if (swept != null) log?.LogInfo(swept);
+            }
+            catch (Exception ex) { log?.LogError("ct_cache prune THREW " + ex); }
             try { string moved = Project.ModRoster.Reconcile(ModDir); if (moved != null) log?.LogInfo(moved); }
             catch (Exception ex) { log?.LogError("ct_content reconcile THREW " + ex); }
             // The startup pass is over - the roster above was read from its final flags. From here

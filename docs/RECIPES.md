@@ -427,16 +427,17 @@ ct_sound status [mediaId] | ct_sound probe <mediaId> | ct_sound selftest
   read is refused BY NAME and skipped; the rest of the project still installs.
 - Source filenames may be non-ASCII on the ADD path (`Аве! Император.mp3` proven in game); on the
   REPLACE path the name must be the media ID, which is grammar, not encoding.
-- **A media the engine is PLAYING cannot be swapped in one go** — `File.Replace` throws
-  `Sharing violation`. `Swap` calls `AkSoundEngine.StopAll()` and retries while pumping the engine;
-  that is why an `.mp3` install (which lands after the menu music starts) works at all.
-- `apply` also rewrites the bank's `ulPluginID` to PCM (and a prefetch source to a plain stream) in
-  **every** bank that declares that media — a menu track is declared by two. Skip that and the
-  engine hands your PCM to the Vorbis codec the bank still names and the voice dies in ~23 ms.
+- **Nothing on disk is swapped.** The bake re-encodes the source as 16-bit PCM and wraps it in one
+  media-only `.bnk` per replaced media id, inside the MOD's `Dist\Sounds`; ContentTool hands those
+  to `AkSoundEngine.LoadBankMemoryCopy` at init and Wwise serves the game's own media id out of our
+  bank. Our bank declares the media itself, so there is no shipped codec declaration to fight —
+  PCM is the only codec this tool emits.
 - **On MUSIC the engine reports `dur=0`** (a looping track has no duration), so the decoded-LENGTH
   arm goes VOID and identity rests on the file hash, the codec declaration and "still playing after
   3 s". `ct_sound probe <mediaId>` posts a media's event on any install, replaced or not — that is
   how the zero was shown to belong to the SOUND rather than to the replacement.
 - **An event is not always named after its sound**: `MainMenuMusic` is played by
   `MainMenuMusicStart`. `<sound>` then `<sound>Start` are read off the shipped `<bank>.txt`.
-- Every touched game file gets a pristine `.ct-backup` first; `revert` proves the restore by SHA-1.
+- **There are no backups and no `revert`** — nothing was applied to a file. A bank cannot be
+  unloaded once loaded (unloading it gives you silence, not vanilla), so unticking the mod leaves
+  the sound live until you restart; the restart is the clean undo.

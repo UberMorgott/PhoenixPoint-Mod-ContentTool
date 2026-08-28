@@ -1,22 +1,63 @@
-# SHIPPING A CONTENT MOD — the whole contract
+# Shipping a content mod
 
-> What a mod folder must contain so that a player who switches it ON in the mod manager gets the
-> content, with no console command and no install step. This is the file to copy from.
+> What a mod folder must contain so that a player who switches it on gets the content, with no
+> console command or authoring step.
 
 ## The contract
 
-A shipped content mod is a folder under `Mods\<YourMod>\` containing:
+A shipped content mod is a folder under `Mods\<YourMod>\`, or the equivalent Workshop subscription,
+containing:
 
 | File | Required | What it does |
 |---|---|---|
 | `meta.json` | **yes** | Makes you a mod at all. **Declare `"Dependencies": [ "com.morgott.ContentTool" ]`** — not because ContentTool reads it (it never does; it asks the mod manager who is ON), but because it makes the manager switch ContentTool on for your player and load it before you. Without it a player can tick your mod with ContentTool off, and a code-less mod then fails to load outright with an error that names the loader instead of the missing prerequisite. `package.ps1` refuses to build a release without the line. The measurement is *What a mod that declares NO dependency really does* below. |
 | `ppcontent.json` | **yes, always** | The manifest. Its PRESENCE is the declaration — and the tools take that literally: `package.ps1` refuses a folder without one *before* it looks at what the mod does (`REFUSED: there is no <path>\ppcontent.json`), and so does the bake. Two fields are required in every one of them, whatever the mod is: `"id"` matching `meta.json`'s `ID`, and `"bundle"` naming the bundle you produce — declared even by a project that never builds one. |
-| `Content\...` | your sources | `Videos\*.webm .mp4 .mov`, `Audio\*.wav .ogg .mp3`, `Textures\*.png`, `Meshes\*.glb .obj`. |
+| `Content\...` and `Icons\...` | as needed | Images under `Textures\` or `Icons\`; replacement geometry under `Meshes\`; new models under `Models\`; audio under `Audio\` or `Audio\Replace\`; video and subtitles under `Videos\` and `Subtitles\`. Exact formats are in the [shared reference](guides/reference.md#1-the-folder). |
 | `Dist\Sounds\<mediaId>.bnk` | for sound replacement | The **already-baked** bank you ship. `ct_sound bake` produces it; the player never bakes. |
-| `Dist\<YourMod>.bundle` | for bundle / mesh / texture content | Your mod's **own** bundle, baked by `ct_project <YourMod>` and shipped. See *The bake rewrites your bundle in place* below. |
+| `Dist\<YourMod>.bundle` | for bundle / mesh / texture content | Your mod's **own** bundle, baked by `ct_project <YourMod>` and shipped. See [the distinction from a patched game bundle](#your-bundle-and-a-patched-game-bundle-are-different-files). |
 | `<YourMod>.dll` | only for behaviour | A hotkey, a trigger, a patch. Content alone needs **no code**. |
 
-Nothing else. No DLL for media, no installer, no console command.
+A player runs no installer, console command or bake.
+
+## From an empty folder to a release
+
+This is the complete order of operations. The individual [recipes](guides/index.md) supply the
+manifest rows for each content type.
+
+1. **Create the project folder.** Work in `<Phoenix Point>\Mods\MyMod\`. Phoenix Point discovers
+   only top-level folders under `Mods\`.
+2. **Write `meta.json`.** Give the mod a stable `ID`, set `AssemblyName` to `""` unless you ship a
+   DLL, and declare `"Dependencies": [ "com.morgott.ContentTool" ]`.
+3. **Write `ppcontent.json`.** Its `"id"` must match `meta.json`, and `"bundle"` names your output.
+   Add the `"replace"`, `"publish"`, `"sounds"`, `"creature"` or `"weapons"` rows required by your
+   recipe. Copying the nearest [demo](demos.md) is safer than starting from memory.
+4. **Add the source files.** Put them in the exact `Content\...` or `Icons\` folder named by the
+   recipe. Scale, axes, media IDs and asset names are the fiddly part; use `ct_list` to discover
+   targets and the fitting tools supplied by the relevant demo.
+5. **Bake in game.** Enable ContentTool and your project, open the developer console, and run:
+
+   ```text
+   ct_project MyMod
+   ct_sound bake MyMod        # also run this when the mod replaces shipped sounds
+   ```
+
+   For a project with its own assets, `ct_project MyMod` writes `Dist\MyMod.bundle`; a manifest-only
+   material tweak correctly has no bundle of its own. `ct_sound bake MyMod` writes replacement banks
+   under `Dist\Sounds\`. Do not continue past a refusal or failure line.
+6. **Close the game and package the project.** From a checkout of the ContentTool repository, run:
+
+   ```powershell
+   .\package.ps1 -Project "<Phoenix Point>\Mods\MyMod"
+   ```
+
+   The default output is `dist-package\MyMod`. The script builds your DLL when a `.csproj` exists,
+   copies only release files, and refuses missing sound bakes or redistributed game data.
+7. **Test the staged folder as a player would.** Install `dist-package\MyMod` in a test setup, tick
+   ContentTool and the mod on, and exercise the changed asset without running an authoring command.
+   Use `ct_version` to record the loaded build, `ct_route7 status` for shipped-bundle replacements,
+   and `ct_catalog status` for published keys. Check `Player.log` as well as the screen or sound.
+8. **Ship the folder you tested.** Zip the `MyMod` folder itself, so the archive contains
+   `MyMod\meta.json`, and publish that archive or the equivalent Workshop item.
 
 ## What applies by itself, and what does not
 
@@ -44,46 +85,28 @@ pretending:
 | route iii (`"publish"` keys) | keys published immediately | keys un-published immediately, no restart |
 | new defs (`"weapons"`, `"creature"`) | built immediately, when your DLL's `OnModEnabled` runs | **they stay until the game is restarted.** Nothing removes a def from the def repository once it is in, and neither demo assembly declares an `OnModDisabled`. The mod's *model keys* do go on the checkbox (route iii above), so the half that comes back is the art, not the weapon — un-tick a weapon mod mid-session and its gun is still in the repository with nothing to wear. Restart for a clean undo; nothing was written anywhere, so a restart is the whole of it. |
 
-**Both Addressables routes now run on the checkbox** (`ModRoster.AfterSetEnabled` → `Route7.Toggle`,
-which applies AND undoes them) and **nothing is written into the game installation** — route vii bakes
-its patched copy into the mod's own AppData folder and redirects the live locations at it
-(`BundleLive`). The old "apply, RESTART, verify / revert" phase pair is gone, and with it the
+Both Addressables routes run from the mod-manager checkbox. The old "apply, RESTART, verify /
+revert" phase pair is gone, and with it the
 `ct_route7 dryrun|verify|revert|stacktest` and `ct_catalog revert|selftest` verbs: running one now
 prints a REMOVED line pointing at `ct_route7 status` / `ct_catalog status`. Dev-only console entry
 points that remain: `ct_route7 apply <YourMod> | status`, `ct_catalog apply <YourMod> | verify | status`.
 
-## The bake rewrites your bundle in place — intended, and not an install write
+## Your bundle and a patched game bundle are different files
 
-`ct_project <YourMod>` deletes and rewrites `Mods\<YourMod>\Dist\<YourMod>.bundle`, every run. So an
-installed mod folder stops being byte-identical to the zip it came out of the moment you bake in it.
-**That is intended.** Three reasons, and the first is the one that settles it:
+`ct_project <YourMod>` overwrites your own `Mods\<YourMod>\Dist\<YourMod>.bundle`. That is the
+portable output you test and ship.
 
-- **It is your folder, not Phoenix Point's.** The guarantee is about the game installation: delete
-  ContentTool and every mod, and the game is byte for byte what Steam installed. `Mods\<YourMod>\` is
-  the mod's own folder, so writing there is a mod writing its own file — the same category as
-  `ct_sound bake` writing `Dist\Sounds\*.bnk`, which nobody has ever called an install write. The
-  install-write rule is not weakened by this and is not being traded against it.
-- **Only an AUTHOR ever triggers it.** `ct_project` is a developer console verb. Nothing in the
-  startup pass, and nothing on the mod-manager checkbox, rewrites your bundle: on a player's machine
-  that file is opened for reading and never for writing. The patched copies of *shipped* bundles —
-  the ones that genuinely are the game's own bytes — are built somewhere else entirely, in
-  ContentTool's own `persistentDataPath` folder, precisely because they must never live in a mod
-  folder that Steam can re-download and wipe.
-- **In place is what makes the artefact honest.** You ship the file you just loaded in game. Baking
-  to a side folder would mean the bundle you test and the bundle you upload are two different files.
+When a `"replace"` row targets an asset inside a bundle shipped by Phoenix Point, ContentTool cannot
+redistribute that bundle: it is the player's game data and may be hundreds of megabytes. Instead, it
+builds a patched copy from that player's installation and redirects the live load to the copy. The
+cache lives here, outside the game folder:
 
-Two consequences worth knowing rather than discovering:
+```text
+%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\Patched\
+```
 
-- **A Workshop update or a Steam file repair restores the shipped bundle**, discarding a local bake.
-  Nothing is lost — the shipped bundle is the correct one; re-run `ct_project` if you were mid-loop.
-- **Deploying after baking silently reverts you.** A deploy copies `Dist\` from your project into the
-  install, so a bake done *before* a deploy is overwritten by the older committed bundle. Bake AFTER
-  deploying, then copy the fresh bundle back into your project and commit it.
-
-It is not the only thing written inside a mod folder, and the other one *does* happen on a player's
-machine: extracting a shipped Wwise stream drops a `WwiseAudio\<mediaId>.wem` cache next to your mod
-(skipped when the length and SHA-1 already match). It is a regenerable cache, it is never part of a
-release — the packager excludes it by name — and, like everything above, it is inside `Mods\`.
+The first enable can therefore pause while a large target bundle is copied and patched. Never put
+that cache in a release; `package.ps1` refuses it.
 
 ## What you see in `Player.log` when it worked
 
@@ -184,8 +207,8 @@ Acidworm's own albedo read off the engine —
   lacking a type or method you referenced — a `TypeLoadException` or `MissingMethodException` at
   runtime. Call `CatalogLive.Register` **by reflection** when you want your mod to log and degrade
   instead; a hard reference cannot.
-- **Ship your own media only.** Never redistribute a Phoenix Point asset; the patched copies routes
-  vii/iii need are produced on the player's machine from the player's own files.
+- **Ship your own media only.** Never redistribute a Phoenix Point asset. `package.ps1` refuses a
+  release containing a shipped bundle, backup, catalog or patch cache.
 - **Your folder must be top-level under `Mods\`.** `PPModLoader` discovers only top-level
   directories holding a `meta.json` (`PPModLoader.cs:29-46`); a folder nested inside another mod can
   never be listed or switched off.

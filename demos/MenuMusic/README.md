@@ -108,7 +108,6 @@ you hear at the menu comes from `StreamingAssets\Audio\GeneratedSoundBanks\Windo
 The published mod is the two source files, the declaration and the two baked banks. This mod ships
 **no DLL of its own** — ContentTool loads its banks and the game's own Wwise plays them.
 
-On the shipped-bank route nothing in the install is written at all. On the older `apply` route what
-lands in the game is one overwritten `<mediaId>.wem` per track plus the codec byte in
-`MainMenuMusic.bnk` and `TacticalMusic.bnk` — **game files**; every touched file gets a pristine
-`.ct-backup` first, and `revert` proves the restore by SHA-1.
+Nothing in the install is written at all. The two banks live in this mod's own `Dist\Sounds\`, and
+ContentTool loads them into memory at init; the shipped `.wem` files and `MainMenuMusic.bnk` are
+never opened for writing. There is no backup and nothing to revert — unticking the mod is the undo.

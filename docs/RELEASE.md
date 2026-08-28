@@ -59,10 +59,8 @@ On its own it changes nothing. You are most likely here because a mod you subscr
 Subscribe, and leave it enabled: a content mod declares ContentTool as a dependency, and the game's
 mod manager turns it on for you.
 
-YOUR GAME FILES ARE NEVER TOUCHED
-Everything happens in memory while the game runs. Nothing is unpacked, patched, backed up or copied
-into your Phoenix Point installation. Unsubscribing leaves your install exactly as a clean one - no
-uninstaller, no repair step, nothing to undo.
+Everything happens in memory while the game runs, so your Phoenix Point installation is never
+written to and unsubscribing leaves nothing behind to undo.
 
 WHAT TO KNOW
 - Content is applied when you tick a mod on, and again on every launch. There is no install step.

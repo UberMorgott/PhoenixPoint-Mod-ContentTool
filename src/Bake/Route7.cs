@@ -196,8 +196,9 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>
-        /// Installs a project's already-baked copies LIVE. Reads Dist\Patched\ and bakes when it is
-        /// empty: this is what installing a DOWNLOADED mod looks like, where the patched copy cannot
+        /// Installs a project's already-baked copies LIVE. Reads ContentToolMain.PatchedDir() and
+        /// bakes when it is empty: this is what installing a DOWNLOADED mod looks like, where the
+        /// patched copy cannot
         /// be shipped (it would put Phoenix Point's own assets inside a Workshop item) and is produced
         /// here, on the player's machine, from the player's own game files.
         /// </summary>

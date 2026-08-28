@@ -97,6 +97,96 @@ namespace Morgott.ContentTool.Project
             File.WriteAllText(Path.Combine(patchedDir, KeyFile), key);
         }
 
+        /// <summary>
+        /// Which GAME INSTALLATION a patched copy belongs to, as a folder name.
+        ///
+        /// persistentDataPath is per USER and per PRODUCT, never per install, so two Phoenix Points
+        /// on one machine (a Steam copy and a second test instance) shared one Patched\&lt;modId&gt;
+        /// folder and overwrote each other's hundreds of megabytes on every enable. The key above
+        /// cannot separate them either: after the same Steam update both installs' shipped bundles
+        /// carry the same size and mtime, so the OTHER install's copy reads FRESH. The install's own
+        /// path is the only thing that tells them apart, hashed short because it becomes a segment.
+        /// </summary>
+        internal static string InstallTag(string installPath)
+        {
+            string p = (installPath ?? "").Replace('/', '\\').TrimEnd('\\').ToLowerInvariant();
+            return Sha1.Hex(Encoding.UTF8.GetBytes(p)).Substring(0, TagLength);
+        }
+
+        internal const int TagLength = 8;
+
+        /// <summary>
+        /// Startup housekeeping: patched copies nobody owns any more are DELETED, not merely skipped.
+        ///
+        /// THE DEFECT THIS FIXES. A copy is hundreds of megabytes and was only ever written, never
+        /// removed - install a content mod, remove it, and its bundles sit in the player's AppData
+        /// for the life of the machine. Route7 and this file both merely stepped over them.
+        ///
+        /// TWO SWEEPS, because there are two ways a folder is orphaned:
+        ///   1. at the ROOT, anything that is not an install tag - the flat pre-tag layout, which
+        ///      nothing reads or writes any more;
+        ///   2. inside THIS install's tag, any mod id <paramref name="liveModIds"/> does not name.
+        /// Another install's tag dir is hex-shaped and therefore untouched by 1 and out of reach of
+        /// 2, which is the whole point of the tag.
+        ///
+        /// SAFE BY CONSTRUCTION. A wrongly deleted entry costs one re-bake and nothing else - the
+        /// bake runs from the player's own game files - and a locked file is skipped and named
+        /// rather than fought. Callers run this BEFORE any bundle is installed for this session, so
+        /// nothing that is deleted here can be loaded.
+        ///
+        /// ponytail: a mod merely switched OFF in the manager is not live and pays one re-bake when
+        /// it comes back. Discover with an all-ON roster if that ever bites.
+        /// </summary>
+        internal static string Prune(string patchedRoot, string tag, ICollection<string> liveModIds)
+        {
+            if (string.IsNullOrEmpty(patchedRoot) || string.IsNullOrEmpty(tag)
+                || liveModIds == null || !Directory.Exists(patchedRoot)) return null;
+
+            HashSet<string> live = new HashSet<string>(liveModIds, StringComparer.OrdinalIgnoreCase);
+            List<string> gone = new List<string>();
+            List<string> kept = new List<string>();
+
+            foreach (string dir in Directory.GetDirectories(patchedRoot))
+                if (!IsTag(Path.GetFileName(dir))) Drop(dir, gone, kept);
+
+            string mine = Path.Combine(patchedRoot, tag);
+            if (Directory.Exists(mine))
+                foreach (string dir in Directory.GetDirectories(mine))
+                    if (!live.Contains(Path.GetFileName(dir))) Drop(dir, gone, kept);
+
+            if (gone.Count == 0 && kept.Count == 0) return null;
+            return "ct_cache: deleted " + gone.Count + " orphaned patched copy(ies) under " + patchedRoot +
+                   (gone.Count > 0 ? " [" + string.Join(", ", gone.ToArray()) + "]" : "") +
+                   (kept.Count > 0 ? "; " + kept.Count + " in use or unreadable, left alone [" +
+                                     string.Join(", ", kept.ToArray()) + "]" : "");
+        }
+
+        /// <summary>One entry removed. The KEY goes first, so a delete a locked file interrupts
+        /// leaves a folder that reads STALE - a re-bake - and never a half-empty one that reads
+        /// FRESH.</summary>
+        private static void Drop(string dir, List<string> gone, List<string> kept)
+        {
+            string name = Path.GetFileName(dir);
+            try
+            {
+                string key = Path.Combine(dir, KeyFile);
+                if (File.Exists(key)) File.Delete(key);
+                Directory.Delete(dir, true);
+                gone.Add(name);
+            }
+            catch (Exception) { kept.Add(name); }
+        }
+
+        /// <summary>ponytail: shape, not a registry - a mod id of exactly eight lowercase hex
+        /// characters would survive the legacy sweep. Mod ids are reverse-DNS; none can.</summary>
+        private static bool IsTag(string name)
+        {
+            if (name == null || name.Length != TagLength) return false;
+            foreach (char c in name)
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+            return true;
+        }
+
         /// <summary>name + size + mtime - what changes when a file changes, without reading it.</summary>
         private static string Stamp(string name, string path)
         {

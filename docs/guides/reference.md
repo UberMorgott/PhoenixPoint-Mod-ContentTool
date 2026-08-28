@@ -9,6 +9,8 @@
 > [Shipping a content mod](../SHIPPING-A-CONTENT-MOD.md). Read that once; this page is the field
 > reference beside it.
 
+For complete projects rather than isolated fields, use the [working demos](../demos.md).
+
 ## 1. The folder
 
 ```text
@@ -479,14 +481,15 @@ project 'morgott.demo.emptycontent' at D:\PP-Instance2\Mods\ContentTool\EmptyCon
 nothing to bake - put .png/.jpg under Content\Textures\, .glb under Content\Models\ or .wav under Content\Audio\
 ```
 
-### Checking what is live — `ct_catalog`, and what it prints
+### Checking what is live — `ct_route7` and `ct_catalog`
 
 Neither of these is an authoring command; both are read-only and both are how you answer *"did my
 mod actually reach the engine this session?"*
 
 ```text
-ct_catalog status      what is redirected and published right now, per mod
-ct_catalog verify      make the game's own Addressables resolve each published key, and report
+ct_route7 status       shipped bundles redirected right now
+ct_catalog status      redirected bundles and published keys, grouped by mod
+ct_catalog verify      make Addressables resolve each published key, and report
 ```
 
 `status` is a roster. Real output from a launch with four demos enabled:
@@ -497,10 +500,9 @@ live bundle redirections: 3 (transform func installed)
   morgott.demo.materialtweak -> aln_fireworm_assets_all.bundle = C:/Users/<you>/AppData/LocalLow/Snapshot Games Inc/Phoenix Point/ContentTool/Patched/morgott.demo.materialtweak/aln_fireworm_assets_all.bundle (crc 3770137363 -> 0)
   morgott.demo.nodeptexture -> aln_acidworm_assets_all.bundle = .../Patched/morgott.demo.nodeptexture/aln_acidworm_assets_all.bundle (crc 1151466550 -> 0)
   morgott.demo.weaponmesh -> px_equipment_assets_all.bundle = .../Patched/morgott.demo.weaponmesh/px_equipment_assets_all.bundle (crc 3454164017 -> 0)
-live published keys: 3
+live published keys: 2
   morgott.demo.weaponadd -> key 'c7a9f1d24b6e4a3c8f5b7d1e9a2c4b60' = assets/morgott.demo.weaponadd/models/sniper in D:/PP-Instance2/Mods/WeaponAdd/Dist/WeaponAdd.bundle
   morgott.demo.weaponadd -> key 'c7a9f1d24b6e4a3c8f5b7d1e9a2c4b61' = assets/morgott.demo.weaponadd/models/ar181 in D:/PP-Instance2/Mods/WeaponAdd/Dist/WeaponAdd.bundle
-  morgott.demo.weaponadd -> key 'c7a9f1d24b6e4a3c8f5b7d1e9a2c4b62' = assets/morgott.demo.weaponadd/models/taupistol in D:/PP-Instance2/Mods/WeaponAdd/Dist/WeaponAdd.bundle
 legacy: none - there is no D:/PP-Instance2/PhoenixPointWin64_Data/StreamingAssets\aa\catalog.json.ct-edits, so nothing an older ContentTool wrote is left in this installation
 ```
 
@@ -521,7 +523,7 @@ what came back, with an untouched sibling asset as the control in the same run.
 
 ```text
 > ct_catalog verify
-C1-live PASS 3 key(s) published LIVE while the game's own catalog.json still carries its shipped 8232 keys (key-count int = 8232), i.e. nothing was written to it
+C1-live PASS 2 key(s) published LIVE while the game's own catalog.json still carries its shipped 8232 keys (key-count int = 8232), i.e. nothing was written to it
 C1-pub PASS the game's own Addressables resolved 'c7a9f1d24b6e4a3c8f5b7d1e9a2c4b60' to GameObject 'sniper' out of WeaponAdd.bundle (the mod's asset is 'assets/morgott.demo.weaponadd/models/sniper', so 'sniper')
 C1-type PASS 'c7a9f1d24b6e4a3c8f5b7d1e9a2c4b60' declares type 'GameObject' and the game's own Addressables resolved it to GameObject 'sniper'
 C1-shader PASS an external PPtr in the mod's own asset, mounted by ADDRESSABLES and by no code of ours, resolved to shader 'Standard' (expected 'Standard'; a dangling external reads 'Hidden/InternalErrorShader')
@@ -592,27 +594,13 @@ Either one is enough, which is what lets the two file-less rungs ship: a **mater
 a DLL. A folder with *neither* — an empty manifest beside a `meta.json` — genuinely ships nothing and
 is still refused, because that is a mod a player installs for no effect.
 
-Beyond that, whether a missing bake is fatal depends on **which route** the source belongs to, and
-the split is exact:
+Missing bake output is handled differently by route. A texture, mesh, model, material or video
+project may still pass the packager because those routes can build their runtime state from the
+manifest and source files. Treat that as a fallback, not a release workflow: run `ct_project`, test
+the result, and ship `Dist\` whenever the recipe produces it.
 
-| Source under `Content\` | No bake in `Dist\` | Why |
-|---|---|---|
-| a texture, mesh, model, material tweak, video | **packages, and works** | the player's own machine reads `Content\` |
-| `Content\Audio\Replace\<mediaId>.*` | **REFUSED, by name** | the player's machine never opens that folder |
-
-*The bundle routes.* A project with `Content\` and **no** `Dist\` **packages successfully**, with no
-warning. Measured: a one-texture content mod with its source `.png` and no bake at all staged
-`6 file(s), 10133 B` and printed the normal success message. That is not a hole, because such a mod
-still works — on the player's first tick ContentTool finds no patched copy, bakes one **from their
-own installation**, writes the mod's own `Dist\<YourMod>.bundle` on their machine and redirects the
-live location at it. Measured end to end on a folder that had never been inside a game: the target
-texture read back **256×256 RGBA32, 1 mip** off the live engine, against the shipped
-**1024×1024 DXT1, 11 mips**.
-
-*The sound route is the opposite, and it used to package clean.* Nothing on the player's machine ever
-reads `Content\Audio\Replace\`; the only thing loaded is `Dist\Sounds\<mediaId>.bnk`. So an unbaked
-sound mod installed, enabled, printed no error and played the **shipped** sound — a silently dead
-release. The packager now refuses it and names the file:
+A sound replacement is stricter. The runtime never opens `Content\Audio\Replace\`; it loads only
+`Dist\Sounds\<mediaId>.bnk`. The packager therefore refuses an unbaked sound source by name:
 
 ```text
 REFUSED - this package is NOT publishable, and dist-package\MyMod has been deleted rather than half-written.
@@ -623,9 +611,8 @@ Run `ct_sound bake <YourMod>` and package again. Note what that refusal does *no
 about redistributing Phoenix Point's data, and it does not print that preamble — this is your own
 file, simply not turned into the thing the player loads.
 
-**Ship `Dist\` anyway, on every route.** Committing the bake output makes the artefact you tested and
-the artefact they install the same file, and it saves every player that first-tick bake. Without a
-bake you are also shipping untested output: nothing has told you your sources import at all.
+Shipping `Dist\` makes the artefact you tested and the artefact the player installs the same file.
+Without a bake, nothing has yet proved that the source imports.
 
 It is an **allowlist**, so `src\`, `tools\`, `bin\`, `obj\` and `.git\` never ride along:
 
@@ -689,10 +676,9 @@ verbatim, naming the offending file:
     declares nothing and carries nothing — and there the message's advice does apply, because the
     usual cause really is a bake that was never run.
 
-The bundle refusals are the important ones. **Never redistribute Phoenix Point's own data.** A patched
-copy of a shipped bundle is the game's file with a few of your bytes in it — ContentTool builds those
-on the *player's* machine out of the *player's* own installation, into their AppData, which is exactly
-why no release has to contain one.
+The bundle refusals prevent redistribution of Phoenix Point data. The
+[shipping contract](../SHIPPING-A-CONTENT-MOD.md#your-bundle-and-a-patched-game-bundle-are-different-files)
+explains which bundle belongs in `Dist\` and which cache must stay out of a release.
 
 ## 7. How a player installs your mod
 
@@ -709,8 +695,8 @@ There is **no bake step, no console command and no install step** on the player'
 
 ContentTool runs one gated pass one frame after it is enabled, and again the moment the player ticks
 your mod on mid-session. For **every mod the manager says is ON** it applies your `Dist\Sounds\*.bnk`,
-your `ppcontent.json` `replace`/`publish` rows and your video rows. Nothing is written into the game
-install; everything is per session and re-applied on every launch.
+your `ppcontent.json` `replace`/`publish` rows and your video rows. The exact off-switch behaviour for
+each route is in [Shipping a content mod](../SHIPPING-A-CONTENT-MOD.md#unticking-it-mid-session-what-actually-happens-per-route).
 
 What it printed when it worked — captured from one launch, not written from memory:
 
@@ -784,14 +770,14 @@ The log is at:
 
 Search it for `ct_`.
 
-## 9. Distribution — GitHub, not the Workshop
+## 9. Distribution
 
-**ContentTool itself is the only thing published to Steam Workshop.** Content mods built with it —
-including every demo — are distributed **from GitHub**, as a release zip, and the ContentTool Workshop
-page links back to this documentation.
+A content mod ships like any other Phoenix Point mod: as a release archive that extracts to
+`Mods\MyMod\`, or as a Steam Workshop item whose subscription contains the same folder contents.
 
-So the last step is: `package.ps1`, zip the output **folder** (so the archive holds
-`MyMod\meta.json`, see §6), attach it to a GitHub release, and point people at it.
+Run `package.ps1`, test its output, then zip the output **folder** so the archive holds
+`MyMod\meta.json`. Use that staged folder for either distribution route; do not upload the authoring
+tree around it.
 
 ## 10. The two rules that are not negotiable
 
@@ -873,5 +859,5 @@ failure. Both are legitimate; referencing an unresolvable `Managed\` module is n
 
 ### Ship your own media only
 
-Never redistribute a Phoenix Point asset. The patched copies the bundle routes need are produced on
-the player's machine, from the player's own files.
+Never redistribute a Phoenix Point asset. Package only your source media, manifest, own bundle and
+own assembly; `package.ps1` enforces this boundary.

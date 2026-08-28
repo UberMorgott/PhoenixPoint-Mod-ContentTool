@@ -59,9 +59,11 @@ aims the same machinery at `px_equipment_assets_all.bundle`, which is **403 MB**
 written by decompressing the whole archive, so expect the `apply` step to take a while and to want
 the memory.
 
-Route vii: ContentTool writes a **patched copy** of the shipped bundle under its own folder and
-repoints the game's Addressables catalog at it. The player's `px_equipment_assets_all.bundle` gets a
-pristine `.ct-backup`, and `revert` proves the restore. Nothing of Snapshot Games' is redistributed
+Route vii: ContentTool builds a **patched copy** of the shipped bundle under
+`%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\Patched\<installTag>\<modId>\`
+on the player's own machine, and repoints the game's live Addressables at it in memory. The
+player's `px_equipment_assets_all.bundle` is read and never written, so there is no backup and
+nothing to revert — switching the mod off drops the redirect. Nothing of Snapshot Games' is redistributed
 — the mod ships a mesh and five images and names the shipped objects it replaces.
 
 ## Which weapon, and how we know

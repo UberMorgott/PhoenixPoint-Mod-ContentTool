@@ -5,7 +5,10 @@ tree, the manifest field by field with a real working example, the console comma
 they really print, how to bake and package, how a player installs it, how ContentTool finds it, and
 that rung's real failure messages.
 
-**Read these two first, once.** They are what every recipe below assumes:
+If you prefer to begin from a complete project, use the [working demos](../demos.md); every demo
+links back to the recipe that explains its technique.
+
+Read these two pages once before following a recipe:
 
 - [Shipping a content mod](../SHIPPING-A-CONTENT-MOD.md) — the contract: what a mod folder may
   contain, what applies by itself, what the checkbox does and does not undo.
@@ -52,9 +55,7 @@ Every recipe below says which side of that line it is on, in its first paragraph
 - **A download needs no bake.** `ct_project` and `ct_sound bake` are AUTHORING commands, for when
   *you* change a source file. You ship the baked output in `Dist\`; your player just ticks the mod
   on. [Measured](reference.md#5-the-two-authoring-commands-and-why-a-player-never-runs-them).
-- **Nothing is ever written into the game installation.** Deleting your mod, or ContentTool, leaves
-  the install byte-identical. There is nothing to uninstall and no `revert` — it was never applied
-  to a file. **The mod-manager checkbox is the whole install step**, for you and for your player.
-  `ct_route7 apply <YourMod>` still exists as a DEVELOPER shortcut, for re-installing your own
-  patched copies mid-session without touching the checkbox; you never need it, and a player has no
-  reason to know it exists.
+- **The mod-manager checkbox is the player's install step.** The old `revert` workflow has been
+  removed. `ct_route7 apply <YourMod>` remains only as an author shortcut for refreshing a
+  shipped-bundle replacement during a test session; route-specific off-switch behaviour is in the
+  [shipping contract](../SHIPPING-A-CONTENT-MOD.md#unticking-it-mid-session-what-actually-happens-per-route).

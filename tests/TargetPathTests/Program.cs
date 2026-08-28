@@ -46,6 +46,7 @@ internal static class Program
         PackageArm();
         TypeResolveArm();
         CacheKeyArm();
+        CachePruneArm();
         InstallWriteArm();
         DevLoopArm();
         VideoOnlyReportArm();
@@ -1566,6 +1567,84 @@ internal static class Program
                 "inputs and not the clock");
         }
         finally { try { Directory.Delete(tmp, true); } catch (IOException) { } }
+    }
+
+    /// <summary>
+    /// Gate S21, offline: the patched cache is namespaced BY INSTALL, and what nobody owns is
+    /// DELETED instead of stepped over.
+    ///
+    /// The two defects it pins, both measured against a real folder tree:
+    ///   1. the cache key was &lt;modId&gt; alone, so the player's Steam install and his second test
+    ///      instance wrote to one folder and thrashed each other's hundreds of megabytes;
+    ///   2. an obsolete copy was only ever SKIPPED (Route7's "the project no longer declares it"),
+    ///      so removing a content mod left its bundles in AppData forever.
+    ///
+    /// It can tell a sweep from a massacre because the same run holds four fates: a live mod SURVIVES
+    /// with its key intact, a dead one is GONE, the OTHER install's tag is UNTOUCHED, and a locked
+    /// entry is left alone - and, the arm that matters most, left STALE rather than half-fresh, so
+    /// the worst a delete can cost is a re-bake.
+    /// </summary>
+    private static void CachePruneArm()
+    {
+        string tmp = Dir(Path.GetTempPath(), "ct_s19_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string steam = @"D:\Steam\steamapps\common\Phoenix Point\PhoenixPointWin64_Data";
+            string mine = PatchCache.InstallTag(steam);
+            string other = PatchCache.InstallTag(@"D:\PP-Instance2\PhoenixPointWin64_Data");
+            Check("S21-tag-splits", mine != other && mine.Length == PatchCache.TagLength,
+                "two installs on one machine get two folders -> " + mine + " vs " + other);
+            Check("S21-tag-stable",
+                PatchCache.InstallTag(steam + "\\") == mine
+                && PatchCache.InstallTag(steam.ToUpperInvariant()) == mine
+                && PatchCache.InstallTag(steam.Replace('\\', '/')) == mine,
+                "while a trailing slash, the case and the slash direction are the same install - a " +
+                "tag that drifted would re-bake the whole cache at every launch");
+
+            string root = Dir(tmp, "Patched");
+            string live = Stamped(Dir(Dir(root, mine), "com.morgott.Live"), "live");
+            string dead = Stamped(Dir(Dir(root, mine), "com.morgott.Dead"), "dead");
+            string theirs = Stamped(Dir(Dir(root, other), "com.morgott.Live"), "theirs");
+            string legacy = Stamped(Dir(root, "com.morgott.Legacy"), "legacy");
+            string locked = Stamped(Dir(Dir(root, mine), "com.morgott.Locked"), "locked");
+
+            string said;
+            using (FileStream hold = new FileStream(Path.Combine(locked, "held.bundle"),
+                                                    FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                hold.WriteByte(7);
+                said = PatchCache.Prune(root, mine, new[] { "com.morgott.Live" });
+            }
+
+            Check("S21-keeps-live", Directory.Exists(live) && PatchCache.Fresh(live, "live"),
+                "the enabled mod's copy survives with its key intact - no re-bake for doing nothing");
+            Check("S21-drops-dead", !Directory.Exists(dead),
+                "the mod the player removed is DELETED, not skipped -> " + dead);
+            Check("S21-other-install", Directory.Exists(theirs) && PatchCache.Fresh(theirs, "theirs"),
+                "the OTHER install's tag is not this sweep's business and is untouched -> " + theirs);
+            Check("S21-drops-legacy", !Directory.Exists(legacy),
+                "and the flat pre-tag layout goes with it, because nothing reads it any more");
+            Check("S21-locked-safe",
+                Directory.Exists(locked) && !PatchCache.Fresh(locked, "locked")
+                && said != null && said.Contains("com.morgott.Locked"),
+                "a locked entry is named and left alone, and left STALE - the key goes first, so the " +
+                "worst an interrupted delete can cost is a re-bake -> " + said);
+
+            // The control in the same run: with the live mod gone from the roster too, the SAME call
+            // takes it. An arm that passed because Prune deletes nothing fails here.
+            PatchCache.Prune(root, mine, new string[0]);
+            Check("S21-ctl-not-inert", !Directory.Exists(live) && Directory.Exists(theirs),
+                "naming no live mod at all empties this install's tag and still leaves the other's");
+        }
+        finally { try { Directory.Delete(tmp, true); } catch (IOException) { } }
+    }
+
+    /// <summary>A cache entry on disk: one patched copy plus the key that says it is current.</summary>
+    private static string Stamped(string dir, string key)
+    {
+        File.WriteAllBytes(Path.Combine(dir, "shipped_assets_all.bundle"), new byte[32]);
+        PatchCache.Write(dir, key);
+        return dir;
     }
 
     // ---------------------------------------------------------------- gate M2

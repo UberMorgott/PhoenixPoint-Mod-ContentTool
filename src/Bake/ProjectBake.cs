@@ -70,7 +70,7 @@ namespace Morgott.ContentTool.Bake
             // stand ahead of it, so a project whose only declaration is a "material" or a "clip" row
             // - no .png, no .glb, no .wav of its own - returned "nothing to bake" and produced no
             // patched copy at all; route vii then refused with "holds no .bundle". Measured on
-            // demos\MaterialTweak, 2026-08-28. Patch() writes into Dist\Patched\ and needs nothing
+            // demos\MaterialTweak, 2026-08-28. Patch() writes into PatchedDir() and needs nothing
             // from the mod's own bundle, so it is simply in the wrong order, not conditional on it.
             if (p.Replace.Count > 0) failures += Patch(p, log);
             // WHAT WAS PATCHED, not how many rows were declared. A "video" row is a replacement that
@@ -1347,7 +1347,8 @@ namespace Morgott.ContentTool.Bake
         /// <summary>
         /// Route vii, declared by the author (gate P1). For every shipped bundle named in
         /// ppcontent.json "replace", clone it, overwrite the named objects, write the patched copy
-        /// into Dist\Patched\ with the SOURCE's compression, and hand the copies to the catalog
+        /// into <see cref="ContentToolMain.PatchedDir"/> (persistentDataPath\ContentTool\Patched\
+        /// &lt;modId&gt;\) with the SOURCE's compression, and hand the copies to the catalog
         /// record so the game loads them with no runtime code (PROVEN-FOUNDATIONS R7).
         ///
         /// The copy is produced from the player's own install and never leaves it, which is what

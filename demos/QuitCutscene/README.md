@@ -24,8 +24,8 @@ QuitCutscene\
 
 **Why 319 and not 40.** The recipe really is one prefix on one shared call — `QuitPatch` at the
 bottom of the file is the whole of it. The other ~280 lines are two things a copyist should know
-are optional: the `Q1-*` instrumentation this demo carries only while the clip is still
-[unconfirmed in-game](#what-else-changed-and-why), and the watchdog, which is not optional at all
+are optional: the `Q1-*` instrumentation, which is what [measured the clip
+playing](#what-else-changed-and-why), and the watchdog, which is not optional at all
 (a mod that takes the quit away and then fails to quit is worse than no mod).
 
 **None of it belongs in ContentTool.** This demo reaches ContentTool by reflection on purpose (see
@@ -162,13 +162,21 @@ that, and one of them matters more than the cutscene does:
   `UIStateHomeScreenCutscene.cs:48` plays through — instead of `FindObjectOfType`, which could answer
   about a different `VideoPlaybackController` two objects away.
 
-**Still unconfirmed in-game.** The def defect is proven from source, and the demo can no longer hang
-a quit, but nobody has yet watched the clip play. The run that settles it: quit from the **main
-menu** and read the log for `Q1-src PASS` → `Q1-trigger` → `Q1-play PASS ... frameCount=90`. A
-`Q1-play FAIL` line now carries the url, `isPrepared` and `frameCount`, which is enough to tell a
-missing catalog row from a rejected codec without another session of guessing. The ESC keypress is
-still UNRUN — the code path is asserted (`OnInputEvent:92-104 -> OnCancel ->` same callback), the
-keypress is a five-second manual check.
+**Confirmed in game, 2026-08-27 (R3).** Quitting from the main menu played the clip: the game's own
+`CommonModules.CutscenesPlayer.VideoPlayer` reported `prepared=True playing=True frameCount=90
+length=3s 1280x720 playbackSource=QuitCutscene_Runtime`, and then the process exited. The added
+catalog key resolved to `…\Mods\QuitCutscene\Content\Videos\quit_outro.webm`, 90 frames 1280×720 —
+`docs\VERIFIED-DEMOS.md`, and `ZW5` in `docs\PROVEN-FOUNDATIONS.md`.
+
+Two things that run left UNMEASURED, and neither affects whether the clip plays. **Which code path
+performed the exit is not known**: the watchdog quits unconditionally
+(`src\QuitCutsceneMain.cs:270-291`), so a log carrying `Q1-exit the cutscene finished or was
+skipped; quitting for real now` and NOT `Q1-watchdog … are up` is what would settle it. And the
+**ESC keypress is still UNRUN** — the code path is asserted (`OnInputEvent:92-104 -> OnCancel ->`
+same callback), the keypress is a five-second manual check.
+
+A `Q1-play FAIL` line carries the url, `isPrepared` and `frameCount`, which is enough to tell a
+missing catalog row from a rejected codec without another session of guessing.
 
 Note the separate instrument bug found while chasing this: `ct_video play`'s arm never prints and
 does not hold `AsyncGate`, so it cannot currently answer "what is the player actually on". Fix the
