@@ -38,6 +38,9 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
+          # Without this the cache step looks only for requirements.txt / pyproject.toml and fails
+          # the job outright - it does not fall back to "no cache".
+          cache-dependency-path: requirements-docs.txt
       - run: pip install -r requirements-docs.txt
       # --strict, so a broken internal link fails the build instead of publishing a dead page.
       - run: mkdocs build --strict
