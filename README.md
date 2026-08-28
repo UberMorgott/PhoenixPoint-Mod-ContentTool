@@ -7,6 +7,9 @@
 > This is an early build under active development. Expect bugs, expect things not to work, and
 > expect the manifest format and commands to change without notice. Do not build a mod you care
 > about on it yet.
+>
+> The ten documented demos and their current routes are safe to reproduce, bake and package today;
+> compatibility, manifest fields and commands may still change before a stable release.
 
 [![License](https://img.shields.io/badge/license-CC%20BY--NC%204.0-blue?style=flat-square)](LICENSE)
 [![Issues](https://img.shields.io/github/issues/UberMorgott/PhoenixPoint-Mod-ContentTool?style=flat-square)](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/issues)
@@ -19,7 +22,9 @@ videos, creatures and weapons. It is an engine for other mods; it changes nothin
 ## Players
 
 1. Download `ContentTool-*.zip` from the [latest release](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/releases/latest).
-2. Copy the `ContentTool` folder into `Phoenix Point\Mods\`.
+2. Copy the `ContentTool` folder into
+   `<Steam library>\steamapps\common\Phoenix Point\Mods\`. The game creates `Mods\` if it is
+   missing.
 3. Start the game, open **Mods**, and tick **Content Tool**.
 
 That is the whole install. If another mod declares ContentTool as a dependency, the mod manager

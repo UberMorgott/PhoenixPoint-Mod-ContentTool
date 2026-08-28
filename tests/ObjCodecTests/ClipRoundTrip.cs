@@ -206,7 +206,7 @@ internal static class ClipRoundTrip
     /// The repack half of BundleBaker.Write, shared by the two round trips below it - a clip EDIT
     /// has to survive the same LZ4 block layout an added clip does, so it goes out the same way.
     /// </summary>
-    private static void Pack(BundleFileInstance bun, AssetsFileInstance af, string outPath)
+    internal static void Pack(BundleFileInstance bun, AssetsFileInstance af, string outPath)
     {
         // Without this the bundle writes its ORIGINAL directory entry and everything added
         // vanishes silently - the same line BundleBaker.Write carries.

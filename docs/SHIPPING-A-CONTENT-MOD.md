@@ -1,225 +1,467 @@
-# Shipping a content mod
+# How a ContentTool mod is made
 
-> What a mod folder must contain so that a player who switches it on gets the content, with no
-> console command or authoring step.
-
-## The contract
-
-A shipped content mod is a folder under `Mods\<YourMod>\`, or the equivalent Workshop subscription,
-containing:
-
-| File | Required | What it does |
-|---|---|---|
-| `meta.json` | **yes** | Makes you a mod at all. **Declare `"Dependencies": [ "com.morgott.ContentTool" ]`** — not because ContentTool reads it (it never does; it asks the mod manager who is ON), but because it makes the manager switch ContentTool on for your player and load it before you. Without it a player can tick your mod with ContentTool off, and a code-less mod then fails to load outright with an error that names the loader instead of the missing prerequisite. `package.ps1` refuses to build a release without the line. The measurement is *What a mod that declares NO dependency really does* below. |
-| `ppcontent.json` | **yes, always** | The manifest. Its PRESENCE is the declaration — and the tools take that literally: `package.ps1` refuses a folder without one *before* it looks at what the mod does (`REFUSED: there is no <path>\ppcontent.json`), and so does the bake. Two fields are required in every one of them, whatever the mod is: `"id"` matching `meta.json`'s `ID`, and `"bundle"` naming the bundle you produce — declared even by a project that never builds one. |
-| `Content\...` and `Icons\...` | as needed | Images under `Textures\` or `Icons\`; replacement geometry under `Meshes\`; new models under `Models\`; audio under `Audio\` or `Audio\Replace\`; video and subtitles under `Videos\` and `Subtitles\`. Exact formats are in the [shared reference](guides/reference.md#1-the-folder). |
-| `Dist\Sounds\<mediaId>.bnk` | for sound replacement | The **already-baked** bank you ship. `ct_sound bake` produces it; the player never bakes. |
-| `Dist\<YourMod>.bundle` | for bundle / mesh / texture content | Your mod's **own** bundle, baked by `ct_project <YourMod>` and shipped. See [the distinction from a patched game bundle](#your-bundle-and-a-patched-game-bundle-are-different-files). |
-| `<YourMod>.dll` | only for behaviour | A hotkey, a trigger, a patch. Content alone needs **no code**. |
-
-A player runs no installer, console command or bake.
-
-## From an empty folder to a release
-
-This is the complete order of operations. The individual [recipes](guides/index.md) supply the
-manifest rows for each content type.
-
-1. **Create the project folder.** Work in `<Phoenix Point>\Mods\MyMod\`. Phoenix Point discovers
-   only top-level folders under `Mods\`.
-2. **Write `meta.json`.** Give the mod a stable `ID`, set `AssemblyName` to `""` unless you ship a
-   DLL, and declare `"Dependencies": [ "com.morgott.ContentTool" ]`.
-3. **Write `ppcontent.json`.** Its `"id"` must match `meta.json`, and `"bundle"` names your output.
-   Add the `"replace"`, `"publish"`, `"sounds"`, `"creature"` or `"weapons"` rows required by your
-   recipe. Copying the nearest [demo](demos.md) is safer than starting from memory.
-4. **Add the source files.** Put them in the exact `Content\...` or `Icons\` folder named by the
-   recipe. Scale, axes, media IDs and asset names are the fiddly part; use `ct_list` to discover
-   targets and the fitting tools supplied by the relevant demo.
-5. **Bake in game.** Enable ContentTool and your project, open the developer console, and run:
-
-   ```text
-   ct_project MyMod
-   ct_sound bake MyMod        # also run this when the mod replaces shipped sounds
-   ```
-
-   For a project with its own assets, `ct_project MyMod` writes `Dist\MyMod.bundle`; a manifest-only
-   material tweak correctly has no bundle of its own. `ct_sound bake MyMod` writes replacement banks
-   under `Dist\Sounds\`. Do not continue past a refusal or failure line.
-6. **Close the game and package the project.** From a checkout of the ContentTool repository, run:
-
-   ```powershell
-   .\package.ps1 -Project "<Phoenix Point>\Mods\MyMod"
-   ```
-
-   The default output is `dist-package\MyMod`. The script builds your DLL when a `.csproj` exists,
-   copies only release files, and refuses missing sound bakes or redistributed game data.
-7. **Test the staged folder as a player would.** Install `dist-package\MyMod` in a test setup, tick
-   ContentTool and the mod on, and exercise the changed asset without running an authoring command.
-   Use `ct_version` to record the loaded build, `ct_route7 status` for shipped-bundle replacements,
-   and `ct_catalog status` for published keys. Check `Player.log` as well as the screen or sound.
-8. **Ship the folder you tested.** Zip the `MyMod` folder itself, so the archive contains
-   `MyMod\meta.json`, and publish that archive or the equivalent Workshop item.
-
-## What applies by itself, and what does not
-
-ContentTool runs one gated pass one frame after it is enabled and, for **every mod the manager says
-is ON**, applies:
-
-- **`Dist\Sounds\*.bnk`** → loaded into Wwise in memory. Replaces a shipped sound by `mediaId`.
-- **`ppcontent.json` → `"replace": [ { "video": "<clip stem>", "asset": "<shipped path>" } ]`** →
-  the clip is served out of **your own folder**, in memory. Omit `"asset"` and the row is ADDED
-  under a derived RuntimeKey, which is printed for you to paste into your own def.
-
-Both are **per session**: nothing is written into the game install. This runs at startup **and when
-the player ticks your mod on mid-session** — same path, driven by `ModEntry.SetEnabled`.
-
-### Unticking it mid-session — what actually happens, per route
-
-The checkbox is not symmetric for every route, and ContentTool says which is which instead of
-pretending:
-
-| Route | Ticked ON mid-session | Ticked OFF mid-session |
-|---|---|---|
-| video (`"replace"` → `"video"`) | served immediately | **handed back immediately**, the shipped clip resolves again, no restart |
-| sound (`Dist\Sounds\*.bnk`) | loaded immediately | **stays until a restart.** Measured: after `UnloadBank` the event dies at 17 ms instead of falling back to the shipped media — Wwise goes SILENT, it does not go vanilla. Silence is a broken game, not a restored one, so the bank is left alone and the log says so. Nothing was written to the install, so the restart is a clean undo. |
-| route vii (`"replace"` → `"bundle"`) | redirected immediately, in memory | redirection dropped immediately, no restart |
-| route iii (`"publish"` keys) | keys published immediately | keys un-published immediately, no restart |
-| new defs (`"weapons"`, `"creature"`) | built immediately, when your DLL's `OnModEnabled` runs | **they stay until the game is restarted.** Nothing removes a def from the def repository once it is in, and neither demo assembly declares an `OnModDisabled`. The mod's *model keys* do go on the checkbox (route iii above), so the half that comes back is the art, not the weapon — un-tick a weapon mod mid-session and its gun is still in the repository with nothing to wear. Restart for a clean undo; nothing was written anywhere, so a restart is the whole of it. |
-
-Both Addressables routes run from the mod-manager checkbox. The old "apply, RESTART, verify /
-revert" phase pair is gone, and with it the
-`ct_route7 dryrun|verify|revert|stacktest` and `ct_catalog revert|selftest` verbs: running one now
-prints a REMOVED line pointing at `ct_route7 status` / `ct_catalog status`. Dev-only console entry
-points that remain: `ct_route7 apply <YourMod> | status`, `ct_catalog apply <YourMod> | verify | status`.
-
-## Your bundle and a patched game bundle are different files
-
-`ct_project <YourMod>` overwrites your own `Mods\<YourMod>\Dist\<YourMod>.bundle`. That is the
-portable output you test and ship.
-
-When a `"replace"` row targets an asset inside a bundle shipped by Phoenix Point, ContentTool cannot
-redistribute that bundle: it is the player's game data and may be hundreds of megabytes. Instead, it
-builds a patched copy from that player's installation and redirects the live load to the copy. The
-cache lives here, outside the game folder:
+This is the complete authoring loop. The examples use a project named `MyMod`; substitute your own
+folder name and identifiers.
 
 ```text
-%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\Patched\
+make the folder -> discover targets -> add your files -> preview -> bake -> package -> reinstall the package -> ship
 ```
 
-The first enable can therefore pause while a large target bundle is copied and patched. Never put
-that cache in a release; `package.ps1` refuses it.
+The usual working layout puts your project beside ContentTool:
 
-## What you see in `Player.log` when it worked
-
-```
-ct_content: 'morgott.demo.materialtweak' is ON in the mod manager, so its live registrations were installed at startup.
-1/1 bundle(s) redirected LIVE for 'morgott.demo.materialtweak' - nothing was written to the game installation
-ct_video: 12 content project(s) serving in memory, 3 skipped
-  IntroVideo: 1 clip(s) served in memory from D:\PP-Instance2\Mods\IntroVideo; nothing in the install was written
-  MaterialTweak: 0 clip(s) served in memory from D:\PP-Instance2\Mods\MaterialTweak; nothing in the install was written
-  NoDepTexture: skipped, disabled in the mod manager
-ct_sound: 6 shipped replacement bank(s) loaded from D:\PP-Instance2\Mods, 0 failed, 0 skipped
-  MenuMusic\208540756.bnk 24583864 B -> AK_Success ...
+```text
+Phoenix Point\
+  Mods\
+    ContentTool\
+    MyMod\
+      meta.json
+      ppcontent.json
 ```
 
-Three passes print there and they count different things — the bundle line is the one a texture or
-mesh mod is proved by, and `0 clip(s) served in memory` on such a mod is correct, because that line
-counts **video** rows. The full rule is in
-[the reference](guides/reference.md#which-success-line-is-yours-there-are-three-and-they-count-different-things).
+The project does **not** need to be ticked in the mod manager to bake or package it. Every authoring
+command takes the bare name `MyMod`, never a path, and looks first for
+`Mods\MyMod\ppcontent.json`, then for `Mods\ContentTool\MyMod\ppcontent.json`. This lookup does not
+consult the mod roster or its enabled flags. The checkbox matters only when **running** the mod;
+the sibling folder wins if both locations contain a manifest.
 
-Every refusal is a named line. If your content does not appear, the reason is on that line:
+## 1. Understand the clone model
 
-- `skipped, disabled in the mod manager` — the player has you switched off. Working as intended.
-- `skipped, the mod manager never discovered it (no meta.json)` — you shipped no `meta.json`, so the
-  manager cannot know you and nothing of yours is applied. Add one.
-- `skipped, the mod manager could not be read` — no readable roster; nothing at all is applied. We
-  never fall back to "apply everything", because that is the bug this gate closed.
+Cloning is the foundation. ContentTool takes a creature or weapon the game already has and copies
+its definition. From that donor come the component structure, navigation agent type and footprint,
+combat behavior, and—above all—the Animator state machine. What you bring is appearance and
+movement: your model, textures and clips. What the donor brings is what the object is and what the
+game knows how to ask it to do.
 
-## What a mod that declares NO dependency really does — measured
+Choose a donor by capability, not by looks and not by the names of its clips. The states in its
+controller are the ceiling on the actions your content can perform. Its movement and combat
+machinery decide where it can go and how it fights. ContentTool replaces every overridable donor
+clip with yours; it does not reuse donor motion or retarget it onto your rig.
 
-The `Dependencies` line above is called mandatory, and until 2026-08-28 nobody had run the case
-where it is missing: every demo declares it. The fixture that does is `demos\NoDepTexture` — one
-texture replacement, two `meta.json` variants, four launches.
+A poor donor leaks its nature into the clone. An early small-spider build used a large donor and
+inherited a 3×3 navigation footprint plus a component that demolished walls as it moved. The
+creature route now defaults to `Swarmer_TacCharacterDef` because it is a one-tile donor with the
+minimum required combat structure.
 
-**The prediction, written down before the runs** (`ModMeta.Dependencies` is
-`public string[] Dependencies = new string[0]` read through `JsonConvert`, so an absent field and an
-explicit `[]` both end up as `string[0]`): the two variants would be indistinguishable; the mod
-would be **enablable** in every cell, because `ResolveDependencies` finds nothing missing; enabling
-it would **not** switch ContentTool on; with ContentTool ON the replacement would apply anyway; and
-with ContentTool OFF **nothing would happen and nothing would be printed** — a mod that reads ON and
-silently does nothing.
+The donor and ContentTool's automatically selected one-tile reference unit are different jobs. The
+donor supplies structure. The reference supplies the navigation agent, cursor and movement marker.
+Nav-area names are scoped to the agent type, so the ground mask must come from that same reference;
+copying a `Walkable*` area from a differently scoped donor can create a creature that walks nowhere.
 
-**Measured.** Rig `D:\PP-Instance2`, ContentTool `1.0.0.0 build=9872a6b9`, from the main menu, mod
-roster cut to PPBridge + the fixture (+ ContentTool where the column says ON). The probe is the
-Acidworm's own albedo read off the engine —
-`Addressables.LoadAssetAsync<GameObject>("02_Bodyparts/ALN_Acidworm_BodyAll_Ready.prefab")` →
-`Renderer.sharedMaterial.mainTexture` → `width`/`format`/`mipmapCount`. Shipped is
-**1024x1024 DXT1, 11 mips**; the fixture's checker bakes to **256x256 RGBA32, 1 mip**.
+Traversal rights come from navigation areas, not from animations. A creature with no climb area is
+never offered a climb link. A creature with the area but no reachable clip can be routed onto it and
+then stall. ContentTool therefore adds an area only after it has filled the corresponding controller
+slots. It can synthesize ordinary climb/drop motion from a walk cycle, but it cannot add a state the
+shipped controller does not have. In particular, climbing up one full level is unavailable on the
+Humanoid controller used by current custom creatures.
 
-| `meta.json` | ContentTool | Mod roster | `acidworm_low_albedo` reads | Verdict |
-|---|---|---|---|---|
-| `Dependencies` **omitted** | **ON** | ContentTool loaded; `ct_content: 'morgott.demo.nodeptexture' is ON in the mod manager`; `1/1 bundle(s) redirected LIVE` | **256x256 RGBA32, 1 mip** | **applies** |
-| `Dependencies` **omitted** | **OFF** | ContentTool discovered, never loaded; `[ERROR] [Mods] Failed to enable mod 'morgott.demo.nodeptexture', loader 'Default'` → `InvalidOperationException: Loader.LoadMod() returned null!` | **1024x1024 DXT1, 11 mips** | **does not apply, and does not load** |
-| `"Dependencies": []` | **ON** | identical to row 1, byte for byte | **256x256 RGBA32, 1 mip** | **applies** |
-| `"Dependencies": []` | **OFF** | identical to row 2, same exception | **1024x1024 DXT1, 11 mips** | **does not apply, and does not load** |
+This model applies beyond creatures: publishing a model only gives it an address, adding audio only
+gives it an event/media identity, and cloning a weapon only gives it the donor's existing behavior.
+If the game has no consumer, state or trigger for something, content files alone cannot invent one.
 
-### What that changes
+## 2. Create the two files
 
-- **Omitted and `[]` are the same input.** Confirmed on all four cells, in both directions. The
-  prediction held here.
-- **The dependency does not gate the CONTENT.** With ContentTool on, the replacement applies exactly
-  as if it had been declared — ContentTool's startup pass asks the mod manager who is ON and never
-  reads anybody's `Dependencies`. What the line actually buys is the **auto-enable**
-  (`ModManager.TryEnableMod:200-207` turns ContentTool on for you) and the ordering that comes with
-  it. That is worth having, and it is not what "mandatory" implied.
-- **The prediction was WRONG about the OFF case, and the truth is better.** A content-only mod has
-  no assembly, so Phoenix Point's own `Default` loader returns `null` from `LoadMod()` and the mod
-  **fails to enable outright**. Code-less mods are loadable only because ContentTool patches that
-  path (`ct_content: code-less content mods are loadable, so the mod manager's switch governs
-  them`) — and with ContentTool off there is no patch. So the feared silent no-op does not happen:
-  the mod is not quietly ON-and-inert, it is refused, with a named `[ERROR]` line in `Player.log`.
-- **It is still not a good failure.** The error names the loader, not the missing prerequisite: a
-  player reads `Failed to enable mod '<id>', loader 'Default'` and has no way to learn that the
-  answer is "switch ContentTool on". Declaring the dependency is what turns that dead end into an
-  auto-enable, which is the real reason the rule stands.
-- One more consequence worth stating: a content mod that ships **its own DLL** would load fine here
-  and then do nothing at all, because the loader failure is the only thing standing in for the
-  missing warning. That case is untested.
+Create `Phoenix Point\Mods\MyMod\meta.json`:
 
-## Rules that are not negotiable
+```json
+{
+  "ID": "yourname.mymod",
+  "AssemblyName": "",
+  "Version": "1.0.0",
+  "Author": [
+    { "Key": "English", "Value": "Your Name" }
+  ],
+  "Name": [
+    { "Key": "English", "Value": "My Content Mod" }
+  ],
+  "Description": [
+    { "Key": "English", "Value": "Replaces one Phoenix Point asset. Requires ContentTool." }
+  ],
+  "Dependencies": [
+    "com.morgott.ContentTool"
+  ]
+}
+```
 
-- **Never reference an assembly nothing loads for you.** `PPModLoader` loads a mod with
-  `Assembly.Load` over raw bytes and installs no `AssemblyResolve` handler, so the CLR can only
-  satisfy your references from assemblies already in memory. A reference it cannot satisfy fails the
-  mod load — and Phoenix Point answers a failed mod load by rewriting `MOD_ACTIVATED` empty, silently
-  disabling *every* other mod on the machine (measured 2026-08-13). The reference that actually does
-  this is a Unity module under `PhoenixPointWin64_Data\Managed\` which `ModSDK\` does not ship:
-  referencing `UnityEngine.VideoModule` took the whole mod list down, and so did the `Managed\`
-  reference the video demo carried before that. **Reference only what `ModSDK\` ships** and reach
-  anything else **by reflection**.
-- **`ContentTool.dll` is not one of those.** You may reference it — the weapon and creature recipes
-  do, and both are confirmed in game — because `meta.json` declares
-  `"Dependencies": [ "com.morgott.ContentTool" ]` and the mod manager enables and loads a dependency
-  before its dependents, so ContentTool is already in memory when your code first mentions its types.
-  Two conditions, both required: the dependency line in `meta.json`, and `<Private>false</Private>`
-  on the reference so a second rival copy is not loaded beside the player's.
-  The real fragility here is **version skew, not resolution**: `Dependencies` carries only an id and
-  no minimum version, so an *older* ContentTool satisfies the dependency and the load order while
-  lacking a type or method you referenced — a `TypeLoadException` or `MissingMethodException` at
-  runtime. Call `CatalogLive.Register` **by reflection** when you want your mod to log and degrade
-  instead; a hard reference cannot.
-- **Ship your own media only.** Never redistribute a Phoenix Point asset. `package.ps1` refuses a
-  release containing a shipped bundle, backup, catalog or patch cache.
-- **Your folder must be top-level under `Mods\`.** `PPModLoader` discovers only top-level
-  directories holding a `meta.json` (`PPModLoader.cs:29-46`); a folder nested inside another mod can
-  never be listed or switched off.
+Create `Phoenix Point\Mods\MyMod\ppcontent.json`:
 
-## Where the engine half lives
+```json
+{
+  "id": "yourname.mymod",
+  "bundle": "MyMod.bundle"
+}
+```
 
-Inside ContentTool, and you do not need to read it to ship a mod: discovery and the enabled /
-disabled / unknown gate are one rule shared by every route, and the two routes that apply by
-themselves — sound banks and video — hang off that same gate. Everything a mod author touches is on
-this page and in the guides.
+`meta.json` makes the folder a Phoenix Point mod. `ppcontent.json` makes it a ContentTool project.
+Keep `ID` and `id` identical even though the current implementation does not cross-check them:
+Phoenix Point uses the first as the mod identity, while ContentTool uses the second for bundles,
+banks, keys and caches.
 
-*(This page is the modder's contract. The file-by-file map of the engine belongs with the engine's
-own architecture notes, which are not part of the published documentation — naming implementation
-files here would also hand them to the source-blind documentation test.)*
+`bundle` is unrelated to the project folder name. Choose any filename; matching `MyMod.bundle` to
+`MyMod\` is only a convention used by the demos. A packaged mod may contain **at most one**
+`.bundle`, and if present its name must equal the declared `bundle` (case-insensitively). A
+manifest-only payload is valid: material-only, replacement-sound-only, added-video, and stat-only
+weapon projects can legitimately package without a `.bundle`.
+
+The dependency is mandatory for a real release. With ContentTool off, a code-less content mod does
+**not load at all**: Phoenix Point logs `Failed to enable mod`, and the enabled state does not stick.
+ContentTool supplies the in-memory loader shim that makes a folder with no assembly loadable. The
+dependency auto-enables ContentTool and orders it before the content mod.
+
+### No DLL is the normal case
+
+`"AssemblyName": ""` is correct for a content-only mod. There is no stub DLL. ContentTool patches
+Phoenix Point's loader in memory so the checkbox can enable a folder that contains only content.
+
+Exactly three kinds of work need a DLL: weapons, creatures, and anything requiring a trigger or def
+edit. Playing an added sound and triggering an added video are trigger examples; merely serving
+either asset is content-only. Start from the complete [project, assembly references, deployment
+loop and `ModMain` surface](guides/behavior-dll.md). Build that DLL in your own IDE before packaging;
+`ct_package` never compiles.
+
+A mod that ships its own DLL can be discovered without the shim, but that does not make its
+ContentTool calls work while the dependency is absent. Declare the dependency for both code-less and
+code-bearing ContentTool mods.
+
+## 3. Discover the target before making art
+
+Do not guess bundle names, asset names, def names, media IDs, bone names or shader properties. Use
+the [discovery workflow](guides/discovery.md).
+
+### Open the developer console
+
+The console is **locked by default, but unlocks automatically whenever Phoenix Point is launched
+with mods**. That is every reader who has installed ContentTool; ContentTool itself does not need to
+unlock it.
+
+Press the physical US-layout backquote-key position (left of `1`) to open or close the console.
+Slash also opens it while it is hidden, and Escape closes it. These keys are hardcoded and cannot be
+rebound; on a non-US keyboard use the same physical key position even if the printed character is
+not a backquote.
+
+If a launcher failed to start the game with mod support, press this fallback sequence in order:
+
+```text
+Up Down Left Right S N A P S H O T
+```
+
+It unlocks and opens the console. There is no settings-file switch for console access.
+
+You can also run commands without opening the console. Put `autorun.txt` beside the mod, or point
+the `CT_AUTORUN` environment variable at a command file. Each non-comment line goes through the
+same command dispatcher, and output is written to `Player.log`.
+
+For a texture replacement, for example:
+
+```text
+ct_list bundles acidworm
+ct_list assets aln_acidworm_assets_all.bundle Texture2D acidworm
+ct_extract tex aln_acidworm_assets_all.bundle acidworm_low_albedo
+```
+
+The listing's `m_Name` is the exact, case-sensitive `asset` value. The extracted PNG is a reference
+for size, UV layout and alignment. Do not redistribute extracted Phoenix Point art.
+
+## 4. Gather your source files
+
+Put your own files in the folder that describes their route:
+
+```text
+MyMod\
+  meta.json
+  ppcontent.json
+  README.md
+  SOURCES.md
+  Content\
+    Textures\       .png .jpg .jpeg used by texture rows or added models
+    Meshes\         .obj .glb used by mesh rows
+    Models\         .glb added as whole prefabs
+    Audio\          .wav .ogg .mp3 added to your own sound bank
+      Replace\      .wav .ogg .mp3 aimed at shipped media IDs
+    Videos\         .webm .mp4 .mov replaced or added as catalog rows
+  Icons\            PNG files used by weapon entries or your own DLL
+```
+
+Only create the folders you use. The file stem is its identifier and is lowercased by the importer:
+`Content\Textures\AcidSkin.png` is named `acidskin` in the manifest. Renaming the file therefore
+renames the identifier; update every reference in the same edit. Two files with the same stem in one
+folder are refused rather than chosen by extension.
+
+`Icons\` is relative to the mod folder, accepts PNG files only, and is included by `ct_package`.
+Inside JSON, `"Icons\\rifle.png"` is the path `Icons\rifle.png`; the doubled backslash is only JSON
+escaping.
+
+Add all route declarations to the same `ppcontent.json`. Root-key order and `replace` row order do
+not matter. One mod may replace textures and sounds, add models and videos, and declare a creature or
+weapons together. The only exclusivity rule is inside one `replace` row: it must contain exactly one
+of `texture`, `material`, `mesh`, `clip` or `video`.
+
+See the [combined project](guides/combined-example.md) before splitting related work into separate
+mods.
+
+## 5. Preview and iterate
+
+There are two loops. Use the ordinary loop for every route. Use live file preview where its current
+target-path plumbing can reach the object.
+
+### Ordinary loop: always available
+
+1. Save your source and manifest.
+2. Run the route's bake or live-apply command.
+3. Put the target on screen or make the sound/video happen.
+4. Read the first refusal in the console or `Player.log`.
+5. Edit and repeat.
+
+For bundle content and shipped-bundle replacements:
+
+```text
+ct_project MyMod
+ct_route7 apply MyMod
+```
+
+For published keys:
+
+```text
+ct_catalog apply MyMod
+ct_catalog verify
+```
+
+`ct_route7 apply` is the author's preview for bundle replacements; `ct_catalog apply` is the
+author's preview for newly published keys. They apply the current project in memory so you can
+inspect it without restarting, and they are not release steps. A player's game applies every
+declared route automatically when the packaged mod is enabled, and reconciles video, sound and
+catalog state during startup. Players run neither command.
+
+`ct_route7 apply` applies live unless the target shipped bundle is already loaded. In that case it
+refuses by bundle name with `REFUSED: restart required: <bundle> is already loaded`; restart, then
+apply before opening the screen or scene that loads it.
+
+For a video row:
+
+```text
+ct_video live MyMod
+```
+
+For replaced audio:
+
+```text
+ct_sound bake MyMod
+```
+
+`ct_project` rewrites `ppcontent.json` when a `creature` block needs its discovered clip list. Save
+or close the file in your editor before running the command; do not overwrite the generated list
+with an older unsaved buffer.
+
+### Live file preview: textures and meshes
+
+`ct_dev` watches files behind an existing `ct_replace` preview binding. It does **not** read
+`ppcontent.json` and create those bindings automatically. Once a binding exists:
+
+```text
+ct_dev on MyMod
+```
+
+Save the bound PNG, JPG, GLB or OBJ under the project and it is re-read after a 0.5-second quiet
+period. Scene changes are rescanned every 3 seconds. Check the watcher and binding count with:
+
+```text
+ct_dev status
+```
+
+Variant sets live here:
+
+```text
+MyMod\
+  Content\Textures\acidworm.png
+  select\
+    Red\acidworm.png
+    Blue\acidworm.png
+```
+
+`Default` means the authored file. A set supplies a same-named alternative; files absent from that
+set fall back to the authored version. Switch with F12 or explicitly:
+
+```text
+ct_dev sets
+ct_dev set Red
+ct_dev next
+```
+
+Turn the loop off when finished:
+
+```text
+ct_dev off
+ct_revert
+```
+
+!!! warning "Advanced preview plumbing"
+    The first `ct_replace` binding currently depends on engineering-oriented discovery commands:
+    `ct_seamprobe on` for an Addressables GUID target or `ct_scan on` for a unique live object name.
+    Load the screen containing the object, obtain the anchor, and bind a supported slot:
+
+    ```text
+    ct_replace guid:<32-lowercase-hex>#<transform>@Renderer.materials[0].tex:_MainTex Mods/MyMod/Content/Textures/acidworm.png
+    ct_replace name:<unique-object-name>#<transform>@MeshFilter.mesh Mods/MyMod/Content/Meshes/prop.glb
+    ```
+
+    Those commands are preview instrumentation, not manifest syntax and not part of a release. The
+    shipped tooling still cannot list all live object paths, renderer indices or Addressables GUIDs
+    from a manifest target, so this immediate loop is not available for every asset. Use the ordinary
+    bake/apply loop when no unambiguous target path can be established. Material-number previews are
+    not file-backed, so F12 does not vary them.
+
+## 6. Bake every route the project uses
+
+The two bake commands are independent:
+
+```text
+ct_project MyMod
+ct_sound bake MyMod
+```
+
+Run `ct_project` after changes to non-video `replace` or `publish` rows, creature/model content,
+textures, meshes or added audio. It writes your own bundle to `MyMod\Dist\MyMod.bundle` when that
+route needs one. It also builds private patched copies of shipped bundles under the user's AppData;
+those copies are Phoenix Point data and never belong in your mod.
+
+Run `ct_sound bake` after changes under `Content\Audio\Replace\`. It writes one replacement bank per
+media ID under `MyMod\Dist\Sounds\`.
+
+If the project uses both bake families, run both commands. Neither invokes the other. Video rows
+need neither bake: `ct_video live` reads `ppcontent.json` and the loose file under `Content\Videos`
+directly during authoring, and enabling the packaged mod applies the same route for players.
+
+Before moving on, deal with every `REFUSED`, `FAILURE(S)` and `SOURCE SKIPPED` line. A successful
+bundle bake ends with:
+
+```text
+ct_project: ALL PASS - <project>\Dist\MyMod.bundle
+```
+
+## 7. Package inside the game
+
+Run:
+
+```text
+ct_package MyMod
+```
+
+This command does not bake and does not compile. It stages only player-facing files from the current
+project into:
+
+```text
+%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\Packaged\MyMod\
+```
+
+It replaces an earlier package folder before staging a new one. On success it prints:
+
+```text
+PACKAGED 5 file(s), 335 B into C:\Users\<you>\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\Packaged\MyMod
+Zip the FOLDER itself, so the archive holds MyMod\meta.json, and upload it.
+```
+
+The package allowlist is `meta.json`, `ppcontent.json`, readme/licence/source notes, `Content\`,
+`Icons\`, `Dist\`, plus the real DLL named by `AssemblyName`. Source audio already represented by a
+`Dist\Sounds\<mediaId>.bnk` is left out of the release.
+
+The packager refuses and deletes a half-staged output if it finds, among other causes:
+
+- no `meta.json` or `ppcontent.json`;
+- no `ID`, no ContentTool dependency, or a declared DLL that is missing;
+- no actual payload or declared content route;
+- an unbaked replacement sound;
+- `Patched\`, a shipped Phoenix Point bundle, `.ct-backup`, `.ct-new`, `.ct-edits` or `catalog.json`.
+
+Fix the named cause in the working project, bake again if necessary, and rerun `ct_package`.
+
+## 8. Test the packaged folder as a player
+
+Do not call the authoring folder “tested.” Test the exact staged package:
+
+1. Exit Phoenix Point.
+2. Move `Phoenix Point\Mods\MyMod\` somewhere outside `Mods\`. Do not merely rename it inside
+   `Mods\`; it would still be a discoverable top-level mod.
+3. Copy the packaged `MyMod\` folder into `Phoenix Point\Mods\`.
+4. Confirm the final path is `Phoenix Point\Mods\MyMod\meta.json`.
+5. Start the game and tick **My Content Mod**. The dependency should enable ContentTool.
+6. Exercise every route: load the asset, trigger the sound/video, begin a new campaign when the mod
+   changes starting storage or squad composition.
+7. Disable the mod and test the result using the route-specific behaviour below.
+8. Exit, relaunch, and test once more. This catches output that existed only in the author session.
+9. Delete the packaged test copy and move the authoring folder back to
+   `Phoenix Point\Mods\MyMod\` before editing again.
+
+Players never run `ct_project`, `ct_sound bake`, `ct_dev`, `ct_route7`, `ct_catalog`, `ct_video` or
+`ct_package`. They install the folder and tick the checkbox.
+
+### What unticking removes
+
+| Route | What happens in the current session | Clean undo |
+|---|---|---|
+| Texture, mesh, material, or clip replacement | Its live bundle redirection is removed immediately. An object already loaded from the patched copy can remain until its screen or scene reloads. | Reload the screen or scene; restart if the object stays resident. |
+| Published key | The appended Addressables locator and ownership are removed immediately. An asset already loaded through the key remains resident. | Restart to clear an already-loaded asset. |
+| Video replacement or addition | The row's live mapping is removed and a shipped cutscene resolves to its shipped file again without a restart. Let an active cutscene finish or reload its screen. | No restart for the mapping. |
+| Added or replacement sound | The bank deliberately remains loaded: unloading it made the event go silent instead of falling back to shipped media. It cannot be undone safely in-session. | Restart is the clean undo. |
+| Added weapon | The created defs remain for the session, while a published model key is removed as described above. The weapon can remain with its art unavailable. | Restart is the clean undo. |
+
+## 9. Zip and ship
+
+Zip the **folder**, not just its contents. The archive must begin like this:
+
+```text
+MyMod.zip
+  MyMod\
+    meta.json
+    ppcontent.json
+    ...
+```
+
+A contents-rooted archive puts `meta.json` directly into `Mods\` when a player chooses “Extract
+here”; Phoenix Point discovers only top-level directories containing `meta.json`.
+
+Ship only files you have the right to redistribute. Keep `SOURCES.md` and required attribution in
+the package. Extracted Phoenix Point files are references for authoring, not release assets.
+
+## Working and shipped trees
+
+This is a real combined route shape before packaging:
+
+```text
+MyMod\
+  meta.json
+  ppcontent.json
+  README.md
+  SOURCES.md
+  Content\
+    Textures\acidworm.png
+    Models\field_scanner.glb
+    Audio\scanner_ping.wav
+    Audio\Replace\ui_confirm.mp3
+  Icons\scanner.png
+  Dist\
+    MyMod.bundle
+    Sounds\633458426.bnk
+```
+
+After `ct_package MyMod`, the packaged tree keeps the texture, model and added sound, keeps both
+baked outputs, and drops only the baked replacement sound's source. Texture and mesh replacements
+are rebuilt on the player's machine from the loose sources under `Content\`, so those sources must
+ship; the player's game does not read them from your bundle.
+
+```text
+MyMod\
+  meta.json
+  ppcontent.json
+  README.md
+  SOURCES.md
+  Content\
+    Textures\acidworm.png
+    Models\field_scanner.glb
+    Audio\scanner_ping.wav
+  Icons\scanner.png
+  Dist\
+    MyMod.bundle
+    Sounds\633458426.bnk
+```
+
+Nothing under `select\` is on the allowlist. Keep variants in the author project; move the chosen
+file into `Content\` before the final bake.

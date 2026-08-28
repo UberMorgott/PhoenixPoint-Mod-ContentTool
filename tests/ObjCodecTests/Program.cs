@@ -94,11 +94,13 @@ internal static class Program
         Console.WriteLine(ClipRoundTrip.Run());
         Console.WriteLine(ClipImport.Run());
         Console.WriteLine(RootMotionBake.Run());
+        Console.WriteLine(ClimbSynthesis.Run());
         Console.WriteLine(ClipBake.Run());
         Console.WriteLine(ClipPlan.Run());
         Console.WriteLine(Compressed.Run());
         Console.WriteLine(DracoTests.Run());
         Console.WriteLine(AssetIndexTests.Run());
+        Console.WriteLine(InspectTests.Run());
         Console.WriteLine(MeshExtractTests.Run());
         Console.WriteLine(VideoExtractTests.Run());
         Console.WriteLine(VideoCatalogTests.Run());

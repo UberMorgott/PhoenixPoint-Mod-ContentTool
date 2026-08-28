@@ -377,9 +377,13 @@ namespace Morgott.ContentTool.Bake
         /// (<see cref="ClipFields.Summary"/>).
         /// </summary>
         /// <param name="aocName">null asks about the CLIP alone (U7).</param>
-        internal static string ReadClipSummary(string bundlePath, string clipName, string aocName = null)
+        /// <param name="unique">`ct_list clip`'s opt-in: refuse an ambiguous clip name instead of
+        /// reporting the first match. The bake's own reads leave it false and are unaffected.</param>
+        internal static string ReadClipSummary(string bundlePath, string clipName, string aocName = null,
+                                               bool unique = false)
         {
-            return Read(bundlePath, (m, afile) => ClipFields.Summary(m, afile, clipName, aocName));
+            return Read(bundlePath, (m, afile) =>
+                ClipFields.Summary(m, afile, clipName, aocName, unique ? bundlePath : null));
         }
 
         /// <summary>
@@ -778,27 +782,16 @@ namespace Morgott.ContentTool.Bake
         /// exposes no properties through the engine API - the data is there, but Material.GetTexture
         /// has no property sheet to look it up in.
         /// </summary>
+        /// <remarks>
+        /// Resolved through <see cref="AssetIndex.FindUnique"/>: aln_fireworm ships TWO Materials
+        /// called 'ALN_Fireworm', and the walk this used to do returned an arbitrary one of them
+        /// quietly - which, now that ct_list props prints this to an author, would be a lie about
+        /// which material they are looking at.
+        /// </remarks>
         internal static string ReadMaterialProperties(string bundlePath, string materialName)
         {
-            AssetsManager m = new AssetsManager();
-            using (Stream cldb = ContentToolMain.ClassData())
-            {
-                m.LoadClassPackage(cldb);
-                BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
-                AssetsFileInstance afile = m.LoadAssetsFileFromBundle(bun, 0, false);
-                m.LoadClassDatabaseFromPackage(afile.file.Metadata.UnityVersion);
-                try
-                {
-                    foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Material))
-                    {
-                        AssetTypeValueField mat = m.GetBaseField(afile, i);
-                        if (mat["m_Name"].AsString != materialName) continue;
-                        return MaterialFields.Summary(mat);
-                    }
-                    return "no Material named " + materialName + " in " + bundlePath;
-                }
-                finally { m.UnloadAll(); }
-            }
+            return Read(bundlePath, (m, afile) => MaterialFields.Summary(m.GetBaseField(afile,
+                AssetIndex.FindUnique(m, afile, AssetClassID.Material, materialName, bundlePath))));
         }
 
         /// <summary>
@@ -859,17 +852,18 @@ namespace Morgott.ContentTool.Bake
         /// list is index-for-index with m_BindPose - so this finds that renderer by the PPtr it holds
         /// and reads each bone's GameObject name. null when no renderer in this bundle uses the mesh,
         /// or when two do and disagree about the skeleton: an ambiguity is refused, never guessed
-        /// (the same rule as <see cref="AssetIndex.FindUnique"/>).
+        /// (the same rule as <see cref="AssetIndex.FindUnique"/>, which resolves the MESH here for
+        /// the same reason - aln_fireworm ships two called 'ALN_Fireworm', and the walk this used to
+        /// do took whichever came first, so ct_list bones would have printed one of two skeletons
+        /// without saying which).
         /// </summary>
         internal static string[] ReadBoneNames(string bundlePath, string meshName)
         {
             string[] found = null;
             Read(bundlePath, (m, afile) =>
             {
-                long meshId = 0;
-                foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Mesh))
-                    if (m.GetBaseField(afile, i)["m_Name"].AsString == meshName) { meshId = i.PathId; break; }
-                if (meshId != 0) found = SkinFields.BoneNames(m, afile, meshId);
+                found = SkinFields.BoneNames(m, afile,
+                    AssetIndex.FindUnique(m, afile, AssetClassID.Mesh, meshName, bundlePath).PathId);
                 return "";
             });
             return found;

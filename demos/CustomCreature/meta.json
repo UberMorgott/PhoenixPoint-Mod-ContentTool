@@ -1,6 +1,6 @@
 {
   "ID": "morgott.demo.customcreature",
-  "AssemblyName": "CustomCreature",
+  "AssemblyName": "CustomCreature.dll",
   "Version": "1.0.0",
   "Author": [ { "Key": "English", "Value": "Morgott" } ],
   "Name": [ { "Key": "English", "Value": "ContentTool Demo: Custom Creature" } ],

@@ -760,6 +760,31 @@ namespace Morgott.ContentTool.Bake
             string missing = man.Missing(discovered);
             if (missing != null) return Check(log, "creature-roles", false, missing);
 
+            // A MAPPED "climb" clip WINS over the synthesised one and is used VERBATIM - its own root
+            // motion is the height the engine will measure. So it is checked here rather than trusted:
+            // a clip whose root does not RISE claims a climb and then slides the creature along the wall
+            // it is supposed to be going up, and the only symptom in game is a route that looks broken.
+            string climbName = man.ClipFor("climb");
+            if (climbName != null)
+                foreach (ImportedModel m in p.Models)
+                {
+                    if (!m.Baked.Rigged) continue;
+                    foreach (KeyValuePair<string, SampledClip> e in ClipFields.Bakeable(m.Name, m.Clips))
+                    {
+                        if (!string.Equals(e.Value.Name, climbName, StringComparison.OrdinalIgnoreCase)) continue;
+                        float rise = ClipFields.RiseOf(ClipFields.Bindings(e.Value, m.Baked, null, p.Scale),
+                                                       m.Baked, e.Value.Times.Length);
+                        if (!(rise > 0f))
+                            return Check(log, "creature-climb", false, "'" + climbName + "' is mapped to " +
+                                "the \"climb\" role but its root motion rises " + ModelBuild.F(rise) +
+                                " - a traversal clip has to carry the creature UP (AnimationInfos.cs:" +
+                                "104-121 measures Offset = end - start on the root-motion node, and " +
+                                "ClimbPathProcessor places the loop point at anchor + Offset.y). Re-export " +
+                                "it with real upward root motion, or unmap the role and let the tool " +
+                                "synthesise the climb out of your walk cycle.");
+                    }
+                }
+
             // Mapped is not the same as PLAYABLE. Every blocking event the game waits for during a role
             // has to be somewhere in that role's clip, and only the animation knows where - so an
             // undeclared one is named here rather than invented at load time.
@@ -832,7 +857,59 @@ namespace Morgott.ContentTool.Bake
                                (e.Key == plan[chosen].Key ? ", ANIMATOR PLAYS THIS" : "") +
                                "; " + c.LossyReason);
             }
+            ClimbClips(baker, p, m, plan, log);
             return play;
+        }
+
+        /// <summary>
+        /// ============ THE THREE CLIPS THAT MAKE A CREATURE CROSS AN OBSTACLE ============
+        ///
+        /// Phoenix Point's maps are made of obstacles, so a creature that can only walk around them is
+        /// not a creature. But a downloaded .glb ships a walk and an idle - it does not ship a wall
+        /// climb - and filling the engine's traversal slots with a FLAT clip hangs the mover half way
+        /// through a window (see the note at CreatureBuild's traversal arm).
+        ///
+        /// So the three parts a ClipSequence needs are SYNTHESISED out of the walk itself: the same
+        /// bones cycling at the same cadence, with the root ramping straight UP instead of forward and
+        /// the body pitched onto the wall. <see cref="ClipFields.Climb"/> does the writing; everything
+        /// this decides is in <see cref="Tactical.ClimbPlan"/>, which the runtime and the offline check
+        /// read too.
+        ///
+        /// GROUND-ONLY IS STILL THE DEFAULT. No walk role mapped, no walk clip in the plan, or no single
+        /// root bone means nothing is written - and the runtime then finds no climb clips, leaves the
+        /// traversal families empty and never adds the link areas, exactly as before.
+        /// </summary>
+        private static void ClimbClips(BundleBaker baker, ContentProject p, ImportedModel m,
+                                       List<KeyValuePair<string, SampledClip>> plan, StringBuilder log)
+        {
+            Tactical.CreatureManifest man = Tactical.CreatureManifest.Load(p.Root);
+            string walkName = man.ClipFor("walk");
+            if (walkName == null) return;
+            SampledClip walk = null;
+            foreach (KeyValuePair<string, SampledClip> e in plan)
+                if (string.Equals(e.Value.Name, walkName, StringComparison.OrdinalIgnoreCase)) walk = e.Value;
+            if (walk == null) return;
+            // The SAME pace the real bake used, or the synthesised legs would cycle at a different rate
+            // from the walk they were taken from.
+            PaceClip(p, m, walk);
+
+            foreach (string part in Tactical.ClimbPlan.Parts)
+            {
+                float from, to;
+                Tactical.ClimbPlan.Pitch(part, out from, out to);
+                string why;
+                List<ClipFields.Binding> bindings = ClipFields.Climb(
+                    walk, m.Baked, p.Scale, Tactical.ClimbPlan.Rise(part),
+                    from * man.ClimbPitch, to * man.ClimbPitch, out why);
+                if (bindings == null) { log.AppendLine("creature-climb: " + why); return; }
+                bool loops = Tactical.ClimbPlan.Loops(part);
+                string key = baker.AddAnimationClip(
+                    "clips/" + m.Name + Tactical.ClimbPlan.Suffix + part, bindings, walk.Times.Length,
+                    walk.SampleRate * (loops ? 1f : Tactical.ClimbPlan.ShortBy), loops);
+                log.AppendLine("creature-climb '" + Tail(key) + "' from '" + walk.Name + "': " + why +
+                               (loops ? ", LOOPS" : ", plays once") + " - Offset.y is what the engine " +
+                               "measures the link height against (AnimationInfos.cs:104-121)");
+            }
         }
 
         /// <summary>

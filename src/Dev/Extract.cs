@@ -60,9 +60,93 @@ namespace Morgott.ContentTool.Dev
                 return LooseFiles.Report(AudioRoot, ".wem", args.Length > 1 ? args[1] : null, 60);
             if (what == "defs")
                 return Defs(args.Length > 1 ? args[1] : null, args.Length > 2 ? args[2] : null);
+            // AssetIndex.FindUnique answers a misspelled or an ambiguous name by THROWING, which the
+            // console prints as eight lines of .NET stack trace - the offender's name is in there, but
+            // an author asking for a bone list is being shown a crash for a typo. The refusal itself is
+            // already written; only its packaging is wrong, so it is unwrapped here and nowhere else.
+            // Any other exception still reaches ct_list's own THREW arm with its stack intact.
+            try
+            {
+                if (what == "bones" && args.Length > 2)
+                    return Bones(args[1], args[2], args.Length > 3 ? args[3] : null);
+                if (what == "props" && args.Length > 2)
+                    return Props(args[1], args[2]);
+                if (what == "clip" && args.Length > 2)
+                    return Clip(args[1], args[2]);
+            }
+            catch (InvalidOperationException ex) { return "ct_list REFUSED - " + ex.Message; }
             return "usage: ct_list bundles [nameFilter] | ct_list assets <bundleFile> [typeFilter] [nameFilter]" +
                    " | ct_list videos [nameFilter] | ct_list audio [nameFilter]" +
-                   " | ct_list defs <nameFilter> [typeFilter]";
+                   " | ct_list defs <nameFilter> [typeFilter]" +
+                   " | ct_list bones <bundleFile> <meshName> [nameFilter]" +
+                   " | ct_list props <bundleFile> <materialName>" +
+                   " | ct_list clip <bundleFile> <clipName>";
+        }
+
+        /// <summary>
+        /// The NAMES of the bones a shipped Mesh is skinned to, numbered by their m_BindPose index.
+        /// An author replacing that mesh has to spell every joint the same way or the rig will not
+        /// rebind (SkinFields.RebindByName matches BY NAME), and the .glb
+        /// `ct_extract mesh` writes carries only synthesised node names - so this is the only place
+        /// the real skeleton can be read without a modelling tool.
+        ///
+        /// Listing, not extraction: nothing is written, so it lives under ct_list with the other
+        /// discovery verbs. The optional name filter is the same substring one ct_list assets takes,
+        /// and it is what a rig past the cap is narrowed with.
+        /// </summary>
+        private static string Bones(string bundleFileName, string meshName, string nameFilter)
+        {
+            string path = BakeSelfCheck.ShippedBundlePath(bundleFileName);
+            if (!File.Exists(path)) return "ct_list VOID - no bundle at " + path;
+
+            string[] names = BundleBaker.ReadBoneNames(path, meshName);
+            if (names == null)
+                return "ct_list VOID - nothing in " + bundleFileName + " names the bones of Mesh '" +
+                       meshName + "': either no SkinnedMeshRenderer there uses it, or two do and " +
+                       "disagree about the skeleton - an ambiguity is refused, never guessed";
+
+            List<string> hits = new List<string>();
+            for (int i = 0; i < names.Length; i++)
+                if (string.IsNullOrEmpty(nameFilter) ||
+                    names[i].IndexOf(nameFilter, StringComparison.OrdinalIgnoreCase) >= 0)
+                    hits.Add(i + ": " + names[i]);
+
+            StringBuilder b = new StringBuilder();
+            b.Append(hits.Count).Append(" of ").Append(names.Length).Append(" bone(s) of Mesh '")
+             .Append(meshName).Append("' in ").Append(bundleFileName).Append(" match '")
+             .Append(nameFilter ?? "").Append("', numbered by m_BindPose index");
+            int n = Math.Min(hits.Count, 60);
+            for (int i = 0; i < n; i++) b.Append("\n  ").Append(hits[i]);
+            if (hits.Count > n) b.Append("\n  ... ").Append(hits.Count - n).Append(" more (narrow the filter)");
+            return b.ToString();
+        }
+
+        /// <summary>
+        /// One shipped Material's whole property block, off the file - the property NAMES a
+        /// "material": "_Prop=value" row has to spell, which otherwise have to be guessed.
+        /// Read from the serialized bytes on purpose: a Material whose shader has not resolved
+        /// exposes no properties through the engine API at all.
+        /// </summary>
+        private static string Props(string bundleFileName, string materialName)
+        {
+            string path = BakeSelfCheck.ShippedBundlePath(bundleFileName);
+            if (!File.Exists(path)) return "ct_list VOID - no bundle at " + path;
+            return bundleFileName + " '" + materialName + "': " +
+                   BundleBaker.ReadMaterialProperties(path, materialName);
+        }
+
+        /// <summary>
+        /// ONE named AnimationClip's fields - what `ct_list assets &lt;bundle&gt; AnimationClip` cannot
+        /// say, since it only names them. The same summary every clip gate reads, so what an author
+        /// sees here is what the tool itself compares against.
+        /// </summary>
+        private static string Clip(string bundleFileName, string clipName)
+        {
+            string path = BakeSelfCheck.ShippedBundlePath(bundleFileName);
+            if (!File.Exists(path)) return "ct_list VOID - no bundle at " + path;
+            // unique: two clips of one name are refused here, not guessed between - the rule
+            // ct_list bones and ct_list props already keep through AssetIndex.FindUnique.
+            return bundleFileName + ": " + BundleBaker.ReadClipSummary(path, clipName, null, true);
         }
 
         /// <summary>

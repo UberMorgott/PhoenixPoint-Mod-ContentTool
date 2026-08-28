@@ -1,48 +1,75 @@
 # ContentTool
 
-ContentTool is an engine for Phoenix Point content mods. It lets those mods replace or add images,
-materials, models, animations, sounds, videos, creatures and weapons. On its own, it changes nothing.
+ContentTool is an engine for Phoenix Point content mods. It lets those mods replace or add textures,
+materials, models, animations, sounds, videos, creatures and weapons. It changes nothing by itself.
 
 ## Players
 
-If another mod told you to install ContentTool:
-
 1. Download `ContentTool-*.zip` from the [latest release](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/releases/latest).
-2. Copy the `ContentTool` folder into `Phoenix Point\Mods\`.
+2. Copy the `ContentTool` folder into
+   `<Steam library>\steamapps\common\Phoenix Point\Mods\`. The game creates `Mods\` if it is
+   missing.
 3. Start the game, open **Mods**, and tick **Content Tool**.
 
-You do not need the developer console or any bake command. A mod that declares ContentTool as a
-dependency makes the mod manager enable it automatically; both mods remain visible as separate
-checkboxes.
+That is all. You do not run author commands or build another mod's files. A content mod that declares
+ContentTool as a dependency makes the mod manager enable it automatically.
+
+If ContentTool does not appear, the folder is probably nested one level too deeply. The file must be
+at `<Steam library>\steamapps\common\Phoenix Point\Mods\ContentTool\meta.json`.
 
 ## Modders
 
-Choose the path that matches what you are trying to do:
+Start here, in this order:
 
-1. **Build a first mod from an empty folder.** Follow
-   [Shipping a content mod](SHIPPING-A-CONTENT-MOD.md#from-an-empty-folder-to-a-release). It covers
-   the two JSON files, source folders, baking, packaging, testing and the release zip in order.
-2. **Start from working code and content.** The [ten demos](demos.md) each isolate one technique and
-   point to the files worth reading.
-3. **Follow a content-specific recipe.** The [recipe ladder](guides/index.md) covers textures,
-   materials, meshes, animated models, sounds, videos, creatures and weapons.
-4. **Look up a field or command.** Use the [shared reference](guides/reference.md) for the folder
-   layout, `meta.json`, `ppcontent.json`, discovery commands and packaging details.
+1. [How a mod is made](SHIPPING-A-CONTENT-MOD.md) — create the folder, preview changes, bake,
+   package, reinstall as a player, and ship.
+2. [Open the developer console](SHIPPING-A-CONTENT-MOD.md#open-the-developer-console) — the
+   physical backquote-key position opens it; nothing needs enabling when the game launched with mods.
+3. [Discover game content](guides/discovery.md) — find the bundle, asset, def, media ID, video row,
+   bone names, material properties and clip data you need.
+4. [Pick a recipe](guides/index.md) — texture, material, mesh, animated model, sound, video,
+   creature or weapon.
+5. [Manifest and command reference](guides/reference.md) — every supported field and author-facing
+   console command.
 
-The shortest useful rule is: content files and JSON describe assets; a DLL is needed only when the
-game needs new behaviour to reach them, such as a hotkey, cutscene trigger or new def.
+One project can use several routes at once. The
+[combined example](guides/combined-example.md) replaces a texture, adds a sound, replaces another
+sound and publishes a model from one `ppcontent.json`.
+
+### The DLL answer
+
+A content-only mod needs no DLL and no stub DLL. Use `"AssemblyName": ""` in `meta.json`, or omit
+that field. Add a real DLL only when your mod needs behaviour: a hotkey, a trigger, a def change, or
+the call that builds a declared creature or weapon. ContentTool supplies an in-memory loader shim so
+the mod-manager checkbox works for a code-less content mod; there is no fake file on disk to hit,
+protect, rename or delete.
+
+When behaviour is required, use the complete [DLL project and `ModMain` skeleton](guides/behavior-dll.md).
+
+### Supported and tested versions
+
+ContentTool `1.0.0.0` is verified with Phoenix Point **1.30.2.75117**
+(`ReleaseCandidate2025`), Unity **2019.4.31f1**, on Steam for Windows. Epic Games Store and Game Pass
+installations are **untested**, not declared unsupported. A `meta.json` dependency carries only the
+ContentTool ID and no minimum version, so an author must test version skew and a game update against
+the exact package they ship.
 
 ## If something fails
 
-Check the loaded build with `ct_version`, then search this log for `ct_`:
+[Open Phoenix Point's developer console](SHIPPING-A-CONTENT-MOD.md#open-the-developer-console) and
+run:
+
+```text
+ct_version
+```
+
+Then search this file for your mod ID and `ct_`:
 
 ```text
 %USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\Player.log
 ```
 
-The log names the mod, resource and reason for a refusal. The
-[shared reference](guides/reference.md#8-how-contenttool-discovers-you) explains the discovery and
-status lines.
+Long console reports are written there in full. Start with the first refusal, not the last symptom.
 
 ## License
 

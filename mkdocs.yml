@@ -86,11 +86,15 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Working demos: demos.md
   - Shipping a content mod: SHIPPING-A-CONTENT-MOD.md
+  - Discover game content: guides/discovery.md
+  - Manifest and commands: guides/reference.md
+  - Behaviour DLL: guides/behavior-dll.md
+  - Animation contract: guides/animation-reference.md
+  - One mod, several routes: guides/combined-example.md
+  - Working demos: demos.md
   - Recipes:
       - Pick your rung: guides/index.md
-      - The shared reference: guides/reference.md
       - Textures, sprites and icons: guides/textures.md
       - Materials: guides/materials.md
       - Meshes - replace and add: guides/meshes.md

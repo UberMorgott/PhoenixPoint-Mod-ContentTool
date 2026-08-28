@@ -10,11 +10,11 @@ namespace Morgott.ContentTool.Project
     /// Turns an AUTHOR FOLDER into a folder that can be zipped and uploaded - and refuses to produce
     /// one that carries Phoenix Point's own data.
     ///
-    /// WHY IT IS NOT A ct_ VERB. Packaging a release is the one step a modder must be able to run
-    /// with the game shut: a console verb would mean launching Phoenix Point, opening the developer
-    /// console and finding the output in Player.log to publish a zip. So the entry point is
-    /// package.ps1 -> tools\Package, and this class - plain System.IO, no UnityEngine type - is the
-    /// shared body, compiled into the mod too so a verb can be hung on it later for free.
+    /// TWO CALLERS, ONE BODY. `ct_package &lt;project&gt;` in the developer console is the one a modder
+    /// needs, because it means no external script; package.ps1 -> tools\Package is ours, and runs
+    /// with the game shut. This class - plain System.IO, no UnityEngine type - is what both call, so
+    /// the rule that decides what may ship cannot drift between them. Neither caller COMPILES: the
+    /// author's DLL is the author's own business (see <see cref="BuiltAssembly"/>).
     ///
     /// WHAT IT DOES NOT DO: bake. The mod's own bundle and its banks are produced by ct_project /
     /// ct_sound bake INSIDE the game (they need Unity's texture decoder and the player's own install),
@@ -166,6 +166,35 @@ namespace Morgott.ContentTool.Project
                    "\\meta.json, and upload it. The player unzips it into Mods\\ (ending up with " +
                    "Mods\\<YourMod>\\meta.json) or subscribes on the Workshop; the mod manager enables " +
                    "ContentTool for them because meta.json declares it.";
+        }
+
+        /// <summary>
+        /// The mod's OWN built DLL inside the author folder, or null - what `ct_package` hands
+        /// <see cref="Run"/> as its <c>assembly</c>.
+        ///
+        /// IT PICKS ONE UP, IT DOES NOT BUILD ONE. Compiling is the author's own business: a modder
+        /// writing C# already has Visual Studio or Rider open and a built DLL on disk, and a
+        /// content-only mod has no code at all. So this looks for exactly the file meta.json names -
+        /// newest copy, anywhere under the project, which finds both bin\Release\net472\&lt;name&gt;.dll
+        /// and a DLL simply dropped in the project root - and answers null for everything else.
+        ///
+        /// A DECLARED ASSEMBLY THAT IS NOWHERE IS DELIBERATELY NOT HANDLED HERE. Run's MetaRefusal
+        /// already refuses that package BY NAME and says to build it; a second opinion here would
+        /// only get to say it worse.
+        /// </summary>
+        internal static string BuiltAssembly(string authorDir)
+        {
+            if (string.IsNullOrEmpty(authorDir) || !Directory.Exists(authorDir)) return null;
+            string meta = Path.Combine(authorDir, "meta.json");
+            if (!File.Exists(meta)) return null;
+            string dll = Json(File.ReadAllText(meta), "AssemblyName");
+            if (string.IsNullOrEmpty(dll)) return null;
+
+            string newest = null;
+            foreach (string f in Directory.GetFiles(authorDir, dll, SearchOption.AllDirectories))
+                if (newest == null || File.GetLastWriteTimeUtc(f) > File.GetLastWriteTimeUtc(newest))
+                    newest = f;
+            return newest;
         }
 
         /// <summary>

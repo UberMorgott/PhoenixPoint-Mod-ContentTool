@@ -469,6 +469,40 @@ namespace Morgott.ContentTool
             }
 
             /// <summary>
+            /// The release step, in game, so a modder never needs a script outside it. The rule is
+            /// Project.Package - the same body package.ps1 reaches through tools\Package - and every
+            /// refusal it implements is its, not restated here.
+            ///
+            /// IT COMPILES NOTHING. The author's DLL is built in the author's IDE; this picks up the
+            /// one meta.json names (Package.BuiltAssembly) and, when it names one that is nowhere,
+            /// refuses the package by that name rather than shipping a mod the game will not load.
+            ///
+            /// The output folder is REMOVED first, exactly as package.ps1 does it: the packager
+            /// refuses a non-empty target on purpose, so re-running the verb after a bake has to
+            /// start from nothing rather than merge into last run's release.
+            /// </summary>
+            [ConsoleCommand(Command = "ct_package", Description = "ContentTool: build the PUBLISHABLE folder for a content mod - copies only what a player needs, refuses BY NAME anything that would redistribute Phoenix Point's own data, and says what to zip. It does NOT compile and does NOT bake: build your DLL in your IDE, run 'ct_project'/'ct_sound bake' first. Writes to <persistentDataPath>\\ContentTool\\Packaged\\<project>. Args: <project>.")]
+            public static void CtPackage(IConsole console, params string[] args)
+            {
+                try
+                {
+                    if (args == null || args.Length == 0 || string.IsNullOrEmpty(args[0]))
+                    { Out(console, "usage: ct_package <project>"); return; }
+
+                    // A NAME under the mod folder, never a path - see ProjectDir.
+                    string root = ProjectDir(args[0]);
+                    string outDir = Path.Combine(Path.Combine(Path.Combine(
+                        UnityEngine.Application.persistentDataPath, "ContentTool"), "Packaged"),
+                        Path.GetFileName(root.TrimEnd('\\', '/')));
+                    if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
+
+                    bool ok;
+                    Out(console, Project.Package.Run(root, outDir, Project.Package.BuiltAssembly(root), out ok));
+                }
+                catch (Exception ex) { Out(console, "ct_package THREW " + ex); }
+            }
+
+            /// <summary>
             /// The falsifiable check for the sink itself: this exact payload is what used to blank the
             /// console. Control in the same run: the first line must still be readable AFTER the giant
             /// block, so a console that survived is proven, not assumed.
@@ -519,7 +553,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_voices THREW " + ex); }
             }
 
-            [ConsoleCommand(Command = "ct_list", Description = "ContentTool: what is IN the game - the discovery half of extraction. Args: bundles [nameFilter] | assets <bundleFile> [typeFilter] [nameFilter] | videos [nameFilter] | audio [nameFilter] | defs <nameFilter> [typeFilter].")]
+            [ConsoleCommand(Command = "ct_list", Description = "ContentTool: what is IN the game - the discovery half of extraction. Args: bundles [nameFilter] | assets <bundleFile> [typeFilter] [nameFilter] | videos [nameFilter] | audio [nameFilter] | defs <nameFilter> [typeFilter] | bones <bundleFile> <meshName> [nameFilter] (the skeleton a shipped Mesh is skinned to, in m_BindPose order - the names a replacement rig must spell) | props <bundleFile> <materialName> (the property names a \"material\": \"_Prop=value\" row takes) | clip <bundleFile> <clipName> (one named AnimationClip's fields).")]
             public static void CtList(IConsole console, params string[] args)
             {
                 try { Out(console, Dev.Extract.List(args)); }

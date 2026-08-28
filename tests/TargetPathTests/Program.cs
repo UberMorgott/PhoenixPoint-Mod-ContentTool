@@ -1246,6 +1246,7 @@ internal static class Program
                 "Dist\\MyMod.bundle accepted -> " + said.Replace("\n", " "));
 
             BakedSourcesArm(tmp);
+            PickupArm(tmp);
         }
         finally { try { Directory.Delete(tmp, true); } catch (IOException) { } }
     }
@@ -1314,6 +1315,63 @@ internal static class Program
                 (want ? "packages" : "is refused") + " with no Content\\ and no Dist\\ -> " +
                 said.Replace(Environment.NewLine, " ").Replace("\n", " "));
         }
+    }
+
+    /// <summary>
+    /// Gate S22, offline: the DLL PICKUP `ct_package` runs on instead of compiling, and the refusal
+    /// that stands behind it.
+    ///
+    /// ONE author folder, and only the DLL moves. It ships an assembly nobody compiles at package
+    /// time, so the whole in-game verb rests on Package.BuiltAssembly finding the file meta.json
+    /// names - and on the package being REFUSED BY NAME when it does not. An implementation that
+    /// stopped looking fails the accept arms; one that started passing a path back for a file that
+    /// is not there, or that quietly dropped the AssemblyName refusal, fails S22-missing; one that
+    /// grabbed any .dll it saw fails S22-content-only, where the mod declares none and a stray DLL
+    /// sits in the folder.
+    /// </summary>
+    private static void PickupArm(string tmp)
+    {
+        string author = Dir(tmp, "Pickup");
+        File.WriteAllText(Path.Combine(author, "meta.json"),
+            "{ \"ID\": \"morgott.demo.pickup\", \"AssemblyName\": \"Pickup.dll\", " +
+            "\"Dependencies\": [ \"com.morgott.ContentTool\" ] }");
+        File.WriteAllText(Path.Combine(author, "ppcontent.json"),
+            "{ \"id\": \"morgott.demo.pickup\", \"bundle\": \"Pickup.bundle\", " +
+            "\"weapons\": [ { \"id\": \"Morgott_X_WeaponDef\", \"clone\": \"PX_ShotgunRifle_WeaponDef\" } ] }");
+
+        // Nowhere yet: the verb hands Run a null and Run refuses the package by the declared name.
+        bool ok;
+        Check("S22-missing-none", Package.BuiltAssembly(author) == null,
+            "a declared assembly that is nowhere under the project is not invented");
+        string outDir = Path.Combine(tmp, "pickup-out-missing");
+        string said = Package.Run(author, outDir, Package.BuiltAssembly(author), out ok);
+        Check("S22-missing", !ok && said.Contains("Pickup.dll") && !Directory.Exists(outDir),
+            "and the package is refused BY NAME rather than shipping a mod the game will not load " +
+            "-> " + said.Replace("\n", " "));
+
+        // The author builds it in their IDE. Nothing else about the project changes.
+        string built = Path.Combine(Dir(Dir(Dir(author, "bin"), "Release"), "net472"), "Pickup.dll");
+        File.WriteAllBytes(built, new byte[32]);
+        Check("S22-finds-built", Package.BuiltAssembly(author) == built,
+            "the DLL the author built is found where a csproj puts it -> " + Package.BuiltAssembly(author));
+        outDir = Path.Combine(tmp, "pickup-out");
+        said = Package.Run(author, outDir, Package.BuiltAssembly(author), out ok);
+        Check("S22-packages", ok && File.Exists(Path.Combine(outDir, "Pickup.dll"))
+                              && !Directory.Exists(Path.Combine(outDir, "bin")),
+            "the same project now packages, carrying the assembly at the ROOT of the release and " +
+            "not the bin\\ tree it was found in -> " + said.Replace("\n", " "));
+        Check("S22-says-where", said.Contains(outDir),
+            "and the result names the folder it wrote, which is the only way an author finds it " +
+            "on their own machine -> " + said.Replace("\n", " "));
+
+        // A CONTENT-ONLY mod declares no assembly, and a stray DLL beside it is not one.
+        string content = Dir(tmp, "PickupContentOnly");
+        File.WriteAllText(Path.Combine(content, "meta.json"),
+            "{ \"ID\": \"morgott.demo.pickup2\", \"AssemblyName\": \"\", " +
+            "\"Dependencies\": [ \"com.morgott.ContentTool\" ] }");
+        File.WriteAllBytes(Path.Combine(content, "Stray.dll"), new byte[8]);
+        Check("S22-content-only", Package.BuiltAssembly(content) == null,
+            "a mod that declares no assembly picks up nothing, whatever is lying in the folder");
     }
 
     /// <summary>

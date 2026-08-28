@@ -238,6 +238,18 @@ namespace Morgott.ContentTool.Tactical
             GameObject rig = BuildRig(c, model, donorAddons.AddonsManagerDef);
             if (rig == null) return null;
 
+            // WHICH TRAVERSAL STATES THIS CREATURE'S ANIMATOR ACTUALLY HAS, asked here because it is the
+            // gate on every traversal slot below and the donor def is not a substitute for it: the
+            // Swarmer leaves ClimbUpLadder null while the controller its rig runs
+            // ('HumanoidAnimatorLOC') carries MV_ClimbLadderUp_Start/Loop/Stop_NoGunA. A filled slot
+            // whose state does not exist is a 5 s WaitForAnimation:175 per point; an empty slot the
+            // controller could have played is a creature that can descend and never ascend.
+            Animator rigAnimator = rig.GetComponent<Animator>();
+            RuntimeAnimatorController rigController =
+                rigAnimator == null ? null : rigAnimator.runtimeAnimatorController;
+            c.States = rigController == null ? new string[0]
+                : rigController.animationClips.Where(x => x != null).Select(x => x.name).Distinct().ToArray();
+
             AddonsManagerDef managerClone = Clone(repo, c, donorAddons.AddonsManagerDef, "AddonsManagerDef");
             managerClone.Rig = rig;
             // Remembered so the SetupRig postfix can recognise its own manager by DEF IDENTITY - see
@@ -359,6 +371,41 @@ namespace Morgott.ContentTool.Tactical
                 // The AgentType above is what makes this reachable: every shipped one-tile agent is
                 // under the 1f radius, so the def's own flag is the deciding vote.
                 navClone.AnimatedTurnBeforeSprint = false;
+
+                // ...AND IT MUST NOT BE OFFERED A ROUTE IT CANNOT WALK. Clearing the traversal clips
+                // (WireClips, ~line 1066) stops the mod from CLAIMING a climb; it does not stop the
+                // engine from ROUTING one, and an empty slot is not a refusal:
+                //   ClimbUpPathProcessor.cs:20-26   logs the missing anims, then emits anyway
+                //   ClimbPathProcessor.EmitClimb:90,107-110 -> EmitClimbFallback:296-330 emits three
+                //                                   Run.Loop points in an L (straight up, then across)
+                //                                   = the "teleport across the surface" the owner saw
+                //   TacticalNavigationComponent.cs:723-737 -> WaitForAnimation:156,175-186 then caps
+                //                                   each wait at 5s, logs "waiting for animation ...
+                //                                   timed out", plays High Idle and carries on = the
+                //                                   stutter. MEASURED before this line existed: the
+                //                                   spider walked 11 tiles over 2 LINK segments in
+                //                                   13,09s with 3 such timeouts, against 3,25s and 1
+                //                                   link for a shipped Fireworm on the same path.
+                // Traversal RIGHTS are decided by navmesh AREAS, not by animations
+                // (NavMeshNavigationComponentDef:13,29-36 -> NavMeshNavigationComponent:40,73 ->
+                // new NavMeshPathRequest(NavAreas, ...)): a link whose area is outside the agent's
+                // mask is not pathable at all, so the route is never built and nothing has to degrade.
+                //
+                // The value is TAKEN, like the AgentType above, never typed in. Every shipped
+                // ground-only unit ships exactly its own Walkable* area and nothing else - READ LIVE
+                // 2026-08-28: Sentinel_Terror [WalkableHumanoid], Chiron_FireWorm [WalkableMedMonster],
+                // Queen_Heavy / YugothianMain [WalkableBigMonster], PX_Scarab [WalkableArmadillo] -
+                // while every climber adds the link areas on top (PX_Civilian: WalkableHumanoid, Jump,
+                // ClimbLadder, RoofDrop, LowObstacle, LowObstacleRoofDrop; Swarmer, our donor: +Jump,
+                // LowObstacleRoofDrop, RoofDrop, LowObstacle). Filtering to Walkable* is that shipped
+                // shape, read off the REFERENCE unit because area names are agent-scoped and the
+                // AgentType we just copied is the reference's, not the donor's - filtering the donor's
+                // list could leave a WalkableMedMonster on a Humanoid agent, which is not a ground
+                // creature but an immobile one.
+                //
+                // Ground-only is what this WRITES; the link areas are added back afterwards, and only
+                // for the traversal families WireClips actually filled - see <see cref="NavAreas"/>,
+                // which is called after it for exactly that reason.
             }
 
             // ...AND THE OTHER HALF OF THE FOOTPRINT, WHICH IS THE ONLY HALF A PLAYER CAN SEE.
@@ -400,7 +447,8 @@ namespace Morgott.ContentTool.Tactical
             // --- the CLIPS --------------------------------------------------------------------
             TacActorAnimActionsDef animsClone = Clone(repo, c, donorAnims, "AnimActionsDef");
             c.Anims = animsClone;
-            WireClips(repo, c, animsClone);
+            string[] climbing = WireClips(repo, c, animsClone);
+            if (navClone != null) NavAreas(navClone, reference, infantry, agent, climbing, say);
 
             // --- the UNIT ---------------------------------------------------------------------
             ComponentSetDef setClone = Clone(repo, c, donor.ComponentSetDef, "ComponentSetDef");
@@ -982,12 +1030,7 @@ namespace Morgott.ContentTool.Tactical
 
         /// <summary>"Mutog_RunFwdLoop" -&gt; run, fwd, loop. Splits on CamelCase and on anything that is
         /// not a letter, so digits and separators never glue two words together.</summary>
-        internal static string[] Tokens(string name)
-        {
-            return System.Text.RegularExpressions.Regex
-                .Split(name, "(?<!^)(?=[A-Z])|[^A-Za-z]+")
-                .Where(s => s.Length > 0).Select(s => s.ToLowerInvariant()).ToArray();
-        }
+        internal static string[] Tokens(string name) { return ClimbPlan.Tokens(name); }
 
         private static bool Has(string[] tokens, params string[] words) { return tokens.Any(words.Contains); }
 
@@ -1009,12 +1052,16 @@ namespace Morgott.ContentTool.Tactical
         /// a downloaded .glb almost never carries a turn-in-place clip, and lerping round
         /// (FaceIn3d -> NoAnimsFace) finishes in a few frames.
         /// </summary>
-        private static void WireClips(DefRepository repo, Creature c, TacActorAnimActionsDef anims)
+        /// <returns>the traversal families that ended up FILLED, so the navmesh areas that route a
+        /// creature onto them can be re-added for exactly those and no others
+        /// (<see cref="NavAreas"/>).</returns>
+        private static string[] WireClips(DefRepository repo, Creature c, TacActorAnimActionsDef anims)
         {
             StampEvents(c);
 
             List<string> wired = new List<string>(), empty = new List<string>();
-            int noTurn = 0, fellBack = 0;
+            List<string> climbing = new List<string>(), notFilled = new List<string>();
+            int noTurn = 0, fellBack = 0, climbed = 0;
             TacActorAnimActionBaseDef[] source = anims.AnimActions ?? new TacActorAnimActionBaseDef[0];
             anims.AnimActions = source.Select(a =>
             {
@@ -1035,6 +1082,27 @@ namespace Morgott.ContentTool.Tactical
 
                 TacActorAnimActionBaseDef clone = Clone(repo, c, a, a.name);
                 int hits = 0;
+                // WHICH TRAVERSAL FAMILIES THIS ACTION CAN HONESTLY CLAIM, decided for the whole family
+                // at once and BEFORE any slot is written. Half a family is worse than none: with only
+                // two of Start/Loop/Stop filled, HasAllAnimations is false, EmitClimb falls back to the
+                // L-shaped teleport (:107-110) - and the area re-added below would by then be routing
+                // the creature over exactly that link. A family counts only when the DONOR filled all
+                // three (an empty donor slot means the controller has no such state to reach) and we
+                // have a clip for every part.
+                // ...AND THE DONOR IS NOT ASKED. It used to be, and that is what left every custom
+                // creature able to descend and never to ascend: the Swarmer ships a null ClimbUpLadder,
+                // so "the donor filled all three" was false for every up-going family there is. The
+                // thing that really decides whether a slot can be filled is whether the CONTROLLER has
+                // a state to play it in - ask that instead, once, off the states collected at BuildRig.
+                foreach (ClimbPlan.Family f in ClimbPlan.Table)
+                {
+                    if (c.ClimbFilled.Contains(f.Slot) ||
+                        !Slots(clone).Any(s => s.StartsWith(f.Slot, StringComparison.Ordinal))) continue;
+                    string why = ClimbPlan.Refuse(f, c.States, pt => c.ClimbClip(pt) != null);
+                    if (why == null) c.ClimbFilled.Add(f.Slot);
+                    else if (!notFilled.Any(x => x.StartsWith(f.Slot + ":", StringComparison.Ordinal)))
+                        notFilled.Add(f.Slot + ": " + why);
+                }
                 foreach (string slot in Slots(clone).ToArray())
                 {
                     // A CAPABILITY WE CANNOT PERFORM MUST NOT BE CLAIMED. This started as a
@@ -1065,6 +1133,20 @@ namespace Morgott.ContentTool.Tactical
                     // fill that family alone and leave the rest cleared.
                     if (Traversal.Any(t => slot.StartsWith(t, StringComparison.Ordinal)))
                     {
+                        // ...UNLESS WE REALLY CAN PERFORM IT. The promise is KEPT for every family in
+                        // ClimbPlan.Table whose controller states exist and whose parts we synthesised:
+                        // the clips rise, so the measured vertical points EmitClimb builds are points
+                        // the animation actually reaches, and the single-clip families (low obstacle,
+                        // vault) are placed on the link's own geometry by the engine and only need the
+                        // state and the def to name the SAME clip. Mounts, rams and jets stay cleared.
+                        AnimationClip climb = ClimbFor(c, slot);
+                        if (climb != null && SetSlot(clone, slot, climb))
+                        {
+                            hits++; climbed++;
+                            ClimbPlan.Family fam = ClimbPlan.For(slot);
+                            if (fam != null && !climbing.Contains(fam.Slot)) climbing.Add(fam.Slot);
+                            continue;
+                        }
                         if (GetSlot(clone, slot) != null) { SetSlot(clone, slot, null); noTurn++; }
                         continue;
                     }
@@ -1099,13 +1181,19 @@ namespace Morgott.ContentTool.Tactical
                   source.Count(IsDefault) + " default action(s) left ALONE as the override keys; " +
                   fellBack + " slot(s) took the IDLE because this creature maps no clip to their role " +
                   "(optional roles only - a required one is refused at bake time); " +
-                  empty.Count + " slot(s) LEFT EMPTY because the donor's own were empty; " + noTurn +
+                  empty.Count + " slot(s) LEFT EMPTY because the donor's own were empty [" +
+                  string.Join(", ", empty.ToArray()) + "]; " + noTurn +
                   " TRAVERSAL slot(s) CLEARED (turn, skid, ladder, drop, vault, jump, mount, ram) " +
                   "because a FILLED one is a promise the engine trusts absolutely: " +
                   "ClimbPathProcessor.EmitClimb:90 only builds measured vertical points when " +
                   "HasAllAnimations, and falls back safely (:107-110) when it cannot - so an empty " +
                   "slot degrades and a slot holding our flat walk or idle HANGS the mover half way " +
-                  "through a window, waiting to arrive where the clip never goes");
+                  "through a window, waiting to arrive where the clip never goes; " + climbed +
+                  " TRAVERSAL slot(s) FILLED with a rising climb [" +
+                  string.Join(", ", climbing.ToArray()) + "]" +
+                  " against the " + c.States.Length + " state(s) the controller really has" +
+                  (notFilled.Count == 0 ? "" : "; NOT filled [" +
+                   string.Join("; ", notFilled.ToArray()) + "]"));
 
             // DOES IT CYCLE. A non-looping idle or walk plays once and holds, which in game is
             // indistinguishable from "no animation at all" - so the loop flag is asserted, not assumed.
@@ -1119,6 +1207,111 @@ namespace Morgott.ContentTool.Tactical
                       " <- MUST CYCLE AND DOES NOT: it will play once and hold, which looks like no " +
                       "animation. Name it in ppcontent.json's top-level \"loop\" declaration and re-bake."));
             }
+
+            // AND DOES THE CLIMB LOOP CYCLE, which is the same question with a worse failure: the loop
+            // is what the engine REPLAYS while it lerps the actor over the variable remainder of a link
+            // (TacticalNavigationComponent.cs:324,339). One that holds its last frame leaves the
+            // creature hanging on the wall until the 5s wait gives up.
+            AnimationClip climbLoop = c.ClimbClip("loop");
+            if (climbLoop != null)
+                c.Say("ct_creature " + (climbLoop.isLooping ? "PASS" : "FAIL") + " climb loop '" +
+                      climbLoop.name + "' isLooping=" + climbLoop.isLooping + (climbLoop.isLooping ? "" :
+                      " <- the engine replays this clip over the remainder of every link; one that " +
+                      "holds its last frame stops the creature dead half way up"));
+            return climbing.ToArray();
+        }
+
+        /// <summary>
+        /// WHICH PART OF A DROP A CONTROLLER STATE PLAYS, by the state's own clip name - or null for
+        /// every other clip in the controller.
+        ///
+        /// It has to be the CONTROLLER's name and not the def slot's, and that is the whole lesson of
+        /// the first attempt at this. The def slot and the controller are two different vocabularies:
+        /// the Swarmer's nav def names 'Swarmer_dropDownStart', while the controller its rig actually
+        /// runs is 'HumanoidAnimatorLOC', whose drop states play 'MV_ClimbDropLowStart_AR',
+        /// 'MV_DropLoop_AR' and 'MV_ClimbDropLowStop_AR'. Keying the override on the def's clip name
+        /// therefore overrode nothing at all, the state kept playing our WALK, and WaitForAnimation:175
+        /// - which loops until GetCurrentAnim IS the clip the DEF named - timed out at 5s per point.
+        /// MEASURED: 3 x "waiting for animation cyborg_spider_ct_climb_start/loop/stop ... timed out.
+        /// Current animation: cyborg_spider_spider_walk", 12,11s for one 5-tile drop.
+        ///
+        /// Only states whose family was really FILLED, because a family we left empty must keep taking
+        /// the ordinary walk - the def and the controller have to name the same clip in both directions.
+        /// ponytail: a keyword rule on the controller's names, like every other classification here -
+        /// the shipped controllers are not enumerable offline and each family names its clips its own
+        /// way. The tokens live in <see cref="ClimbPlan.Table"/> beside the def slot they answer for.
+        /// </summary>
+        private static string ClimbPartOf(Creature c, string vanilla)
+        {
+            return ClimbPlan.PartOfState(vanilla, c.ClimbFilled);
+        }
+
+        /// <summary>
+        /// The climb clip for one traversal slot - or null, which means "clear it" exactly as before.
+        /// The SLOT is the declaration: "DropDown.Loop" names the family and the part, and a single-clip
+        /// field like "ClimbUpLowObstacleAlt" names the family whose row names the part. Nothing here
+        /// guesses from a clip name, and nothing consults the donor.
+        /// </summary>
+        private static AnimationClip ClimbFor(Creature c, string slot)
+        {
+            ClimbPlan.Family f = ClimbPlan.For(slot);
+            if (f == null || !c.ClimbFilled.Contains(f.Slot)) return null;
+            string part = ClimbPlan.PartOfSlot(slot);
+            return part == null ? null : c.ClimbClip(part);
+        }
+
+        /// <summary>
+        /// WHICH ROUTES THE CREATURE IS OFFERED, decided AFTER the clips are wired and never before.
+        ///
+        /// Traversal RIGHTS are navmesh AREAS, not animations (NavMeshNavigationComponentDef:13,29-36
+        /// -&gt; NavMeshNavigationComponent:40,73 -&gt; new NavMeshPathRequest(NavAreas, ...)): a link
+        /// whose area is outside the mask is not pathable at all, so the route is never built and
+        /// nothing has to degrade. That makes the mask the ONE place a creature is stopped from being
+        /// routed onto a climb it cannot perform - and it is built from what <see cref="WireClips"/>
+        /// really filled, so the two cannot disagree.
+        ///
+        /// Walkable* is TAKEN off the reference unit and never typed: area names are agent-scoped and
+        /// the AgentType is the reference's, so filtering the DONOR's list could leave a
+        /// WalkableMedMonster on a Humanoid agent - not a ground creature but an immobile one. The link
+        /// areas are named (<see cref="ClimbPlan.Table"/>) but still not trusted: each is added only if
+        /// a SHIPPED unit on this same agent carries it.
+        /// </summary>
+        private static void NavAreas(TacticalNavigationComponentDef nav, TacCharacterDef reference,
+                                     TacCharacterDef[] infantry, string agent, string[] climbing,
+                                     Action<string> say)
+        {
+            TacticalNavigationComponentDef refNav = reference == null ? null
+                : reference.ComponentSetDef.GetComponentDef<TacticalNavigationComponentDef>();
+            if (refNav == null || refNav.NavAreas == null) return;
+            List<string> areas = refNav.NavAreas
+                .Where(a => a != null && a.StartsWith("Walkable", StringComparison.Ordinal)).ToList();
+            if (areas.Count == 0) return;
+
+            HashSet<string> shipped = new HashSet<string>(infantry
+                .Select(d => d.ComponentSetDef.GetComponentDef<TacticalNavigationComponentDef>())
+                .Where(n => n != null && n.AgentType == agent && n.NavAreas != null)
+                .SelectMany(n => n.NavAreas).Where(a => a != null));
+            // ONE AREA CAN SERVE TWO CROSSINGS and half a pair is worse than neither: LowObstacle routes
+            // both the climb UP and the climb DOWN, Jump routes both the one-tile vault and the two-tile
+            // one. So an area is offered only when EVERY family that hangs off it was filled - that is
+            // the "areas and filled slots never disagree" rule, stated once.
+            List<string> links = new List<string>(), refused = new List<string>();
+            foreach (KeyValuePair<string, List<ClimbPlan.Family>> e in ClimbPlan.ByArea())
+            {
+                string area = e.Key;
+                if (areas.Contains(area) || links.Contains(area)) continue;
+                bool all = e.Value.All(f => climbing.Contains(f.Slot));
+                if (!all) continue;                                   // silent: WireClips already said why
+                if (shipped.Contains(area)) links.Add(area); else refused.Add(area);
+            }
+            areas.AddRange(links);
+            nav.NavAreas = areas.ToArray();
+            say("ct_creature PASS nav areas [" + string.Join(", ", areas.ToArray()) + "] - " +
+                links.Count + " link area(s) added for the " + climbing.Length +
+                " traversal family(ies) whose Start/Loop/Stop this build really filled" +
+                (refused.Count == 0 ? "" : "; [" + string.Join(", ", refused.ToArray()) + "] REFUSED " +
+                 "because no shipped unit on agent '" + agent + "' carries them, so the name would " +
+                 "resolve to nothing"));
         }
 
         /// <summary>
@@ -1293,7 +1486,19 @@ namespace Morgott.ContentTool.Tactical
             {
                 if (key == null) { missed++; continue; }
                 bool isAction = actionKey != null && key == actionKey;
-                AnimationClip mine = c.OurClip(isAction ? "attack" : RoleForVanilla(key.name));
+                // A TRAVERSAL KEY IS NAMED BY THE SLOT THAT USED IT, never by its own name, and getting
+                // this wrong is a silent 5s stall per point rather than a wrong-looking animation.
+                // The def slot and the CONTROLLER are two halves of one wait: the def says which clip
+                // the climb segment expects, the controller decides which clip the state plays, and
+                // WaitForAnimation:175 loops until GetCurrentAnim IS that very object. The donor's drop
+                // clip tokenises to "drop" -> walk, so without this the state played our WALK while the
+                // def promised the climb - MEASURED in game: 3 x "Swarmer_1 is waiting for animation
+                // cyborg_spider_ct_climb_start/loop/stop ... timed out. Current animation:
+                // cyborg_spider_spider_walk", 11,98s for a single one-tile drop.
+                string climbPart = c.ClimbFilled.Count == 0 ? null : ClimbPartOf(c, key.name);
+                AnimationClip mine = climbPart != null && c.ClimbClip(climbPart) != null
+                    ? c.ClimbClip(climbPart)
+                    : c.OurClip(isAction ? "attack" : RoleForVanilla(key.name));
                 if (mine == null) { missed++; continue; }
                 overrides[key] = mine;
                 map.Add(key.name + " -> " + mine.name + (isAction ? " (DefaultActionClip)" : ""));
@@ -1471,6 +1676,15 @@ namespace Morgott.ContentTool.Tactical
         internal AddonsManagerDef Manager;
         internal Vector3 Up = Vector3.up;
         internal float Scale = 1f;
+        /// <summary>Every clip name the rig's animator controller CONTAINS - which is the honest answer
+        /// to "does a state exist for this traversal family", and the only one that does not depend on
+        /// what the donor def happened to fill in. Collected once, off the controller the rig carries.</summary>
+        internal string[] States = new string[0];
+        /// <summary>The ClimbPlan family slots this build really filled. Read by the def writer, by the
+        /// controller remap and by the navmesh mask, so all three state one answer - the def slot and
+        /// the controller must name the SAME clip object or the navigation wait never ends (see the
+        /// note in <see cref="CreatureBuild.RemapController"/>).</summary>
+        internal readonly HashSet<string> ClimbFilled = new HashSet<string>();
 
         /// <summary>
         /// The bundle clip playing <paramref name="role"/>, or null when the manifest maps none.
@@ -1484,6 +1698,18 @@ namespace Morgott.ContentTool.Tactical
             string name = Man.ClipFor(role);
             return name == null ? null
                  : Clips.FirstOrDefault(c => c.name.EndsWith(name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// One part of the climb: the AUTHOR's clip when they mapped one to the "climb" role, and
+        /// otherwise the part the bake synthesised out of the walk cycle. A mapped clip wins for all
+        /// three parts at once, which is legal - ClipSequence.cs:16-25 only asks that Start, Loop and
+        /// Stop are non-null, not that they differ - and it means one authored climb is enough.
+        /// </summary>
+        internal AnimationClip ClimbClip(string part)
+        {
+            return OurClip("climb") ?? Clips.FirstOrDefault(
+                x => x.name.EndsWith(ClimbPlan.Suffix + part, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>The creature whose rig wears <paramref name="from"/>'s mesh - not merely the first

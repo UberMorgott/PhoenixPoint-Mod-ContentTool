@@ -623,19 +623,27 @@ Two places, and they are different questions.
 manifest complete?*
 
 ```text
-creature-measure 'cyborg_spider': 49 bone(s), spans 120.435 x 64.237 x 105.578 file unit(s) about 0,0,0;
-  a tile is 1.0, so "scale": 0.008 makes it one tile across (this project declares 0.008).
-  Its origin is 2.137 above its lowest vertex on +Y, which is "creature": { "lift" } ...
-creature-clips 'cyborg_spider': 7 animation(s) in the file -> Spider_Walk, Spider_Idle, ...
+clip-names PASS "loop" names 2 clip(s) and "play" names 1 of the 7 this project bakes
+creature-measure 'cyborg_spider': 49 bone(s), spans 120.435 x 64.237 x 105.578 file unit(s)
+  about 0,29.979,-3.649; a tile is 1.0, so "scale": 0.008 makes it one tile across (this
+  project declares 0.008). Its origin is 32.118 above its lowest vertex on +Y, which is
+  "creature": { "lift" } if the model is centred rather than standing on its feet.
+creature-clips 'cyborg_spider': 7 animation(s) in the file -> Spider_Walk, Spider_Idle,
+  Spider_Idle_long, Spider_Damage, Spider_Attack_1, Spider_Attack_2, Spider_Death
   lifted off the file's shared timeline at N s  (×7, one per clip — see §5b below)
 creature-events PASS every blocking event the game waits for is declared
-creature-roles  PASS "clips" maps 7 of 7 discovered animation(s); every required role is mapped
+creature-roles PASS "clips" maps 6 of 7 discovered animation(s); every required role
+  (walk, idle, attack, death) is mapped
 ct_project: ALL PASS - ...\Dist\CustomCreature.bundle
 ```
 
 Read `creature-measure` against what you declared: it prints the scale that *would* make the model
 one tile across next to the one your file asks for. If those disagree wildly, that is the mistake
 that corrupts the collider, the aim point and the root motion all at once.
+
+`6 of 7` is not a gap: `Spider_Idle_long` is mapped to `""` in `ppcontent.json`, which is how you say
+*bake this clip, give it no role*. No `creature-scaffold` line appears either — that one only prints
+when the manifest's clip list is missing or incomplete, and this project's is already filled in.
 
 **At load time and in a mission** — one `ct_creature` line per seam, each with its own PASS/FAIL:
 

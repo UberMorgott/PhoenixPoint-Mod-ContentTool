@@ -1,42 +1,74 @@
-# A new creature — a downloaded model, in your squad, with its own skeleton and its own animations
+# Build a creature from its own rig and clips
 
-The tallest rung. A model downloaded from the internet, untouched, becomes a playable unit: its own
-skeleton is the one that came inside the file, and the clips it plays while it walks, attacks,
-flinches and dies are the clips that came inside the file — driven by Phoenix Point's own animation
-system, its own anim-action defs and its own path processor.
+A custom creature is not a standalone actor imported from a GLB. ContentTool clones a shipped
+`TacCharacterDef`, installs your rig and clips, and rewrites the subset of animation actions it can
+support. Read [the clone model](../SHIPPING-A-CONTENT-MOD.md#1-understand-the-clone-model) before
+choosing a donor or source model.
 
-**This route needs a DLL**, but a tiny one. Cloning the donor, remapping the controller, wiring the
-clip slots, stamping the animation events and orienting the rig are the same for every creature mod
-anyone will ever write, so all of that lives in the ContentTool engine. What is left for you is the
-two things that are genuinely a **choice**: the numbers in `ppcontent.json`, and the decision to put
-the unit somewhere — the demo puts it in the player's starting squad, which is ~36 lines.
+The content engine builds the def. Your mod's DLL decides where that def enters the game: starting
+squad, faction deployment, an ability, or another campaign rule.
 
-Read [Animated models](animated-models.md) first if you have not: this is the **with an adapter** case,
-and the page explains why an adapter is unavoidable rather than a missing feature.
+## 1. Prepare the project
 
-## 1. The folder
+Start with one binary glTF model:
 
 ```text
-CustomCreature\
-  meta.json                            "AssemblyName": "CustomCreature.dll"
-  ppcontent.json                       THE FILE YOU EDIT - model, clip->role map, event times, stats, scale
+MyCreature\
+  meta.json
+  ppcontent.json
   Content\
     Models\
-      cyborg_spider.glb                the download, 1 481 244 B, UNMODIFIED
-    Textures\
-      cyborg_spider.png                OPTIONAL: same stem -> the model's _MainTex slot
-  Dist\
-    CustomCreature.bundle              written by `ct_project` - COMMIT AND SHIP IT
-  src\CustomCreatureMain.cs            36 lines: build the creature, put it in the squad
-  CustomCreature.csproj                builds the line above - see "The DLL" below
-  CustomCreature.dll                   the built output, staged by package.ps1
-  SOURCES.md                           attribution. CC BY REQUIRES it. Read it before swapping models.
+      cyborg_spider.glb
 ```
 
-## 2. The manifest, field by field
+The GLB must contain a skeleton, a skinned mesh below its rig root, and clips for at least walk,
+idle, attack and death. A glTF file has no Unity `Animator` component: during import ContentTool
+creates the `Animator` on the generated rig-root GameObject, then installs the donor's controller
+there. Bone names and count are yours; ContentTool does not retarget them to the donor.
 
-The whole of a working one, with the fields that are not `"creature"` shown at the top level where
-they belong:
+With exactly one `.glb` under `Content\Models\`, `creature.model` may be omitted and that file is
+selected. With none or several and no `model`, the build is refused by name and nothing changes. An
+explicit value is the file stem, matched case-insensitively; a stem that is not present is also
+refused. The demo spells out `"model": "cyborg_spider"` even though it has only that one file.
+
+Three terms used in this guide are practical measurements, not requirements from an assumed art
+tool. A **bind pose** is the skeleton's reference pose that attaches mesh vertices to bones before
+animation. **Root motion** is translation or rotation stored on the animation's root rather than
+only in moving limbs; ContentTool reads that displacement for movement and climbing. **One tile**
+means roughly one cell of Phoenix Point's tactical grid. The first bake prints a candidate scale
+that makes the measured model about that wide; it does not assume that one GLB unit equals one tile.
+
+Declare the route with a complete initial manifest:
+
+```json
+{
+  "id": "yourname.mycreature",
+  "bundle": "MyCreature.bundle",
+  "creature": {}
+}
+```
+
+Close or save this file in your editor, then run:
+
+```text
+ct_project MyCreature
+```
+
+The first run measures the model, prints its bone count, dimensions, one-tile scale candidate and
+origin-to-lowest-vertex distance, and rewrites the `creature` block with every bakeable clip name.
+It then refuses while required roles remain empty. That refusal is the intended scaffold workflow.
+
+## 2. Map clips and measurements
+
+Assign `walk`, `idle`, `attack`, and `death`. Optional roles are `jump`, `reaction`, `ranged`, and
+`climb`. Clip names on the left must remain exactly as spelled in the GLB; the role on the right is
+ContentTool's vocabulary.
+
+`ranged` appears twice on purpose in the completed manifest below. Inside `creature.clips` it is a
+clip **role**; the creature-level `ranged` key names a shipped `WeaponDef` to clone as the ranged
+attack.
+
+This is the complete working shape used by the spider demo:
 
 ```json
 {
@@ -56,240 +88,191 @@ they belong:
       "Spider_Death": "death"
     },
     "events": {
-      "walk":   "SwarmerStep_EventDef 0.15, SwarmerStep_EventDef 0.65",
+      "walk": "SwarmerStep_EventDef 0.15, SwarmerStep_EventDef 0.65",
       "attack": "ActionDo 0.4054, ShootShot 0.4865, ActionEnd 0.8378",
       "ranged": "ActionDo 0.2286, ShootShot 0.5429, ActionEnd 0.9143",
-      "death":  "Ragdoll 0.9"
+      "death": "Ragdoll 0.9"
     },
-    "name":   "Spider",
-    "model":  "cyborg_spider",
-    "donor":  "Swarmer_TacCharacterDef",
+    "name": "Spider",
+    "model": "cyborg_spider",
+    "donor": "Swarmer_TacCharacterDef",
     "ranged": "Crabman_Head_Spitter_WeaponDef",
     "up": "0,1,0",
     "lift": 2.1372,
-    "health": 40, "will": 10, "speed": 16, "volume": 1
+    "health": 40,
+    "will": 10,
+    "speed": 16,
+    "volume": 1,
+    "climbPitch": 90
   }
 }
 ```
 
-### Top level
-
-| Field | Value | What it is |
-|---|---|---|
-| `id` / `bundle` | required | as in every project |
-| `scale` | `0.008` | file units → game units. **One number, at the top level**, because the bake reads it too for root motion — two numbers that must agree would drift. |
-| `loop` | `"Spider_Idle, Spider_Walk"` | which of the file's own clips must cycle. **glTF carries no loop flag**, so this cannot be inferred, and an un-looped walk plays once and freezes. |
-| `play` | `"Spider_Idle"` | which clip a bare imported model plays |
-
-### The `"creature"` block
-
-| Field | Required | What it is |
-|---|---|---|
-| `"creature": {}` itself | **yes** | The empty block **is the opt-in.** A project without one is a texture/sound project and none of this happens to it. |
-| `clips` | **yes** | your clip name → **role**. Roles: `walk`, `idle`, `attack`, `death` (all four REQUIRED), plus optional `reaction` (flinch on damage), `ranged`, `jump`. An empty string earmarks a clip for later. |
-| `events` | in practice yes | role → `"<EventName> <fraction>, …"`. **WHERE in the clip**, as a fraction of its length. |
-| `name` | yes | what the unit is called |
-| `model` | yes | the stem of the file in `Content\Models\` |
-| `donor` | yes | the **shipped unit to clone structure from**. Pick a one-tile one — see below. Accepts a def name (the normal case) or a species tag. |
-| `ranged` | optional | a shipped `WeaponDef` to give it a ranged attack |
-| `up` | yes | the model's up axis, e.g. `"0,1,0"`. The rotation is *derived* from it, so the only thing that can be wrong is the measurement. |
-| `lift` | yes | how far the model's origin sits above its lowest vertex. **A centred model without this stands in a hole half its own height deep**, and a rotation can never supply the number. |
-| `health` `will` `speed` `volume` | optional | stats. `volume` is unit slots in the aircraft — set it to `1` or a six-slot craft overflows. |
-| `pace` | optional | tiles/second the creature travels at. Omit it for the shipped soldier's **5.4284**; set `0` to keep your clip's own authored speed. |
-
-## 3. The commands, and what they print
-
-### The workflow — the bake refuses you on purpose, twice
-
-**Step 1 — drop the `.glb` in**, put `"creature": {}` in `ppcontent.json`, and bake:
+With that already-complete manifest, a live bake printed these exact lines:
 
 ```text
-ct_project CustomCreature
-```
-
-The tool reads your file, **writes back into your `ppcontent.json`** every animation it found, tells
-you what it measured, and **refuses**:
-
-```text
-creature-measure 'cyborg_spider': 49 bone(s), spans 120.435 x 64.237 x 105.578 file unit(s) ...
-  a tile is 1.0, so "scale": 0.008 makes it one tile across
-creature-clips 'cyborg_spider': 7 animation(s) in the file -> Spider_Walk, Spider_Idle, ...
-creature-scaffold: WROTE the clip list into ...\ppcontent.json - map each one to a role there.
-creature-roles FAIL ... leaves 4 REQUIRED role(s) unmapped: walk, idle, attack, death.
-```
-
-It refuses rather than guesses on purpose. glTF has no "this is the walk cycle" flag, so a walk and a
-death are the same shape of data — and a wrong guess puts an event-less clip in the attack state,
-which is a ten-second stall per swing that reads like **the game** hanging.
-
-**Step 2 — fill in the roles** beside each clip name, and set the numbers you care about. Read
-`creature-measure` against what you declared: it prints the scale that *would* make the model one tile
-across, next to the one your file asks for. If those disagree wildly, that mistake corrupts the
-collider, the aim point and the root motion all at once.
-
-**Step 3 — bake again.** Re-baking never churns the file: a role you already filled in survives, a
-clip you added arrives blank.
-
-```text
+clip-names PASS "loop" names 2 clip(s) and "play" names 1 of the 7 this project bakes
+creature-measure 'cyborg_spider': 49 bone(s), spans 120.435 x 64.237 x 105.578 file unit(s) about 0,29.979,-3.649; a tile is 1.0, so "scale": 0.008 makes it one tile across (this project declares 0.008). Its origin is 32.118 above its lowest vertex on +Y, which is "creature": { "lift" } if the model is centred rather than standing on its feet.
+creature-clips 'cyborg_spider': 7 animation(s) in the file -> Spider_Walk, Spider_Idle, Spider_Idle_long, Spider_Damage, Spider_Attack_1, Spider_Attack_2, Spider_Death
 creature-events PASS every blocking event the game waits for is declared
-creature-roles  PASS "clips" maps 7 of 7 discovered animation(s); every required role is mapped
-ct_project: ALL PASS - ...\Dist\CustomCreature.bundle
+creature-roles PASS "clips" maps 6 of 7 discovered animation(s); every required role (walk, idle, attack, death) is mapped
+ct_project: ALL PASS - <project>\Dist\CustomCreature.bundle
 ```
 
-### At load time, and in a mission
+No `creature-scaffold` line appears because the manifest already contains every discovered clip.
+The roles line says `6 of 7` because `Spider_Idle_long` is deliberately mapped to an empty role.
+The printed `32.118` origin distance is a candidate `lift` for a model centred on its origin, not a
+value to copy automatically. The demo's author judged the model in game and chose `"lift": 2.1372`;
+you must make the same visual decision for your model.
 
-One line per seam, each with its own PASS/FAIL:
+Use the measurements as candidates when completing the file:
+
+- `scale` is top-level uniform rig scale. The bake prints the value that makes the model about one
+  tile across.
+- `up` is the model's imported up axis. ContentTool rotates that vector to world up.
+- `lift` is the author-chosen file-unit distance from origin down to the lowest vertex, applied after
+  scale; the printed value assumes a centred model and need not be the value you choose.
+- `play` selects the imported Animator's starting clip. `loop` must include the mapped walk and idle.
+- `pace` is tiles per second. Omit it for the shipped pace; set `0` to preserve the authored timing.
+- `speed` is Action Points—how far the unit can move in a turn—not visual movement speed.
+- `health` zero keeps the donor's value. Set it deliberately; a donor with zero strength produces a
+  creature that enters play dead.
+
+Run `ct_project MyCreature` again. Fix the first refusal and repeat until the bundle bakes.
+
+## 3. Choose the donor by capability
+
+`Swarmer_TacCharacterDef` is the default because it is one tile and contains the required navigation,
+animation, addons and melee structure. A facehugger has no body parts and cannot supply the required
+melee weapon. A large donor can bring a multi-tile footprint or demolition machinery into a small
+model.
+
+Ask the live repository for candidates:
 
 ```text
-ct_creature PASS '...\Dist\CustomCreature.bundle' -> model 'cyborg_spider', 7 clip(s): cyborg_spider_spider_attack_1, ...
-ct_creature PASS root-motion node '_rootJoint'
-ct_creature PASS rig root 'cyborg_spider' has the Animator ON THE ROOT, renderer=... bones=49 ...
-ct_creature PASS 4 animation event(s) stamped as OnAnimEvent(<name>) [cyborg_spider_spider_attack_1:ActionDo@0.4054, ...]
-ct_creature PASS clips: N non-default anim action(s) rewritten ...; M TurnSequence slot(s) CLEARED ...
-ct_creature PASS role 'walk' = 'cyborg_spider_spider_walk' isLooping=True
-ct_creature PASS (tactical) 'Overridden: MidMonsterAnimator' had 45 overridable clip(s); ... -> HL_ActionPlaceholder -> cyborg_spider_spider_attack_1 (DefaultActionClip), Chiron_death -> cyborg_spider_spider_death, ...
-ct_creature PASS '...' donor-free audit: no Mutog_ClassTagDef/VehicleTag, 1 geometry-free bodypart ...
-ct_creature PASS roster (Tutorial.InitSquad) 'Manticore' carries 6 unit(s), space 6/6: ...
+ct_list defs Swarmer TacCharacterDef
+ct_list defs Crabman TacCharacterDef
 ```
 
-**The four to know by name:**
+Choose based on component and combat behavior. Donor appearance and donor clip names do not help:
+the donor's clips are overridden. Its controller states, agent-related structure and abilities are
+the ceiling.
 
-- **the roster line** — *is there a creature at all.* Every other line can be green while this one
-  fails; that is the point of it. The engine's own "add to aircraft" call **never refuses** — it
-  computes the space sum and throws it away — so "we called Add" is not evidence of anything. This
-  line reads the aircraft back out.
-- **the controller line** — *whether turn, idle and death play at all.* It fires **per spawn, in a
-  mission**, not at mod load, and lists every clip the donor's controller holds and what each now
-  plays. If it is absent, the bridge never ran.
-- **the donor-free audit** — *is this your creature or a repainted donor.* Read back off the finished
-  def through the game's own accessors, so an edit that re-points one field at the donor turns it red.
-- **`isLooping=False … MUST CYCLE AND DOES NOT`** — the one to read first. A non-looping idle or walk
-  plays once and holds, which in game is indistinguishable from *no animation at all*. It comes from
-  the top-level `"loop"` declaration, and `ct_project` prints `, LOOPS` or `, plays once` per clip.
+ContentTool separately selects a shipped one-tile reference unit for agent type, cursors and move
+highlight. Its `Walkable*` nav area supplies the ground mask because area names are scoped to that
+agent type. Do not treat “reference” as another manifest key; it is an internal, copied provenance
+that prevents a donor's differently scoped nav mask from immobilizing the clone.
 
-### The measurement
+## 4. Author events at the real frames
 
-Measured on a download-shaped install — shipped files only, `ct_project` **never run** — the creature
-spawned into a live mission and passed **all 19** gate arms:
+Phoenix Point waits for named events. The attack role normally needs `ActionDo`, `ShootShot`, then
+`ActionEnd`; death needs `Ragdoll`. Values are fractions of that clip's duration. Put `ShootShot` at
+the actual contact/projectile frame and `ActionEnd` when the pose is ready to leave.
 
-| Probe | Reading |
-|---|---|
-| bash `Fishman_12` | **190,0 → 130,0** |
-| spit | **130,0 → 120,0** (4 → 5 statuses) |
-| walk | 2,83 tiles in 0,71 s = **3,98 tile/s** |
-| death clip | `cyborg_spider_spider_death` |
-| `Health.Max` | **60,0**, from `Data.Strength=4` |
-| animator played | `cyborg_spider_spider_attack_1 / _attack_2 / _walk / _idle / _death` |
+Missing event declarations are warnings during bake, but a live ability can wait ten seconds for
+each missing blocking event. That looks like a hung game. The event order in the string matters, and
+two waits should not share one timestamp.
 
-The control, on the first shipped candidate template, in the harness's own words: animator
-`[Fireworm_idle_loop → Fireworm_move_loop]`, `Data.Strength=0` → **CONTENT-DEFECT, born dead**,
-`C1-melee FAIL` (no attack ability resolves), 2,32 tile/s. That control is what shows the harness is
-capable of reporting failure.
+See [Phoenix Point animation contract](animation-reference.md) for every slot, event and parameter.
 
-!!! warning "The bake's health number is not the number the game gives the creature"
-    `ppcontent.json` asks for `health: 40` and the build line computes
-    `Health.Max = Toughness 0 + 4 x 10,00 = 40`. The spawned actor measured **`Health.Max = 60,0`**
-    from the same `Data.Strength=4`, with TFTV resident in a 21-mod stack. Recorded, not resolved: the
-    most likely explanation is a TFTV strength→health multiplier, and nothing yet establishes which
-    layer applies it. **Check the live actor, not the bake line.**
+## 5. Traversal
 
-## The three things that will actually bite you
+### Why custom creatures used to stall
 
-### Choosing a donor — pick a ONE-TILE unit
+The pathfinder grants traversal by navmesh areas. An empty animation slot does not keep an actor off
+a link: the game can emit an L-shaped fallback using the run loop, wait up to five seconds at each
+point for a clip identity that never becomes current, fall back to high idle, and continue. That is
+the stepped wall motion and long pause the earlier implementation produced.
 
-The clone inherits its donor's whole component list, and none of it is a *tag* you can strip. The
-demo used to clone a Mutog, and every one of these was inherited in silence:
+There was a second trap: nav-action field names and controller clip names are different
+vocabularies, and some nav fields are three-part sequences while others are single clips. Filling
+only sequence fields by a nav def's apparent name left real controller states untouched.
 
-| What the donor brought | What the player saw |
-|---|---|
-| a demolition component | a tiny spider smashing every wall it passed |
-| nav `AgentType: "MedMonster"` | a multi-tile footprint and a fat path preview |
-| a 3×3 move ability | a 3×3 move on a 1×1 creature |
-| an agent radius ≥ 1 | a turn-in-place demanded on every move order |
+### What ContentTool does now
 
-Crushing is a **component**, and the footprint is one **string**. The engine now drops the demolition
-component from every creature it builds and re-points the AgentType at a shipped one-tile unit, so a
-bad donor is survivable — but the honest fix is to start from the right unit.
+ContentTool reads the rig's controller, synthesizes a start, looping pure-up climb and stop from the
+creature's own walk, and maps them into the controller and nav-action fields together. It covers 19
+slots across roof drops, low-obstacle roof drops, ladder climbs, low-obstacle climbs and jump-over
+families. A nav area is added only when its real controller states and required clip parts are filled.
 
-`Swarmer_TacCharacterDef` is the default because it is the smallest shipped unit that carries
-everything the clone *requires*: a `Humanoid` agent type, an addons manager with a skeleton chassis,
-an anim-actions def, and **a bodypart that is a melee weapon with a bash ability on it** — which is
-where your creature's attack comes from. A Facehugger looks like a better fit until you notice its
-bodypart list is empty, and a creature with no bodypart weapon can never attack.
-
-### Animation events — the biggest ceiling, and it is not a hang
-
-Phoenix Point does not time gameplay off clip length. It **blocks waiting for a named event fired from
-inside the clip**:
-
-| The game waits for | It gates |
-|---|---|
-| `ActionDo`, `ActionEnd` | every generic ability |
-| `ShootShot` | the shot actually leaving the weapon |
-| `Ragdoll` | the actual death |
-| `Holster`, `DrawOut` | weapon in and out of hands |
-
-A downloaded clip carries **none** of these, and **the bake does not write them** — that is a real
-ceiling. The engine works around it at load by stamping the events your `"events"` block declares, but
-**any ability whose event is not in that list still costs 10 s.**
-
-The failure mode is precise, and it is not a hang: the wait is timeout-bounded at 10 s, logs *"the
-event is likely missing from the animator"*, and continues. So the logic still fires — ten seconds
-late, every action. Unplayable, not fatal.
-
-**Measuring your own times.** The demo measured `Spider_Attack_1` peaking on bone `lapa_1_R_4_044` at
-**0.4865** of the clip — the frame where a leg reaches farthest — by walking the clip frame by frame
-and finding how far the furthest bone had travelled from its frame-0 position along the clip's own
-principal axis of motion. That gave the declared
-`"attack": "ActionDo 0.4054, ShootShot 0.4865, ActionEnd 0.8378"`. A real creature mod puts the hit
-frame on the frame that *looks* like a hit; a measurement is a grounded starting point.
-
-### Speed comes from the clip's ROOT MOTION, not from a number
-
-The one that surprises everyone. **There is no def field anywhere in this game that sets a unit's
-movement speed.** The engine measures every clip by sampling it on the actual object and reading how
-far the root-motion node travelled: `Speed = offset.magnitude / clip.length`. So whatever pace your
-downloaded animator happened to walk at *is* the pace your creature moves at — and a walk cycle that
-animates **in place** measures `Speed == 0`. Most free models animate in place.
-
-`"pace"` retimes the clip you mapped to `walk` to a target tiles/second. There are two ways to raise a
-measured speed and **only one keeps the feet on the ground**: stretching the ramp makes the body cover
-more ground at the old cadence, which is foot sliding; **compressing the timeline** leaves travel per
-cycle unchanged and speeds legs and ground up together, so a planted foot stays planted. The bake does
-the second, and only to the walk clip — an attack's rate is set by the `ShootShot` frame you measured,
-and retiming it would move the hit.
+For the current one-tile Humanoid creature this produces:
 
 ```text
-clip 'Spider_Walk' pace: 1.986079 -> 5.4284 tile/s, so the clip plays x2.733224
-  (0.8 s -> 0.292695 s per cycle = 3.416476 cycle(s)/s).
-  The legs and the ground speed up together, so nothing slides.
+WalkableHumanoid, Jump, ClimbLadder, RoofDrop, LowObstacle, LowObstacleRoofDrop
 ```
 
-**A walk clip with root translation is the single most useful thing to know before buying a model for
-a game.** This one genuinely travels (1.986079 tile/s), so ×2.73 is enough and 3.42 cycles/s looks
-natural. The previous model animated in place and needed ×10.65 — 12.78 cycles/s, a blur.
+That is the same mask as a shipped soldier. By comparison, shipped ground-only units carry one
+scoped ground area: `Sentinel_Terror` has `WalkableHumanoid`, `Chiron_FireWorm` has
+`WalkableMedMonster`, `Queen_Heavy` has `WalkableBigMonster`, and `PX_Scarab` has
+`WalkableArmadillo`. Shipped climbers add only the link areas they can actually traverse.
 
-`"pace"` is **not** the same key as `"speed"`, and cannot be: `speed` is spent as the unit's action
-points — how **far** it gets in a turn. `pace` is how **fast** it crosses a tile.
+The engine derives climb height from baked root motion and repeats the loop for the variable
+remainder, so one set of clips crosses different obstacle heights.
 
-## What the bundle contains, and by what name
+`climbPitch` rotates the creature nose-up during synthesis. The spider uses `90`: on a wall, its
+ordinary leg cycle reads as climbing. `0` is the honest default for a biped, whose walk would look
+wrong rotated onto its face. The general technique is: **when the animation you need does not exist,
+rotate the model so an animation you do have reads correctly.**
 
-| Asset | Address |
-|---|---|
-| the creature prefab (root + 49 bones + `SkinnedMeshRenderer` + `Animator`) | `assets/morgott.demo.customcreature/models/cyborg_spider` |
-| its seven clips | `assets/morgott.demo.customcreature/clips/cyborg_spider_spider_walk` … `_spider_death` |
-| the override controller the bare `Animator` carries | `assets/morgott.demo.customcreature/controllers/cyborg_spider_aoc` |
+If your GLB contains authored climbing art, map that clip to `climb`. It wins over synthesis and its
+own root offset is used. The mapped clip must rise; bake refuses a non-rising climb rather than
+shipping a sliding creature.
 
-A clip's name is `<model file stem>_<clip name in the .glb>`, lowercased — hence
-`cyborg_spider_spider_walk`. Clips are matched by **suffix**, so renaming the model file cannot
-silently unbind everything.
+### Measured result and ceiling
 
-## The DLL — the whole of it
+The spider crossed a 4.93-unit rooftop rise over 24.90 units of path in 3.94 seconds and a 5.00-unit
+drop in 2.68 seconds, ending at the ordered point with zero animation timeouts. Before the traversal
+fix, a shorter five-tile feature took 13.09 seconds and emitted three timeout lines; a shipped
+Fireworm took 3.25 seconds on that control route.
 
-**This is the entire assembly.** Below is `src\CustomCreatureMain.cs` from the demo, reduced only by
-deleting its comment block; every line of code is verbatim.
+The synthesized walk cadence is still not authored climb art. All synthesized parts carry upward
+root motion even when the family is used for descent; the shared controller mapping makes that
+complete without stalls, but bespoke art is the visual upgrade.
+
+Controller-state classification currently uses keywords in the controller's overridable clip names
+because shipped controllers cannot be fully enumerated offline. A future game controller with a new
+naming vocabulary can therefore be refused until ContentTool's family map is updated.
+
+Climbing up one full level remains unavailable to a Humanoid-agent custom creature. The shipped
+Humanoid controller has no reachable `JumpUpOneLevel` state and the path processor returns no usable
+sequence, so ContentTool refuses that family and does not add its area. `Mount`, `Ram`, `JetJump` and
+`FallNoSupport` remain excluded because they are abilities or hazards rather than ordinary path
+links.
+
+## 6. Hitboxes and ranged attacks
+
+By default ContentTool measures enabled renderers and creates a character-layer box collider plus a
+camera collider for hover/click. Set `hitBones` to a comma-separated bone list for sphere colliders;
+`hitRadius` controls their radius. Set `colliders` to `off` only when your own behavior creates and
+verifies them. `aim` names a bone for the aim marker.
+
+For a ranged creature, set `ranged` to a shipped `WeaponDef` and optionally set `aiAction`,
+`shootBone`, and `accuracy`. ContentTool clones that weapon as a second attack. The `ranged` clip role
+keeps its animation separate from melee. Test both attacks because their required events and target
+frames can differ.
+
+## 7. Build the def from your DLL
+
+`ppcontent.json` cannot decide where a new actor belongs in the campaign, so a creature requires a
+real DLL. Start from the complete [project, references and `ModMain` skeleton](behavior-dll.md), and
+read its [profile-wide `Managed\` module warning](behavior-dll.md#managed-module-load-failure)
+before adding references. Substitute `MyCreature` for `MyMod` in that project file.
+
+`CreatureBuild` has two public members: `public static TacCharacterDef Build(string modDir,
+Action<string> log)` and `public static void JoinPlayerVehicle(TacCharacterDef def, string who)`.
+Everything else on that class is internal.
+
+`Build` registers and returns the cloned def. On failure it logs and returns `null`; it never throws.
+`JoinPlayerVehicle` finds the current geoscape and takes the Phoenix faction's first vehicle. When
+that vehicle does not already have a unit with the same `TemplateDef`, it creates a character from
+`def` for the Phoenix faction using the current difficulty's starting-squad generation parameters,
+then adds it. It reads the roster back and logs `PASS` or `FAIL`; `who` is only a label for that log.
+It safely does nothing when no geoscape or vehicle exists.
+
+This complete entry point uses the demo's starting-squad policy:
 
 ```csharp
+using System.Reflection;
 using HarmonyLib;
 using Morgott.ContentTool.Tactical;
 using PhoenixPoint.Geoscape.Levels;
@@ -297,19 +280,18 @@ using PhoenixPoint.Geoscape.Levels.Factions;
 using PhoenixPoint.Modding;
 using PhoenixPoint.Tactical.Entities;
 
-namespace Morgott.CustomCreature
+namespace YourName.MyCreature
 {
-    public class CustomCreatureMain : ModMain
+    public sealed class MyCreatureMain : ModMain
     {
-        public override bool CanSafelyDisable => true;
-
-        /// <summary>The creature the engine built, handed to the two squad triggers below.</summary>
         internal static TacCharacterDef Spider;
+
+        public override bool CanSafelyDisable => true;
 
         public override void OnModEnabled()
         {
             Spider = CreatureBuild.Build(Instance.Entry.Directory, m => Logger.LogInfo(m));
-            ((Harmony)HarmonyInstance).PatchAll(System.Reflection.Assembly.GetExecutingAssembly());
+            ((Harmony)HarmonyInstance).PatchAll(Assembly.GetExecutingAssembly());
         }
     }
 
@@ -318,175 +300,70 @@ namespace Morgott.CustomCreature
     {
         private static void Postfix()
         {
-            CreatureBuild.JoinPlayerVehicle(CustomCreatureMain.Spider, "CreateInitialSquad");
+            CreatureBuild.JoinPlayerVehicle(MyCreatureMain.Spider, "CreateInitialSquad");
         }
     }
 
-    /// <summary>Private method, patched by name.</summary>
     [HarmonyPatch(typeof(GeoscapeTutorial), "InitSquad")]
     internal static class SpiderJoinsTutorialSquad
     {
         private static void Postfix()
         {
-            CreatureBuild.JoinPlayerVehicle(CustomCreatureMain.Spider, "Tutorial.InitSquad");
+            CreatureBuild.JoinPlayerVehicle(MyCreatureMain.Spider, "Tutorial.InitSquad");
         }
     }
 }
 ```
 
-It splits cleanly in two, and the split is the point of the page:
+`OnModEnabled` first builds the def, then applies this assembly's two Harmony postfixes. The normal
+new-campaign path calls `GeoPhoenixFaction.CreateInitialSquad`. The tutorial replaces that builder
+with its private `GeoscapeTutorial.InitSquad`, so it is patched by name. Both postfixes are required
+to put the creature in the player's vehicle in both campaign starts; changing
+`StartingSquadTemplate` is insufficient because the tutorial reads it only for its length. For a
+different campaign design, keep the `Build` call but replace these two injection seams with your own.
 
-- **`CreatureBuild.Build(modDirectory, log)`** is the mechanism, and it is one call.
-  `Instance.Entry.Directory` is your own mod folder; the callback is what prints the `ct_creature`
-  lines. It **never throws** — a failed mod load empties the activated-mods list, so it logs the
-  reason and returns `null` instead.
-- **Everything else is the choice ContentTool cannot make for you:** *where does this creature come
-  from?* This demo puts it in the starting squad, so it owns those two patches. A different mod would
-  hand the unit to a faction's deployment list, or spawn it from an ability, and would own a
-  different hook.
-
-!!! warning "Why the squad hook is patched TWICE"
-    Phoenix Point has **two** squad builders and which one runs depends on whether the player took
-    the tutorial. The obvious one is `GeoPhoenixFaction.CreateInitialSquad`. The other is
-    `GeoscapeTutorial.InitSquad`, which quietly replaces it and reads the starting-squad template for
-    its **length only** before filling the gap with a fixed human template — which is why appending
-    to that array produces an extra soldier and never your creature. `JoinPlayerVehicle` sidesteps
-    both by adding the unit to the aircraft *after* whichever builder ran, then reading the roster
-    back to prove it is there. Patch only the first and your creature is missing for every player who
-    took the tutorial.
-
-`OnModEnabled` and not `ApplyDefRepoPatches`: the running game has that second hook, but the shipped
-`ModSDK\Assembly-CSharp.dll` you compile against does not declare it, so the override does not
-compile. `OnModEnabled` runs after the defs are loaded and before a campaign exists, which is the
-window this needs.
-
-### The `.csproj`
-
-`package.ps1` builds the first `*.csproj` in your mod folder and then looks for
-`bin\Release\**\<FolderName>.dll`, so **`<AssemblyName>` must equal your mod's folder name** and
-`meta.json` must declare that same name. Reduced from the demo's `CustomCreature.csproj`:
-
-```xml
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <AssemblyName>CustomCreature</AssemblyName>
-    <RootNamespace>Morgott.CustomCreature</RootNamespace>
-    <TargetFramework>net472</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <OutputPath>bin\$(Configuration)\CustomCreature\</OutputPath>
-  </PropertyGroup>
-  <ItemGroup>
-    <Compile Include="src\**\*.cs" />
-    <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-  <PropertyGroup>
-    <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
-    <ModSDK>$(PPRoot)\ModSDK</ModSDK>
-    <!-- The ModSDK folder ships only four assemblies; these two live in the game's own Managed\. -->
-    <UnityManaged>$(PPRoot)\PhoenixPointWin64_Data\Managed</UnityManaged>
-  </PropertyGroup>
-  <ItemGroup>
-    <Reference Include="ContentTool">
-      <HintPath>$(PPRoot)\Mods\ContentTool\ContentTool.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Assembly-CSharp">
-      <HintPath>$(ModSDK)\Assembly-CSharp.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="0Harmony">
-      <HintPath>$(ModSDK)\0Harmony.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine.CoreModule">
-      <HintPath>$(ModSDK)\UnityEngine.CoreModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine.AnimationModule">
-      <HintPath>$(UnityManaged)\UnityEngine.AnimationModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine.AssetBundleModule">
-      <HintPath>$(UnityManaged)\UnityEngine.AssetBundleModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
-</Project>
-```
-
-`<Private>false</Private>` on **every** reference, and read
-[the reference rule](reference.md#10-the-two-rules-that-are-not-negotiable) before you add a seventh
-one — this is the recipe with the most references, and the last two come from the game's own
-`Managed\` folder rather than `ModSDK\`, which is the category that can take every mod on the machine
-down with it.
-
-And `meta.json` names it:
+`meta.json` must name the DLL you built:
 
 ```json
-{ "ID": "morgott.demo.customcreature", "AssemblyName": "CustomCreature.dll",
-  "Dependencies": [ "com.morgott.ContentTool" ] }
+{
+  "ID": "yourname.mycreature",
+  "AssemblyName": "MyCreature.dll",
+  "Version": "1.0.0",
+  "Author": [
+    { "Key": "English", "Value": "Your Name" }
+  ],
+  "Name": [
+    { "Key": "English", "Value": "My Creature" }
+  ],
+  "Description": [
+    { "Key": "English", "Value": "Adds a custom creature. Requires ContentTool." }
+  ],
+  "Dependencies": [
+    "com.morgott.ContentTool"
+  ]
+}
 ```
 
-## 4. Bake and package
+`ct_package` finds the already-built DLL named by `AssemblyName`; it never compiles. Follow the
+[build-to-mod-folder and restart loop](behavior-dll.md#name-the-real-dll) after every code change.
 
-```powershell
-ct_project CustomCreature                 # in game, after changing the model or the manifest
-$PP = 'D:\Steam\steamapps\common\Phoenix Point'   # your own game folder
-.\package.ps1 -Project "$PP\Mods\CustomCreature"  # with the game shut - builds your .csproj too
-```
+## 8. Test and ship
 
-Commit `Dist\CustomCreature.bundle`. **That is what makes the download work with no bake.**
+Test from a new campaign if your behavior adds the unit only during squad or storage creation.
+Verify all of these in a tactical mission:
 
-## 5. How a player installs it
+- selection, hover and aim targeting;
+- several ground moves, corners, climb, drop and low-obstacle links;
+- melee and ranged actions, including their event timing;
+- reaction, damage and death;
+- save, reload and mod disable behavior appropriate to your injection seam.
 
-Unzip into `Phoenix Point\Mods\`, tick it on, start a **NEW CAMPAIGN** — the demo's unit is the last
-one in the starting squad. **No bake, no console command.** Nothing in the game install is touched.
-
-## 6. Discovery and the dependency line
-
-`"Dependencies": [ "com.morgott.ContentTool" ]`. The engine reads `Dist\<YourMod>.bundle` at mod
-enable. Until that file exists the mod says so and changes nothing:
+Then run the final bake and package:
 
 ```text
-ct_creature VOID '...\Dist\CustomCreature.bundle' does not exist - run `ct_project CustomCreature`
+ct_project MyCreature
+ct_package MyCreature
 ```
 
-## 7. When it does not work
-
-| Line or symptom | What it means |
-|---|---|
-| `creature-roles FAIL ... leaves 4 REQUIRED role(s) unmapped: walk, idle, attack, death.` | you baked with `"creature": {}` and have not mapped the roles yet. That is step 1 of the workflow, not an error. |
-| `creature-events WARN` | a blocking event is undeclared. It costs **10 s per action**, not a hang. |
-| `AnimEventReceiver.WaitForEvent timeout expired … the event is likely missing from the animator` | the game's own error, and the sign that your `"events"` block does not cover an action you used. |
-| `<unit> is waiting for animation <clip> timed out. Current animation: <other clip>` | you filled a slot with a clip whose state your controller cannot reach. **A filled slot is a CLAIM, not a picture** — filling the turn-in-place slots tells the engine this creature turns on the spot, and it then blocks forever waiting for a state a downloaded `.glb` has no clip for. Any optional sequence is the game asking a yes/no question; answer it honestly. |
-| `isLooping=False … MUST CYCLE AND DOES NOT` | the deployed bundle was baked before your `"loop"` declaration existed. Re-bake and restart. |
-| `ct_creature VOID '...\Dist\<Mod>.bundle' does not exist` | you never baked, or the bundle is not in the package. |
-| the roster lists your creature and **shows no model** | an extra transform between the rig root and the prefab. One code path looks for the `Animator` tolerantly and one looks on the root only, with no null check — the prefab must **be** the rig root, unwrapped. |
-| the creature walks on the spot | the root-motion node is wrong. The engine derives it as the rig's one parentless bone; if it measures travel off a bone's parent it reads 0 and reports "this segment does not move the actor". Look for `ct_creature PASS root-motion node '<name>'`. |
-| the creature slides round instead of turning | the donor's turn clips are playing on your rig and name none of your bones. The turn slots are cleared rather than mirrored — the honest answer is that a downloaded model does not turn in place, and it lerps round in a few frames instead. |
-| it stands in a hole half its own height deep | `lift` is missing or wrong. A rotation can never supply that number. |
-| armour and weapon models do not show | expected. Body-part visuals are reparented onto the rig **matched by bone name**, and a foreign skeleton shares no bone name with the donor's. A real creature mod ships its own body-part items, or none. |
-| a stray 2-triangle plane in the file | fine. The reader picks the mesh a **skin** drives and names the meshes it dropped. If that does not single one out — two skinned meshes, or a static file with several — it refuses. |
-| the death clip is 13.83 s of frozen pose | your file lays its clips end to end on one shared reel with absolute key times. The reader lifts each clip off that reel to its own zero and says so (`lifted off the file's shared timeline at N s`); if you see the old behaviour, re-bake. |
-
-## Ceilings, stated
-
-- **The bake emits no animation events.** The biggest one. Every baked clip arrives eventless and the
-  workaround at load covers only `ShootShot` / `ActionDo` / `ActionEnd` / `Ragdoll`.
-- **Root motion, not a speed stat.** See above. Buy a model whose walk cycle travels.
-- **Body-part visuals do not attach.** Matched by bone name; a foreign skeleton shares none.
-- **The stats, AI and abilities are the donor's** unless you set them. Cloning a working unit rather
-  than inventing balance is deliberate.
-- **One clip per state, no state machine of your own.** The controller is the donor's, and this route
-  serializes no controller constant. A genuinely new state machine means a controller of your own,
-  from code.
-- **Draco is refused.** Export from Blender as glTF Binary with Compression unticked.
-  `EXT_meshopt_compression` and `KHR_mesh_quantization` are decoded in-house and need no conversion.
-
-## Licence
-
-Check your model's licence **before** you swap one in. Not every free model is free to ship, and
-CC-BY additionally obliges you to keep the author credited — in your `SOURCES.md` and in the mod
-description.
+Install the packaged folder as a player and repeat the test after a cold restart. Ship the model only
+when its license permits redistribution and include the required attribution in `SOURCES.md`.

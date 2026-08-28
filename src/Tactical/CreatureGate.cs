@@ -852,32 +852,26 @@ namespace Morgott.ContentTool.Tactical
                              "in the wrong space" : ""));
                     }
 
-                    // ARM 8d - IT CROSSES A LEVEL CHANGE, which is what actually HUNG the user.
+                    // ARM 8d - IT IS NEVER ROUTED ONTO A LINK IT CANNOT PERFORM.
                     //
-                    // C1-walk orders a path across open floor, and that is exactly how the freeze got
-                    // through: the traversal families (ladder, drop, vault, jump, mount) were filled
-                    // with our flat walk or idle, HasAllAnimations went TRUE, and
-                    // ClimbPathProcessor.EmitClimb:90 then built a MEASURED vertical segment off a clip
-                    // that never rises. The mover waited to arrive where the animation could not take
-                    // it. Flat ground never touches that code, so no arm could see it.
+                    // This arm used to demand the OPPOSITE (climb, links > 0) and it was honest about
+                    // failing: with the traversal slots FILLED it arrived in 2,23s over 1 link of 12,
+                    // with them CLEARED in 13,09s over 2 links of 13 - and it passed both times. That
+                    // is the whole defect in two numbers. Clearing the clips stops the mod CLAIMING a
+                    // traversal; it does not stop the engine ROUTING one. ClimbUpPathProcessor:20-26
+                    // logs the missing anims and emits anyway, EmitClimb:90,107-110 falls back to
+                    // EmitClimbFallback:296-330 (three Run.Loop points in an L = the teleport across
+                    // the surface), and WaitForAnimation:156,175-186 caps each wait at 5s = the
+                    // stutter. MEASURED on this very save before the fix: 3 x "Swarmer_1 is waiting
+                    // for animation cyborg_spider_spider_walk ... timed out" inside those 13,09s.
                     //
-                    // FALSIFIED, AND IT DID NOT CATCH THE BUG - read this before trusting the arm.
-                    // MEASURED by disabling the traversal clearing and re-running: this arm PASSES
-                    // EITHER WAY. With the traversal slots left FILLED (the state that froze the user)
-                    // it arrived in 2,23s over 1 link of 12; with them cleared it arrived in 13,09s
-                    // over 2 links of 13. So the link this save can reach - a 0,56 step - is NOT the
-                    // link type that hangs, and the arm does not yet reproduce the window freeze. It
-                    // guards arrival across A level change, which is worth having, but it is NOT proof
-                    // that the freeze is fixed and must not be cited as such.
-                    // ponytail: left honest rather than tuned until it goes red - the next step is a
-                    // save whose spawn reaches a real vault/window (JumpOverLowWall,
-                    // ClimbUpLowObstacle), not a stricter clock on a step it already clears.
-                    //
-                    // ASSERTED ON THE SEGMENT, NOT JUST ON ARRIVAL. Reaching the destination proves
-                    // nothing if the path was flat all along - the game would simply have walked round.
-                    // NavMeshPathRequest.GetLinkForSegment:44-51 returns the NavLink for a segment and
-                    // null for ordinary ground, so counting non-null links is the game's OWN answer to
-                    // "was this a climb". That count is what makes this arm unable to pass by walking.
+                    // So the contract is now the one CreatureBuild can actually keep: the creature's
+                    // NavAreas hold no link area (CreatureBuild ~line 363), therefore the path it is
+                    // given contains NO link segment, and it walks AROUND. Reaching the destination
+                    // is not the assertion - the LINK COUNT is. NavMeshPathRequest.GetLinkForSegment:
+                    // 44-51 returns the NavLink for a segment and null for ordinary ground, so that
+                    // count is the game's OWN answer to "was it routed over a climb", and putting the
+                    // climb areas back turns this arm RED on the same save.
                     if (move != null)
                     {
                         actor.RestartAbilities();
@@ -887,97 +881,146 @@ namespace Morgott.ContentTool.Tactical
                         // Wider than C1-walk on purpose: a level change is rarely within three tiles,
                         // and a candidate on a DIFFERENT height is the cheap honest filter for "getting
                         // there requires leaving the floor".
-                        const float Reach = 12f;
-                        MoveAbilityTargetData[] all;
-                        try { all = move.GetTargetsDataInRange(null, Reach).ToArray(); }
-                        catch (Exception ex) { all = new MoveAbilityTargetData[0];
-                                               log.AppendLine("C1-traverse targets THREW " + ex.Message); }
-                        MoveAbilityTargetData high = all
-                            .Where(s => Mathf.Abs(s.Position.y - actor.Pos.y) > 0.5f)
-                            .OrderByDescending(s => Mathf.Abs(s.Position.y - actor.Pos.y))
-                            .FirstOrDefault();
-
-                        if (high == null)
+                        // Widened from 12: with the traversal families FILLED the question is no longer
+                        // "was it kept off a link" but "did it really cross one", and a level change has
+                        // to be inside the radius for the arm to ask that at all. At 12 the spider's own
+                        // spawn on 'spider_demo_before' offered 320 tiles and not one of them changed
+                        // height, so the arm silently fell back to the longest flat walk and measured
+                        // nothing about traversal.
+                        const float Reach = 26f;
+                        // UP TO THREE ORDERS, and the retry is not a fudge - it is what makes the arm
+                        // able to ask the question at all. A link exists only where walking is
+                        // impossible, and one order picks ONE destination: measured on this save, the
+                        // biggest level change within 26 tiles of the spider's spawn (2,37) was reached
+                        // by ordinary sloped ground with 0 links, so a single-shot arm reports a flat
+                        // walk and proves nothing about traversal either way. Each attempt re-reads the
+                        // offers from wherever the previous one ended and takes the largest height
+                        // change it has not already tried, so the second order is usually the way back
+                        // DOWN - which is where a drop link lives. It stops at the first path that
+                        // really carries one.
+                        // BOTH DIRECTIONS, and separately, because they are two different capabilities and
+                        // only one of them used to work. Descending needs DropDown, which the donor had;
+                        // ASCENDING needs the ladder and low-obstacle families the donor left null, so an
+                        // arm that took the biggest |dy| in reach could pass on a drop for ever while the
+                        // creature could not climb a single step. Each direction gets its own order, its
+                        // own clock and its own line.
+                        List<string> reports = new List<string>();
+                        int bad = 0, posed = 0;
+                        foreach (int want in new[] { 1, -1 })
                         {
-                            // VOID, never PASS. An arm that quietly settles for flat ground when it
-                            // cannot find a climb is the vacuous-green failure this session already
-                            // caught once, so this says plainly that the MAP could not pose the
-                            // question - and that the next step is a save that can, not a weaker rule.
-                            fail += Check(log, "C1-traverse", false,
-                                "VOID no reachable tile within " + Reach.ToString("F0") +
-                                " differs in height from the actor by more than 0,5 (" + all.Length +
-                                " offer(s) considered), so THIS SAVE CANNOT POSE THE QUESTION. The arm " +
-                                "refuses to fall back to flat ground: that would pass while the freeze " +
-                                "it exists to catch went straight through. Re-run the gate on a save " +
-                                "whose spawn has a ladder, roof drop or low wall in reach.");
-                        }
-                        else
-                        {
+                            string dir = want > 0 ? "UP" : "DOWN";
+                            MoveAbilityTargetData[] all = new MoveAbilityTargetData[0];
+                            MoveAbilityTargetData high = null;
+                            List<Vector3> tried = new List<Vector3>();
                             Vector3 fromT = actor.Pos;
                             string blewT = null;
-                            float tt = Time.realtimeSinceStartup;
-                            try { move.Activate(high.ToTarget()); }
-                            catch (Exception ex) { blewT = ex.Message; }
-
-                            // Sampled WHILE it runs: the path is built at activation and cleared when
-                            // the move ends, so the link count has to be read during the walk.
                             int links = 0, segs = 0;
                             List<string> playedT = new List<string>();
-                            float tickT = 0f;
-                            while (blewT == null && move.IsExecuting &&
-                                   Time.realtimeSinceStartup - tt < 30f)
+                            float tookT = 0f;
+                            for (int attempt = 0; attempt < 3; attempt++)
                             {
-                                try
+                                try { all = move.GetTargetsDataInRange(null, Reach).ToArray(); }
+                                catch (Exception ex) { all = new MoveAbilityTargetData[0];
+                                                       log.AppendLine("C1-traverse targets THREW " + ex.Message); }
+                                Vector3 at = actor.Pos;
+                                MoveAbilityTargetData pick = all
+                                    .Where(s => (s.Position.y - at.y) * want > 0.5f &&
+                                                !tried.Any(t => Vector3.Distance(t, s.Position) < 1.5f))
+                                    .OrderByDescending(s => (s.Position.y - at.y) * want)
+                                    .FirstOrDefault();
+                                if (pick == null) break;
+                                high = pick;
+                                tried.Add(pick.Position);
+                                fromT = at;
+                                blewT = null; links = 0; segs = 0; playedT.Clear();
+
+                                float tt = Time.realtimeSinceStartup;
+                                try { move.Activate(high.ToTarget()); }
+                                catch (Exception ex) { blewT = ex.Message; }
+
+                                // Sampled WHILE it runs: the path is built at activation and cleared when
+                                // the move ends, so the link count has to be read during the walk.
+                                while (blewT == null && move.IsExecuting &&
+                                       Time.realtimeSinceStartup - tt < 30f)
                                 {
-                                    TacticalPathRequest p = actor.TacticalNav == null
-                                        ? null : actor.TacticalNav.CurrentTacPath;
-                                    if (p != null && p.Path != null && p.Path.Count > segs)
+                                    try
                                     {
-                                        segs = p.Path.Count;
-                                        int n = 0;
-                                        for (int i = 0; i < segs; i++)
-                                            if (p.GetLinkForSegment(i) != null) n++;
-                                        if (n > links) links = n;
+                                        TacticalPathRequest p = actor.TacticalNav == null
+                                            ? null : actor.TacticalNav.CurrentTacPath;
+                                        if (p != null && p.Path != null && p.Path.Count > segs)
+                                        {
+                                            segs = p.Path.Count;
+                                            int n = 0;
+                                            for (int i = 0; i < segs; i++)
+                                                if (p.GetLinkForSegment(i) != null) n++;
+                                            if (n > links) links = n;
+                                        }
                                     }
+                                    catch { /* the path is torn down mid-read; the counts already taken stand */ }
+                                    // EVERY FRAME, not on a tick: a vault is one short clip and a
+                                    // quarter-second sampler walked straight past it, which reads in the
+                                    // log as "it ascended playing the walk". The list only grows on a
+                                    // CHANGE, so the cost is the same either way.
+                                    if (actor.Animator != null)
+                                    {
+                                        AnimatorClipInfo[] now = actor.Animator.GetCurrentAnimatorClipInfo(0);
+                                        string what = now.Length == 0 || now[0].clip == null ? "(none)" : now[0].clip.name;
+                                        if (playedT.Count == 0 || playedT[playedT.Count - 1] != what) playedT.Add(what);
+                                    }
+                                    yield return null;
                                 }
-                                catch { /* the path is torn down mid-read; the counts already taken stand */ }
-                                if (actor.Animator != null && Time.realtimeSinceStartup - tt >= tickT)
-                                {
-                                    tickT += 1f;
-                                    AnimatorClipInfo[] now = actor.Animator.GetCurrentAnimatorClipInfo(0);
-                                    string what = now.Length == 0 || now[0].clip == null ? "(none)" : now[0].clip.name;
-                                    if (playedT.Count == 0 || playedT[playedT.Count - 1] != what) playedT.Add(what);
-                                }
-                                yield return null;
+
+                                tookT = Time.realtimeSinceStartup - tt;
+                                // The next order needs action points again - the same call the arm made
+                                // before the first one.
+                                actor.RestartAbilities();
+                                if (links > 0) break;
                             }
 
-                            float tookT = Time.realtimeSinceStartup - tt;
-                            float dyWant = Mathf.Abs(high.Position.y - fromT.y);
-                            float dyGot = Mathf.Abs(actor.Pos.y - fromT.y);
+                            if (high == null)
+                            {
+                                // NOT a failure: a flat map genuinely cannot pose this half. It is said
+                                // out loud so a green run can never be mistaken for a proven one.
+                                reports.Add(dir + ": VOID - no tile more than 0,5 " + dir + " within " +
+                                            Reach.ToString("F0") + " tile(s), this save cannot pose it");
+                                continue;
+                            }
+                            posed++;
+                            float dyWant = (high.Position.y - fromT.y) * want;
+                            float dyGot = (actor.Pos.y - fromT.y) * want;
                             float left = Vector3.Distance(actor.Pos, high.Position);
-                            // Arrived, climbed, and the path really did contain a link. The clock
-                            // ceiling is generous - a climb is slower than a walk - but a HANG is
-                            // 30s of nothing, so it separates cleanly.
                             bool arrived = left <= 1.5f;
-                            bool climbed = dyGot > 0.5f;
-                            fail += Check(log, "C1-traverse",
-                                blewT == null && arrived && climbed && links > 0 && tookT < 25f,
-                                (blewT != null ? "THREW " + blewT + "; " : "") + "'" + actor.name +
-                                "' was ordered to a tile " + dyWant.ToString("F2") +
-                                " above/below it (" + high.PathLength.ToString("F2") + " tile(s) of path, " +
-                                all.Length + " offer(s) within " + Reach.ToString("F0") + "): it ended " +
-                                left.ToString("F2") + " tile(s) from the target having changed height by " +
-                                dyGot.ToString("F2") + ", in " + tookT.ToString("F2") + "s, and the path " +
-                                "it walked carried " + links + " LINK segment(s) of " + segs +
-                                " (NavMeshPathRequest.GetLinkForSegment:44-51 - null is ordinary " +
-                                "ground), animator played [" + string.Join(" -> ", playedT.ToArray()) + "]" +
-                                (links == 0 ? " <- NO VERTICAL SEGMENT: it walked round instead of " +
-                                 "climbing, so this run did NOT exercise the code that froze the user" : "") +
-                                (!climbed ? " <- IT NEVER CHANGED HEIGHT" : "") +
+                            TacticalNavigationComponentDef nd =
+                                actor.TacticalNav == null ? null : actor.TacticalNav.TacticalNavDef;
+                            string areas = nd == null || nd.NavAreas == null ? "?"
+                                : string.Join(", ", nd.NavAreas);
+                            // The assertion is ARRIVAL, HEIGHT and the CLOCK - a creature routed over a
+                            // link it cannot play does not merely look wrong, it eats a 5s
+                            // WaitForAnimation cap per point and reads as a hang. MEASURED on this save
+                            // before any of this existed: 13,09s over 2 links with 3 "waiting for
+                            // animation ... timed out", against 3,25s for a shipped Fireworm.
+                            bool climbed = dyGot >= dyWant - 0.5f;
+                            bool ok = blewT == null && arrived && climbed && tookT < 12f;
+                            if (!ok) bad++;
+                            reports.Add(dir + ": " + (ok ? "PASS" : "FAIL") + " " +
+                                (blewT != null ? "THREW " + blewT + "; " : "") + "ordered " +
+                                dyWant.ToString("F2") + " " + dir + " (" +
+                                high.PathLength.ToString("F2") + " tile(s) of path, " + all.Length +
+                                " offer(s) within " + Reach.ToString("F0") + "), ended " +
+                                left.ToString("F2") + " tile(s) short having changed height by " +
+                                dyGot.ToString("F2") + " in " + tookT.ToString("F2") + "s over " + links +
+                                " LINK segment(s) of " + segs + ", animator played [" +
+                                string.Join(" -> ", playedT.ToArray()) + "]" +
+                                (links > 0 ? " <- IT CROSSED A LINK, which is the point" : "") +
                                 (!arrived ? " <- IT DID NOT ARRIVE" : "") +
-                                (tookT >= 25f ? " <- HUNG: the classic shape of a vertical segment " +
-                                 "measured off a clip that cannot perform it" : ""));
+                                (!climbed ? " <- IT NEVER CHANGED HEIGHT" : "") +
+                                (tookT >= 12f ? " <- TOO SLOW: a 5s WaitForAnimation cap per point " +
+                                 "(TacticalNavigationComponent.cs:723-737)" : ""));
+                            if (want < 0) reports.Add("NavAreas [" + areas + "]");
                         }
+                        fail += Check(log, "C1-traverse", bad == 0 && posed > 0,
+                            (posed == 0 ? "VOID neither direction could be posed on this map. " : "") +
+                            string.Join(" | ", reports.ToArray()));
                     }
 
                     float max = actor.Health.Max;

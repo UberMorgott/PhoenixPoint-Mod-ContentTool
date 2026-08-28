@@ -29,6 +29,7 @@
     "health": 40,
     "will": 10,
     "speed": 16,
-    "volume": 1
+    "volume": 1,
+    "climbPitch": 90
   }
 }

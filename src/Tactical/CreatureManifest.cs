@@ -83,7 +83,12 @@ namespace Morgott.ContentTool.Tactical
         /// for the shot instead. Mapping it clones that action for ONLY the ranged weapon, so the
         /// spit and the bash stop sharing an animation.
         /// </summary>
-        internal static readonly string[] Roles = { "walk", "idle", "attack", "death", "jump", "reaction", "ranged" };
+        /// <summary>"climb" is the one traversal role: a single clip may legally fill a whole
+        /// ClipSequence (Start/Loop/Stop are three fields, and ClipSequence.cs:16-25 only tests them for
+        /// non-null), so ONE role covers what the slot map actually consumes. Optional - unmapped, the
+        /// bake synthesises the three parts out of the walk cycle instead.</summary>
+        internal static readonly string[] Roles = { "walk", "idle", "attack", "death", "jump", "reaction",
+                                                    "ranged", "climb" };
         internal static readonly string[] RequiredRoles = { "walk", "idle", "attack", "death" };
 
         /// <summary>Clip name AS SPELLED IN THE MODEL FILE -&gt; role. Insertion-ordered, so the
@@ -136,6 +141,16 @@ namespace Morgott.ContentTool.Tactical
         /// whatever pace its author animated it at.
         /// </summary>
         internal float Pace = Import.Treadmill.ShippedPace;
+
+        /// <summary>
+        /// DEGREES OF NOSE-UP PITCH the creature holds while it climbs, and the whole reason a walk
+        /// cycle can stand in for a climb at all: a spider on a wall really does face up it, so at 90
+        /// the ordinary gait reads as climbing rather than as a body sliding upright up a face.
+        ///
+        /// 0 - the default - is the HONEST answer for a biped, whose walk would look wrong tipped over.
+        /// The start clip tips into it, the loop holds it, the stop takes it back to level at the top.
+        /// </summary>
+        internal float ClimbPitch;
 
         /// <summary>The shipped WeaponDef cloned as the SECOND, ranged attack. Empty = melee-only,
         /// and none of <see cref="CreatureRanged"/> runs - the default for every existing creature.</summary>
@@ -266,6 +281,7 @@ namespace Morgott.ContentTool.Tactical
             // author saying "my clip is already animated at the speed I want". Number() cannot tell
             // them apart, so the presence of the key is tested and not its value.
             if (Field(flat, "pace").Length > 0) m.Pace = Number(flat, "pace");
+            m.ClimbPitch = Number(flat, "climbPitch");
             m.Ranged = Field(flat, "ranged");
             string aiAction = Field(flat, "aiAction");
             if (aiAction.Length > 0) m.AiAction = aiAction;

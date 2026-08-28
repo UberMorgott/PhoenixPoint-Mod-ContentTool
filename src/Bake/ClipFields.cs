@@ -259,14 +259,174 @@ namespace Morgott.ContentTool.Bake
 
         /// <summary>Replaces the root's position curve, or inserts it at the END of the position group
         /// (see the remark on <see cref="Bindings"/> for why the group order is load-bearing).</summary>
-        private static void Put(List<Binding> bindings, string path, float[] values)
+        private static void Put(List<Binding> bindings, string path, float[] values,
+                                uint attribute = AttributePosition)
         {
             for (int i = 0; i < bindings.Count; i++)
-                if (bindings[i].Attribute == AttributePosition && bindings[i].BonePath == path)
+                if (bindings[i].Attribute == attribute && bindings[i].BonePath == path)
                 { bindings[i].Values = values; return; }
             int at = 0;
-            while (at < bindings.Count && bindings[at].Attribute == AttributePosition) at++;
-            bindings.Insert(at, new Binding { BonePath = path, Attribute = AttributePosition, Values = values });
+            while (at < bindings.Count && bindings[at].Attribute <= attribute) at++;
+            bindings.Insert(at, new Binding { BonePath = path, Attribute = attribute, Values = values });
+        }
+
+        /// <summary>
+        /// The root's REST rotation as a quaternion, read off its bind matrix - the pose a bone the clip
+        /// never rotates is left in. Needed because the common case is a downloaded rig whose armature
+        /// root carries no rotation channel at all (the fixture 'u8_probe.glb' is exactly that), and a
+        /// pitch written from identity would throw away whatever correction the rest pose holds.
+        ///
+        /// The matrix is column-major, the same layout <see cref="Ramp"/> reads translation out of at
+        /// 12/13/14, so the basis vectors are its columns. They are normalised first: a rig with a scale
+        /// baked into its rest pose would otherwise produce a quaternion that is not a rotation.
+        /// </summary>
+        private static float[] RestRotation(float[] m)
+        {
+            float[] c = new float[9];
+            for (int col = 0; col < 3; col++)
+            {
+                float x = m[col * 4], y = m[col * 4 + 1], z = m[col * 4 + 2];
+                float len = (float)Math.Sqrt(x * x + y * y + z * z);
+                if (!(len > 0f)) return new[] { 0f, 0f, 0f, 1f };
+                c[col * 3] = x / len; c[col * 3 + 1] = y / len; c[col * 3 + 2] = z / len;
+            }
+            // m[row, col] = c[col * 3 + row]
+            float m00 = c[0], m10 = c[1], m20 = c[2];
+            float m01 = c[3], m11 = c[4], m21 = c[5];
+            float m02 = c[6], m12 = c[7], m22 = c[8];
+            float trace = m00 + m11 + m22, s;
+            if (trace > 0f)
+            {
+                s = (float)Math.Sqrt(trace + 1f) * 2f;
+                return new[] { (m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25f * s };
+            }
+            if (m00 > m11 && m00 > m22)
+            {
+                s = (float)Math.Sqrt(1f + m00 - m11 - m22) * 2f;
+                return new[] { 0.25f * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s };
+            }
+            if (m11 > m22)
+            {
+                s = (float)Math.Sqrt(1f + m11 - m00 - m22) * 2f;
+                return new[] { (m01 + m10) / s, 0.25f * s, (m12 + m21) / s, (m02 - m20) / s };
+            }
+            s = (float)Math.Sqrt(1f + m22 - m00 - m11) * 2f;
+            return new[] { (m02 + m20) / s, (m12 + m21) / s, 0.25f * s, (m10 - m01) / s };
+        }
+
+        /// <summary>
+        /// A TRAVERSAL CLIP MADE OUT OF THE CREATURE'S OWN WALK - the bindings for one of the three
+        /// parts of a climb, taken from the walk cycle and given a vertical root ramp instead of a
+        /// forward one.
+        ///
+        /// The legs keep the walk's own cadence and the ROOT goes straight up, which is exactly what the
+        /// engine measures: AnimationInfos.GetAnimInfo:104-121 samples the root-motion node at t=0 and
+        /// t=length and calls the difference <c>Offset</c>, so a curve rising <paramref name="rise"/>
+        /// over the clip IS a climb of that height as far as the path builder is concerned. The middle
+        /// is stretched by the engine (see <see cref="Tactical.ClimbPlan.Rise"/>), so one pair of numbers
+        /// covers every link height and nothing is scaled per link.
+        ///
+        /// The PITCH is the visual half: the root's own rotation curve is turned nose-up about the
+        /// model's local +X (glTF's forward is +Z, up is +Y, so +X is its right), lerped from
+        /// <paramref name="pitchFrom"/> to <paramref name="pitchTo"/> degrees across the clip. A spider
+        /// climbing a wall really does face up it, so at 90 the ordinary walk cycle reads as climbing.
+        ///
+        /// ponytail: the walk's CADENCE is wrong against a vertical face - the feet still swing as if the
+        /// ground were under them, and the gait is timed for the walk's speed, not the climb's. Authored
+        /// per-family art is the upgrade, and mapping a clip to the "climb" role takes it (see
+        /// <see cref="Tactical.CreatureManifest.Roles"/>). No pitch is written at all when the walk's
+        /// root carries no rotation channel - the rest rotation is then the only thing that pose has,
+        /// and replacing it would tip the creature out of whatever correction the import folded in.
+        /// </summary>
+        /// <param name="why">what was written, for the bake log - always, so an author reads the numbers
+        /// the engine will measure instead of inferring them.</param>
+        internal static List<Binding> Climb(SampledClip walk, BakedSkin skin, float worldScale,
+                                            float rise, float pitchFrom, float pitchTo, out string why)
+        {
+            int root = Treadmill.RootBone(skin);
+            if (root < 0) { why = "the rig has no single root bone, so nothing can carry a climb"; return null; }
+            List<Binding> bindings = Bindings(walk, skin, null, worldScale);
+            string path = skin.BonePath(root);
+            int frames = walk.Times.Length;
+
+            Binding pos = null, rot = null;
+            foreach (Binding b in bindings)
+            {
+                if (b.BonePath != path) continue;
+                if (b.Attribute == AttributePosition) pos = b;
+                else if (b.Attribute == AttributeRotation) rot = b;
+            }
+
+            // The walk's forward travel is REPLACED, not added to: a climb that also drifts sideways
+            // would land the actor off the link's own anchor.
+            float[] rest = skin.BoneRest[root];
+            float bx = rest[12], by = rest[13], bz = rest[14];
+            if (pos != null) { bx = pos.Values[0]; by = pos.Values[1]; bz = pos.Values[2]; }
+            float[] values = new float[frames * PositionCurves];
+            for (int f = 0; f < frames; f++)
+            {
+                float k = frames < 2 ? 1f : (float)f / (frames - 1);
+                values[f * PositionCurves] = bx;
+                values[f * PositionCurves + 1] = by + rise * k;
+                values[f * PositionCurves + 2] = bz;
+            }
+            Put(bindings, path, values);
+
+            string pitched = "no pitch";
+            if (pitchFrom != 0f || pitchTo != 0f)
+            {
+                // A root the walk never rotates has no curve to ride, so one is written from its REST
+                // rotation - which is the pose it holds anyway, so at 0 degrees this is a no-op.
+                if (rot == null)
+                {
+                    float[] q = RestRotation(rest);
+                    float[] all = new float[frames * CurveWidth(AttributeRotation)];
+                    for (int f = 0; f < frames; f++)
+                        for (int i = 0; i < 4; i++) all[f * 4 + i] = q[i];
+                    rot = new Binding { BonePath = path, Attribute = AttributeRotation, Values = all };
+                    Put(bindings, path, all, AttributeRotation);
+                }
+                for (int f = 0; f < frames; f++)
+                {
+                    float k = frames < 2 ? 1f : (float)f / (frames - 1);
+                    // Negated: the manifest's angle is NOSE-UP, and a right-hand rotation about +X of
+                    // -90 degrees is what takes +Z (forward) onto +Y (up).
+                    double half = -(pitchFrom + (pitchTo - pitchFrom) * k) * Math.PI / 360.0;
+                    float s = (float)Math.Sin(half), w = (float)Math.Cos(half);
+                    int i = f * CurveWidth(AttributeRotation);
+                    float qx = rot.Values[i], qy = rot.Values[i + 1],
+                          qz = rot.Values[i + 2], qw = rot.Values[i + 3];
+                    // q * pitch - applied on the RIGHT, so the pitch is in the bone's own local frame
+                    // and rides whatever the walk already does with it.
+                    rot.Values[i] = qw * s + qx * w;
+                    rot.Values[i + 1] = qy * w + qz * s;
+                    rot.Values[i + 2] = qz * w - qy * s;
+                    rot.Values[i + 3] = qw * w - qx * s;
+                }
+                pitched = "pitched " + pitchFrom.ToString("0.#", CultureInfo.InvariantCulture) + " -> " +
+                          pitchTo.ToString("0.#", CultureInfo.InvariantCulture) + " degrees nose-up";
+            }
+
+            why = "rises " + rise.ToString("0.###", CultureInfo.InvariantCulture) + " over " + frames +
+                  " frame(s) on '" + path + "', " + pitched;
+            return bindings;
+        }
+
+        /// <summary>
+        /// How far the root-motion node RISES across a clip's bindings - the <c>Offset.y</c> the engine
+        /// will measure (AnimationInfos.GetAnimInfo:104-121). NaN when the root carries no position
+        /// curve at all, which is a clip that moves the actor nowhere.
+        /// </summary>
+        internal static float RiseOf(IList<Binding> bindings, BakedSkin skin, int frames)
+        {
+            int root = Treadmill.RootBone(skin);
+            if (root < 0 || frames < 2) return float.NaN;
+            string path = skin.BonePath(root);
+            foreach (Binding b in bindings)
+                if (b.Attribute == AttributePosition && b.BonePath == path &&
+                    b.Values != null && b.Values.Length >= frames * PositionCurves)
+                    return b.Values[(frames - 1) * PositionCurves + 1] - b.Values[1];
+            return float.NaN;
         }
 
         /// <summary>
@@ -788,9 +948,17 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         /// <param name="aocName">null reports the CLIP alone - U7's case, where the clip is handed to
         /// AnimationClip.SampleAnimation and there is no override controller to report on.</param>
-        internal static string Summary(AssetsManager m, AssetsFileInstance af, string clipName, string aocName)
+        /// <param name="uniqueIn">OPT-IN, and only `ct_list clip` passes it: the clip is resolved by
+        /// <see cref="AssetIndex.FindUnique"/> against this label instead of by first-match
+        /// <see cref="Find"/>, so an ambiguous clip name is REFUSED the way ct_list bones and props
+        /// already refuse one rather than silently reporting whichever clip came first. Left null the
+        /// bake side (ProjectBake, BakeSelfCheck) reads exactly what it always read.</param>
+        internal static string Summary(AssetsManager m, AssetsFileInstance af, string clipName, string aocName,
+                                       string uniqueIn = null)
         {
-            AssetTypeValueField clip = Find(m, af, AssetClassID.AnimationClip, clipName);
+            AssetTypeValueField clip = uniqueIn == null
+                ? Find(m, af, AssetClassID.AnimationClip, clipName)
+                : m.GetBaseField(af, AssetIndex.FindUnique(m, af, AssetClassID.AnimationClip, clipName, uniqueIn));
             if (clip == null) return "no AnimationClip named '" + clipName + "'";
 
             AssetTypeValueField bindings = clip["m_ClipBindingConstant"]["genericBindings"]["Array"];

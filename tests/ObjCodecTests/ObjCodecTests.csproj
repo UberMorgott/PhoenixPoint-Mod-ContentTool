@@ -23,10 +23,16 @@
     <Compile Include="ClipImport.cs" />
     <Compile Include="ClipBake.cs" />
     <Compile Include="RootMotionBake.cs" />
+    <Compile Include="ClimbSynthesis.cs" />
+    <!-- The traversal contract carries no UnityEngine type on purpose, so the two halves that must
+         agree - the clips a climb needs and the navmesh areas that route one - are checked here
+         rather than by watching a creature stick to a wall in game. -->
+    <Compile Include="..\..\src\Tactical\ClimbPlan.cs" Link="ClimbPlan.cs" />
     <Compile Include="ClipPlan.cs" />
     <Compile Include="Compressed.cs" />
     <Compile Include="DracoTests.cs" />
     <Compile Include="AssetIndexTests.cs" />
+    <Compile Include="InspectTests.cs" />
     <Compile Include="MeshExtractTests.cs" />
     <Compile Include="VideoExtractTests.cs" />
     <Compile Include="VideoCatalogTests.cs" />
