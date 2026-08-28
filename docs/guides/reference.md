@@ -104,6 +104,9 @@ route pages before copying it into a real project.
       "name": "Field Rifle",
       "model": "yourname.mymod/models/field_scanner",
       "fit": "auto",
+      "projectile": "Crabman_Head_Spitter_WeaponDef",
+      "tint": "#4CFF5A",
+      "trail": "0.6",
       "damage": 40,
       "spread": 2.5,
       "count": 1,
@@ -216,6 +219,12 @@ role, while creature-level `ranged` names a shipped `WeaponDef` to clone for the
 | `fit` | no | With a model and no explicit `shoot`, must be `auto`. |
 | `shoot`, `aim`, `shell` | no | Socket coordinates as `x,y,z`. Zero is a legal coordinate. |
 | `flip` | no | `true` reverses which fitted end is treated as the muzzle. |
+| `scale` | no | Float; explicit uniform mesh scale, overrides the fit solver. |
+| `rotate` | no | `"x,y,z"` euler degrees; explicit mesh rotation, overrides auto rotation + `flip`. |
+| `projectile` | no | Name of a `WeaponDef` (takes its `DamagePayload.ProjectileVisuals`) or a `ProjectileDef` name directly. |
+| `flash` | no | Name of a `WeaponDef`; takes its `VisualEffects` (`EquipmentVisualEffectsDef`: Flash/Smoke/Shell). |
+| `tint` | no | `#RRGGBB`; clones the `ProjectileDef` + private prefab copy, recolours TrailRenderer + ParticleSystem colours. No `#RGB`, no alpha. |
+| `trail` | no | Float seconds; `TrailRenderer.time` on the private prefab copy = beam length. Implies a private clone like `tint`. |
 | `damage`, `spread` | no | Zero keeps the cloned values. |
 | `count`, `clips` | no | Starting-storage weapon and magazine quantities; zero adds none. |
 | `damagetype` | no | `DamageTypeBaseEffectDef` name. |

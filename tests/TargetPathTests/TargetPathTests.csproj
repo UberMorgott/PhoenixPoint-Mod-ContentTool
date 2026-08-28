@@ -40,6 +40,9 @@
          Unity half is nothing but the assembly LIST), so gate S16 measures the module-split rule
          offline against real, split assemblies. -->
     <Compile Include="..\..\src\Bake\TypeNames.cs" Link="TypeNames.cs" />
+    <!-- The weapon manifest's "tint" parse. Deliberately free of UnityEngine (three floats, not a
+         Color), so gate W1 measures the refusals offline instead of only inside a game session. -->
+    <Compile Include="..\..\src\Bake\HexColor.cs" Link="HexColor.cs" />
     <Compile Include="..\..\src\Project\Package.cs" Link="Package.cs" />
     <Compile Include="..\..\src\Project\PatchCache.cs" Link="PatchCache.cs" />
   </ItemGroup>

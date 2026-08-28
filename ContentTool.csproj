@@ -148,6 +148,14 @@
       <HintPath>$(UnityManaged)\UnityEngine.PhysicsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- ParticleSystem and ParticleSystemGradientMode: a weapon manifest's "tint" recolours the
+         start colour and colour-over-lifetime of every particle system on its OWN copy of a
+         projectile prefab (src\Tactical\WeaponBuild.cs). TrailRenderer and Gradient are in
+         CoreModule; the particle types are not, and nothing else references this module. -->
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <HintPath>$(UnityManaged)\UnityEngine.ParticleSystemModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- UnityEngine.Input.GetKeyDown - the developer live loop's variant-set hotkey
          (src\Dev\DevRunner.cs). Legacy Input has lived in its own module since 2019: verified
          against this install that UnityEngine.Input is in InputLegacyModule.dll while KeyCode is in

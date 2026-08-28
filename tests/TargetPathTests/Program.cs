@@ -52,6 +52,8 @@ internal static class Program
         VideoOnlyReportArm();
         DeclaredTypeArm();
         StopEventArm();
+        WeaponTintArm();
+        FitBelowRootArm();
 
         Console.WriteLine(failures == 0 ? "R0: ALL PASS" : "R0: " + failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
@@ -1924,6 +1926,46 @@ internal static class Program
             "same check, so the arm above is a measurement and not a blind pass");
     }
 
+    /// <summary>
+    /// Gate S21: the fit must never be written to the prefab ROOT, because the engine erases it there.
+    ///
+    /// Addon.AttachVisuals does `VisualRoot.SetParent(attachTransform); VisualRoot.ResetTransform();`
+    /// (Addon.cs:1079-1080) and VisualRoot IS the instantiated prefab root (Addon.cs:1039), so a
+    /// position, rotation or scale on the root is zeroed the moment the gun reaches the hand.
+    /// MEASURED live on D:\PP-Instance2 with the shipped body: ar181 rendered at lossyScale 1.0000
+    /// and an effective length of 1.000 against the 0.553 of the donor it had been fitted to, and
+    /// sniper 0.920 against 0.819. With the fit one level down: 0.553 and 0.819, exactly the donors.
+    ///
+    /// Unity cannot run here, so the arm is over the SOURCE - the arrangement S17, S18 and S20 use -
+    /// with the body that shipped as the control in the same run.
+    /// </summary>
+    private static void FitBelowRootArm()
+    {
+        string src = SrcRoot();
+        string file = src == null ? null : Path.Combine(src, "Tactical", "WeaponBuild.cs");
+        string text = file != null && File.Exists(file) ? File.ReadAllText(file) : null;
+
+        Check("S21-fit-below-root", text != null && FitStaysBelowRoot(text),
+            "the fit is written to a transform BELOW the prefab root, which is the only place the " +
+            "engine's attach-time ResetTransform does not erase -> " + file);
+        Check("S21-fit-below-root-ctl", !FitStaysBelowRoot(ShippedRootFit),
+            "while the body that shipped - localScale and localPosition straight onto " +
+            "prefab.transform - fails the same check, so the arm above is a measurement and not a " +
+            "blind pass");
+    }
+
+    /// <summary>No transform component of the fit is assigned to `prefab.transform` anywhere.</summary>
+    private static bool FitStaysBelowRoot(string text)
+    {
+        return !Regex.IsMatch(text, @"prefab\.transform\.local(Scale|Position|Rotation)\s*=")
+               && text.Contains("FitNode(prefab)");
+    }
+
+    /// <summary>The body that shipped, and that the live game measured as a no-op.</summary>
+    private const string ShippedRootFit =
+        "prefab.transform.localScale = new Vector3(scale, scale, scale);\n" +
+        "prefab.transform.localPosition = new Vector3(offset[0], offset[1], offset[2]);\n";
+
     /// <summary>Does the resolver look the event's own name up first, keep Stop out of the strip
     /// fallback, and return a stop line instead of a media list for a Stop that owns no media?</summary>
     private static bool StopEventTold(string text)
@@ -2261,6 +2303,33 @@ internal static class Program
     }
 
     private static void Pass(string gate, string detail) { Console.WriteLine(gate + " PASS " + detail); }
+
+    /// <summary>
+    /// The weapon manifest's <c>"tint"</c>, offline. A colour is the one manifest value where a
+    /// LENIENT parse is the dangerous one: "#00FF0" read as some green is a bolt that is almost the
+    /// right colour, which nobody would ever report as a bug. So this arm measures both halves -
+    /// the exact channels for a well-formed colour, and a NAMED refusal for every near-miss.
+    ///
+    /// The Unity half - that the tint lands on a PRIVATE ProjectileDef and a PRIVATE prefab copy
+    /// rather than the shared one every shipped laser uses - cannot run here (it needs a live
+    /// DefRepository and Object.Instantiate). Its instrument is the in-game one:
+    /// WeaponBuild.Vfx prints "projectile=... (own copy)" vs "(shared)" per weapon.
+    /// </summary>
+    private static void WeaponTintArm()
+    {
+        float[] rgb;
+        string why;
+        if (!HexColor.TryParse("#3FA9FF", out rgb, out why)) Fail("W1-parse", "#3FA9FF refused: " + why);
+        else if (Math.Abs(rgb[0] - 63f / 255f) > 1e-6f || Math.Abs(rgb[1] - 169f / 255f) > 1e-6f ||
+                 Math.Abs(rgb[2] - 1f) > 1e-6f)
+            Fail("W1-value", "#3FA9FF -> " + rgb[0] + "," + rgb[1] + "," + rgb[2] + ", expected 63,169,255 / 255");
+        // The '#' is optional, and case does not matter.
+        if (!HexColor.TryParse("4cff5a", out rgb, out why)) Fail("W1-bare", "4cff5a refused: " + why);
+        else if (Math.Abs(rgb[1] - 1f) > 1e-6f) Fail("W1-bare", "4cff5a green channel " + rgb[1] + ", expected 1");
+        foreach (string bad in new[] { "#3FA9F", "#3FA9FFF", "#3FA9FG", "#3FA9FF80", "", "red", null })
+            if (HexColor.TryParse(bad, out rgb, out why))
+                Fail("W1-lenient", "'" + (bad ?? "<null>") + "' was accepted as a colour");
+    }
 
     private static void Fail(string gate, string detail) { failures++; Console.WriteLine(gate + " FAIL " + detail); }
 }

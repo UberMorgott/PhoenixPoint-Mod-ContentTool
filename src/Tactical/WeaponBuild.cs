@@ -190,11 +190,13 @@ namespace Morgott.ContentTool.Tactical
                 }
             }
 
+            string shotReport = Shot(repo, def, e);
+
             string animReport = Animate(repo, def, source);
 
             log("ct_weapon PASS '" + e.name + "' (" + e.id + ") cloned from " + e.clone +
                 "; icon " + iconWhy + "; prefab " + prefabWhy +
-                "; " + Tuning(def, source, e) + keywordReport + typeReport + animReport +
+                "; " + Tuning(def, source, e) + keywordReport + typeReport + shotReport + animReport +
                 "; " + Vfx(def));
             return def;
         }
@@ -366,6 +368,193 @@ namespace Morgott.ContentTool.Tactical
             return "; keywords [" + string.Join(", ", said.ToArray()) + "]";
         }
 
+        // ---------------------------------------------------------------- what the shot LOOKS like
+
+        /// <summary>
+        /// ============ THE FOUR KEYS THAT DECIDE WHAT COMES OUT OF THE BARREL ============
+        ///
+        /// Phoenix Point has NO HITSCAN. Everything a weapon puts downrange is a Projectile
+        /// instantiated from <c>DamagePayload.ProjectileVisuals</c> (Weapon.cs:456 ->
+        /// DefRepository.CreateInstance:107-113, which instantiates <c>ObjectDef.GetPrefab()</c>), and
+        /// a "laser beam" is nothing but such a projectile whose prefab carries a long TrailRenderer.
+        /// The muzzle end is the OTHER field, <c>EquipmentDef.VisualEffects</c> - flash, smoke, brass.
+        /// Both are pure data, which is why these are manifest keys and not code:
+        ///
+        ///   "projectile"  the name of a WeaponDef whose shot to borrow, or of a ProjectileDef
+        ///                 directly. Assigning a SHARED def is safe - nothing is mutated.
+        ///   "flash"       the name of a WeaponDef whose EquipmentVisualEffectsDef to borrow. Same:
+        ///                 a shared reference, assigned, never written through.
+        ///   "tint"        "#RRGGBB". EVERY shipped laser projectile prefab is pure WHITE - the hue
+        ///                 lives in the shared trail material - so a colour cannot be had by picking
+        ///                 a differently-coloured donor. It has to be painted on.
+        ///   "trail"       seconds of TrailRenderer.time, which IS the visible length of the beam.
+        ///
+        /// THE HALF THAT WOULD RUIN A PLAYER'S GAME. ProjectileVisuals is a def SHARED by every
+        /// weapon that fires that bolt, and its Prefab is one asset shared by every instance of it.
+        /// Painting either in place would recolour the player's own shipped lasers for the session -
+        /// the exact class of bug the DamagePayload deep-copy above exists to prevent. So "tint" and
+        /// "trail" clone the def AND take a private copy of its prefab FIRST, once per weapon entry,
+        /// and paint only the copy. A weapon that only ASSIGNS (projectile/flash) clones nothing.
+        /// </summary>
+        private static string Shot(DefRepository repo, WeaponDef def, Entry e)
+        {
+            List<string> said = new List<string>();
+
+            if (!string.IsNullOrEmpty(e.flash))
+            {
+                WeaponDef donor = ByName<WeaponDef>(repo, e.flash);
+                if (donor == null || donor.VisualEffects == null)
+                    said.Add("flash '" + e.flash + "' NOT FOUND (no WeaponDef of that name carries " +
+                             "VisualEffects) - the weapon keeps " + Named(def.VisualEffects));
+                else
+                {
+                    def.VisualEffects = donor.VisualEffects;
+                    said.Add("flash <- " + donor.name + " (" + donor.VisualEffects.name + ")");
+                }
+            }
+
+            if (!string.IsNullOrEmpty(e.projectile))
+            {
+                // A ProjectileDef by its own name first, then a WeaponDef to lift one off: the two
+                // spellings an author reaches for, and neither is guessable from the other.
+                ProjectileDef want = ByName<ProjectileDef>(repo, e.projectile);
+                if (want == null)
+                {
+                    WeaponDef donor = ByName<WeaponDef>(repo, e.projectile);
+                    if (donor != null && donor.DamagePayload != null)
+                        want = donor.DamagePayload.ProjectileVisuals;
+                }
+                if (want == null)
+                    said.Add("projectile '" + e.projectile + "' NOT FOUND (neither a ProjectileDef " +
+                             "nor a WeaponDef with one) - the weapon keeps " +
+                             Named(def.DamagePayload.ProjectileVisuals));
+                else
+                {
+                    def.DamagePayload.ProjectileVisuals = want;
+                    said.Add("projectile <- " + want.name);
+                }
+            }
+
+            bool wantsTint = !string.IsNullOrEmpty(e.tint);
+            if (wantsTint || e.trail > 0f)
+            {
+                float[] rgb = null;
+                string why;
+                if (wantsTint && !HexColor.TryParse(e.tint, out rgb, out why))
+                    said.Add("tint REFUSED: " + why);
+                else
+                    said.Add(Repaint(repo, def, e, rgb));
+            }
+
+            return said.Count == 0 ? "" : "; shot [" + string.Join(", ", said.ToArray()) + "]";
+        }
+
+        /// <summary>
+        /// The private copy - one ProjectileDef clone plus one prefab instance per weapon entry -
+        /// and the paint applied to it. Everything here writes only to objects created in this
+        /// method; the shared def and the shared prefab are read and never touched.
+        /// </summary>
+        private static string Repaint(DefRepository repo, WeaponDef def, Entry e, float[] rgb)
+        {
+            ProjectileDef shared = def.DamagePayload.ProjectileVisuals;
+            if (shared == null) return "tint/trail SKIPPED - this weapon has no ProjectileVisuals to paint";
+            GameObject asset = shared.GetPrefab() as GameObject;
+            if (asset == null)
+                return "tint/trail SKIPPED - " + shared.name + " has no GameObject prefab (its bolt is " +
+                       "not a mesh this can paint)";
+
+            // Under an INACTIVE holder, so the copy's own components never Awake: it is a template
+            // to instantiate from, not a projectile in the world.
+            GameObject copy = UnityEngine.Object.Instantiate(asset, Attic().transform);
+            copy.name = asset.name + " [" + e.id + "]";
+
+            ProjectileDef mine = (ProjectileDef)repo.CreateDef(e.Guid(4), shared, null);
+            mine.name = "E_Projectile [" + e.id + "]";
+            mine.ResourcePath = "Morgott/ContentTool/" + e.id;
+            mine.Prefab = copy;          // non-null, so GetPrefab never reaches PrefabSource
+            def.DamagePayload.ProjectileVisuals = mine;
+
+            int trails = 0, systems = 0;
+            // ponytail: vertex colour only. The trail MATERIAL is still the shared one, so the hue
+            // that lands is (tint x material), which is why a white-prefab laser tints cleanly and a
+            // gold Guardian bolt does not. Give the renderer a private material instance if a demo
+            // ever needs to tint an already-coloured bolt.
+            foreach (TrailRenderer tr in copy.GetComponentsInChildren<TrailRenderer>(true))
+            {
+                if (rgb != null) tr.colorGradient = Multiply(tr.colorGradient, Rgb(rgb));
+                if (e.trail > 0f) tr.time = e.trail;
+                trails++;
+            }
+            if (rgb != null)
+                foreach (ParticleSystem ps in copy.GetComponentsInChildren<ParticleSystem>(true))
+                {
+                    ParticleSystem.MainModule main = ps.main;
+                    main.startColor = Multiply(main.startColor, Rgb(rgb));
+                    ParticleSystem.ColorOverLifetimeModule life = ps.colorOverLifetime;
+                    life.color = Multiply(life.color, Rgb(rgb));
+                    systems++;
+                }
+
+            return "private " + mine.name + " off " + shared.name +
+                   (rgb == null ? "" : "; tint " + e.tint) +
+                   (e.trail > 0f ? "; trail " + e.trail.ToString("0.##", CultureInfo.InvariantCulture) + "s" : "") +
+                   "; painted " + trails + " trail(s) + " + systems + " particle system(s)";
+        }
+
+        private static Color Rgb(float[] rgb) { return new Color(rgb[0], rgb[1], rgb[2], 1f); }
+
+        /// <summary>Alpha is the source's own: a colour key's alpha is ignored by Gradient (the
+        /// alphaKeys carry it) and the tint's own alpha is 1, so the fade survives the multiply.</summary>
+        private static Gradient Multiply(Gradient g, Color tint)
+        {
+            GradientColorKey[] keys = g.colorKeys;
+            for (int i = 0; i < keys.Length; i++) keys[i].color = keys[i].color * tint;
+            Gradient made = new Gradient { mode = g.mode };
+            made.SetKeys(keys, g.alphaKeys);
+            return made;
+        }
+
+        private static ParticleSystem.MinMaxGradient Multiply(ParticleSystem.MinMaxGradient m, Color tint)
+        {
+            switch (m.mode)
+            {
+                case ParticleSystemGradientMode.Color:
+                    return new ParticleSystem.MinMaxGradient(m.color * tint);
+                case ParticleSystemGradientMode.TwoColors:
+                    return new ParticleSystem.MinMaxGradient(m.colorMin * tint, m.colorMax * tint);
+                case ParticleSystemGradientMode.Gradient:
+                    return new ParticleSystem.MinMaxGradient(Multiply(m.gradient, tint));
+                case ParticleSystemGradientMode.TwoGradients:
+                    return new ParticleSystem.MinMaxGradient(Multiply(m.gradientMin, tint),
+                                                             Multiply(m.gradientMax, tint));
+                default:
+                    return new ParticleSystem.MinMaxGradient(tint);   // RandomColor: nothing to multiply
+            }
+        }
+
+        /// <summary>The inactive, undestroyed parent every private projectile template hangs under.
+        /// Inactive is the point: a child of an inactive object never becomes activeInHierarchy, so
+        /// no Awake runs on a template and nothing of it is ever in the player's scene.</summary>
+        private static GameObject attic;
+        private static GameObject Attic()
+        {
+            if (attic == null)
+            {
+                attic = new GameObject("ContentTool.ProjectileTemplates");
+                attic.SetActive(false);
+                UnityEngine.Object.DontDestroyOnLoad(attic);
+            }
+            return attic;
+        }
+
+        private static T ByName<T>(DefRepository repo, string name) where T : BaseDef
+        {
+            foreach (T d in repo.GetAllDefs<T>()) if (d != null && d.name == name) return d;
+            return null;
+        }
+
+        private static string Named(BaseDef d) { return d == null ? "none" : d.name; }
+
         // ---------------------------------------------------------------- starting storage
 
         /// <summary>
@@ -461,7 +650,12 @@ namespace Morgott.ContentTool.Tactical
                 }
                 try
                 {
-                    if (e.fit != "auto") { Place(op.Result, e, e.shoot, e.aim, e.shell, "declared"); return; }
+                    if (e.fit != "auto")
+                    {
+                        Override(op.Result, e);
+                        Place(op.Result, e, e.shoot, e.aim, e.shell, "declared");
+                        return;
+                    }
 
                     // SOCKETS FIRST, ALWAYS, from the model's own box. A nested asynchronous load is
                     // not allowed to be the only thing standing between this weapon and having a
@@ -470,7 +664,7 @@ namespace Morgott.ContentTool.Tactical
                     // them with no sockets at all. Placing now means the worst case is a slightly
                     // wrong muzzle instead of a missing one, and the donor merely improves it.
                     Vector3 s0, a0, h0;
-                    Sockets(mineBounds(op.Result), Vector3.zero, 1f, out s0, out a0, out h0);
+                    Sockets(mineBounds(op.Result), out s0, out a0, out h0);
                     Place(op.Result, e, s0, a0, h0, "derived from its own box (donor not measured yet)");
 
                     // THE DONOR HAS TO BE LOADED, not hoped for. AddonSkinDataBase.GetPrefabAsset
@@ -521,8 +715,9 @@ namespace Morgott.ContentTool.Tactical
         /// donor whose prefab is not loaded cannot be measured, and guessing a scale would be worse
         /// than the honest "unfitted" the demo already ships. It says which case it took, by name.
         ///
-        /// ponytail: the fit is applied to the ROOT, so the EXT_ sockets - which Socket() places in
-        /// root-local space right after this - ride along with it. That is why Fit runs FIRST.
+        /// THE FIT IS NOT WRITTEN TO THE ROOT - see FitNode. It goes one level down, and the EXT_
+        /// sockets stay at the root in the donor's own space, so they no longer have to be
+        /// counter-scaled.
         /// </summary>
         private static bool Fit(GameObject prefab, Entry e, WeaponDef source, GameObject donorGo,
                                 out Vector3 shoot, out Vector3 aim, out Vector3 shell)
@@ -548,7 +743,7 @@ namespace Morgott.ContentTool.Tactical
                 // to a zeroed manifest value put the muzzle inside the grip and reported it as
                 // "declared", which is the silent-wrong-value case a socket check exists to catch.
                 // Deriving from the model's OWN box is at least the right end of the right gun.
-                Sockets(mine.sharedMesh.bounds, Vector3.zero, 1f, out shoot, out aim, out shell);
+                Sockets(mine.sharedMesh.bounds, out shoot, out aim, out shell);
                 Debug.Log("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': " + e.clone +
                           "'s own prefab could not be measured. The model keeps the size its .glb " +
                           "carries, and the sockets are derived from its own box instead: shoot=" + shoot);
@@ -558,8 +753,15 @@ namespace Morgott.ContentTool.Tactical
             Bounds src = mine.sharedMesh.bounds, dst = donor.sharedMesh.bounds;
             float[] se = { src.extents.x, src.extents.y, src.extents.z };
             int longAxis = FitBox.LongAxis(se);
-            float[] euler = FitBox.RotationToZ(longAxis, e.flip);
-            prefab.transform.localRotation = Quaternion.Euler(euler[0], euler[1], euler[2]);
+            // "rotate" and "scale" are the two escape hatches the MEASUREMENT cannot supply. A
+            // bounding box says which axis is the barrel but not which way up the gun is, and it
+            // says how big the donor's box is but not that the author wanted a smaller gun in it.
+            // Both are read here rather than after the solve, so the sockets are derived from the
+            // frame the prefab actually ends up in.
+            float[] euler = e.declaresRotate ? new[] { e.rotate.x, e.rotate.y, e.rotate.z }
+                                             : FitBox.RotationToZ(longAxis, e.flip);
+            Transform node = FitNode(prefab);
+            node.localRotation = Quaternion.Euler(euler[0], euler[1], euler[2]);
 
             // The box AFTER the turn: rotating by whole right angles permutes the extents, so the
             // solve must see the extents the mesh will actually present once it is facing +Z.
@@ -573,15 +775,26 @@ namespace Morgott.ContentTool.Tactical
                               out scale, out offset, out why))
             {
                 Debug.Log("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': " + why);
-                prefab.transform.localRotation = Quaternion.identity;
+                node.localRotation = Quaternion.identity;
                 return false;
             }
 
-            prefab.transform.localScale = new Vector3(scale, scale, scale);
-            prefab.transform.localPosition = new Vector3(offset[0], offset[1], offset[2]);
+            if (e.scale > 0f)
+            {
+                // The centre still has to land on the donor's, or an explicit scale moves the gun
+                // out of the hand as well as resizing it: offset = target centre - scale x source centre.
+                scale = e.scale;
+                offset = new[] { dst.center.x - scale * src.center.x,
+                                 dst.center.y - scale * src.center.y,
+                                 dst.center.z - scale * src.center.z };
+            }
+            node.localScale = new Vector3(scale, scale, scale);
+            node.localPosition = new Vector3(offset[0], offset[1], offset[2]);
             Debug.Log("[ContentTool] ct_weapon fit '" + e.id + "' into " + e.clone + "'s own box: long axis " +
-                      "XYZ"[longAxis] + " -> +Z (rotate " + euler[1] + (e.flip ? " incl. flip" : "") +
-                      "), scale " + scale.ToString("0.0000", CultureInfo.InvariantCulture) +
+                      "XYZ"[longAxis] + " -> +Z (rotate " + euler[1] +
+                      (e.declaresRotate ? " DECLARED " + e.rotate : e.flip ? " incl. flip" : "") +
+                      "), scale " + (e.scale > 0f ? "DECLARED " : "") +
+                      scale.ToString("0.0000", CultureInfo.InvariantCulture) +
                       ", offset " + offset[0].ToString("0.000", CultureInfo.InvariantCulture) + "," +
                       offset[1].ToString("0.000", CultureInfo.InvariantCulture) + "," +
                       offset[2].ToString("0.000", CultureInfo.InvariantCulture) +
@@ -593,12 +806,10 @@ namespace Morgott.ContentTool.Tactical
             // above mid-height - the stock and magazine fill the lower half), and the ejection port on
             // the +X face beside the sights.
             //
-            // THE DIVISION BY SCALE IS THE WHOLE TRICK. Sockets are children of the root, and the root
-            // now carries the fit's own scale and offset, so a child's localPosition is expressed in
-            // the SCALED frame. A coordinate q in the donor's space therefore has to be written as
-            // (q - offset) / scale, or every socket lands at the wrong end of the gun by exactly the
-            // factor the fit just applied.
-            Sockets(dst, new Vector3(offset[0], offset[1], offset[2]), scale, out shoot, out aim, out shell);
+            // NO COUNTER-SCALING ANY MORE. The fit lives on the CT_Fit node, not on the root, and the
+            // sockets are the root's own children (Socket() never touches CT_Fit), so root-local space
+            // IS the donor's space and a donor coordinate q is written as q.
+            Sockets(dst, out shoot, out aim, out shell);
             return true;
         }
 
@@ -609,20 +820,18 @@ namespace Morgott.ContentTool.Tactical
         /// stock and magazine fill the lower half), and the ejection port on the +X face beside the
         /// sights.
         ///
-        /// THE DIVISION BY SCALE IS THE WHOLE TRICK. Sockets are children of the root, and a fitted
-        /// root carries the fit's own scale and offset, so a child's localPosition is expressed in
-        /// the SCALED frame. A coordinate q in the target space is therefore written as
-        /// (q - offset) / scale, or every socket lands off by exactly the factor the fit applied.
-        /// An unfitted call passes offset zero and scale one, which reduces to q.
+        /// NO COUNTER-SCALING. The sockets are the ROOT's children and the root is always identity -
+        /// the fit lives on CT_Fit, one level below, precisely so that the root can stay the frame
+        /// the game hands the weapon in. So root-local space is the space <paramref name="box"/> is
+        /// measured in, and a coordinate is written straight out.
         /// </summary>
-        private static void Sockets(Bounds box, Vector3 offset, float scale,
-                                    out Vector3 shoot, out Vector3 aim, out Vector3 shell)
+        private static void Sockets(Bounds box, out Vector3 shoot, out Vector3 aim, out Vector3 shell)
         {
             float barrelY = box.center.y - box.extents.y + 0.70f * (2f * box.extents.y);
             float aimZ = box.center.z - box.extents.z + 0.62f * (2f * box.extents.z);
-            shoot = (new Vector3(box.center.x, barrelY, box.center.z + box.extents.z) - offset) / scale;
-            aim = (new Vector3(box.center.x, barrelY, aimZ) - offset) / scale;
-            shell = (new Vector3(box.center.x + box.extents.x, barrelY, aimZ) - offset) / scale;
+            shoot = new Vector3(box.center.x, barrelY, box.center.z + box.extents.z);
+            aim = new Vector3(box.center.x, barrelY, aimZ);
+            shell = new Vector3(box.center.x + box.extents.x, barrelY, aimZ);
         }
 
         /// <summary>
@@ -651,6 +860,52 @@ namespace Morgott.ContentTool.Tactical
             return mf != null && mf.sharedMesh != null ? mf.sharedMesh.bounds : new Bounds(Vector3.zero, Vector3.zero);
         }
 
+        /// <summary>"scale" and "rotate" on a prefab that is NOT being auto-fitted - a model the
+        /// author already placed offline, where these two keys are the only thing left to say. Same
+        /// seam as the auto fit: written to CT_Fit, because on the root the engine erases them.</summary>
+        private static void Override(GameObject prefab, Entry e)
+        {
+            if (!e.declaresRotate && e.scale <= 0f) return;
+            Transform node = FitNode(prefab);
+            if (e.declaresRotate) node.localRotation = Quaternion.Euler(e.rotate.x, e.rotate.y, e.rotate.z);
+            if (e.scale > 0f) node.localScale = new Vector3(e.scale, e.scale, e.scale);
+        }
+
+        /// <summary>
+        /// THE TRANSFORM THE FIT IS WRITTEN TO - the prefab's MESH CHILD, never the root.
+        ///
+        /// WHY NOT THE ROOT, which is where every one of these values used to go. A weapon is attached
+        /// by Addon.AttachVisuals as
+        ///     VisualRoot.SetParent(attachTransform); VisualRoot.ResetTransform();
+        /// (Addon.cs:1079-1080), and VisualRoot IS the instantiated prefab root
+        /// (Addon.cs:1039: VisualRoot = Instantiate(VisualsSourcePrefab).transform). ResetTransform
+        /// zeroes localPosition, localRotation AND localScale, so everything Fit writes to the root is
+        /// erased the instant the gun reaches the hand. MEASURED live on D:\PP-Instance2: the ar181
+        /// prefab root carried localScale 0.5528, the instance in the soldier's hand rendered at
+        /// lossyScale 1.0 and a mesh 1.81x the length of the donor it was fitted to. One level down
+        /// the engine never touches anything.
+        ///
+        /// AN EXISTING CHILD, NOT A NEW ONE. A ContentTool prefab is a root plus one mesh child
+        /// (PrefabFields.Build), so the seam is already there. INSERTING a node and reparenting the
+        /// model under it was tried first and CRASHED the process natively inside
+        /// EquipmentComponent.SetSelectedEquipment the moment the weapon was selected - reproduced
+        /// twice, and the same run passed with the reparenting removed. Restructuring a loaded prefab
+        /// asset is not a supported thing to do to it; writing a transform on a child it already has,
+        /// which is what Socket() has always done, is.
+        ///
+        /// The EXT_ sockets stay at the ROOT, and the root now stays identity, so root-local space is
+        /// the frame the game hands the weapon in and a socket is written in donor coordinates flat.
+        /// </summary>
+        private static Transform FitNode(GameObject prefab)
+        {
+            MeshFilter mf = prefab.GetComponentInChildren<MeshFilter>(true);
+            // ponytail: a foreign prefab whose mesh sits ON the root has nowhere below the root to
+            // write to, so it gets the old behaviour - the fit is computed and then erased at attach.
+            // Inserting a node is what the crash above rules out; upgrade path is baking the fit into
+            // the mesh vertices, which needs no transform at all.
+            return mf != null && mf.transform != prefab.transform ? mf.transform : prefab.transform;
+        }
+
         /// <summary>The four sockets onto the prefab, and one line saying where they came from.</summary>
         private static void Place(GameObject prefab, Entry e, Vector3 shoot, Vector3 aim, Vector3 shell, string how)
         {
@@ -662,16 +917,27 @@ namespace Morgott.ContentTool.Tactical
                       " for '" + e.id + "'; four EXT_ sockets " + how + " shoot=" + shoot + " aim=" + aim);
         }
 
-        /// <summary>One named empty under the prefab root, idempotent.</summary>
+        /// <summary>
+        /// One named empty under the prefab root, idempotent.
+        ///
+        /// IT MOVES AN EXISTING ONE. Place runs TWICE for an auto-fitted weapon - once from the
+        /// model's own box before the donor is loaded, then again from the donor's box - and the
+        /// earlier version of this returned early on the second call, so the fitted coordinates were
+        /// computed, logged and thrown away. Idempotent has to mean "same result whichever call
+        /// arrives", not "first writer wins".
+        /// </summary>
         private static void Socket(GameObject root, string name, Vector3 local)
         {
-            if (root.transform.Find(name) != null) return;
-            GameObject go = new GameObject(name);
-            go.transform.SetParent(root.transform, false);
-            go.transform.localPosition = local;
+            Transform go = root.transform.Find(name);
+            if (go == null)
+            {
+                go = new GameObject(name).transform;
+                go.SetParent(root.transform, false);
+            }
+            go.localPosition = local;
             // The muzzle looks down +Z, which is the direction the shipped weapon meshes point and
             // the direction a projectile leaves along.
-            go.transform.localRotation = Quaternion.identity;
+            go.localRotation = Quaternion.identity;
         }
 
         // ---------------------------------------------------------------- reporting
@@ -714,10 +980,21 @@ namespace Morgott.ContentTool.Tactical
         {
             EquipmentVisualEffectsDef fx = def.VisualEffects;
             if (fx == null) return "vfx NONE - this weapon fires with no muzzle flash";
+            // The projectile is printed with its TRAIL LENGTH and whether it is this weapon's OWN
+            // copy: "tint" and "trail" are only honest if the def they wrote to is private, and the
+            // name of a shared def appearing here after a tint is exactly the leak to catch.
+            ProjectileDef shot = def.DamagePayload.ProjectileVisuals;
+            string trail = "";
+            GameObject art = shot == null ? null : shot.GetPrefab() as GameObject;
+            if (art != null)
+                foreach (TrailRenderer tr in art.GetComponentsInChildren<TrailRenderer>(true))
+                { trail = " trail=" + tr.time.ToString("0.##", CultureInfo.InvariantCulture) + "s"; break; }
             return "vfx '" + fx.name + "' flash=" + (fx.Flash == null ? "none" : fx.Flash.name) +
                    " shell=" + (fx.Shell == null ? "none" : fx.Shell.name + "@" + fx.ShellEjectionPoint) +
-                   " projectile=" + (def.DamagePayload.ProjectileVisuals == null
-                       ? "none" : def.DamagePayload.ProjectileVisuals.name);
+                   " projectile=" + (shot == null ? "none"
+                       : shot.name + (art != null && art.transform.parent != null &&
+                                      art.transform.parent.gameObject == attic
+                                      ? " (own copy)" : " (shared)")) + trail;
         }
 
         // ---------------------------------------------------------------- plumbing
@@ -761,6 +1038,16 @@ namespace Morgott.ContentTool.Tactical
         private sealed class Entry
         {
             internal string id = "", name = "", clone = "", blurb = "", icon = "", model = "", guid = "", damageType = "", fit = "";
+            /// <summary>What comes out of the barrel and what happens at the muzzle: a def name to
+            /// borrow ("projectile", "flash"), a "#RRGGBB" to paint the bolt, and the beam's length
+            /// in seconds of TrailRenderer time. See <see cref="Shot"/>.</summary>
+            internal string projectile = "", flash = "", tint = "";
+            internal float trail;
+            /// <summary>The two things a measured fit cannot decide: how big the author wanted the
+            /// gun inside the donor's box, and which way up it is. Both override the auto fit.</summary>
+            internal float scale;
+            internal Vector3 rotate;
+            internal bool declaresRotate;
             /// <summary>The one bit a symmetric bounding box cannot supply: which end is the muzzle.</summary>
             internal bool flip;
             /// <summary>Whether the manifest actually wrote a "shoot" key. NOT "is it non-zero":
@@ -777,20 +1064,29 @@ namespace Morgott.ContentTool.Tactical
             /// own "guid", never Guid.NewGuid(): a save stores an item by its def, and a def whose
             /// identity changes every launch is a save that stops loading.
             ///
-            /// THE WEAPON KEEPS THE DECLARED GUID VERBATIM, and the view and skin take it with the
-            /// FIRST hex digit replaced by 'a' and 'b'. That is not decoration - the first version of
-            /// this overwrote the guid's LAST TWO digits with 01/02/03, which are exactly the digits
-            /// a manifest uses to tell its entries apart, so `...4b01`, `...4b11` and `...4b21` all
-            /// collapsed onto `...4b01` and the second and third weapons silently resolved to the
-            /// first. The in-game log said "already built this session" three times over and only one
-            /// weapon reached storage. Derive from a position the author does NOT vary, and verify
-            /// (see the distinctness check in Parse) rather than trusting the scheme.
+            /// THE WEAPON KEEPS THE DECLARED GUID VERBATIM, and the view, skin and private
+            /// projectile take it with the FIRST hex digit ROTATED forward by 1, 2 and 3. That is not
+            /// decoration - the first version of this overwrote the guid's LAST TWO digits with
+            /// 01/02/03, which are exactly the digits a manifest uses to tell its entries apart, so
+            /// `...4b01`, `...4b11` and `...4b21` all collapsed onto `...4b01` and the second and
+            /// third weapons silently resolved to the first.
+            ///
+            /// The second version wrote CONSTANT letters 'a'/'b'/'c' into that first digit, which
+            /// collides with the weapon's own guid whenever the author's guid already starts with
+            /// a, b or c - one hex digit in five. Measured in-game 2026-08-28: every weapon in the
+            /// WeaponAdd demo starts with `c`, so the projectile copy (which == 4) derived the
+            /// weapon's own guid back and the whole manifest was refused. Rotating is distinct from
+            /// the original for EVERY input, and the distinctness check in Parse still verifies it
+            /// rather than trusting the scheme.
             /// </summary>
             internal string Guid(int which)
             {
                 if (string.IsNullOrEmpty(guid)) return guid;
                 if (which == 1) return guid;
-                return (which == 2 ? "a" : "b") + guid.Substring(1);
+                const string hex = "0123456789abcdef";
+                int i = hex.IndexOf(char.ToLowerInvariant(guid[0]));
+                if (i < 0) i = 0;
+                return hex[(i + which - 1) % 16] + guid.Substring(1);
             }
         }
 
@@ -823,6 +1119,13 @@ namespace Morgott.ContentTool.Tactical
                     guid = Field(o.Value, "guid"),
                     damageType = Field(o.Value, "damagetype"),
                     fit = Field(o.Value, "fit"),
+                    projectile = Field(o.Value, "projectile"),
+                    flash = Field(o.Value, "flash"),
+                    tint = Field(o.Value, "tint"),
+                    trail = Num(o.Value, "trail"),
+                    scale = Num(o.Value, "scale"),
+                    rotate = Vec(o.Value, "rotate"),
+                    declaresRotate = Field(o.Value, "rotate").Length > 0,
                     flip = Field(o.Value, "flip") == "true",
                     declaresShoot = Field(o.Value, "shoot").Length > 0,
                     damage = Num(o.Value, "damage"),
@@ -883,7 +1186,7 @@ namespace Morgott.ContentTool.Tactical
             // is worth six lines to make it impossible to ship again.
             Dictionary<string, string> taken = new Dictionary<string, string>();
             foreach (Entry e in list)
-                for (int which = 1; which <= 3; which++)
+                for (int which = 1; which <= 4; which++)
                 {
                     string g = e.Guid(which);
                     string owner = e.id + "#" + which;

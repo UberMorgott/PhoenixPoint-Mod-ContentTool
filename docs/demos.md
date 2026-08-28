@@ -104,8 +104,11 @@ README is the detailed account of the rig, root motion, events, hitbox and donor
 ## [WeaponAdd](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/WeaponAdd)
 
 Adds three weapon defs to starting storage. Two publish models from the mod's own bundle; the third
-keeps its donor's model. It teaches def cloning, model-key publication, inventory icons, attachment
-sockets, starting inventory and per-weapon damage, spread and effect tuning.
+keeps its donor's model. Each fires with its own projectile colour: green blobs (`projectile` +
+`tint`), blue beam (`tint` + `trail`), orange beam with flamethrower muzzle flash (`tint` +
+`flash`). It teaches def cloning, model-key publication, inventory icons, attachment sockets,
+starting inventory, per-weapon damage/spread tuning, projectile borrowing, colour tinting, trail
+length, and muzzle-flash swapping.
 
 The useful map is `ppcontent.json`: compare its two `"publish"` rows with the three `"weapons"`
 entries. Then inspect `Content\Models\`, `Icons\`, and the one-call entry point in
