@@ -1,0 +1,9 @@
+{
+  "ID": "morgott.demo.weaponmesh",
+  "AssemblyName": "WeaponMesh.dll",
+  "Version": "1.1.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Weapon Mesh" } ],
+  "Description": [ { "Key": "English", "Value": "The Ares AR-1 every soldier starts with becomes a CC0 rifle - model, textures AND inventory icon.\nRequires the ContentTool mod. Nothing to run and nothing to undo: tick this mod on and the rifle is there, tick it off and the shipped one is handed straight back. NO game file is touched - ContentTool bakes a patched copy of the shipped bundle into its own AppData folder and points the game's live Addressables at that copy, in memory." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

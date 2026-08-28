@@ -1,0 +1,56 @@
+# Publishes docs\ to GitHub Pages with MkDocs Material.
+#
+# DORMANT UNTIL EXTRACTION. It is written for the repository ContentTool is being extracted into
+# (UberMorgott/PhoenixPoint-Mod-ContentTool), where this file sits at the repository root and
+# Actions finds it. In the author's monorepo the git root is one level up, so nothing here runs
+# yet - that is intended, not an oversight. It has never executed against GitHub.
+#
+# Pages must also be switched to "GitHub Actions" as its source once, in the repository settings;
+# a workflow alone does not change that setting.
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publish at a time; a queued run is dropped rather than racing the one in flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements-docs.txt
+      # --strict, so a broken internal link fails the build instead of publishing a dead page.
+      - run: mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

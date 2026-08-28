@@ -1,0 +1,221 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>ContentTool</AssemblyName>
+    <RootNamespace>Morgott.ContentTool</RootNamespace>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Product>ContentTool</Product>
+    <Authors>Morgott</Authors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>portable</DebugType>
+    <Deterministic>true</Deterministic>
+    <!-- PPModLoader.LoadMod loads "<FolderName>\<FolderName>.dll", so the output folder name
+         MUST equal the assembly name. This folder is what gets copied into Mods\. -->
+    <OutputPath>bin\$(Configuration)\ContentTool\</OutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Machine-specific. Override without editing this file:
+         dotnet build /p:PPRoot="<path to Phoenix Point>" -->
+    <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
+    <ModSDK>$(PPRoot)\ModSDK</ModSDK>
+    <UnityManaged>$(PPRoot)\PhoenixPointWin64_Data\Managed</UnityManaged>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+    <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Embedded, never read from a path: the bake writer needs the class database on the player's
+         machine too, and FINAL-PLAN 1.6 forbids an absolute developer path. 289605 B, UABEA v8. -->
+    <EmbeddedResource Include="lib\classdata.tpk" LogicalName="Morgott.ContentTool.classdata.tpk" />
+    <!-- The occupied Wwise ID set (7697 media + 1064 computed), packed from data\pp_wwise_index.json
+         by tools\pack_id_index.py. The validator must LOAD a measured set, never hold a constant. -->
+    <EmbeddedResource Include="lib\ppids.bin" LogicalName="Morgott.ContentTool.ppids.bin" />
+    <!-- Gate V1's probe clip: 256x144, 2 s @ 30 fps = 60 frames, VP8 + Vorbis in WebM - the exact
+         container the game ships. 6,265 B. Embedded rather than deployed: deploy.ps1 copies the
+         build output and a gate must not depend on a developer path. -->
+    <EmbeddedResource Include="lib\v1_probe.webm" LogicalName="Morgott.ContentTool.v1_probe.webm" />
+    <!-- Gate U9's animated model. COPIED beside the DLL, never embedded: 349,468 B of shipped
+         assembly to serve one gate is 349 KB the tool carries forever, and deploy.ps1 copies the
+         build output's FILES, so a plain None/CopyToOutputDirectory puts it in Mods\ContentTool\
+         with no deploy change. The sample project takes it from <mod>\u8_probe.glb when present and
+         says so when not (ProjectBake.WriteSample), exactly like the A6 probes below.
+         ponytail: gate scaffolding. When U9 is in-game green and recorded, drop this line and the
+         sample's spider with it - the FEATURE (a project's own .glb clips get baked) costs nothing. -->
+    <!-- Link, not just Include: without it MSBuild keeps the lib\ segment in the output and
+         deploy.ps1's file-only copy leaves it behind. -->
+    <None Include="lib\u8_probe.glb" Link="u8_probe.glb" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The SAME CC0 download, UNTOUCHED, used as the NEGATIVE fixture of the no-adapter question:
+         the sample declares it as a mesh replacement for a shipped RIGGED mesh, so the bake log says
+         in numbers what a foreign armature does to a by-name rebind. See docs\animated-model-cases.md.
+         ponytail: gate scaffolding, same as u8_probe above - drop both lines when their rows leave
+         PENDING-INGAME for good. -->
+    <None Include="lib\u10_probe.glb" Link="u10_probe.glb" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Gate A6's sound probes are deliberately NOT embedded. They would cost 8,8 KB of shipped
+         assembly to serve one gate, and the tool's size is a hard constraint - the .ogg/.mp3 import
+         itself costs ZERO bytes because the ENGINE decodes both. The sample takes them from
+         <mod>\FormatProbes\ (tools\make-format-probes.ps1) when present and says so when not; the
+         offline test reads lib\a1_probe.* straight off disk. Contrast v1_probe.webm above, which is
+         embedded because gate V1 has no other source for a VP8 clip. -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Build-time only. The merge itself is described in ILRepack.targets, which this package
+         imports and whose existence disables the package's own catch-all merge target. -->
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.34.2" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Modding API comes from ModSDK, never from Managed\. -->
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ModSDK)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- The seam probe (FINAL-PLAN 39.3) patches AddonSkinDataBase.GetPrefabAsset. Harmony is a
+         hard dependency of every PP mod already; the game ships it. -->
+    <Reference Include="0Harmony">
+      <HintPath>$(ModSDK)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- AssetReferenceGameObject.AssetGUID - the identity the seam hands us. -->
+    <Reference Include="Unity.ResourceManager">
+      <HintPath>$(UnityManaged)\Unity.ResourceManager.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Addressables">
+      <HintPath>$(UnityManaged)\Unity.Addressables.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Texture2D/Color32/Application live in CoreModule; AssetBundle.LoadFromFile needs the
+         separate AssetBundleModule, which the game ships in Managed\ but nothing references by
+         default. Private=false: the game already has both. -->
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManaged)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- JsonUtility for ppcontent.json - Unity's own reader, so no JSON dependency is added. -->
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(UnityManaged)\UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Texture2D.LoadImage / EncodeToPNG: the importer decodes PNG with Unity's own decoder
+         rather than carrying one. -->
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(UnityManaged)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- VideoPlayer: gate V1's oracle. The game plays its cutscenes through this same class
+         (VideoPlaybackController.cs:148-150), so nothing new is being asked of the install. -->
+    <Reference Include="UnityEngine.VideoModule">
+      <HintPath>$(UnityManaged)\UnityEngine.VideoModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Gate F1 only: UnityWebRequestMultimedia.GetAudioClip is how the ENGINE's own audio
+         decoders (mp3/ogg/aac) are reached without carrying one, and AudioClip.GetData is what
+         turns the result into the PCM the bank writer needs. -->
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(UnityManaged)\UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestModule">
+      <HintPath>$(UnityManaged)\UnityEngine.UnityWebRequestModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestAudioModule">
+      <HintPath>$(UnityManaged)\UnityEngine.UnityWebRequestAudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(UnityManaged)\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- AnimationClip / Animator / RuntimeAnimatorController: U6's gate reads them back out of the
+         bake. Animator itself lives in CoreModule, the clip does not. -->
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(UnityManaged)\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Collider / BoxCollider / SphereCollider. Phoenix Point creates no collider in code - it
+         reads ones an artist authored onto a bodypart prefab - so a creature assembled out of a .glb
+         arrives with none and is unhittable. src\Tactical\CreatureFit.cs fits them at enter-play, and
+         the types live here, not in CoreModule. -->
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(UnityManaged)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- UnityEngine.Input.GetKeyDown - the developer live loop's variant-set hotkey
+         (src\Dev\DevRunner.cs). Legacy Input has lived in its own module since 2019: verified
+         against this install that UnityEngine.Input is in InputLegacyModule.dll while KeyCode is in
+         CoreModule. The game ships both. Nothing on a player's path touches this - the poll only
+         exists while ct_dev is ON. -->
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(UnityManaged)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- AkSoundEngine / AkCallbackManager / AkDurationCallbackInfo. The game ships it; the mod
+         only calls into it. -->
+    <Reference Include="AK.Wwise.Unity.API">
+      <HintPath>$(UnityManaged)\AK.Wwise.Unity.API.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- AkGameObj - every GameObject registered with Wwise, which is the emitter set ct_music asks
+         for live voices (src\Dev\MusicProbe.cs). Game DLL, same deal as the API above. -->
+    <Reference Include="AK.Wwise.Unity.MonoBehaviour">
+      <HintPath>$(UnityManaged)\AK.Wwise.Unity.MonoBehaviour.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Bake writer. Vendored (MIT) from nesrak1/AssetsTools.NET @ 9aa8c6e, NOT the 3.0.5 nupkg:
+         that build NREs in ClassDatabaseToTypeTree.ConvertInternal for any class absent from the
+         file's typetree, which is every class we add. Built with the git csproj's TargetFrameworks
+         narrowed to net472; it references only mscorlib and System.Core, so nothing else has to
+         come with it. Private=true puts it in the output folder purely so ILRepack can merge it
+         away again - PPModLoader uses Assembly.Load(byte[]) and installs no AssemblyResolve, so a
+         sibling DLL would never resolve. See ILRepack.targets. -->
+    <Reference Include="AssetsTools.NET">
+      <HintPath>lib\AssetsTools.NET.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <!-- Wwise Vorbis .wem -> .wav, for EXTRACTION only (src\Wwise\WwiseWem.cs). 3097 of the 3105
+         shipped .wem are Wwise Vorbis, so without a decoder almost nothing comes out as audio an
+         author can edit. Vendored (MIT, 79.5 KB) from ResourceReplacer's lib\, which is the exact
+         binary its shipped audio path uses, and merged away by ILRepack.targets exactly like
+         AssetsTools.NET - so this adds no file the author has to install and nothing to the SHIPPING
+         path, which stays zero-runtime. -->
+    <Reference Include="NVorbis">
+      <HintPath>lib\NVorbis.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <!-- MP3 for the same reason NVorbis is here: an author's .mp3 has to become PCM on the author's
+         machine, and the only other decoder in reach is Unity's own - which this game ships DISABLED
+         (m_DisableAudio, it drives all sound through Wwise), so reaching it means editing
+         globalgamemanagers in the player's install. Vendored (MIT, 70.5 KB, no dependencies) from
+         ResourceReplacer's lib\ - the same binary its shipped audio path uses - and merged away by
+         ILRepack.targets exactly like NVorbis. Nothing is added to the SHIPPING path: the decode
+         happens at bake time and the mod ships a Wwise bank. -->
+    <Reference Include="NLayer">
+      <HintPath>lib\NLayer.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <!-- NVorbis needs Span<T>; the game ships System.Memory, so it is referenced, not copied. -->
+    <Reference Include="System.Memory">
+      <HintPath>$(UnityManaged)\System.Memory.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- MERGED, unlike System.Memory: NVorbis's Ogg container classes carry tuples in their
+         signatures and the game install has no System.ValueTuple facade ANYWHERE, so leaving the
+         reference dangling is the classic "Could not load file or assembly System.ValueTuple" mod
+         crash. The net47 build is 24.6 KB of pure type forwarders; merging turns that reference into
+         forwards to mscorlib, where net472 actually keeps ValueTuple. (RR hit this first - see its
+         ILRepack.targets.) -->
+    <Reference Include="System.ValueTuple">
+      <HintPath>lib\System.ValueTuple.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

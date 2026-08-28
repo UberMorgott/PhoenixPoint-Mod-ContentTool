@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>IntroVideo</AssemblyName>
+    <RootNamespace>Morgott.Demo.IntroVideo</RootNamespace>
+    <Authors>Morgott</Authors>
+    <Product>IntroVideo</Product>
+    <Version>1.0.0</Version>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- PPModLoader loads "<FolderName>\<FolderName>.dll", so the output folder name must equal
+         the assembly name - same rule ContentTool.csproj and QuitCutscene.csproj follow. -->
+    <OutputPath>bin\$(Configuration)\IntroVideo\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+    <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <PropertyGroup>
+    <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
+    <ModSDK>$(PPRoot)\ModSDK</ModSDK>
+    <GameManaged>$(PPRoot)\PhoenixPointWin64_Data\Managed</GameManaged>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The GAME's Assembly-CSharp, not the ModSDK's. The shipped SDK stub is a version behind and
+         its ModMain has no ApplyDefRepoPatches (measured: the SDK copy exposes OnLevelStart and
+         stops there, the runtime copy carries the hook this mod overrides). Same file the game
+         loads, so what compiles is what runs. -->
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameManaged)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ModSDK)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

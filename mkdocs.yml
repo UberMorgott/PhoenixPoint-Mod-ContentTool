@@ -1,0 +1,100 @@
+# The documentation site. Built with MkDocs Material because it is the generator this machine can
+# actually BUILD: ruby/gem/bundle/jekyll are all absent here, python is not, so a Jekyll site would
+# have shipped unbuilt and unverified. `mkdocs build --strict` below is the check.
+#
+#   python -m venv .venv
+#   .venv\Scripts\pip install -r requirements-docs.txt
+#   .venv\Scripts\mkdocs build --strict          # writes site\, fails on a broken link
+#   .venv\Scripts\mkdocs serve                   # http://127.0.0.1:8000 while writing
+#
+# site_url/nav assume ContentTool is its OWN repository, where this file sits at the root. In the
+# author's monorepo it is one folder down; nothing here reads the parent, so both work.
+site_name: ContentTool
+site_description: >-
+  Replace or add any content in Phoenix Point - textures, models, materials, sounds, videos,
+  whole creatures and weapons - from a mod folder, in memory, without ever writing to your game.
+site_url: https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/
+repo_url: https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool
+repo_name: UberMorgott/PhoenixPoint-Mod-ContentTool
+copyright: CC BY-NC 4.0 - Morgott
+
+docs_dir: docs
+site_dir: site
+
+# The docs\ folder is ALSO the author's working tree: architecture, research and dated handoffs live
+# beside the pages a reader wants. Excluding them here means the BUILD drops them, so a stale
+# handoff can never be published, and the source-blind agent test cannot read one by accident.
+# That test is the reason this is an exclusion in the build and not a convention about linking.
+# RECIPES / PROVEN-FOUNDATIONS / RELEASE are ENGINE-AUTHOR material, not content-mod-author
+# material: AssetsTools.NET call sequences, gate evidence, and the release runbook. Publishing them
+# was a first draft's reflex. The seal check caught what that costs - PROVEN-FOUNDATIONS links to
+# FINAL-PLAN, which is not published, and RELEASE prints the author's own machine path - so they
+# leave the public build and the per-rung guides carry the evidence a modder actually needs.
+exclude_docs: |
+  README.md
+  FINAL-PLAN.md
+  METHODOLOGY.md
+  RECIPES.md
+  PROVEN-FOUNDATIONS.md
+  RELEASE.md
+  HANDOFF-*.md
+  research-*.md
+  design-*.md
+  animated-model-cases.md
+  VERIFIED-DEMOS.md
+  blind-test/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy      # every console line on this site is meant to be pasted
+    - search.highlight
+  palette:
+    # Phoenix Point is a dark game; default to dark and let the reader switch.
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Shipping a content mod: SHIPPING-A-CONTENT-MOD.md
+  - Recipes:
+      - Pick your rung: guides/index.md
+      - The shared reference: guides/reference.md
+      - Textures, sprites and icons: guides/textures.md
+      - Materials: guides/materials.md
+      - Meshes - replace and add: guides/meshes.md
+      - Animated models: guides/animated-models.md
+      - Sounds - replace and add: guides/sounds.md
+      - Videos - replace and add: guides/videos.md
+      - A new creature: guides/creature.md
+      - A new weapon: guides/weapon.md

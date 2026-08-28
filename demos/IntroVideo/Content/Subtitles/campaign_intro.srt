@@ -1,0 +1,11 @@
+1
+00:00:00,200 --> 00:00:02,000
+This picture is the mod's own file.
+
+2
+00:00:02,200 --> 00:00:04,000
+So is the sound - a separate Wwise media.
+
+3
+00:00:04,200 --> 00:00:05,900
+And this line is the mod's own .srt.

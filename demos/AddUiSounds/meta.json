@@ -1,0 +1,9 @@
+{
+  "ID": "morgott.demo.adduisounds",
+  "AssemblyName": "AddUiSounds.dll",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Add UI Sounds" } ],
+  "Description": [ { "Key": "English", "Value": "NOT AUTOMATIC: press Alt+B in game to hear it. No bake and no install step - just enable the mod.\nAdds two short sounds Phoenix Point never shipped, baked into this mod's own Wwise bank, and plays one at random on Alt+B. Requires the ContentTool mod.\nThat bank ships ALREADY BUILT inside Dist\\AddUiSounds.bundle and this mod's own DLL loads it the moment the mod is enabled, so a download plays as it stands: measured 2026-08-28 with no bake command ever run, the two added events answered 1489 ms and 653 ms, both served from memory. 'ct_project AddUiSounds' is the AUTHOR's command, for rebuilding that bundle after editing Content\\Audio; a player never needs it.\nIt ships a DLL, and that is the lesson: the sounds themselves are content, but a hotkey is BEHAVIOUR and behaviour is code. Its twin, ContentTool Demo: Replace UI Sounds, replaces shipped sounds instead and needs no code at all." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

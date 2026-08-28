@@ -1,0 +1,10 @@
+{
+  "id": "morgott.demo.replaceuisounds",
+  "bundle": "ReplaceUiSounds.bundle",
+
+  "sounds": [
+    { "media": 18839791,  "file": "sting_plus.mp3" },
+    { "media": 633458426, "file": "sting_confirm.mp3" },
+    { "media": 940964934, "file": "sting_cancel.mp3" }
+  ]
+}

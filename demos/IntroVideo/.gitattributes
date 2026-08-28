@@ -1,0 +1,5 @@
+# Phoenix Point's SRT reader is CRLF-only. ParserUtils.ParseTimeValue:132 unconditionally steps one
+# character past the last digit of a timestamp, which is the '\r'; with LF endings that step lands
+# ON the newline, ParseLines:14 then skips forward to the NEXT one, and the first line of every cue
+# is eaten. Measured offline by tools\check_srt.ps1. Never let git normalise these.
+*.srt -text

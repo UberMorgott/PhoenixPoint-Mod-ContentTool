@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>WeaponMesh</AssemblyName>
+    <RootNamespace>Morgott.WeaponMesh</RootNamespace>
+    <Authors>Morgott</Authors>
+    <Product>WeaponMesh</Product>
+    <Version>1.1.0</Version>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- PPModLoader loads "<FolderName>\<FolderName>.dll", so the output folder name must equal
+         the assembly name - same rule ContentTool.csproj and QuitCutscene.csproj follow. -->
+    <OutputPath>bin\$(Configuration)\WeaponMesh\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+    <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <PropertyGroup>
+    <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
+    <ModSDK>$(PPRoot)\ModSDK</ModSDK>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ModSDK)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Texture2D, Sprite, Rect, Vector2. NOTE what is NOT here: UnityEngine.ImageConversionModule.
+         The PNG decode is reached by reflection instead - QuitCutscene measured (2026-08-13) that a
+         compile-time reference to a Managed\ module this mod loader does not resolve makes the mod
+         fail to LOAD, and Phoenix Point answers a failed load by rewriting MOD_ACTIVATED empty,
+         which silently disables every other mod too. The four ModSDK assemblies are the safe set. -->
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ModSDK)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

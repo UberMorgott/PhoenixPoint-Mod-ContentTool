@@ -1,0 +1,103 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- Machine-specific, only so System.Memory can be referenced from the game the way the mod
+         does. Override with /p:PPRoot="<path to Phoenix Point>". -->
+    <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
+    <UnityManaged>$(PPRoot)\PhoenixPointWin64_Data\Managed</UnityManaged>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="MeshMergeTests.cs" />
+    <Compile Include="MeshRoundTrip.cs" />
+    <Compile Include="PrefabRoundTrip.cs" />
+    <Compile Include="SkinRoundTrip.cs" />
+    <Compile Include="ModelRoundTrip.cs" />
+    <Compile Include="SkinAbove.cs" />
+    <Compile Include="MaterialBake.cs" />
+    <Compile Include="MaterialTweakFixture.cs" />
+    <Compile Include="ClipRoundTrip.cs" />
+    <Compile Include="ClipImport.cs" />
+    <Compile Include="ClipBake.cs" />
+    <Compile Include="RootMotionBake.cs" />
+    <Compile Include="ClipPlan.cs" />
+    <Compile Include="Compressed.cs" />
+    <Compile Include="DracoTests.cs" />
+    <Compile Include="AssetIndexTests.cs" />
+    <Compile Include="MeshExtractTests.cs" />
+    <Compile Include="VideoExtractTests.cs" />
+    <Compile Include="VideoCatalogTests.cs" />
+    <!-- The streamable-catalog surgery carries no UnityEngine type on purpose, so the append rule
+         and the duplicate-RuntimeKey refusal (which would otherwise brick a player's boot scene)
+         are proven against the REAL shipped Catalog.json here, not in a game session. -->
+    <Compile Include="..\..\src\Bake\CatalogText.cs" Link="CatalogText.cs" />
+    <Compile Include="AudioExtractTests.cs" />
+    <Compile Include="WavReadTests.cs" />
+    <Compile Include="SourceAudioTests.cs" />
+    <Compile Include="SourceDecodeTests.cs" />
+    <Compile Include="WemLoopTests.cs" />
+    <!-- The whole SOURCE reader carries no UnityEngine type, and the engine cannot decode audio in
+         this game at all (gate F1), so .wav, .ogg and .mp3 import is proven here - the same files
+         the mod compiles against the same NVorbis/NLayer it merges. -->
+    <Compile Include="..\..\src\Wwise\WwisePcm.cs" Link="WwisePcm.cs" />
+    <Compile Include="..\..\src\Wwise\BankGen.cs" Link="BankGen.cs" />
+    <Compile Include="..\..\src\Wwise\WwiseId.cs" Link="WwiseId.cs" />
+    <!-- The Wwise Vorbis decoder and its baked setup headers - the same files the mod compiles, so
+         a green decode here is the decode the tool ships. -->
+    <Compile Include="..\..\src\Wwise\WwiseWem.cs" Link="WwiseWem.cs" />
+    <Compile Include="..\..\src\Wwise\WwiseSetupHeaders.cs" Link="WwiseSetupHeaders.cs" />
+    <!-- The OBJ parser carries no UnityEngine types on purpose, so this gate runs offline instead
+         of only inside a game session - same arrangement as TargetPathTests. -->
+    <Compile Include="..\..\src\Import\ObjCodec.cs" Link="ObjCodec.cs" />
+    <!-- What an .ogg/.mp3 SOURCE declares about itself - no UnityEngine type, so the oracle the
+         in-game import arm compares against is proven here instead of costing a launch. -->
+    <Compile Include="..\..\src\Import\SourceAudio.cs" Link="SourceAudio.cs" />
+    <Compile Include="..\..\src\Import\MeshBuild.cs" Link="MeshBuild.cs" />
+    <!-- MeshFields carries no UnityEngine type either, so the write -> repack -> read round trip on
+         a REAL shipped bundle runs here instead of costing a game launch. -->
+    <Compile Include="..\..\src\Bake\MeshFields.cs" Link="MeshFields.cs" />
+    <Compile Include="..\..\src\Bake\MeshMerge.cs" Link="MeshMerge.cs" />
+    <Compile Include="..\..\src\Bake\FitBox.cs" Link="FitBox.cs" />
+    <!-- Same arrangement for U4: PrefabFields carries no UnityEngine type, so the hierarchy's
+         build -> repack -> read round trip runs here instead of costing a game launch. -->
+    <Compile Include="..\..\src\Bake\PrefabFields.cs" Link="PrefabFields.cs" />
+    <!-- U5's skin fields carry no UnityEngine type either, so the bones/bind-poses/weights round
+         trip runs here too. -->
+    <Compile Include="..\..\src\Bake\SkinFields.cs" Link="SkinFields.cs" />
+    <!-- The Material's fields carry no UnityEngine type either, so what a baked material CONTAINS -
+         the paint a renderer needs to draw anything but white - is proven here. -->
+    <Compile Include="..\..\src\Bake\MaterialFields.cs" Link="MaterialFields.cs" />
+    <!-- U6's clip/controller/Animator fields carry no UnityEngine type either, so the whole
+         AnimationClip round trip runs here too. -->
+    <Compile Include="..\..\src\Bake\ClipFields.cs" Link="ClipFields.cs" />
+    <!-- The bundle LISTING carries no UnityEngine type either, so discovery - what is in a bundle,
+         and the refusal to guess between two assets of the same name - is proven offline too. -->
+    <Compile Include="..\..\src\Bake\AssetIndex.cs" Link="AssetIndex.cs" />
+    <!-- Mesh EXTRACTION is UnityEngine-free end to end - the serialized-Mesh reader, the GLB writer
+         and the GLB reader (the last two ported verbatim from ResourceReplacer's pp-native\src) -
+         so the whole extract -> glb -> read-back round trip is proven here, not in a game session. -->
+    <Compile Include="..\..\src\Bake\MeshRead.cs" Link="MeshRead.cs" />
+    <Compile Include="..\..\src\Bake\LooseFiles.cs" Link="LooseFiles.cs" />
+    <Compile Include="..\..\src\Import\GlbCodec.cs" Link="GlbCodec.cs" />
+    <Compile Include="..\..\src\Import\GlbReader.cs" Link="GlbReader.cs" />
+    <Compile Include="..\..\src\Import\Meshopt.cs" Link="Meshopt.cs" />
+    <Compile Include="..\..\src\Import\Draco.cs" Link="Draco.cs" />
+    <Compile Include="..\..\src\Import\MaterialCodec.cs" Link="MaterialCodec.cs" />
+    <!-- The AUTHOR's .glb -> serialized-model conversion is UnityEngine-free too, so the whole
+         read -> bake -> read-back round trip of an ADDED model runs here rather than in the game. -->
+    <Compile Include="..\..\src\Import\ModelBuild.cs" Link="ModelBuild.cs" />
+    <Compile Include="..\..\src\Import\Treadmill.cs" Link="Treadmill.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="AssetsTools.NET">
+      <HintPath>..\..\lib\AssetsTools.NET.dll</HintPath>
+    </Reference>
+    <Reference Include="NVorbis"><HintPath>..\..\lib\NVorbis.dll</HintPath></Reference>
+    <Reference Include="NLayer"><HintPath>..\..\lib\NLayer.dll</HintPath></Reference>
+    <Reference Include="System.ValueTuple"><HintPath>..\..\lib\System.ValueTuple.dll</HintPath></Reference>
+    <Reference Include="System.Memory"><HintPath>$(UnityManaged)\System.Memory.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

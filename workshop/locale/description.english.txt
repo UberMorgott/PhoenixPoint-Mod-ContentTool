@@ -1,0 +1,51 @@
+[h1]Content Tool[/h1]
+
+[b]This is an engine, not a mod with features. On its own it changes nothing in your game.[/b]
+
+You are almost certainly here because some other mod lists Content Tool as a requirement. Subscribe to it, leave it ticked, and forget about it. It adds no items, no missions, no UI and no balance changes of its own.
+
+[h2]What it does for the mods that need it[/h2]
+
+It lets a mod [b]replace[/b] things Phoenix Point ships - textures, models, materials, animation curves, sounds, videos, whole asset bundles - and [b]add[/b] things the game never had, such as a new creature or a new weapon model.
+
+All of it happens [b]in memory, while the game runs[/b]. Nothing is unpacked, patched or copied into your Phoenix Point installation.
+
+[h2]Your game installation is never written[/h2]
+
+Content Tool does not write into your Phoenix Point folder. Not a patched file, not a catalog edit, not a backup - a backup inside the install is a write too.
+
+[b]Deleting the mod leaves the installation byte-identical to a clean one.[/b] No uninstaller, no repair step, nothing to undo.
+
+Its working files live in your AppData folder and inside each content mod's own folder under Mods\, never in the game.
+
+[h2]Installing[/h2]
+
+Subscribe here, start the game, open [b]Mods[/b] in the main menu and tick [b]Content Tool[/b].
+
+A content mod normally turns it on for you: content mods declare Content Tool as a dependency, and the game's own mod manager refuses to enable them without it. Both show up as separate toggles - leave Content Tool ticked.
+
+Requirements: the Phoenix Point base game. No other dependency. It does not conflict with TFTV.
+
+[h2]Where the content mods are[/h2]
+
+The example mods built on Content Tool are [b]not[/b] Workshop items. They are downloads on GitHub, linked from the documentation:
+
+[url=https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/]ubermorgott.github.io/PhoenixPoint-Mod-ContentTool[/url]
+
+[h2]For mod authors[/h2]
+
+Everything else - what a mod folder may contain, the ppcontent.json grammar, the bake and package steps, the ct_* console commands, the limits stated plainly - is in the documentation. This page deliberately does not repeat it:
+
+[url=https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/]ubermorgott.github.io/PhoenixPoint-Mod-ContentTool[/url]
+
+[h2]Something did not work[/h2]
+
+Every refusal is a named line in your player log:
+
+[code]%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\Player.log[/code]
+
+Search it for [b]ct_[/b]. The line says which mod, which resource and why. Attach that line to a bug report at [url=https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/issues]the issue tracker[/url].
+
+[h2]License[/h2]
+
+CC BY-NC 4.0 - Morgott. Non-commercial, attribution required. Content mods you build with it are yours; this license covers Content Tool itself.

@@ -1,0 +1,9 @@
+{
+  "ID": "morgott.demo.menumusic",
+  "AssemblyName": "",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Menu Music" } ],
+  "Description": [ { "Key": "English", "Value": "Replaces both vanilla main-menu music tracks with the mod's own. Requires the ContentTool mod.\nStandard and YOE editions both covered. Content only, no DLL: ContentTool loads this mod's shipped replacement banks at startup and no game file is touched. Switch this mod off and the vanilla music is back." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

@@ -1,0 +1,8 @@
+{
+  "ID": "morgott.demo.nodeptexture",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: No Dependency" } ],
+  "Description": [ { "Key": "English", "Value": "DECLARES NO DEPENDENCY ON PURPOSE - a measurement fixture, not a mod to play with.\nThis is the SECOND serializer input: \"Dependencies\": [] written out explicitly, as opposed to the field being omitted entirely in meta.json. Copy this file over meta.json in the INSTALL to measure that variant. It replaces one shipped Acidworm texture with a magenta checker." } ],
+  "Dependencies": []
+}

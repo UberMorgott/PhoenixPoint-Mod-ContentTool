@@ -1,0 +1,15 @@
+{
+  "ID": "com.morgott.ContentTool",
+  "AssemblyName": "ContentTool.dll",
+  "Version": "1.0.0",
+  "Author": [
+    { "Key": "English", "Value": "Morgott" }
+  ],
+  "Name": [
+    { "Key": "English", "Value": "Content Tool" }
+  ],
+  "Description": [
+    { "Key": "English", "Value": "Content engine for other mods - replaces and adds game content in memory. Never writes to your game files.\nMods that need it list it as a dependency and enable it for you. On its own it changes nothing. The ct_* console commands are for mod authors." }
+  ],
+  "Dependencies": []
+}

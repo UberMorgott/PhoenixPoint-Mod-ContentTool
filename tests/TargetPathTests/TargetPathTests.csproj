@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- The identity parser and the whole-file validation are deliberately free of UnityEngine
+         types, so gate R0 runs offline instead of only inside a game session. -->
+    <Compile Include="..\..\src\Project\TargetPath.cs" Link="TargetPath.cs" />
+    <!-- Same reason: the enabled/disabled decision is free of UnityEngine and PhoenixPoint types, so
+         gate G1 runs offline instead of only inside a game session. -->
+    <Compile Include="..\..\src\Project\ModGate.cs" Link="ModGate.cs" />
+    <!-- And the discovery that feeds it: which folders are content mods at all, and where a project
+         NAME resolves to. Both are plain System.IO, so gate G2 runs offline against real folders. -->
+    <Compile Include="..\..\src\Project\ContentMods.cs" Link="ContentMods.cs" />
+    <!-- And what is applied right now, per mod and per route: the bookkeeping a runtime toggle turns
+         on and off. Plain dictionaries, so gate G3 measures the transitions offline. -->
+    <Compile Include="..\..\src\Project\ContentState.cs" Link="ContentState.cs" />
+    <!-- And who owns which shipped bundle live, plus what an InternalId resolves to. Deliberately
+         free of Unity types (locations travel as object), so gate S1 - the ownership policy and the
+         transform-func composition - runs offline instead of only inside a game session. -->
+    <Compile Include="..\..\src\Bake\BundleClaims.cs" Link="BundleClaims.cs" />
+    <!-- And which generated banks a re-bake owns: plain System.IO plus the Wwise name hash, so gate
+         S9 measures the delete rule against real files instead of only inside a game session. -->
+    <Compile Include="..\..\src\Bake\BankPrune.cs" Link="BankPrune.cs" />
+    <Compile Include="..\..\src\Wwise\WwiseId.cs" Link="WwiseId.cs" />
+    <!-- The packaging rule a modder's release is measured against, and the freshness key that
+         decides whether a player's cached patched bundle is still current. Both plain System.IO,
+         so gates S14 and S15 run offline against real files - which is the only place they COULD
+         run: packaging happens with the game shut. -->
+    <!-- The developer live loop's decisions - the debounce, the cross-thread dirty hand-off, the
+         variant-set cycle and, above all, that developer mode OFF schedules nothing. Deliberately
+         free of UnityEngine (System.IO only; the Unity half is src\Dev\DevRunner.cs), so gate S2
+         runs offline against real folders and a real FileSystemWatcher. -->
+    <Compile Include="..\..\src\Dev\DevLoop.cs" Link="DevLoop.cs" />
+    <!-- And how a published key's declared "type" becomes a real Type. System.Reflection only (the
+         Unity half is nothing but the assembly LIST), so gate S16 measures the module-split rule
+         offline against real, split assemblies. -->
+    <Compile Include="..\..\src\Bake\TypeNames.cs" Link="TypeNames.cs" />
+    <Compile Include="..\..\src\Project\Package.cs" Link="Package.cs" />
+    <Compile Include="..\..\src\Project\PatchCache.cs" Link="PatchCache.cs" />
+  </ItemGroup>
+</Project>

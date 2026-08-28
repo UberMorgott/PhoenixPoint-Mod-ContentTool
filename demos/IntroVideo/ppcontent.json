@@ -1,0 +1,10 @@
+{
+  "id": "morgott.demo.introvideo",
+  "bundle": "IntroVideo.bundle",
+  "replace": [
+    { "video": "campaign_intro", "asset": "StreamableCopiedAssets/Videos/Factions/Phoenix/PP_Intro.webm" }
+  ],
+  "sounds": [
+    { "media": 908611677, "file": "intro_theme.mp3" }
+  ]
+}

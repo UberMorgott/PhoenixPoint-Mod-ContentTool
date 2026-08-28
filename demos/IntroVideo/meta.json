@@ -1,0 +1,9 @@
+{
+  "ID": "morgott.demo.introvideo",
+  "AssemblyName": "IntroVideo.dll",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Replace Cutscene" } ],
+  "Description": [ { "Key": "English", "Value": "NEW CAMPAIGN ONLY: the intro it replaces plays when a campaign starts. No bake and no install step.\nReplaces the new-campaign intro cinematic - picture, sound AND subtitles, all three from this mod's own folder. No game file is modified and there is nothing to revert. A cutscene is three separate assets: the .webm, a Wwise media, and a subtitle TextAsset held on the def. The first two are content only; the third ships a small DLL, because a field on a def is not a file - that split is the lesson of this demo.\nAll three halves arrive with the download and need nothing built. The sound ships as an ALREADY BUILT bank in Dist\\Sounds which ContentTool loads at startup: measured 2026-08-28 with no bake command ever run, the PP_Intro event answered 6034 ms from memory where the shipped file is 121355 ms and streams from disk. 'ct_sound bake IntroVideo' is the AUTHOR's command, for rebuilding that bank after editing Content\\Audio; a player never needs it." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>WeaponAdd</AssemblyName>
+    <RootNamespace>Morgott.WeaponAdd</RootNamespace>
+    <Authors>Morgott</Authors>
+    <Product>WeaponAdd</Product>
+    <Version>1.0.0</Version>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- PPModLoader loads "<FolderName>\<FolderName>.dll", so the output folder name must equal
+         the assembly name - same rule every other mod in this repo follows. -->
+    <OutputPath>bin\$(Configuration)\WeaponAdd\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+    <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <PropertyGroup>
+    <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
+    <ModSDK>$(PPRoot)\ModSDK</ModSDK>
+    <UnityManaged>$(PPRoot)\PhoenixPointWin64_Data\Managed</UnityManaged>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- ContentTool is the ENGINE mod and this demo DEPENDS on it: the whole weapon mechanism -
+         def clone chain, view, icon, prefab key, EXT_ sockets, payload deep copy, starting storage -
+         lives in WeaponBuild and is shared by every weapon mod. Private=false because the player
+         already has ContentTool installed (meta.json declares the dependency, and PPModLoader
+         enables a dependency before its dependents); shipping a second copy beside this DLL would
+         load a rival set of the same types. -->
+    <Reference Include="ContentTool">
+      <HintPath>..\..\bin\$(Configuration)\ContentTool\ContentTool.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ModSDK)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Unity.Addressables, Unity.ResourceManager and UnityEngine.CoreModule are GONE from this
+         demo. They were here for src\Prefab.cs, which held every line that touched Addressables so
+         that a Managed\ reference this loader could not resolve would surface as one caught
+         exception rather than a mod that fails to LOAD - the failure mode that makes Phoenix Point
+         rewrite MOD_ACTIVATED empty and silently disable every other mod (632fba7: referencing
+         UnityEngine.VideoModule at compile time made the mod fail to LOAD, "whereupon Phoenix Point
+         rewrote MOD_ACTIVATED empty and silently disabled every other mod including ContentTool").
+         Note the trap is a Managed\ module ModSDK\ does not ship - NOT the ContentTool reference
+         above, which the declared dependency loads for us. That file is
+         deleted: the engine already references those assemblies and already carries the guard, so
+         the demo no longer needs to. -->
+  </ItemGroup>
+</Project>

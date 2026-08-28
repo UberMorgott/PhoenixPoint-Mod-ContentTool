@@ -1,0 +1,9 @@
+{
+  "ID": "morgott.demo.quitcutscene",
+  "AssemblyName": "QuitCutscene.dll",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Quit Cutscene" } ],
+  "Description": [ { "Key": "English", "Value": "MAIN MENU ONLY: quitting there plays a clip, then exits; ESC skips it. Requires the ContentTool mod.\nQuitting from an in-game pause screen exits normally with no clip - the geoscape has no shipped play-then-continue path. The clip itself is zero-runtime content served in memory; only the trigger needs the DLL." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

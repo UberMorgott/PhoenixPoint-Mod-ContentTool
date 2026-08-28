@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>CustomCreature</AssemblyName>
+    <RootNamespace>Morgott.CustomCreature</RootNamespace>
+    <Authors>Morgott</Authors>
+    <Product>CustomCreature</Product>
+    <Version>1.0.0</Version>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- PPModLoader loads "<FolderName>\<FolderName>.dll", so the output folder name must equal
+         the assembly name - same rule ContentTool.csproj and QuitCutscene.csproj follow. -->
+    <OutputPath>bin\$(Configuration)\CustomCreature\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+    <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <PropertyGroup>
+    <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
+    <ModSDK>$(PPRoot)\ModSDK</ModSDK>
+    <!-- The ModSDK folder ships only four assemblies; AnimationModule and AssetBundleModule live
+         in the game's own Managed\ - same split ContentTool.csproj documents. -->
+    <UnityManaged>$(PPRoot)\PhoenixPointWin64_Data\Managed</UnityManaged>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- ContentTool is the ENGINE mod and this demo DEPENDS on it: the whole creature mechanism -
+         clone chain, controller remap, clip wiring, event stamping, pose - lives there and is shared
+         by every creature mod. Private=false because the player already has ContentTool installed
+         (meta.json declares the dependency, and PPModLoader enables a dependency before its
+         dependents); shipping a second copy beside this DLL would load a rival set of the same types. -->
+    <Reference Include="ContentTool">
+      <HintPath>..\..\bin\$(Configuration)\ContentTool\ContentTool.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ModSDK)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(ModSDK)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ModSDK)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(UnityManaged)\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(UnityManaged)\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,34 @@
+{
+  "id": "morgott.demo.customcreature",
+  "bundle": "CustomCreature.bundle",
+  "scale": 0.008,
+  "play": "Spider_Idle",
+  "loop": "Spider_Idle, Spider_Walk",
+  "creature": {
+    "clips": {
+      "Spider_Walk": "walk",
+      "Spider_Idle": "idle",
+      "Spider_Idle_long": "",
+      "Spider_Damage": "reaction",
+      "Spider_Attack_1": "attack",
+      "Spider_Attack_2": "ranged",
+      "Spider_Death": "death"
+    },
+    "events": {
+      "walk": "SwarmerStep_EventDef 0.15, SwarmerStep_EventDef 0.65",
+      "attack": "ActionDo 0.4054, ShootShot 0.4865, ActionEnd 0.8378",
+      "ranged": "ActionDo 0.2286, ShootShot 0.5429, ActionEnd 0.9143",
+      "death": "Ragdoll 0.9"
+    },
+    "name": "Spider",
+    "model": "cyborg_spider",
+    "donor": "Swarmer_TacCharacterDef",
+    "ranged": "Crabman_Head_Spitter_WeaponDef",
+    "up": "0,1,0",
+    "lift": 2.1372,
+    "health": 40,
+    "will": 10,
+    "speed": 16,
+    "volume": 1
+  }
+}

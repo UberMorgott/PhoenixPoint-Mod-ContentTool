@@ -1,0 +1,9 @@
+{
+  "ID": "morgott.demo.weaponadd",
+  "AssemblyName": "WeaponAdd.dll",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Weapon Add" } ],
+  "Description": [ { "Key": "English", "Value": "NEW CAMPAIGNS ONLY: adds a NEW, fully usable weapon - the Vulture SR - to the Phoenix base storage.\nRequires the ContentTool mod. Nothing to run: ticking this mod on publishes its model keys. Equip it, holster it, overwatch, reload and fire: stats, slots, ammo, sound and muzzle flash are cloned from the PX Sniper Rifle, and it takes the same clips. NOTHING is written into your game files - the model is served from this mod's own bundle, and switching the mod off removes the weapon. NEW CAMPAIGNS ONLY: it is added to the starting storage, so an existing save will not have it. It cannot be researched or manufactured." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

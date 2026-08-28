@@ -1,0 +1,4 @@
+# Pinned so the site that builds on a contributor's machine is the site that builds in CI.
+# Bump deliberately, and re-run `mkdocs build --strict` when you do.
+mkdocs==1.6.1
+mkdocs-material==9.7.7

@@ -1,0 +1,35 @@
+# package.ps1's output: a staged copy of a mod, rebuilt from the project on every run and zipped
+# for release. Never committed - it is derived, and it is the one folder in the tree a stale copy
+# of could be uploaded by mistake.
+dist-package/
+
+# Build output. These are currently covered by the OUTER monorepo .gitignore; they are repeated
+# here so that ContentTool\ works as a standalone repository without changing anything else.
+bin/
+obj/
+
+# The rendered documentation site. Derived from docs\ by `mkdocs build`, rebuilt by CI on every
+# push; committing it would mean two sources of truth for the same pages.
+site/
+.venv/
+
+# IDE / tooling / OS
+.serena/
+.vs/
+.idea/
+graphify-out/
+*.user
+*.suo
+Thumbs.db
+.DS_Store
+
+# Machine-specific: a copy of the game's console output, dropped beside the csproj by a dev run.
+Console.log
+*.log
+
+# Python helpers under tools\
+**/__pycache__/
+*.pyc
+
+# Secrets
+.env

@@ -1,0 +1,8 @@
+{
+  "ID": "morgott.demo.materialtweak",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Material Tweak" } ],
+  "Description": [ { "Key": "English", "Value": "ONLY THE INJURED FIREWORM: its damaged-skin material goes matte. One number, no art, no code.\nThe smallest content mod there is. ppcontent.json carries a single \"material\" row that sets _GlossMapScale on the shipped material ALN_Fireworm_DMG from 1 to 0.15, so a wounded Fireworm stops looking wet. Requires the ContentTool mod, which bakes a private patched copy of the shipped bundle on YOUR machine and serves it in memory; nothing is written into your Phoenix Point installation and switching this mod off puts the shipped material straight back." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

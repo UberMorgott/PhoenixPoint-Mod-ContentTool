@@ -1,0 +1,27 @@
+// SteamCMD Workshop build item descriptor for ContentTool (Phoenix Point, appid 839770).
+//
+// Usage:
+//   steamcmd +login <user> +workshop_build_item "<abs path to this .vdf>" +quit
+//   (workshop\update.ps1 does this for you.)
+//
+// publishedfileid:
+//   "PUBLISHEDFILEID_PLACEHOLDER" -> NOTHING HAS BEEN PUBLISHED YET. update.ps1 refuses to run.
+//   "<real id>"                   -> UPDATE that existing item.
+// Never paste an id from another mod here: SteamCMD would upload ContentTool over that item.
+//
+//   contentfolder = the assembled workshop\Dist (run workshop\pack-dist.ps1 first).
+//   previewfile   = the preview image, <= 1 MB, 1024x1024, JPG or PNG. Committed at
+//                   workshop\image\steam_preview.jpg - the same file publish_ugc.py resolves.
+//   changenote    = stamped in by update.ps1 -ChangeNote.
+//
+// Paths assume the checkout is at E:\DEV\PhoenixPoint\ContentTool. Adjust if yours is elsewhere.
+// ONE item only. The demo mods are GitHub downloads, never Workshop items.
+
+"workshopitem"
+{
+	"appid"           "839770"
+	"publishedfileid" "PUBLISHEDFILEID_PLACEHOLDER"
+	"contentfolder"   "E:\DEV\PhoenixPoint\ContentTool\workshop\Dist"
+	"previewfile"     "E:\DEV\PhoenixPoint\ContentTool\workshop\image\steam_preview.jpg"
+	"changenote"      "Update ContentTool."
+}

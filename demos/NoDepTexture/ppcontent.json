@@ -1,0 +1,8 @@
+{
+  "id": "morgott.demo.nodeptexture",
+  "bundle": "NoDepTexture.bundle",
+
+  "replace": [
+    { "bundle": "aln_acidworm_assets_all.bundle", "asset": "acidworm_low_albedo", "texture": "acidworm" }
+  ]
+}

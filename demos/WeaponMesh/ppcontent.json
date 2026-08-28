@@ -1,0 +1,13 @@
+{
+  "id": "morgott.demo.weaponmesh",
+  "bundle": "WeaponMesh.bundle",
+
+  "replace": [
+    { "bundle": "px_equipment_assets_all.bundle", "asset": "WPN_PX_RG_Assault_Rifle_T01_V01",           "mesh":    "rifle" },
+    { "bundle": "px_equipment_assets_all.bundle", "asset": "WPN_PX_RG_Assault_Rifle_T01_V01_albedo",    "texture": "rifle_albedo" },
+    { "bundle": "px_equipment_assets_all.bundle", "asset": "WPN_PX_RG_Assault_Rifle_T01_V01_normal",    "texture": "rifle_normal_flat" },
+    { "bundle": "px_equipment_assets_all.bundle", "asset": "WPN_PX_RG_Assault_Rifle_T01_V01_metallic",  "texture": "rifle_metallic_flat" },
+    { "bundle": "px_equipment_assets_all.bundle", "asset": "WPN_PX_RG_Assault_Rifle_T01_V01_occlusion", "texture": "rifle_occlusion_white" },
+    { "bundle": "px_equipment_assets_all.bundle", "asset": "WPN_PX_RG_Assault_Rifle_T01_V01_emissive",  "texture": "rifle_emissive_off" }
+  ]
+}

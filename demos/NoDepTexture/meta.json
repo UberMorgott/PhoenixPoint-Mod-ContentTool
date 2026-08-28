@@ -1,0 +1,7 @@
+{
+  "ID": "morgott.demo.nodeptexture",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: No Dependency" } ],
+  "Description": [ { "Key": "English", "Value": "DECLARES NO DEPENDENCY ON PURPOSE - a measurement fixture, not a mod to play with.\nIt replaces one shipped Acidworm texture with a magenta checker. Every other demo declares \"Dependencies\": [ \"com.morgott.ContentTool\" ]; this one declares none, so ticking it on does NOT switch ContentTool on. With ContentTool off it does nothing at all and says nothing at all. See docs\\SHIPPING-A-CONTENT-MOD.md for the measured result." } ]
+}

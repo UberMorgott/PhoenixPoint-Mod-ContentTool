@@ -1,0 +1,28 @@
+<Project>
+  <!-- Merges AssetsTools.NET into ContentTool.dll so the mod ships as ONE file. PPModLoader loads
+       the assembly with Assembly.Load(byte[]) (ModSDKContext.LoadModdingAssembly) and installs no
+       AssemblyResolve anywhere in Assembly-CSharp, so a sibling AssetsTools.NET.dll would never
+       resolve - it compiles and CI-passes, then dies on the player's machine with TypeLoadException.
+
+       The mere existence of this file suppresses ILRepack.Lib.MSBuild.Task's own default target
+       (see its .targets: Condition="!Exists('$(ILRepackTargetsFile)')"), which would otherwise try
+       to merge the game's own assemblies too and fail on Assembly-CSharp. -->
+  <Target Name="MergeDependencies" AfterTargets="Build" Condition="Exists('$(OutputPath)AssetsTools.NET.dll')">
+    <ItemGroup>
+      <MergeInputs Include="$(OutputPath)$(TargetName)$(TargetExt)" />
+      <MergeInputs Include="$(OutputPath)AssetsTools.NET.dll" />
+      <!-- The Wwise Vorbis decoder, and the ValueTuple forwarders its Ogg classes reference - see
+           the two references in ContentTool.csproj for why one is merged and System.Memory is not. -->
+      <MergeInputs Include="$(OutputPath)NVorbis.dll" />
+      <!-- The .mp3 reader, merged for the same reason - see the NLayer reference in the csproj. -->
+      <MergeInputs Include="$(OutputPath)NLayer.dll" />
+      <MergeInputs Include="$(OutputPath)System.ValueTuple.dll" />
+    </ItemGroup>
+    <ILRepack Parallel="true" DebugInfo="true" Internalize="true"
+              InputAssemblies="@(MergeInputs)" TargetKind="Dll"
+              LibraryPath="$(UnityManaged);$(ModSDK)"
+              OutputFile="$(OutputPath)$(TargetName)$(TargetExt)" />
+    <!-- Everything that was only copied so ILRepack could see it, or that the game already has. -->
+    <Delete Files="@(ReferenceCopyLocalPaths->'$(OutputPath)%(DestinationSubDirectory)%(Filename)%(Extension)')" />
+  </Target>
+</Project>

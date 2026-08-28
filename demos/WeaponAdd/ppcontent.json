@@ -1,0 +1,65 @@
+{
+  "id": "morgott.demo.weaponadd",
+  "bundle": "WeaponAdd.bundle",
+
+  "publish": [
+    {
+      "key":   "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b60",
+      "asset": "models/sniper",
+      "type":  "GameObject",
+      "deps":  "defaultlocalgroup_unitybuiltinshaders.bundle"
+    },
+    {
+      "key":   "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b61",
+      "asset": "models/ar181",
+      "type":  "GameObject",
+      "deps":  "defaultlocalgroup_unitybuiltinshaders.bundle"
+    }
+  ],
+
+  "weapons": [
+    {
+      "id":     "Morgott_VulturePDW_WeaponDef",
+      "name":   "Vulture PDW",
+      "clone":  "PX_LaserPDW_WeaponDef",
+      "guid":   "c7a9f1d2-4b6e-4a3c-8f5b-7d1e9a2c4b01",
+      "blurb":  "A Phoenix armoury rebuild of a pre-Pandoravirus energy carbine: the emitter was wound past its rated draw, so every bolt lands harder and none of them land where you meant.",
+      "icon":   "Icons\\sniper_inv.png",
+      "model":  "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b60",
+      "fit":    "auto",
+      "shoot":  "0.00435,0.06109,0.76880",
+      "aim":    "0.00435,0.06109,0.41911",
+      "shell":  "0.02021,0.06109,0.41911",
+      "damage": "60",
+      "spread": "3.0",
+      "count":  "10",
+      "clips":  "10"
+    },
+    {
+      "id":     "Morgott_VultureAR_WeaponDef",
+      "name":   "Vulture AR",
+      "clone":  "PX_AssaultRifle_WeaponDef",
+      "guid":   "c7a9f1d2-4b6e-4a3c-8f5b-7d1e9a2c4b11",
+      "blurb":  "The same armoury, the same bad habit, applied to a service rifle. It hits like something heavier and groups like something cheaper.",
+      "model":  "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b61",
+      "fit":    "auto",
+      "damage": "45",
+      "spread": "2.4",
+      "count":  "10",
+      "clips":  "10"
+    },
+    {
+      "id":     "Morgott_VultureSidearm_WeaponDef",
+      "name":   "Vulture Sidearm",
+      "clone":  "SY_LaserPistol_WeaponDef",
+      "guid":   "c7a9f1d2-4b6e-4a3c-8f5b-7d1e9a2c4b21",
+      "blurb":  "A Synedrion laser sidearm with the safeties argued out of it. One hand, one very bright bolt that leaves what it hits burning, and a grouping its previous owner would not sign for.",
+      "damage": "75",
+      "spread": "2.25",
+      "damagetype": "Fire_StandardDamageTypeEffectDef",
+      "keywords": "Burning_DamageKeywordEffectorDef=40",
+      "count":  "10",
+      "clips":  "10"
+    }
+  ]
+}

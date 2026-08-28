@@ -1,0 +1,8 @@
+{
+  "id": "morgott.demo.materialtweak",
+  "bundle": "MaterialTweak.bundle",
+
+  "replace": [
+    { "bundle": "aln_fireworm_assets_all.bundle", "asset": "ALN_Fireworm_DMG", "material": "_GlossMapScale=0.15" }
+  ]
+}

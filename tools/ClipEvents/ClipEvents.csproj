@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>ClipEvents</AssemblyName>
+    <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
+    <UnityManaged>$(PPRoot)\PhoenixPointWin64_Data\Managed</UnityManaged>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- ContentTool's OWN import path, compiled in, exactly as tools\SpiderAxisCheck does: the frame
+         this reports must be a frame of the clip the BAKE will write, not of a second reader's idea
+         of it. All UnityEngine-free. -->
+    <Compile Include="..\..\src\Import\ObjCodec.cs" Link="ObjCodec.cs" />
+    <Compile Include="..\..\src\Import\MeshBuild.cs" Link="MeshBuild.cs" />
+    <Compile Include="..\..\src\Import\GlbCodec.cs" Link="GlbCodec.cs" />
+    <Compile Include="..\..\src\Import\GlbReader.cs" Link="GlbReader.cs" />
+    <Compile Include="..\..\src\Import\Meshopt.cs" Link="Meshopt.cs" />
+    <Compile Include="..\..\src\Import\Draco.cs" Link="Draco.cs" />
+    <Compile Include="..\..\src\Import\MaterialCodec.cs" Link="MaterialCodec.cs" />
+    <Compile Include="..\..\src\Import\ModelBuild.cs" Link="ModelBuild.cs" />
+    <Compile Include="..\..\src\Import\Treadmill.cs" Link="Treadmill.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.ValueTuple"><HintPath>..\..\lib\System.ValueTuple.dll</HintPath></Reference>
+    <Reference Include="System.Memory"><HintPath>$(UnityManaged)\System.Memory.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

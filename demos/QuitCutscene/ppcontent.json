@@ -1,0 +1,7 @@
+{
+  "id": "morgott.demo.quitcutscene",
+  "bundle": "QuitCutscene.bundle",
+  "replace": [
+    { "video": "quit_outro" }
+  ]
+}
