@@ -448,7 +448,17 @@ namespace Morgott.ContentTool.Tactical
             TacActorAnimActionsDef animsClone = Clone(repo, c, donorAnims, "AnimActionsDef");
             c.Anims = animsClone;
             string[] climbing = WireClips(repo, c, animsClone);
-            if (navClone != null) NavAreas(navClone, reference, infantry, agent, climbing, say);
+            // EVERY shipped unit that navigates, not just the human infantry the reference came from.
+            // An area name is scoped to the AGENT TYPE and to nothing else, and the humans on 'Humanoid'
+            // do not carry all of its areas: READ LIVE 2026-08-28, Soldier_NavigationDef has ClimbLadder
+            // and NO JumpUpOneLevel, while Crabman_NavigationDef and HumanoidGuardian_NavigationDef -
+            // both AgentType 'Humanoid' - do carry it. Asking only the humans therefore REFUSED the
+            // ascent as "no shipped unit on agent 'Humanoid' carries it" while two of them did.
+            if (navClone != null)
+                NavAreas(navClone, reference, repo.GetAllDefs<TacCharacterDef>()
+                    .Where(d => d.ComponentSetDef != null &&
+                                d.ComponentSetDef.GetComponentDef<TacticalNavigationComponentDef>() != null)
+                    .ToArray(), agent, climbing, say);
 
             // --- the UNIT ---------------------------------------------------------------------
             ComponentSetDef setClone = Clone(repo, c, donor.ComponentSetDef, "ComponentSetDef");
@@ -1274,10 +1284,11 @@ namespace Morgott.ContentTool.Tactical
         /// the AgentType is the reference's, so filtering the DONOR's list could leave a
         /// WalkableMedMonster on a Humanoid agent - not a ground creature but an immobile one. The link
         /// areas are named (<see cref="ClimbPlan.Table"/>) but still not trusted: each is added only if
-        /// a SHIPPED unit on this same agent carries it.
+        /// a SHIPPED unit on this same agent carries it - ANY of them, alien included, because an area
+        /// name is scoped to the agent type and the humans on 'Humanoid' do not carry all of its areas.
         /// </summary>
         private static void NavAreas(TacticalNavigationComponentDef nav, TacCharacterDef reference,
-                                     TacCharacterDef[] infantry, string agent, string[] climbing,
+                                     TacCharacterDef[] navigating, string agent, string[] climbing,
                                      Action<string> say)
         {
             TacticalNavigationComponentDef refNav = reference == null ? null
@@ -1287,7 +1298,7 @@ namespace Morgott.ContentTool.Tactical
                 .Where(a => a != null && a.StartsWith("Walkable", StringComparison.Ordinal)).ToList();
             if (areas.Count == 0) return;
 
-            HashSet<string> shipped = new HashSet<string>(infantry
+            HashSet<string> shipped = new HashSet<string>(navigating
                 .Select(d => d.ComponentSetDef.GetComponentDef<TacticalNavigationComponentDef>())
                 .Where(n => n != null && n.AgentType == agent && n.NavAreas != null)
                 .SelectMany(n => n.NavAreas).Where(a => a != null));

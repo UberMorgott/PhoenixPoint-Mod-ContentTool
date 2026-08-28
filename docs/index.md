@@ -7,8 +7,7 @@ materials, models, animations, sounds, videos, creatures and weapons. It changes
 
 1. Download `ContentTool-*.zip` from the [latest release](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/releases/latest).
 2. Copy the `ContentTool` folder into
-   `<Steam library>\steamapps\common\Phoenix Point\Mods\`. The game creates `Mods\` if it is
-   missing.
+   `<Steam library>\steamapps\common\Phoenix Point\Mods\`.
 3. Start the game, open **Mods**, and tick **Content Tool**.
 
 That is all. You do not run author commands or build another mod's files. A content mod that declares
@@ -49,8 +48,7 @@ When behaviour is required, use the complete [DLL project and `ModMain` skeleton
 ### Supported and tested versions
 
 ContentTool `1.0.0.0` is verified with Phoenix Point **1.30.2.75117**
-(`ReleaseCandidate2025`), Unity **2019.4.31f1**, on Steam for Windows. Epic Games Store and Game Pass
-installations are **untested**, not declared unsupported. A `meta.json` dependency carries only the
+(`ReleaseCandidate2025`), Unity **2019.4.31f1**, on Windows. A `meta.json` dependency carries only the
 ContentTool ID and no minimum version, so an author must test version skew and a game update against
 the exact package they ship.
 

@@ -23,8 +23,7 @@ videos, creatures and weapons. It is an engine for other mods; it changes nothin
 
 1. Download `ContentTool-*.zip` from the [latest release](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/releases/latest).
 2. Copy the `ContentTool` folder into
-   `<Steam library>\steamapps\common\Phoenix Point\Mods\`. The game creates `Mods\` if it is
-   missing.
+   `<Steam library>\steamapps\common\Phoenix Point\Mods\`.
 3. Start the game, open **Mods**, and tick **Content Tool**.
 
 That is the whole install. If another mod declares ContentTool as a dependency, the mod manager

@@ -93,6 +93,10 @@ internal static class ClimbSynthesis
             "MV_ClimbLowObject_Dwn_AR", "MV_ClimbLowObject_Dwn_AR_Alt",
             "MV_ClimbLowObject_Over1Tile_AR", "MV_ClimbLowObject_Over1Tile_AR_Alt",
             "MV_ClimbLowObject_Over2Tiles_AR",
+            // The ascent of a whole level. Its state says FLOOR where the def field says LEVEL, and
+            // asking for [jump+level] is what refused this family for a season - READ LIVE off a
+            // spawned creature's own 'Overridden: HumanoidAnimatorLOC'.
+            "MV_JumpUpOneFloor_Start_Placeholder",
             "MV_RunFwd_Loop_AR", "HL_Idle_AR", "MV_MountStartPlaceholder", "Dilo_Ram_RunLoop"
         };
         var everything = new HashSet<string>();
@@ -100,14 +104,34 @@ internal static class ClimbSynthesis
         foreach (ClimbPlan.Family f in ClimbPlan.Table)
         {
             string why = ClimbPlan.Refuse(f, real, p => true);
-            bool jumpUp = f.Slot == "JumpUpOneLevel";
-            Check(jumpUp ? why != null : why == null, "'" + f.Slot + "' " + (jumpUp
-                ? "is REFUSED BY NAME against a real controller (" + why + ") - no shipped humanoid " +
-                  "controller has a jump-up-one-level state, and its area 256 is not in a Humanoid " +
-                  "agent's mask (125) either, so claiming it would be a promise with nothing behind it"
-                : "is covered by a real controller's states, not by what the donor def happened to fill: " +
-                  (why ?? "")));
+            Check(why == null, "'" + f.Slot + "' is covered by a real controller's states, not by what " +
+                  "the donor def happened to fill: " + (why ?? ""));
         }
+        // THE ASCENT, both halves of it, because this is the one family that was declared impossible.
+        Check(ClimbPlan.PartOfState("MV_JumpUpOneFloor_Start_Placeholder", everything) == "start" &&
+              ClimbPlan.PartOfSlot("JumpUpOneLevel") == "start",
+              "the state 'MV_JumpUpOneFloor_Start_Placeholder' and the def field 'JumpUpOneLevel' - the " +
+              "controller saying FLOOR and the def saying LEVEL for one crossing - resolve to the SAME " +
+              "synthesised clip, which is the whole of what WaitForAnimation:175 compares");
+        Check(ClimbPlan.Rise(ClimbPlan.PartOfSlot("JumpUpOneLevel")) > 0f &&
+              !ClimbPlan.Loops(ClimbPlan.PartOfSlot("JumpUpOneLevel")),
+              "the clip the ascent takes RISES and does not cycle - JumpUpOneLevelProcessor.cs:25-34 " +
+              "emits exactly one point for the whole link, so a clip that levels off never reaches the " +
+              "floor above and a looping one would never end");
+        // A controller WITHOUT the state must still refuse the family, or the arm above is only reading
+        // the table back to itself and the area would be offered over an ascent nothing plays.
+        Check(ClimbPlan.Refuse(FamilyOf("JumpUpOneLevel"),
+                               new[] { "MV_RunFwd_Loop_AR", "MV_RocketJumpLoopA" }, p => true) != null,
+              "a controller carrying no jump-up state REFUSES the family - that refusal is what keeps " +
+              "the JumpUpOneLevel area off a creature that cannot perform the ascent");
+        Check(ClimbPlan.Refuse(FamilyOf("JumpUpOneLevel"), real, p => p != "start") != null,
+              "and a creature with no 'start' clip refuses it too, however good the controller is");
+        // ONE AREA, ONE FAMILY: the ascent hangs off an area of its own, so filling it can never offer a
+        // route half of which has no clips.
+        Check(ClimbPlan.ByArea()["JumpUpOneLevel"].Count == 1 &&
+              ClimbPlan.ByArea()["JumpUpOneLevel"][0].Slot == "JumpUpOneLevel",
+              "the 'JumpUpOneLevel' area is claimed by exactly the family that fills it, so the mask and " +
+              "the filled slots cannot disagree about the ascent");
         Check(ClimbPlan.PartOfState("MV_ClimbLowObject_Up_AR", everything) == "start" &&
               ClimbPlan.PartOfState("MV_ClimbLowObject_Up_AR", everything) ==
               ClimbPlan.PartOfSlot("ClimbUpLowObstacle"),
@@ -124,7 +148,10 @@ internal static class ClimbSynthesis
               ClimbPlan.PartOfState("MV_ClimbLadderDwnStop_NoGunA", everything) == "stop",
               "a ladder's own states resolve to the parts their def slots take");
         foreach (string flat in new[] { "MV_RunFwd_Loop_AR", "HL_Idle_AR", "MV_MountStartPlaceholder",
-                                        "Dilo_Ram_RunLoop" })
+                                        "Dilo_Ram_RunLoop",
+                                        // The jet-jump states the same controller carries: they say
+                                        // 'jump' too, and only 'floor' tells the ascent from them.
+                                        "MV_RocketJumpStartA", "MV_RocketJumpLoopA", "MV_RocketJumpEndA" })
             Check(ClimbPlan.PartOfState(flat, everything) == null,
                   "'" + flat + "' is NOT a traversal state and takes no climb clip - a walk, an idle, " +
                   "a mount and a ram must keep the clips their roles give them");
@@ -198,6 +225,12 @@ internal static class ClimbSynthesis
                "rising " + F(rise) + " tile(s) on '" + rootPath + "' and cycling, " +
                ClimbPlan.Table.Length + " traversal family(ies), each paired with its navmesh area and " +
                "with the controller states that play it";
+    }
+
+    private static ClimbPlan.Family FamilyOf(string slot)
+    {
+        foreach (ClimbPlan.Family f in ClimbPlan.Table) if (f.Slot == slot) return f;
+        throw new Exception("CLIMB FAIL: the table no longer names '" + slot + "'");
     }
 
     /// <summary>Is every token of <paramref name="a"/> in <paramref name="b"/>.</summary>

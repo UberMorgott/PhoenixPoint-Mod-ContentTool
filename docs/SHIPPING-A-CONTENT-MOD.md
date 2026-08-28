@@ -51,8 +51,8 @@ Traversal rights come from navigation areas, not from animations. A creature wit
 never offered a climb link. A creature with the area but no reachable clip can be routed onto it and
 then stall. ContentTool therefore adds an area only after it has filled the corresponding controller
 slots. It can synthesize ordinary climb/drop motion from a walk cycle, but it cannot add a state the
-shipped controller does not have. In particular, climbing up one full level is unavailable on the
-Humanoid controller used by current custom creatures.
+shipped controller does not have. Climbing up one full level is not such a case: that state exists on
+the Humanoid controller, so a custom creature gets the `JumpUpOneLevel` area too.
 
 This model applies beyond creatures: publishing a model only gives it an address, adding audio only
 gives it an event/media identity, and cloning a weapon only gives it the donor's existing behavior.

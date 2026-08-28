@@ -29,9 +29,16 @@ namespace Morgott.ContentTool.Tactical
     ///
     /// WHY THE DONOR IS NO LONGER CONSULTED. A family used to be filled only where the DONOR def had
     /// filled it, which left every custom creature unable to ASCEND: the Swarmer ships a null
-    /// ClimbUpLadder and the engine's <c>GetClimbAnimSequence</c> (ClimbPathProcessor.cs:50-51) returns
-    /// null for JumpUpOneLevel no matter what the def holds. The controller, not the donor, is the thing
+    /// ClimbUpLadder and a null JumpUpOneLevel. The controller, not the donor, is the thing
     /// that decides whether a state exists, so the controller is what is asked.
+    ///
+    /// A SINGLE-CLIP FAMILY IS DRIVEN THE SAME WAY AS A SEQUENCE, which is what makes one table enough.
+    /// JumpUpOneLevelProcessor.cs:21-34 emits ONE point carrying <c>_clips.JumpUpOneLevel</c> plus the
+    /// animator integer ClimbSegmentType=JumpUpFloor; TacticalNavigationComponent.ExecutePoints:733-737
+    /// then blocks in WaitForAnimation:175 until <c>GetCurrentAnim()</c> IS that very clip OBJECT. So
+    /// naming a clip the controller never plays cannot make it play - it buys a 5 s stall - and a null
+    /// clip is not a stall either (:23 emits no point and only logs a deduped warning), it is simply no
+    /// ascent point at all.
     /// </summary>
     internal static class ClimbPlan
     {
@@ -70,12 +77,19 @@ namespace Morgott.ContentTool.Tactical
         }
 
         /// <summary>
-        /// EVERY FAMILY A REAL MAP ROUTES A ONE-TILE AGENT OVER. The last row is deliberately present
-        /// and deliberately never fills: no shipped humanoid controller carries a jump-up-one-level
-        /// state (its area, 256, is not in a Humanoid agent's mask either - READ LIVE, the mask is 125),
-        /// so it is REFUSED BY NAME in the build log rather than quietly missing. Mount, Ram, JetJump
-        /// and FallNoSupport are absent on purpose: they are abilities and hazards, not links a path
-        /// request routes over, so no navmesh area of ours can offer them.
+        /// EVERY FAMILY A REAL MAP ROUTES A ONE-TILE AGENT OVER, the ascent of a whole level included.
+        ///
+        /// THAT LAST ROW WAS REFUSED FOR ONE SEASON FOR A SPELLING REASON, and it is worth naming so it
+        /// is not "discovered" impossible a third time. The tokens asked for were [jump+level], after
+        /// the DEF field's name; the state HumanoidAnimatorLOC really carries is
+        /// <c>MV_JumpUpOneFloor_Start_Placeholder</c> - READ LIVE off a spawned creature's own
+        /// controller - which says FLOOR, never "level". So the state was there the whole time and the
+        /// family answered for none of its own clips. Its area was read live too: Crabman_NavigationDef
+        /// and HumanoidGuardian_NavigationDef, both AgentType 'Humanoid', carry "JumpUpOneLevel", so the
+        /// area resolves for our agent and the earlier "mask is 125" reading was the SOLDIER's mask, not
+        /// the agent type's ceiling. Mount, Ram, JetJump and FallNoSupport stay absent on purpose: they
+        /// are abilities and hazards, not links a path request routes over, so no navmesh area of ours
+        /// can offer them.
         /// </summary>
         internal static readonly Family[] Table =
         {
@@ -87,7 +101,7 @@ namespace Morgott.ContentTool.Tactical
             new Family { Slot = "ClimbDownLowObstacle",Area = "LowObstacle",         Part = "stop",    State = new[] { "object", "dwn" } },
             new Family { Slot = "JumpOverLowWall",     Area = "Jump",                Part = "start",   State = new[] { "object", "tile" } },
             new Family { Slot = "JumpOverLowObstacle", Area = "Jump",                Part = "start",   State = new[] { "object", "tiles" } },
-            new Family { Slot = "JumpUpOneLevel",      Area = "JumpUpOneLevel",      Part = "start",   State = new[] { "jump", "level" } },
+            new Family { Slot = "JumpUpOneLevel",      Area = "JumpUpOneLevel",      Part = "start",   State = new[] { "jump", "floor" } },
         };
 
         /// <summary>The family a def slot path belongs to ("DropDown.Loop", "ClimbUpLowObstacleAlt"), or

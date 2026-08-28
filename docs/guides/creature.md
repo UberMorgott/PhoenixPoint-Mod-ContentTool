@@ -191,17 +191,20 @@ only sequence fields by a nav def's apparent name left real controller states un
 ### What ContentTool does now
 
 ContentTool reads the rig's controller, synthesizes a start, looping pure-up climb and stop from the
-creature's own walk, and maps them into the controller and nav-action fields together. It covers 19
-slots across roof drops, low-obstacle roof drops, ladder climbs, low-obstacle climbs and jump-over
-families. A nav area is added only when its real controller states and required clip parts are filled.
+creature's own walk, and maps them into the controller and nav-action fields together. It covers 20
+slots across roof drops, low-obstacle roof drops, ladder climbs, low-obstacle climbs, jump-over
+families and the ascent of one whole level. A nav area is added only when its real controller states
+and required clip parts are filled.
 
 For the current one-tile Humanoid creature this produces:
 
 ```text
-WalkableHumanoid, Jump, ClimbLadder, RoofDrop, LowObstacle, LowObstacleRoofDrop
+WalkableHumanoid, RoofDrop, LowObstacleRoofDrop, ClimbLadder, LowObstacle, Jump, JumpUpOneLevel
 ```
 
-That is the same mask as a shipped soldier. By comparison, shipped ground-only units carry one
+That is a shipped soldier's mask plus `JumpUpOneLevel`, which the shipped Humanoid aliens
+`Crabman_NavigationDef` and `HumanoidGuardian_NavigationDef` also carry. By comparison, shipped
+ground-only units carry one
 scoped ground area: `Sentinel_Terror` has `WalkableHumanoid`, `Chiron_FireWorm` has
 `WalkableMedMonster`, `Queen_Heavy` has `WalkableBigMonster`, and `PX_Scarab` has
 `WalkableArmadillo`. Shipped climbers add only the link areas they can actually traverse.
@@ -233,9 +236,15 @@ Controller-state classification currently uses keywords in the controller's over
 because shipped controllers cannot be fully enumerated offline. A future game controller with a new
 naming vocabulary can therefore be refused until ContentTool's family map is updated.
 
-Climbing up one full level remains unavailable to a Humanoid-agent custom creature. The shipped
-Humanoid controller has no reachable `JumpUpOneLevel` state and the path processor returns no usable
-sequence, so ContentTool refuses that family and does not add its area. `Mount`, `Ram`, `JetJump` and
+Climbing up one full level is available. It was refused for a season over a spelling: the state was
+asked for as *jump* + *level* after the def field's name, while the shipped `HumanoidAnimatorLOC`
+really carries `MV_JumpUpOneFloor_Start_Placeholder`, which says **floor**. The area was read the
+same way, off a shipped human's list. The `JumpUpOneLevel` slot takes the same synthesized rising
+clip the vault families take, so no extra clip is needed from you and nothing extra is mapped. Three
+link segments carrying `JumpUpOneLevel` were crossed in 2.36 seconds with zero animation timeouts,
+and a 4.93-unit ascent on another save took 3.93 seconds, also with none. One proof is still
+outstanding: both measured crossings arrived on a downward order, so an arrival in the up direction
+specifically over a jump-up link has not yet been demonstrated. `Mount`, `Ram`, `JetJump` and
 `FallNoSupport` remain excluded because they are abilities or hazards rather than ordinary path
 links.
 

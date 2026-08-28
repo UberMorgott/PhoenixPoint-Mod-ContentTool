@@ -90,7 +90,7 @@ uses even though ContentTool exposes only the reduced role set above.
 | `MountIdle` | clip | Mounted idle. |
 | `Ram` | `ClipSequence` | Mutog-style ram. |
 | `RamPrepare`, `RamFinish` | clip | Ram endpoints. |
-| `JumpUpOneLevel` | clip | One-level ascent. Unavailable on the Humanoid controller used by current custom creatures. |
+| `JumpUpOneLevel` | clip | One-level ascent. Filled by the same synthesized rising clip the vault families take; the Humanoid controller state is named `MV_JumpUpOneFloor_Start_Placeholder`. |
 | `JumpOverLowWall`, `JumpOverLowWallAlt` | clip | Low-wall crossing and alternate. |
 | `JumpOverLowObstacle` | clip | Longer low-obstacle crossing; shipped registration is uncertain because this field is omitted from the def's `GetAllClips()`. |
 | `ClimbUpLowObstacle`, `ClimbUpLowObstacleAlt` | clip | Step/climb up a low obstacle. |
@@ -211,9 +211,9 @@ to five seconds for an animation that never arrives, then continue in steps.
 
 ContentTool synthesizes three climb clips from the creature's walk: a start, a looping pure `+Y`
 rise, and a stop. The engine reads height from baked root motion and repeats the loop while it lerps
-across the remaining distance, so one set handles varying obstacle heights. ContentTool fills 19
-usable slots across drop, ladder, low-obstacle and jump families, then adds an area only when the
-controller and clips genuinely support it.
+across the remaining distance, so one set handles varying obstacle heights. ContentTool fills 20
+usable slots across drop, ladder, low-obstacle, jump and one-level-ascent families, then adds an area
+only when the controller and clips genuinely support it.
 
 `climbPitch` rotates the model during those clips. The worked spider uses `90` because a spider's
 ordinary gait reads as a wall climb when its nose points up the wall. A biped should normally use
@@ -223,8 +223,10 @@ does not exist, rotate the model so an animation you do have reads correctly.**
 If the model has real climbing art, map one source clip to the optional `climb` role. It replaces
 the synthesized motion, and its root must rise; a non-rising mapped climb is refused at bake time.
 
-The current Humanoid controller has no usable `JumpUpOneLevel` state, so ContentTool does not add
-that area. `Mount`, `Ram`, `JetJump`, and `FallNoSupport` are abilities or hazards, not ordinary path
+`JumpUpOneLevel` is filled and its area added: the Humanoid controller's state is
+`MV_JumpUpOneFloor_Start_Placeholder`, and the single clip it wants is the same synthesized rising
+start the vault families use, so an author supplies nothing extra. `Mount`, `Ram`, `JetJump`, and
+`FallNoSupport` are abilities or hazards, not ordinary path
 links, and remain unavailable through this synthesis.
 
 ## Rig names and sockets

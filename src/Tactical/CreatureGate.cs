@@ -7,6 +7,8 @@ using Base.AI.Defs;
 using Base.Core;
 using Base.Defs;
 using Base.Entities;
+using Base.Levels;
+using Base.Levels.Nav;
 using Base.Serialization;
 using Base.Utils;
 using PhoenixPoint.Common.Entities;
@@ -58,6 +60,7 @@ namespace Morgott.ContentTool.Tactical
             switch (cmd)
             {
                 case "list": return List();
+                case "links": return Links();
                 case "gate":
                     if (args.Length < 2)
                         return "usage: ct_creature gate <tactical savename> [template name fragment]   " +
@@ -71,8 +74,43 @@ namespace Morgott.ContentTool.Tactical
                     go.AddComponent<Runner>().Begin(save, who);
                     return "C1 armed on save '" + save + "' for template '" + (who ?? "(first candidate)") +
                            "' - the arms print from the runner once the mission is live";
-                default: return "usage: ct_creature [list | gate <tactical savename>]";
+                default: return "usage: ct_creature [list | links | gate <tactical savename>]";
             }
+        }
+
+        /// <summary>
+        /// WHICH CROSSINGS THE LOADED MAP CAN EVEN POSE, counted off the engine's own link registry.
+        ///
+        /// A traversal that never appears in a gate run is ambiguous - a creature that cannot ascend and
+        /// a map with nothing to ascend read exactly alike - and the ambiguity costs a whole load to
+        /// resolve by hand. INavMesh.GetNavLinks(null) is every link on the level and
+        /// NavLink.GetValidAreas() is what ClimbPathProcessor.GetClimbType:58-82 itself reads to pick a
+        /// processor, so this is the game's own answer, per family in <see cref="ClimbPlan.Table"/>.
+        /// </summary>
+        private static string Links()
+        {
+            Level level = GameUtl.CurrentLevel();
+            INavMesh nav = level == null ? null : level.GetComponent<INavMesh>();
+            if (nav == null) return "ct_creature links: no level with a navmesh is loaded - load a " +
+                                   "tactical mission first";
+            NavLink[] all;
+            try { all = nav.GetNavLinks(null).ToArray(); }
+            catch (Exception ex) { return "ct_creature links: GetNavLinks THREW " + ex.Message; }
+            StringBuilder sb = new StringBuilder();
+            sb.Append("ct_creature links: " + all.Length + " nav link(s) on '" +
+                      (level.name ?? "?") + "'");
+            // One AREA, one row: two families share LowObstacle and two share Jump, and printing each
+            // twice reads as two different counts of two different things.
+            List<string> said = new List<string>();
+            foreach (ClimbPlan.Family f in ClimbPlan.Table)
+            {
+                if (said.Contains(f.Area)) continue;
+                said.Add(f.Area);
+                NavAreas mask = nav.GetNavAreas(f.Area);
+                int n = all.Count(l => l != null && l.GetValidAreas().Contains(mask));
+                sb.Append("; " + f.Area + "=" + n);
+            }
+            return sb.ToString();
         }
 
         /// <summary>
@@ -915,6 +953,7 @@ namespace Morgott.ContentTool.Tactical
                             Vector3 fromT = actor.Pos;
                             string blewT = null;
                             int links = 0, segs = 0;
+                            List<string> crossed = new List<string>();
                             List<string> playedT = new List<string>();
                             float tookT = 0f;
                             for (int attempt = 0; attempt < 3; attempt++)
@@ -932,7 +971,7 @@ namespace Morgott.ContentTool.Tactical
                                 high = pick;
                                 tried.Add(pick.Position);
                                 fromT = at;
-                                blewT = null; links = 0; segs = 0; playedT.Clear();
+                                blewT = null; links = 0; segs = 0; playedT.Clear(); crossed.Clear();
 
                                 float tt = Time.realtimeSinceStartup;
                                 try { move.Activate(high.ToTarget()); }
@@ -952,7 +991,21 @@ namespace Morgott.ContentTool.Tactical
                                             segs = p.Path.Count;
                                             int n = 0;
                                             for (int i = 0; i < segs; i++)
-                                                if (p.GetLinkForSegment(i) != null) n++;
+                                            {
+                                                Base.Levels.Nav.NavLink link = p.GetLinkForSegment(i);
+                                                if (link == null) continue;
+                                                n++;
+                                                // WHICH crossing it was, in the game's own vocabulary. The
+                                                // link count alone cannot tell an ascent of a whole level
+                                                // from a vault, and those are different capabilities with
+                                                // different def slots - GetClimbType:58-82 reads exactly
+                                                // this to pick the processor, so reading it here is the
+                                                // game's own answer to "what did it just cross".
+                                                foreach (ClimbPlan.Family f in ClimbPlan.Table)
+                                                    if (link.GetValidAreas().Contains(
+                                                            actor.TacticalNav.INavMesh.GetNavAreas(f.Area)) &&
+                                                        !crossed.Contains(f.Area)) crossed.Add(f.Area);
+                                            }
                                             if (n > links) links = n;
                                         }
                                     }
@@ -1009,7 +1062,9 @@ namespace Morgott.ContentTool.Tactical
                                 " offer(s) within " + Reach.ToString("F0") + "), ended " +
                                 left.ToString("F2") + " tile(s) short having changed height by " +
                                 dyGot.ToString("F2") + " in " + tookT.ToString("F2") + "s over " + links +
-                                " LINK segment(s) of " + segs + ", animator played [" +
+                                " LINK segment(s) of " + segs +
+                                (crossed.Count == 0 ? "" : " carrying [" +
+                                 string.Join(", ", crossed.ToArray()) + "]") + ", animator played [" +
                                 string.Join(" -> ", playedT.ToArray()) + "]" +
                                 (links > 0 ? " <- IT CROSSED A LINK, which is the point" : "") +
                                 (!arrived ? " <- IT DID NOT ARRIVE" : "") +
