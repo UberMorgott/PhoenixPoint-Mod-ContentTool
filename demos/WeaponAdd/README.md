@@ -8,9 +8,9 @@ are only half of it. The other half is a def.**
 > `"Dependencies": [ "com.morgott.ContentTool" ]`.
 >
 > **Nothing is written into your game files.** Unlike its sibling `WeaponMesh`, this demo does not
-> patch a shipped bundle: the model is served out of *this mod's own* bundle under *its own* catalog
-> key, and the weapon exists only while the mod is enabled. Switching the mod off removes it.
-> Disabling the mod un-publishes its key on the spot; there is no catalog.json edit to revert.
+> patch a shipped bundle: the models are served out of *this mod's own* bundle under *their own*
+> catalog keys. Disabling the mod un-publishes those keys on the spot, but defs already created stay
+> alive for the session; restart for a clean undo (`docs/SHIPPING-A-CONTENT-MOD.md:396-404`).
 
 Meet the **Vulture AR**, the **Vulture Sniper** and the **Vulture Sidearm** -- three `WeaponDef`s
 the game does not ship, sitting in the Phoenix base's inventory the moment a new campaign begins,
@@ -25,36 +25,59 @@ ContentTool engine -- `src\Tactical\WeaponBuild.cs`. This mod is one call and a 
 
 ```text
 WeaponAdd\
-  ppcontent.json                      THE INTERESTING FILE: two "publish" rows + a "weapons" array
+  ppcontent.json                      THE INTERESTING FILE: three "publish" rows + three weapons
   meta.json                           the mod manifest; AssemblyName = WeaponAdd.dll
   Content\Models\sniper.glb           the geometry, fitted to the shipped sniper's own box
-  Content\Models\ar181.glb            the Sketchfab download, UNMODIFIED - see SOURCES.md.
+  Content\Models\ar181.glb            the Sketchfab download, UNMODIFIED; attribution in SOURCES.md
                                       Multi-mesh; MeshMerge joins it at bake. It is worn.
+  Content\Models\nerf.glb             the Sketchfab download REDUCED - 211,120 -> 8,316 tris, three
+                                      512 atlases, turned onto +Z. See tools\reduce_nerf.py
   Content\Textures\sniper.png         1024 - named after the model, which is what binds it
   Icons\sniper_inv.png                450x450 - the inventory cell, rendered FROM sniper.glb
+  Icons\nerf_inv.png                  450x450 - the same, rendered FROM nerf.glb
   src\WeaponAddMain.cs                ONE CALL. The mechanism is ContentTool's WeaponBuild
   tools\fit_sniper.py                 orientation, scale AND the three EXT_ socket positions
+  tools\reduce_nerf.py                decimate + downsample a render asset into a game asset
   tools\render_icon.py                the icon, rasterised offline from the shipped .glb
   tools\downscale_atlas.ps1           2048 -> 1024, and why
-  tools\check_project.py             reads ppcontent.json the way the TOOL reads it
-  tools\source\                       the CC0 sniper kit as downloaded, so every step re-runs
-  SOURCES.md                          CC0 attribution, kept with the files
+  tools\check_project.py              reads ppcontent.json the way the TOOL reads it
+  tools\source\                       the CC0 sniper kit AND nerf_gun.glb as downloaded, so every
+                                      step re-runs from the original on a fresh clone
+  SOURCES.md                          source, author and licence for every shipped media file
 ```
 
 ## The three weapons
 
 | weapon | donor | model | shot | key manifest fields |
 |---|---|---|---|---|
-| **Vulture AR** | `SY_LaserAssaultRifle_WeaponDef` | `ar181.glb` | GREEN blobs -- `projectile` from `Crabman_Head_Spitter_WeaponDef` (DirectLine, PS startSize 3.0 = biggest blob in the game), `tint` `#4CFF5A` | `projectile`, `tint` |
+| **Vulture AR** | `SY_LaserAssaultRifle_WeaponDef` | `ar181.glb` | GREEN blobs -- `projectile` from `Crabman_Head_Spitter_WeaponDef`, `tint` `#4CFF5A` | `projectile`, `tint`, `offset` |
 | **Vulture Sniper** | `SY_LaserSniperRifle_WeaponDef` | `sniper.glb` | BLUE beam -- donor laser projectile, `tint` `#3FA9FF`, `trail` `0.6` (long TrailRenderer = visible beam) | `tint`, `trail`, `icon` |
-| **Vulture Sidearm** | `SY_LaserPistol_WeaponDef` | none (native art) | ORANGE beam -- `tint` `#FF7A14`, `flash` from `NJ_FlameThrower_WeaponDef` (igniter muzzle effect), fire damage + burning | `tint`, `flash`, `damagetype`, `keywords` |
+| **Vulture Sidearm** | `SY_LaserPistol_WeaponDef` | `nerf.glb` | ORANGE beam -- `tint` `#FF7A14`, `flash` from `NJ_FlameThrower_WeaponDef` (igniter muzzle effect), fire damage + burning | `tint`, `flash`, `damagetype`, `keywords`, `icon` |
 
-> **Two wear their own art, one wears its donor's.** The Sidearm declares no `"model"` and keeps
-> the `SimpleSkinDataDef` of the weapon it cloned -- it looks like that gun. Having it beside two
-> weapons that do wear their own art is what makes the difference legible.
+> **All three wear their own art**, and the Sidearm is the one that shows what a DOWNLOAD costs: as
+> published it is 211 120 triangles across 11 meshes with six 1024 atlases, 25x heavier than
+> anything Phoenix Point ships. `tools\reduce_nerf.py` takes it to 8 316 triangles and three 512
+> atlases in one pass. The current file is 10 112 412 B -> 909 976 B; `check_project.py` reads those
+> shipped bytes and all 8 316 triangles.
+
+## Rebuild the demo art
+
+- `fit_sniper.py` — rebuilds `sniper.glb` from the CC0 kit, turns and uniformly fits it to the
+  measured Phoenix sniper box, then prints shoot/aim/shell coordinates (`fit_sniper.py:3-27`,
+  `:149-163`).
+- `downscale_atlas.ps1` — rebuilds `sniper.png` at 1024 from the kit's 2048 atlas; the script checks
+  dimensions and sampled colours (`downscale_atlas.ps1:1-8`, `:31-47`).
+- `reduce_nerf.py` — always starts from `tools\source\nerf_gun.glb`; it bakes transforms, turns the
+  barrel to +Z, clusters 211 120 triangles to 8 316, and downsamples the three used base-colour
+  atlases from 1024 to 512 (`reduce_nerf.py:3-29`, `:328-411`).
+- `render_icon.py` — rasterises the shipped GLB into a 450x450 inventory icon. It and
+  `check_project.py` iterate every primitive of every mesh, so multi-material `nerf.glb` is rendered
+  and counted in full (`render_icon.py:92-105`, `check_project.py:121-134`).
 
 Verified in-game 2026-08-28, `D:\PP-Instance2`: `ar181_skin` renders at scale 0.553 = donor
-exactly; `sniper_skin` 0.819 = donor exactly.
+exactly; `sniper_skin` 0.819 = donor exactly. Sidearm verified 2026-08-29: `nerf_skin` at 0.1816
+under `gun_point_hand`, 0.182 m long against the donor `SY_LaserPistol`'s 0.306 m, one hand,
+firing.
 
 ## Install
 
@@ -126,6 +149,9 @@ Override the fit solver when it gives the wrong answer:
 - `scale`: float -- explicit uniform mesh scale, replaces the computed value.
 - `rotate`: `"x,y,z"` euler degrees -- explicit mesh rotation, replaces the axis-aligned auto
   rotation and `flip`.
+- `offset`: `"x,y,z"` metres -- added after the solve, so size and turn stay measured while the grip
+  moves. Derived sockets move with it (`WeaponBuild.cs:797-840`). The AR uses `0,-0.07,0`; the
+  Sniper uses `0,0,0.06` (`ppcontent.json:33-35`, `:50-53`).
 
 ## Muzzle flash and VFX binding
 
@@ -157,7 +183,8 @@ hand-written def gets wrong:
 | abilities | `Weapon_ShootAbilityDef`, `Overwatch_AbilityDef`, `Reload_AbilityDef`, `DropItem_AbilityDef` |
 | ammo | `CompatibleAmmunition`, `ChargesMax` -- the demo adds 10 clips to `StartingStorage` |
 | damage | `AutoFireShotCount`, `APToUsePerc` -- the burst and the AP cost are the shipped ones; only per-shot damage is changed |
-| tags | all donor tags (determines pose/animation via `EquipmentListDef` membership) |
+| tags | all donor tags |
+| pose/animation | clone appended beside the donor in equipment-filtered action defs and shared `EquipmentListDef`s (`WeaponBuild.cs:231-304`) |
 | sound | `ShootingEvent` + the Wwise `MainSwitch` |
 | visuals | `VisualEffects` and `ProjectileVisuals`, unless overridden by `flash`/`projectile`/`tint`/`trail` |
 

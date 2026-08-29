@@ -15,7 +15,7 @@ leave off: the route-specific folder, complete manifests, bake command, test and
 | Replace a video | `replace[].video` with `asset` | no | [Videos](videos.md#replace-a-shipped-video) |
 | Add a video | `replace[].video` without `asset` | only to trigger it | [Videos](videos.md#add-a-video) |
 | Build a creature from its own rig and clips | `creature` | yes | [Creature](creature.md) and [animation contract](animation-reference.md) |
-| Clone and add weapons | `weapons[]` | yes | [Weapon](weapon.md) |
+| Clone, add and fit weapons | `weapons[]` | yes | [Weapon and in-game fit workbench](weapon.md#fit-the-model-in-the-workbench) |
 
 One project may use any combination of these rows and folders. Read the
 [combined example](combined-example.md) if you are about to create one mod per asset type.

@@ -8,7 +8,7 @@ A folder without `meta.json` is invisible — PPModLoader discovers only TOP-LEV
 Copy an existing `meta.json`. The four rules:
 
 - **ID** `morgott.demo.<name>`, matching the project's `ppcontent.json` `"id"`.
-- **Name** `ContentTool Demo: <X>` — one prefix, so the six sort together among hundreds of mods.
+- **Name** `ContentTool Demo: <X>` — one prefix, so the ten sort together among hundreds of mods.
   The list uppercases it for you.
 - **Dependencies** `[ "com.morgott.ContentTool" ]`. It is enforced: a missing dependency makes the
   mod un-enablable (`ModEntry.cs:53-63`), and enabling a demo auto-enables ContentTool

@@ -24,6 +24,10 @@ may be redistributed with this repository without restriction.
   untouched, only the colours move. CC0, same as the original.
 - The kit's `T_Guns_Batch1_Normal.png` and `T_Guns_Batch1_ORM.png` are **not** shipped. See the
   README for why they would be dead files here.
+- **`T_Guns_Batch1_BaseColor.png` itself is not in this repository either** — unlike the sniper
+  demo, which keeps its `T_Guns_Batch2_BaseColor.png` under `tools\source\`. Nothing is lost: it is
+  in the CC0 kit linked above, and `tools\grimdark.ps1` re-runs the moment you drop it into
+  `tools\source\`. It is named here so its absence is a known fact rather than a discovery.
 
 ## The neutral maps
 

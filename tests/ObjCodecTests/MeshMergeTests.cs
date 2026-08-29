@@ -220,7 +220,8 @@ internal static class MeshMergeTests
         Ok(FitBox.RotationToZ(2, false)[1] == 0f, "a gun already on +Z is not turned");
 
         float scale; float[] offset; string why;
-        Ok(FitBox.Solve(sc, se, tc, te, out scale, out offset, out why), "a normal fit solves: " + why);
+        // null rotation = the identity case, unchanged by the turn-aware solve.
+        Ok(FitBox.Solve(sc, se, tc, te, null, out scale, out offset, out why), "a normal fit solves: " + why);
 
         // SMALLEST ratio wins, so the result fits INSIDE the reserved box on every axis. Here that is
         // Y: 0.11355/0.06 = 1.89, against X 0.0755 and Z 11.5 - so X, the tightest, actually governs.
@@ -242,7 +243,7 @@ internal static class MeshMergeTests
                        offset[2].ToString("0.000") + ", rotate " + euler[1] + " deg");
 
         // A flat or empty mesh has no meaningful fit and must be refused rather than divided by.
-        Ok(!FitBox.Solve(sc, new[] { 0.5f, 0f, 0.04f }, tc, te, out scale, out offset, out why),
+        Ok(!FitBox.Solve(sc, new[] { 0.5f, 0f, 0.04f }, tc, te, null, out scale, out offset, out why),
            "a mesh with no thickness is refused");
         Ok(why != null && why.Contains("thickness"), "and the refusal says why: " + why);
     }

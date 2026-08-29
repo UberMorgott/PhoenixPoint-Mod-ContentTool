@@ -120,9 +120,13 @@ def main():
             fail("%s references an EXTERNAL buffer - a mod must ship one self-contained file" % glb)
         # Embedded images are now a FEATURE, not a fault: the bake decodes them and binds them to
         # _MainTex, which is what lets a downloaded model arrive painted. This used to fail here.
-        prim = js["meshes"][0]["primitives"][0]
-        verts = js["accessors"][prim["attributes"]["POSITION"]]["count"]
-        tris = js["accessors"][prim["indices"]]["count"] // 3
+        # EVERY primitive of every mesh. Counting only the first one reported a third of ar181 and
+        # a third of nerf, both of which carry one primitive per material.
+        verts = tris = 0
+        for mesh in js["meshes"]:
+            for prim in mesh["primitives"]:
+                verts += js["accessors"][prim["attributes"]["POSITION"]]["count"]
+                tris += js["accessors"][prim["indices"]]["count"] // 3
         print("ok   publish  key %s  ->  %s   (%s)" % (key, asset, kind))
         print("ok   model    %s  %d verts / %d tris / %d bytes" % (stem + ".glb", verts, tris, len(data)))
         print("ok   texture  %s" % (("%s.png  %d bytes" % (stem, os.path.getsize(png)))

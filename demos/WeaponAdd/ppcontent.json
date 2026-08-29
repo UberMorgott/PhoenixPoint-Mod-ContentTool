@@ -14,6 +14,12 @@
       "asset": "models/ar181",
       "type":  "GameObject",
       "deps":  "defaultlocalgroup_unitybuiltinshaders.bundle"
+    },
+    {
+      "key":   "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b62",
+      "asset": "models/nerf",
+      "type":  "GameObject",
+      "deps":  "defaultlocalgroup_unitybuiltinshaders.bundle"
     }
   ],
 
@@ -26,6 +32,7 @@
       "blurb":  "A Synedrion laser carbine the Phoenix armoury rebuilt around a Pandoran acid emitter. It spits fat green globs at a rate no laser was rated for, and groups like something cheaper.",
       "model":  "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b61",
       "fit":    "auto",
+      "offset": "0,-0.07,0",
       "projectile": "Crabman_Head_Spitter_WeaponDef",
       "tint":   "#4CFF5A",
       "damage": "45",
@@ -34,6 +41,8 @@
       "clips":  "10"
     },
     {
+      "rotate": "-4,-0.5,2",
+      "scale": "0.9497",
       "id":     "Morgott_VultureSniper_WeaponDef",
       "name":   "Vulture Sniper",
       "clone":  "SY_LaserSniperRifle_WeaponDef",
@@ -42,6 +51,7 @@
       "icon":   "Icons\\sniper_inv.png",
       "model":  "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b60",
       "fit":    "auto",
+      "offset": "0,-0.02,-0.09",
       "trail":  "0.6",
       "tint":   "#3FA9FF",
       "damage": "60",
@@ -50,11 +60,17 @@
       "clips":  "10"
     },
     {
+      "offset": "-0.01,0,-0.062",
+      "rotate": "0,-10,0",
+      "scale": "0.2416",
       "id":     "Morgott_VultureSidearm_WeaponDef",
       "name":   "Vulture Sidearm",
       "clone":  "SY_LaserPistol_WeaponDef",
       "guid":   "c7a9f1d2-4b6e-4a3c-8f5b-7d1e9a2c4b21",
       "blurb":  "A Synedrion laser sidearm with the safeties argued out of it and a flame-thrower's igniter bolted where the heat sink used to be. One hand, one very bright orange bolt, and what it hits keeps burning.",
+      "icon":   "Icons\\nerf_inv.png",
+      "model":  "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b62",
+      "fit":    "auto",
       "tint":   "#FF7A14",
       "flash":  "NJ_FlameThrower_WeaponDef",
       "damage": "75",

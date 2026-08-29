@@ -68,6 +68,10 @@ namespace Morgott.ContentTool.Tactical
                 DefRepository repo = GameUtl.GameComponent<DefRepository>();
                 foreach (Entry e in entries)
                 {
+                    // WHICH FILE THIS ENTRY CAME FROM, carried on the entry itself. Every content mod
+                    // has its own ppcontent.json and two of them may declare the same weapon id, so a
+                    // dialled fit that only knows the id has nowhere honest to save to.
+                    e.manifest = meta;
                     try
                     {
                         WeaponDef def = One(repo, modDir, e, log);
@@ -435,16 +439,17 @@ namespace Morgott.ContentTool.Tactical
                 }
             }
 
-            bool wantsTint = !string.IsNullOrEmpty(e.tint);
-            if (wantsTint || e.trail > 0f)
+            // TWO INDEPENDENT KEYS. A mistyped "tint" used to skip Repaint altogether and take a
+            // perfectly valid "trail" down with it, silently: the refusal named the colour and said
+            // nothing about the trail that never got applied.
+            float[] rgb = null;
+            string vfxWhy;
+            if (!string.IsNullOrEmpty(e.tint) && !HexColor.TryParse(e.tint, out rgb, out vfxWhy))
             {
-                float[] rgb = null;
-                string why;
-                if (wantsTint && !HexColor.TryParse(e.tint, out rgb, out why))
-                    said.Add("tint REFUSED: " + why);
-                else
-                    said.Add(Repaint(repo, def, e, rgb));
+                said.Add("tint REFUSED: " + vfxWhy);
+                rgb = null;
             }
+            if (rgb != null || e.trail > 0f) said.Add(Repaint(repo, def, e, rgb));
 
             return said.Count == 0 ? "" : "; shot [" + string.Join(", ", said.ToArray()) + "]";
         }
@@ -750,7 +755,17 @@ namespace Morgott.ContentTool.Tactical
                 return false;
             }
 
-            Bounds src = mine.sharedMesh.bounds, dst = donor.sharedMesh.bounds;
+            // THE DONOR'S BOX HAS TO BE READ IN THE DONOR'S ROOT FRAME, not in its mesh's own.
+            // sharedMesh.bounds is measured in the MESH's local space, but the fit and the four
+            // sockets are written in the PREFAB ROOT's space - and those two are the same space only
+            // when the donor's mesh sits on its root at identity. MEASURED live on D:\PP-Instance2:
+            // the sniper's WPN_SYN_Laser_Sniper_V01_mesh does sit at identity and its clone was
+            // right; the assault rifle's WPN_SY_Laser_Assault_V01_mesh hangs off its root at
+            // (-0.003, 0.041, 0.116), and the cloned gun rendered exactly that far below and behind
+            // the hand - the right size, in the wrong place. Carrying the box up into the root frame
+            // first is what makes "the donor's own box" mean the box the PLAYER sees.
+            Matrix4x4 toRoot = donorGo.transform.worldToLocalMatrix * donor.transform.localToWorldMatrix;
+            Bounds src = mine.sharedMesh.bounds, dst = Rebase(toRoot, donor.sharedMesh.bounds);
             float[] se = { src.extents.x, src.extents.y, src.extents.z };
             int longAxis = FitBox.LongAxis(se);
             // "rotate" and "scale" are the two escape hatches the MEASUREMENT cannot supply. A
@@ -763,15 +778,19 @@ namespace Morgott.ContentTool.Tactical
             Transform node = FitNode(prefab);
             node.localRotation = Quaternion.Euler(euler[0], euler[1], euler[2]);
 
-            // The box AFTER the turn: rotating by whole right angles permutes the extents, so the
-            // solve must see the extents the mesh will actually present once it is facing +Z.
-            float[] turned = longAxis == 0 ? new[] { se[2], se[1], se[0] }
-                           : longAxis == 1 ? new[] { se[0], se[2], se[1] }
-                           : se;
+            // THE SOLVE IS DONE THROUGH THE TURN, both halves of it. The node carries the rotation as
+            // well as the scale and the offset, so the box the scale is measured against is the
+            // TURNED box and the centre the offset has to land is the TURNED centre. The rotation is
+            // read back off the matrix Unity derives from the very quaternion the node now holds, so
+            // no Euler convention is re-implemented here and a DECLARED "rotate" goes through exactly
+            // the same algebra as a measured one - the old extent permutation was keyed on longAxis
+            // and was therefore simply wrong whenever the manifest declared its own rotation.
+            Matrix4x4 rm = Matrix4x4.Rotate(node.localRotation);
+            float[] rot = { rm.m00, rm.m01, rm.m02, rm.m10, rm.m11, rm.m12, rm.m20, rm.m21, rm.m22 };
             float scale; float[] offset; string why;
-            if (!FitBox.Solve(new[] { src.center.x, src.center.y, src.center.z }, turned,
+            if (!FitBox.Solve(new[] { src.center.x, src.center.y, src.center.z }, se,
                               new[] { dst.center.x, dst.center.y, dst.center.z },
-                              new[] { dst.extents.x, dst.extents.y, dst.extents.z },
+                              new[] { dst.extents.x, dst.extents.y, dst.extents.z }, rot,
                               out scale, out offset, out why))
             {
                 Debug.Log("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': " + why);
@@ -781,13 +800,21 @@ namespace Morgott.ContentTool.Tactical
 
             if (e.scale > 0f)
             {
-                // The centre still has to land on the donor's, or an explicit scale moves the gun
-                // out of the hand as well as resizing it: offset = target centre - scale x source centre.
+                // The centre still has to land on the donor's, or an explicit scale moves the gun out
+                // of the hand as well as resizing it - and through the SAME turn the node carries:
+                // offset = target centre - scale x (R x source centre).
                 scale = e.scale;
-                offset = new[] { dst.center.x - scale * src.center.x,
-                                 dst.center.y - scale * src.center.y,
-                                 dst.center.z - scale * src.center.z };
+                Vector3 c = node.localRotation * src.center;
+                offset = new[] { dst.center.x - scale * c.x,
+                                 dst.center.y - scale * c.y,
+                                 dst.center.z - scale * c.z };
             }
+            // "offset" is a NUDGE, not a replacement: the solve still centres the gun in the donor's
+            // box and this is added on top, so a manifest that declares one keeps the measured size
+            // and turn and only says "and a little lower, and a little back". A grip is not a box
+            // centre and nothing in a .glb says where it is, so this is the eye's own correction.
+            Remember(e, prefab, node, true, src, dst, new Vector3(offset[0], offset[1], offset[2]), euler, scale);
+            offset[0] += e.offset.x; offset[1] += e.offset.y; offset[2] += e.offset.z;
             node.localScale = new Vector3(scale, scale, scale);
             node.localPosition = new Vector3(offset[0], offset[1], offset[2]);
             Debug.Log("[ContentTool] ct_weapon fit '" + e.id + "' into " + e.clone + "'s own box: long axis " +
@@ -809,8 +836,28 @@ namespace Morgott.ContentTool.Tactical
             // NO COUNTER-SCALING ANY MORE. The fit lives on the CT_Fit node, not on the root, and the
             // sockets are the root's own children (Socket() never touches CT_Fit), so root-local space
             // IS the donor's space and a donor coordinate q is written as q.
+            // THE SOCKETS MOVE WITH THE GUN. They are derived from the box the gun occupies, and an
+            // "offset" moves that box - leave dst alone and the muzzle stays where the donor's was
+            // while the barrel is somewhere else, which is exactly the silent divergence the socket
+            // check exists to catch.
+            dst.center += e.offset;
             Sockets(dst, out shoot, out aim, out shell);
             return true;
+        }
+
+        /// <summary>
+        /// A box carried into another frame: the centre goes through the matrix, and the
+        /// axis-aligned extent of the turned box is |M| x extent - the same absolute-value product
+        /// FitBox.Solve uses for the fit node's own rotation.
+        /// </summary>
+        private static Bounds Rebase(Matrix4x4 m, Bounds b)
+        {
+            Vector3 e = b.extents;
+            Vector3 ext = new Vector3(
+                Mathf.Abs(m.m00) * e.x + Mathf.Abs(m.m01) * e.y + Mathf.Abs(m.m02) * e.z,
+                Mathf.Abs(m.m10) * e.x + Mathf.Abs(m.m11) * e.y + Mathf.Abs(m.m12) * e.z,
+                Mathf.Abs(m.m20) * e.x + Mathf.Abs(m.m21) * e.y + Mathf.Abs(m.m22) * e.z);
+            return new Bounds(m.MultiplyPoint3x4(b.center), ext * 2f);
         }
 
         /// <summary>
@@ -865,10 +912,468 @@ namespace Morgott.ContentTool.Tactical
         /// seam as the auto fit: written to CT_Fit, because on the root the engine erases them.</summary>
         private static void Override(GameObject prefab, Entry e)
         {
-            if (!e.declaresRotate && e.scale <= 0f) return;
             Transform node = FitNode(prefab);
+            // The position the baked mesh child already carries IS this entry's solved value: there is
+            // no solve here, so "offset" nudges that, which is the same rule either way. It is read
+            // BEFORE the nudge so that re-reading the manifest lands in the same place twice.
+            Vector3 baseline = node.localPosition;
             if (e.declaresRotate) node.localRotation = Quaternion.Euler(e.rotate.x, e.rotate.y, e.rotate.z);
             if (e.scale > 0f) node.localScale = new Vector3(e.scale, e.scale, e.scale);
+            node.localPosition = baseline + e.offset;
+            // WHAT IS ON SCREEN, not what was on screen before the override. The first version
+            // remembered the PRE-override numbers, so ct_fit printed a block that reproduced a
+            // different gun from the one being looked at.
+            float[] euler = e.declaresRotate
+                ? new[] { e.rotate.x, e.rotate.y, e.rotate.z }
+                : new[] { node.localEulerAngles.x, node.localEulerAngles.y, node.localEulerAngles.z };
+            Remember(e, prefab, node, false, new Bounds(), new Bounds(), baseline, euler, node.localScale.x);
+        }
+
+        // ---------------------------------------------------------------- dialling a fit in, LIVE
+
+        /// <summary>
+        /// What a fit ended up being, per weapon, so <see cref="Fit(string[])"/> can nudge it and
+        /// print the manifest block that would reproduce the result. The SOLVED position is kept
+        /// apart from the declared nudge because those are the two halves the manifest separates:
+        /// "fit": "auto" writes <c>solved</c> and "offset" is only ever the difference.
+        /// </summary>
+        private sealed class Dialled
+        {
+            /// <summary>The ppcontent.json this entry was read from, and the entry itself. WITHOUT
+            /// THESE THERE IS NOWHERE TO SAVE TO: two content mods may declare the same weapon id, so
+            /// an id alone names no file - and a save into the wrong mod's manifest silently retunes a
+            /// weapon its author never touched.</summary>
+            internal string manifest;
+            internal Entry entry;
+            internal GameObject prefab;      // the prefab ROOT - where the four EXT_ sockets live
+            internal Transform node;         // the mesh child the fit is written to (never the root)
+            /// <summary>Whether the position is SOLVED from the two boxes ("fit": "auto") or is simply
+            /// the place the baked mesh already sat. The difference decides whether a live rotation or
+            /// scale change moves the gun on reload.</summary>
+            internal bool auto;
+            internal Bounds src, dst;        // the model's own mesh box, and the donor's in root space
+            internal Vector3 solved;         // where the manifest's own solve puts it AT THESE numbers
+            internal Vector3 offset;         // manifest "offset" - the live position is solved + offset
+            internal float[] euler;
+            internal float scale;
+
+            /// <summary>The last three numbers that were READ FROM or WRITTEN TO the manifest. Nothing
+            /// else in this class knows the difference between "this is what the file says" and "this
+            /// is what I have been nudging for ten minutes", and that difference is the only thing
+            /// standing between an experiment and a gun the author thinks he has ruined.</summary>
+            internal Vector3 savedOffset;
+            internal float[] savedEuler;
+            internal float savedScale;
+
+            internal void MarkSaved()
+            {
+                savedOffset = offset;
+                savedEuler = new[] { euler[0], euler[1], euler[2] };
+                savedScale = scale;
+            }
+        }
+
+        private static readonly Dictionary<string, Dialled> dialled = new Dictionary<string, Dialled>();
+
+        /// <summary>The key: id AND the file it came from, so two mods declaring the same weapon id
+        /// cannot overwrite each other's live fit.</summary>
+        private static string Key(Entry e) { return e.id + " @ " + e.manifest; }
+
+        private static void Remember(Entry e, GameObject prefab, Transform node, bool auto,
+                                     Bounds src, Bounds dst, Vector3 solved, float[] euler, float scale)
+        {
+            Dialled f = new Dialled
+            {
+                manifest = e.manifest, entry = e, prefab = prefab, node = node, auto = auto,
+                src = src, dst = dst, solved = solved, offset = e.offset,
+                euler = new[] { euler[0], euler[1], euler[2] }, scale = scale
+            };
+            // Straight off the manifest, so a fit nobody has touched reads SAVED rather than MODIFIED.
+            f.MarkSaved();
+            dialled[Key(e)] = f;
+        }
+
+        /// <summary>
+        /// Has this fit been nudged since it was last read from or written to its manifest? The panel's
+        /// SAVED / MODIFIED line, and the whole of it - the comparison itself is
+        /// <see cref="Dev.BenchList.Same"/>, which is engine-free and therefore asserted offline.
+        ///
+        /// A key with no live fit answers false: there is nothing on screen to have modified.
+        /// </summary>
+        public static bool Modified(string key)
+        {
+            Dialled f;
+            if (!dialled.TryGetValue(key, out f)) return false;
+            return !Dev.BenchList.Same(f.scale, f.euler, new[] { f.offset.x, f.offset.y, f.offset.z },
+                                       f.savedScale, f.savedEuler,
+                                       new[] { f.savedOffset.x, f.savedOffset.y, f.savedOffset.z }, 1e-5f);
+        }
+
+        // ---------------------------------------------------------------- the service the UI calls
+
+        /// <summary>Every weapon whose fit is live this session, as "&lt;id&gt; @ &lt;manifest path&gt;".</summary>
+        public static List<string> Fitted() { return new List<string>(dialled.Keys); }
+
+        /// <summary>What is on screen right now for one key - and it IS what is on screen: position is
+        /// the node's own, the rest is the state the manifest would be written from.</summary>
+        public static bool State(string key, out Vector3 position, out Vector3 euler, out float scale,
+                                 out Vector3 offset)
+        {
+            position = euler = offset = Vector3.zero; scale = 0f;
+            Dialled f;
+            if (!dialled.TryGetValue(key, out f) || f.node == null) return false;
+            position = f.node.localPosition;
+            euler = new Vector3(f.euler[0], f.euler[1], f.euler[2]);
+            scale = f.scale;
+            offset = f.offset;
+            return true;
+        }
+
+        /// <summary>A RELATIVE change - any axis of position or rotation, and the scale, in one call.
+        /// Pass zeroes for the channels that are not moving; per-axis is a delta with two zeroes.</summary>
+        public static string Adjust(string key, Vector3 dPosition, Vector3 dEuler, float dScale)
+        {
+            Dialled f;
+            string why = Dial(key, out f);
+            if (why != null) return why;
+            f.offset += dPosition;
+            f.euler[0] += dEuler.x; f.euler[1] += dEuler.y; f.euler[2] += dEuler.z;
+            f.scale = Mathf.Max(0.0001f, f.scale + dScale);
+            return Applied(key, f);
+        }
+
+        /// <summary>The same three channels, ABSOLUTE. Position is where the mesh child is to sit;
+        /// the "offset" the manifest will carry is derived from it, never the other way round.</summary>
+        public static string Set(string key, Vector3 position, Vector3 euler, float scale)
+        {
+            Dialled f;
+            string why = Dial(key, out f);
+            if (why != null) return why;
+            f.euler = new[] { euler.x, euler.y, euler.z };
+            f.scale = Mathf.Max(0.0001f, scale);
+            // The turn and the size are applied FIRST, because on an auto fit they move the solved
+            // centre - and "put it here" has to mean here, not here-before-the-solve-moved.
+            Resolve(f);
+            f.offset = position - f.solved;
+            return Applied(key, f);
+        }
+
+        private static string Dial(string key, out Dialled f)
+        {
+            if (!dialled.TryGetValue(key, out f)) return "ct_fit: '" + key + "' is not a fitted weapon";
+            return f.node == null ? "ct_fit: '" + key + "' lost its prefab" : null;
+        }
+
+        /// <summary>
+        /// THE STORED STATE MADE TRUE ON SCREEN - and it is the SAME algebra a reload runs, which is
+        /// the whole of the round-trip guarantee. On an auto fit the solved position is a function of
+        /// the turn and the scale (offset = donor centre - scale x R x source centre, exactly as
+        /// <see cref="Fit"/> computes it for a DECLARED scale), so changing either has to re-solve or
+        /// the block printed afterwards reloads as a different gun. That was the bug: rotation and
+        /// scale were reported from the cache while the offset was measured against a stale solve.
+        /// </summary>
+        private static void Resolve(Dialled f)
+        {
+            f.node.localRotation = Quaternion.Euler(f.euler[0], f.euler[1], f.euler[2]);
+            f.node.localScale = new Vector3(f.scale, f.scale, f.scale);
+            if (f.auto) f.solved = f.dst.center - f.scale * (f.node.localRotation * f.src.center);
+        }
+
+        private static string Applied(string key, Dialled f)
+        {
+            Resolve(f);
+            f.node.localPosition = f.solved + f.offset;
+            Sync(f);
+            int moved = Follow(f);
+            return Blocks(key) + "\n" + moved + " live instance(s) followed";
+        }
+
+        /// <summary>
+        /// The four EXT_ sockets, re-derived for where the gun now is. WITHOUT THIS the muzzle, the
+        /// sights and the ejection port stay where the fit first put them while the barrel moves -
+        /// projectiles leave from EXT_ShootPoint and the flash spawns there (Weapon.cs:389-397), so a
+        /// live nudge would desync the firing geometry from the gun the player sees.
+        ///
+        /// ONLY for an auto fit: an entry that DECLARES its sockets owns those coordinates, the save
+        /// path never writes them, and moving them live would be a change that does not survive a
+        /// reload - which is exactly what this whole seam exists to prevent.
+        /// </summary>
+        private static void Sync(Dialled f)
+        {
+            if (!f.auto || f.prefab == null) return;
+            Bounds box = f.dst;
+            box.center += f.offset;
+            Vector3 shoot, aim, shell;
+            Sockets(box, out shoot, out aim, out shell);
+            Place(f.prefab, f.entry, shoot, aim, shell, "live");
+        }
+
+        /// <summary>
+        /// The manifest's three keys written back into the file this entry came from. The write itself
+        /// is <see cref="WeaponManifest.Save"/> - a validated splice that preserves every other byte.
+        /// </summary>
+        public static string Save(string key)
+        {
+            Dialled f;
+            string held = Dial(key, out f);
+            if (held != null) return held;
+            string why;
+            string wrote = WeaponManifest.Save(f.manifest, f.entry.id, f.scale, f.euler,
+                                               new[] { f.offset.x, f.offset.y, f.offset.z }, out why);
+            if (wrote == null)
+                return "ct_fit save REFUSED for '" + f.entry.id + "': " + why + " -> " + f.manifest;
+            // THE ONLY PLACE IN THIS FILE THAT WRITES A BYTE. Everything else - every Adjust, every
+            // Set, Auto, the whole workbench - moves a Transform and a few floats in memory, so an
+            // experiment costs nothing until this line has run.
+            f.MarkSaved();
+            return "ct_fit saved '" + f.entry.id + "' into " + wrote + "\n" + Blocks(key);
+        }
+
+        /// <summary>
+        /// ============ START OVER: THE AUTOMATIC SOLVE, WITH EVERY OVERRIDE IGNORED ============
+        ///
+        /// The second of the two undo levels the panel offers, and the deeper one. <see cref="Reload"/>
+        /// goes back to WHAT THE MANIFEST SAYS - which is the right answer for "I have been nudging and
+        /// I want the last save back", and the wrong one once a bad fit has been SAVED. This goes back
+        /// to what the mod would compute with no <c>offset</c>, <c>rotate</c> or <c>scale</c> at all:
+        /// the long axis turned onto +Z and <see cref="FitBox.Solve"/> matching the model's own box to
+        /// the donor's, exactly as <c>Fit</c> does it on a fresh load.
+        ///
+        /// ADDITIVE BY CONSTRUCTION. It re-runs the existing solve against the two boxes already
+        /// remembered on the record and then hands the result to the existing
+        /// <see cref="Applied(string, Dialled)"/> - no algebra, no socket rule and no save path is
+        /// touched, and nothing is written to disk: the author still has to press SAVE.
+        /// </summary>
+        public static string Auto(string key)
+        {
+            Dialled f;
+            string held = Dial(key, out f);
+            if (held != null) return held;
+            if (!f.auto)
+                return "ct_fit auto REFUSED for '" + f.entry.id + "': this entry is not an auto fit - " +
+                       "its model was placed offline and there is no solve to go back to. REVERT " +
+                       "(reload) is the undo for it.";
+
+            float[] se = { f.src.extents.x, f.src.extents.y, f.src.extents.z };
+            float[] euler = FitBox.RotationToZ(FitBox.LongAxis(se), f.entry.flip);
+            Matrix4x4 rm = Matrix4x4.Rotate(Quaternion.Euler(euler[0], euler[1], euler[2]));
+            float[] rot = { rm.m00, rm.m01, rm.m02, rm.m10, rm.m11, rm.m12, rm.m20, rm.m21, rm.m22 };
+            float scale; float[] offset; string why;
+            if (!FitBox.Solve(new[] { f.src.center.x, f.src.center.y, f.src.center.z }, se,
+                              new[] { f.dst.center.x, f.dst.center.y, f.dst.center.z },
+                              new[] { f.dst.extents.x, f.dst.extents.y, f.dst.extents.z }, rot,
+                              out scale, out offset, out why))
+                return "ct_fit auto REFUSED for '" + f.entry.id + "': " + why;
+
+            f.euler = euler;
+            f.scale = scale;
+            f.offset = Vector3.zero;                 // "offset" IS the manual nudge; auto has none
+            return "ct_fit '" + f.entry.id + "' reset to the AUTOMATIC solve - every manual override " +
+                   "(offset, rotate, scale) discarded. NOTHING was written: " + f.manifest +
+                   " still says what it said. Press SAVE to keep this, or REVERT to go back to it.\n" +
+                   Applied(key, f);
+        }
+
+        /// <summary>
+        /// This ONE entry re-read from its manifest and re-applied, live.
+        ///
+        /// NOT <see cref="Build"/>, and the reason is two-fold: <see cref="One"/> returns early for a
+        /// def that already exists (:91-95) so nothing would be re-fitted at all, and Build calls
+        /// <see cref="Seed"/>, which appends another weapon and another clip row to EVERY difficulty's
+        /// StartingStorage on every run.
+        /// </summary>
+        public static string Reload(string key)
+        {
+            Dialled f;
+            string held = Dial(key, out f);
+            if (held != null) return held;
+            Entry fresh = null;
+            try
+            {
+                foreach (Entry x in Parse(File.ReadAllText(f.manifest)))
+                    if (x.id == f.entry.id) { x.manifest = f.manifest; fresh = x; }
+            }
+            catch (Exception ex) { return "ct_fit reload REFUSED: " + f.manifest + " " + ex.Message; }
+            if (fresh == null)
+                return "ct_fit reload REFUSED: '" + f.entry.id + "' is no longer in " + f.manifest;
+
+            f.entry = fresh;
+            // ponytail: an undeclared scale or rotation keeps what is on screen rather than re-running
+            // FitBox against the donor - after any save the manifest declares all three, so this only
+            // ever holds for a reload of an entry that was never dialled. Re-enable the mod for that.
+            if (fresh.declaresRotate) f.euler = new[] { fresh.rotate.x, fresh.rotate.y, fresh.rotate.z };
+            if (fresh.scale > 0f) f.scale = fresh.scale;
+            f.offset = fresh.offset;
+            // What is on screen is now what the file says, so the panel reads SAVED again.
+            f.MarkSaved();
+            return "ct_fit reloaded '" + fresh.id + "' from " + f.manifest + "\n" + Applied(key, f);
+        }
+
+        /// <summary>The paste-ready manifest block for one key, or all of them.</summary>
+        public static string Report(string key) { return Blocks(key); }
+
+        /// <summary>
+        /// ct_fit - move a built weapon's mesh in the LIVE scene and read the numbers back.
+        ///
+        /// WHY THIS EXISTS. A bounding-box fit aligns CENTRES, and a hand grips a GRIP: nothing in a
+        /// .glb says where the trigger is, so the last centimetres are a thing only an eye can judge.
+        /// Rebuilding to try a number means a bake and a relaunch per guess; this moves the gun in the
+        /// soldier's hand while you are looking at it, and then prints exactly what to paste.
+        ///
+        /// BOTH THE ASSET AND WHAT IS ALREADY IN THE HAND. The fit lives on the prefab asset, so a
+        /// weapon equipped BEFORE the nudge holds an instance that copied the old numbers. Live
+        /// instances are found by the one thing that cannot lie about identity - they share the
+        /// prefab's sharedMesh - so no name matching and no walk through the equipment model.
+        /// </summary>
+        public static string Fit(string[] args)
+        {
+            if (dialled.Count == 0)
+                return "ct_fit: no weapon has been fitted this session. Enable the mod (or run " +
+                       "'ct_project <mod>') and give a soldier the weapon first.";
+            if (args == null || args.Length == 0 || args[0] == "show")
+                return Blocks(null);
+
+            string want = args[0];
+            List<string> hits = new List<string>();
+            foreach (string key in dialled.Keys)
+                if (dialled[key].entry.id == want) { hits.Clear(); hits.Add(key); break; }
+                else if (key.IndexOf(want, StringComparison.OrdinalIgnoreCase) >= 0) hits.Add(key);
+            if (hits.Count != 1)
+                return "ct_fit: '" + want + "' matches " + hits.Count + " of " +
+                       string.Join(", ", new List<string>(dialled.Keys).ToArray());
+            string key1 = hits[0];
+            if (args.Length < 2) return Blocks(key1);
+
+            // ONE SERVICE UNDERNEATH. Every verb here is the same call the workbench UI makes, so a
+            // fix to the algebra cannot reach one of them and miss the other.
+            Vector3 pos, euler, offset; float scale;
+            State(key1, out pos, out euler, out scale, out offset);
+            string verb = args[1];
+            string arg = args.Length >= 3 ? args[2] : null;
+            switch (verb)
+            {
+                case "save":   return Save(key1);
+                case "reload": return Reload(key1);
+                case "move":   return Adjust(key1, Vec3(Need(arg, verb)), Vector3.zero, 0f);
+                case "turn":   return Adjust(key1, Vector3.zero, Vec3(Need(arg, verb)), 0f);
+                case "pos":    return Set(key1, Vec3(Need(arg, verb)), euler, scale);
+                case "rot":    return Set(key1, pos, Vec3(Need(arg, verb)), scale);
+                case "scale":  return Set(key1, pos, euler, P(Need(arg, verb)));
+                // Bare "x,y,z" is a position nudge - what ct_fit has always meant.
+                default:       return Adjust(key1, Vec3(verb), Vector3.zero, 0f);
+            }
+        }
+
+        private static string Need(string arg, string verb)
+        {
+            if (arg == null)
+                throw new InvalidDataException("ct_fit " + verb + " wants a value: move/turn/pos/rot " +
+                                               "take \"x,y,z\", scale takes one number");
+            return arg;
+        }
+
+        /// <summary>
+        /// Every live copy of this prefab's mesh gets the node's numbers. Reference equality on
+        /// sharedMesh is the identity test; the prefab's own node is skipped, it was just set.
+        ///
+        /// AND THE SOCKETS WITH IT. <see cref="Sync"/> writes the four EXT_ empties on the prefab
+        /// ASSET, but a gun already in a soldier's hand is an INSTANCE that copied the old ones - so
+        /// without this the muzzle and the sights stay where they were while the barrel moves, and the
+        /// shot leaves from thin air. They are copied off the prefab by name, so whatever Sync just
+        /// decided is what the instance gets.
+        /// </summary>
+        private static int Follow(Dialled f)
+        {
+            Transform node = f.node;
+            MeshFilter self = node.GetComponent<MeshFilter>();
+            if (self == null || self.sharedMesh == null) return 0;
+            int n = 0;
+            foreach (MeshFilter mf in Resources.FindObjectsOfTypeAll<MeshFilter>())
+            {
+                if (mf == null || mf == self || mf.sharedMesh != self.sharedMesh) continue;
+                if (!mf.gameObject.scene.IsValid()) continue;   // an asset, not something on screen
+                mf.transform.localPosition = node.localPosition;
+                mf.transform.localRotation = node.localRotation;
+                mf.transform.localScale = node.localScale;
+                Transform root = mf.transform.parent;
+                if (root != null && f.prefab != null)
+                    foreach (string socket in SocketNames)
+                    {
+                        Transform mine = f.prefab.transform.Find(socket), theirs = root.Find(socket);
+                        if (mine != null && theirs != null) theirs.localPosition = mine.localPosition;
+                    }
+                n++;
+            }
+            return n;
+        }
+
+        private static readonly string[] SocketNames =
+            { "EXT_ShootPoint", "EXT_AimPoint", "EXT_AimIKPoint", "EXT_ShellPoint" };
+
+        /// <summary>The paste-ready manifest block(s): what the solve produced, and the "offset" that
+        /// turns the solve into what is on screen right now.</summary>
+        private static string Blocks(string only)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            foreach (KeyValuePair<string, Dialled> kv in dialled)
+            {
+                if (only != null && kv.Key != only) continue;
+                Dialled f = kv.Value;
+                if (f.node == null) continue;
+                // THE STATE, NOT A RE-DERIVATION. The offset printed used to be measured against a
+                // solve that a live rotation or scale change had already invalidated, so the block
+                // reloaded as a different gun from the one on screen. Everything printed here is now
+                // the same three values Save writes and Resolve applies.
+                Vector3 off = f.offset;
+                sb.Append(kv.Key).Append("\n")
+                  .Append("  \"scale\": \"").Append(f.scale.ToString("0.0000", CultureInfo.InvariantCulture)).Append("\",\n")
+                  .Append("  \"rotate\": \"").Append(f.euler[0].ToString("0.###", CultureInfo.InvariantCulture)).Append(",")
+                  .Append(f.euler[1].ToString("0.###", CultureInfo.InvariantCulture)).Append(",")
+                  .Append(f.euler[2].ToString("0.###", CultureInfo.InvariantCulture)).Append("\",\n")
+                  .Append("  \"offset\": \"").Append(Xyz(off)).Append("\"\n")
+                  .Append("  (solved ").Append(Xyz(f.solved)).Append(", live ")
+                  .Append(Xyz(f.node.localPosition)).Append(", hand ")
+                  .Append(f.node.parent == null ? "-" : Xyz(f.node.parent.position)).Append(")\n")
+                  // THE NUMBER THAT IS COMPARABLE TO THE DONOR. Root-local space is the frame the
+                  // game hands a weapon in (the root is left at identity - see FitNode), so this box
+                  // and the donor's own root-local box are measured against the SAME hand.
+                  .Append("  box in root space ").Append(Box(f.node)).Append("\n");
+            }
+            return sb.Length == 0 ? "ct_fit: nothing to show" : sb.ToString().TrimEnd();
+        }
+
+        /// <summary>A fit node's mesh box carried up into its parent's (the prefab root's) frame -
+        /// the same Rebase the fit itself solves with, so the two are directly comparable.</summary>
+        private static string Box(Transform node)
+        {
+            MeshFilter mf = node.GetComponent<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null) return "-";
+            Bounds b = Rebase(Matrix4x4.TRS(node.localPosition, node.localRotation, node.localScale),
+                              mf.sharedMesh.bounds);
+            return "centre " + Xyz(b.center) + " extent " + Xyz(b.extents) +
+                   " min " + Xyz(b.min) + " max " + Xyz(b.max);
+        }
+
+        private static string Xyz(Vector3 v)
+        {
+            return v.x.ToString("0.####", CultureInfo.InvariantCulture) + "," +
+                   v.y.ToString("0.####", CultureInfo.InvariantCulture) + "," +
+                   v.z.ToString("0.####", CultureInfo.InvariantCulture);
+        }
+
+        private static Vector3 Vec3(string raw)
+        {
+            string[] p = raw.Split(',');
+            if (p.Length != 3) throw new InvalidDataException("ct_fit wants \"x,y,z\" in metres; got '" + raw + "'");
+            return new Vector3(P(p[0]), P(p[1]), P(p[2]));
+        }
+
+        private static float P(string s)
+        {
+            float v;
+            if (!float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out v))
+                throw new InvalidDataException("ct_fit: '" + s + "' is not a number");
+            return v;
         }
 
         /// <summary>
@@ -1038,6 +1543,9 @@ namespace Morgott.ContentTool.Tactical
         private sealed class Entry
         {
             internal string id = "", name = "", clone = "", blurb = "", icon = "", model = "", guid = "", damageType = "", fit = "";
+            /// <summary>The ppcontent.json this entry was read from, set by <see cref="Build"/>. The
+            /// one fact an entry cannot carry in its own JSON, and the one a live fit needs to save.</summary>
+            internal string manifest = "";
             /// <summary>What comes out of the barrel and what happens at the muzzle: a def name to
             /// borrow ("projectile", "flash"), a "#RRGGBB" to paint the bolt, and the beam's length
             /// in seconds of TrailRenderer time. See <see cref="Shot"/>.</summary>
@@ -1048,6 +1556,13 @@ namespace Morgott.ContentTool.Tactical
             internal float scale;
             internal Vector3 rotate;
             internal bool declaresRotate;
+            /// <summary>The thing NO measurement can supply: where the GRIP is. A bounding-box fit
+            /// aligns centre with centre, and a centre is not a trigger - a rifle whose box matches
+            /// the donor's can still put the hand inside the buttstock. "offset": "x,y,z" in metres
+            /// is the human eye's correction, ADDED to whatever the fit solved (or to the mesh's own
+            /// position when there is no fit), so "fit": "auto" keeps doing the size and the turn and
+            /// this only nudges the result.</summary>
+            internal Vector3 offset;
             /// <summary>The one bit a symmetric bounding box cannot supply: which end is the muzzle.</summary>
             internal bool flip;
             /// <summary>Whether the manifest actually wrote a "shoot" key. NOT "is it non-zero":
@@ -1103,43 +1618,44 @@ namespace Morgott.ContentTool.Tactical
         private static List<Entry> Parse(string json)
         {
             List<Entry> list = new List<Entry>();
-            Match arr = Regex.Match(json, "\"weapons\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
-            if (!arr.Success) return list;
-
-            foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
+            // The rows come from WeaponManifest, which is also what WRITES them back: a reader and a
+            // writer with their own idea of where an entry begins is a save into the wrong bytes.
+            foreach (WeaponManifest.Row row in WeaponManifest.Rows(json))
             {
+                string o = row.Text;
                 Entry e = new Entry
                 {
-                    id = Field(o.Value, "id"),
-                    name = Field(o.Value, "name"),
-                    clone = Field(o.Value, "clone"),
-                    blurb = Field(o.Value, "blurb"),
-                    icon = Field(o.Value, "icon"),
-                    model = Field(o.Value, "model"),
-                    guid = Field(o.Value, "guid"),
-                    damageType = Field(o.Value, "damagetype"),
-                    fit = Field(o.Value, "fit"),
-                    projectile = Field(o.Value, "projectile"),
-                    flash = Field(o.Value, "flash"),
-                    tint = Field(o.Value, "tint"),
-                    trail = Num(o.Value, "trail"),
-                    scale = Num(o.Value, "scale"),
-                    rotate = Vec(o.Value, "rotate"),
-                    declaresRotate = Field(o.Value, "rotate").Length > 0,
-                    flip = Field(o.Value, "flip") == "true",
-                    declaresShoot = Field(o.Value, "shoot").Length > 0,
-                    damage = Num(o.Value, "damage"),
-                    spread = Num(o.Value, "spread"),
-                    count = (int)Num(o.Value, "count"),
-                    clips = (int)Num(o.Value, "clips"),
-                    shoot = Vec(o.Value, "shoot"),
-                    aim = Vec(o.Value, "aim"),
-                    shell = Vec(o.Value, "shell")
+                    id = Field(o, "id"),
+                    name = Field(o, "name"),
+                    clone = Field(o, "clone"),
+                    blurb = Field(o, "blurb"),
+                    icon = Field(o, "icon"),
+                    model = Field(o, "model"),
+                    guid = Field(o, "guid"),
+                    damageType = Field(o, "damagetype"),
+                    fit = Field(o, "fit"),
+                    projectile = Field(o, "projectile"),
+                    flash = Field(o, "flash"),
+                    tint = Field(o, "tint"),
+                    trail = Num(o, "trail"),
+                    scale = Num(o, "scale"),
+                    rotate = Vec(o, "rotate"),
+                    declaresRotate = Field(o, "rotate").Length > 0,
+                    offset = Vec(o, "offset"),
+                    flip = Field(o, "flip") == "true",
+                    declaresShoot = Field(o, "shoot").Length > 0,
+                    damage = Num(o, "damage"),
+                    spread = Num(o, "spread"),
+                    count = (int)Num(o, "count"),
+                    clips = (int)Num(o, "clips"),
+                    shoot = Vec(o, "shoot"),
+                    aim = Vec(o, "aim"),
+                    shell = Vec(o, "shell")
                 };
                 // "keywords": "Burning_DamageKeywordEffectorDef=40; Shred_...=5" - def NAME to value,
                 // semicolon separated, because a nested JSON object would break the flat {...} row
                 // regex this parser and ContentProject both rely on.
-                foreach (string clause in Field(o.Value, "keywords").Split(';'))
+                foreach (string clause in Field(o, "keywords").Split(';'))
                 {
                     string one = clause.Trim();
                     if (one.Length == 0) continue;
@@ -1158,7 +1674,7 @@ namespace Morgott.ContentTool.Tactical
                 if (string.IsNullOrEmpty(e.id) || string.IsNullOrEmpty(e.clone) || string.IsNullOrEmpty(e.guid))
                     throw new InvalidDataException(
                         "every \"weapons\" entry needs \"id\" (the def name), \"clone\" (the SHIPPED " +
-                        "weapon def it is cloned from) and \"guid\" (its fixed def identity); got " + o.Value);
+                        "weapon def it is cloned from) and \"guid\" (its fixed def identity); got " + o);
                 // A model needs sockets, and there are exactly two honest ways to get them: declare
                 // them (a model pre-fitted offline, as the fit script derives them) or ask the
                 // engine to derive them, which is what "fit": "auto" already means.
@@ -1201,34 +1717,18 @@ namespace Morgott.ContentTool.Tactical
             return list;
         }
 
-        private static string Field(string obj, string name)
-        {
-            return Regex.Match(obj, "\"" + name + "\"\\s*:\\s*\"([^\"]*)\"").Groups[1].Value;
-        }
+        // The three readers live in WeaponManifest, free of UnityEngine, because the SAVE path has to
+        // read a row exactly the way the build path does - and because that is what lets the round
+        // trip be measured offline (gate S25) instead of only in a soldier's hand.
+        private static string Field(string obj, string name) { return WeaponManifest.Field(obj, name); }
 
-        /// <summary>A number written either bare or quoted, invariant culture - a comma decimal
-        /// separator on a Russian machine would otherwise read 3.0 as 30.</summary>
-        private static float Num(string obj, string name)
-        {
-            Match m = Regex.Match(obj, "\"" + name + "\"\\s*:\\s*\"?(-?[0-9]*\\.?[0-9]+)\"?");
-            if (!m.Success) return 0f;
-            float v;
-            return float.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : 0f;
-        }
+        private static float Num(string obj, string name) { return WeaponManifest.Num(obj, name); }
 
         /// <summary>"x,y,z" -&gt; Vector3. Absent reads as zero, which Parse treats as "not declared".</summary>
         private static Vector3 Vec(string obj, string name)
         {
-            string raw = Field(obj, name);
-            if (string.IsNullOrEmpty(raw)) return Vector3.zero;
-            string[] parts = raw.Split(',');
-            if (parts.Length != 3) return Vector3.zero;
-            float x, y, z;
-            if (!float.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out x) ||
-                !float.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out y) ||
-                !float.TryParse(parts[2].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out z))
-                return Vector3.zero;
-            return new Vector3(x, y, z);
+            float[] v = WeaponManifest.Vec(obj, name);
+            return new Vector3(v[0], v[1], v[2]);
         }
     }
 }

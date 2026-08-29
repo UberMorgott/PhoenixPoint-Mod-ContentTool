@@ -15,6 +15,19 @@ dotnet build (Join-Path $PSScriptRoot 'ContentTool.csproj') -c Release
 if ($LASTEXITCODE -ne 0) { throw "dotnet build failed (exit $LASTEXITCODE)." }
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 Copy-Item "$out\*" $dest -Force
+
+# ============ WHERE THIS COPY CAME FROM, WRITTEN DOWN ============
+# The in-game fit workbench SAVES into the deployed ppcontent.json - that is the file the game loaded
+# - while the author's truth is the repo, and the next run of this script copies repo OVER deployed.
+# So an afternoon of dialling a gun in by eye used to be one forgotten hand-copy away from being
+# overwritten by its own older version. Nothing has to be configured for the workbench to mirror a
+# save back, because THIS script already knows both paths: it leaves the source folder in a one-line
+# marker beside every mod it installs, and src\Dev\BenchList.cs reads it back after a save.
+# The name is dot-prefixed and carries the mod's own name, so it can never collide with mod content.
+function Write-SourceMarker([string] $Folder, [string] $Source) {
+    Set-Content -Path (Join-Path $Folder '.contenttool-source') -Value $Source -Encoding UTF8
+}
+Write-SourceMarker $dest $PSScriptRoot
 Write-Host "Deployed ContentTool to $dest"
 
 # Every demo is its own MOD, not a folder inside ours: PPModLoader discovers only TOP-LEVEL
@@ -29,10 +42,23 @@ foreach ($demo in Get-ChildItem (Join-Path $PSScriptRoot 'demos') -Directory) {
     # Icons\ ships too: the weapon demos read <mod>\Icons\*.png at OnModEnabled to write the
     # inventory cell's sprite, and leaving it out is what made both print "no icon at ..." in-game
     # while the file sat in the repo all along.
+    # THE DATA-LOSS WINDOW, out loud. If the deployed manifest differs from the one about to land on
+    # top of it, the author tuned a fit in game and has not mirrored it back (or the mirror failed).
+    # A WARNING, not a block: overwriting is usually exactly what a deploy is for, and a prompt here
+    # would sit unanswered in every scripted run.
+    $liveManifest = Join-Path $to 'ppcontent.json'
+    $repoManifest = Join-Path $demo.FullName 'ppcontent.json'
+    if ((Test-Path $liveManifest) -and (Test-Path $repoManifest) -and
+        (Get-FileHash $liveManifest).Hash -ne (Get-FileHash $repoManifest).Hash) {
+        Write-Host ("WARNING: $($demo.Name)\ppcontent.json in the game DIFFERS from the repo copy " +
+                    "about to overwrite it - if you tuned this weapon in the workbench, that tuning " +
+                    "is in $liveManifest and is being lost now.") -ForegroundColor Red
+    }
     foreach ($item in 'meta.json', 'ppcontent.json', 'README.md', 'SOURCES.md', 'Content', 'Icons', 'Dist') {
         $from = Join-Path $demo.FullName $item
         if (Test-Path $from) { Copy-Item $from $to -Recurse -Force }
     }
+    Write-SourceMarker $to $demo.FullName
     # The two demos that ship a trigger build their own DLL; the other four are content only.
     $csproj = Get-ChildItem $demo.FullName -Filter '*.csproj' | Select-Object -First 1
     if ($csproj) {

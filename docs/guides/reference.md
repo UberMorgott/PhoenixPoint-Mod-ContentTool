@@ -104,6 +104,7 @@ route pages before copying it into a real project.
       "name": "Field Rifle",
       "model": "yourname.mymod/models/field_scanner",
       "fit": "auto",
+      "offset": "0,-0.07,0",
       "projectile": "Crabman_Head_Spitter_WeaponDef",
       "tint": "#4CFF5A",
       "trail": "0.6",
@@ -219,16 +220,20 @@ role, while creature-level `ranged` names a shipped `WeaponDef` to clone for the
 | `fit` | no | With a model and no explicit `shoot`, must be `auto`. |
 | `shoot`, `aim`, `shell` | no | Socket coordinates as `x,y,z`. Zero is a legal coordinate. |
 | `flip` | no | `true` reverses which fitted end is treated as the muzzle. |
-| `scale` | no | Float; explicit uniform mesh scale, overrides the fit solver. |
+| `scale` | no | Positive float; explicit uniform mesh scale, overrides the fit solver. Zero or negative does not override. |
 | `rotate` | no | `"x,y,z"` euler degrees; explicit mesh rotation, overrides auto rotation + `flip`. |
+| `offset` | no | `"x,y,z"` metres; local-position nudge added after the auto-fit solve. It preserves the solved rotation/scale/centre and moves derived sockets with the mesh. Without auto-fit, adds to the baked mesh child's position. |
 | `projectile` | no | Name of a `WeaponDef` (takes its `DamagePayload.ProjectileVisuals`) or a `ProjectileDef` name directly. |
 | `flash` | no | Name of a `WeaponDef`; takes its `VisualEffects` (`EquipmentVisualEffectsDef`: Flash/Smoke/Shell). |
 | `tint` | no | `#RRGGBB`; clones the `ProjectileDef` + private prefab copy, recolours TrailRenderer + ParticleSystem colours. No `#RGB`, no alpha. |
-| `trail` | no | Float seconds; `TrailRenderer.time` on the private prefab copy = beam length. Implies a private clone like `tint`. |
+| `trail` | no | Positive float seconds; `TrailRenderer.time` on the private prefab copy = beam length. Implies a private clone like `tint`; zero or negative does not override. |
 | `damage`, `spread` | no | Zero keeps the cloned values. |
 | `count`, `clips` | no | Starting-storage weapon and magazine quantities; zero adds none. |
 | `damagetype` | no | `DamageTypeBaseEffectDef` name. |
 | `keywords` | no | Semicolon-separated `DamageKeywordDef=value` entries. |
+
+Weapon VFX parsing and application are in `WeaponBuild.cs:373-502`; fit overrides and `offset`
+composition are in `WeaponBuild.cs:767-840` and `:906-920`.
 
 ## Source folders and identifiers
 
@@ -312,6 +317,11 @@ ct_dev sets
 ct_dev set <name>
 ct_dev next
 ct_dev reload
+ct_bench [open|close|reset]
+ct_fit [show]
+ct_fit <weapon> [<dx,dy,dz>|save|reload]
+ct_fit <weapon> move|turn|pos|rot <x,y,z>
+ct_fit <weapon> scale <value>
 ct_replace <targetPath> <file-or-value>
 ct_revert
 ct_scan on|off|status
@@ -322,6 +332,15 @@ manifest with its discovered clips. Video-only projects write no bundle. `ct_sou
 `Dist\Sounds\<mediaId>.bnk`; neither invokes the other. `ct_route7`,
 `ct_catalog`, and `ct_video` are [author previews, not player or release
 steps](../SHIPPING-A-CONTENT-MOD.md#ordinary-loop-always-available). A player only enables the mod.
+
+`ct_bench` opens the [in-game weapon fit workbench](weapon.md#fit-the-model-in-the-workbench), closes
+it, or resets its view. With no argument it toggles. A fully loaded geoscape campaign is required.
+
+`ct_fit` controls the same live fit service from the console. A bare `x,y,z` or `move` adds a
+position delta in metres; `turn` adds euler degrees; `pos`, `rot` and `scale` set absolute values.
+`save` writes the three fit fields into the originating manifest, while `reload` discards live
+changes and re-reads it. Every adjusting form updates matching live instances and prints the final
+`scale`, `rotate` and `offset` values.
 
 ### Package
 

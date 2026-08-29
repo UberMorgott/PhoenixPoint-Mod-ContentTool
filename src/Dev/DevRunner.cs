@@ -168,6 +168,10 @@ namespace Morgott.ContentTool.Dev
                 if (hotkeysBroken || !DevLoop.Enabled) return;
                 try
                 {
+                    // The same guard the fit workbench keeps, in the other place this mod reads a raw
+                    // key: a key the GAME binds fires the game's action too, and the user pressed one
+                    // key. F12 is nobody's, so this is a no-op today - it is here so it stays one.
+                    if (BenchList.IsGameOwned(Hotkey.ToString())) return;
                     if (Input.GetKeyDown(Hotkey)) ContentToolMain.Say(Switch(DevLoop.Next()));
                 }
                 catch (Exception ex)

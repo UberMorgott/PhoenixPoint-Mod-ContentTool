@@ -103,13 +103,16 @@ README is the detailed account of the rig, root motion, events, hitbox and donor
 
 ## [WeaponAdd](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/WeaponAdd)
 
-Adds three weapon defs to starting storage. Two publish models from the mod's own bundle; the third
-keeps its donor's model. Each fires with its own projectile colour: green blobs (`projectile` +
-`tint`), blue beam (`tint` + `trail`), orange beam with flamethrower muzzle flash (`tint` +
-`flash`). It teaches def cloning, model-key publication, inventory icons, attachment sockets,
-starting inventory, per-weapon damage/spread tuning, projectile borrowing, colour tinting, trail
-length, and muzzle-flash swapping.
+Adds exactly three weapon defs, all with mod-owned models (`ppcontent.json:5-77`):
 
-The useful map is `ppcontent.json`: compare its two `"publish"` rows with the three `"weapons"`
-entries. Then inspect `Content\Models\`, `Icons\`, and the one-call entry point in
+- **Vulture AR** — `SY_LaserAssaultRifle_WeaponDef`, `ar181.glb`, green `#4CFF5A` blobs borrowed
+  from `Crabman_Head_Spitter_WeaponDef`.
+- **Vulture Sniper** — `SY_LaserSniperRifle_WeaponDef`, `sniper.glb`, blue `#3FA9FF` beam with a
+  `0.6` s trail.
+- **Vulture Sidearm** — `SY_LaserPistol_WeaponDef`, `nerf.glb`, orange `#FF7A14` beam plus
+  `NJ_FlameThrower_WeaponDef` muzzle effects.
+
+It teaches def cloning, three model-key publications, inventory icons, auto-fit plus `offset`,
+starting storage, tuning and projectile VFX. Start with `ppcontent.json`, then inspect
+`Content\Models\`, `Icons\`, the four source-art tools, and the one-call entry point in
 `src\WeaponAddMain.cs`. Read the [weapon recipe](guides/weapon.md).

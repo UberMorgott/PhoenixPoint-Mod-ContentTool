@@ -91,12 +91,17 @@ def png(path, width, height, rgba):
 
 def main(src, out, size=SIZE):
     gltf, blob = read_glb(src)
-    prim = gltf["meshes"][0]["primitives"][0]
+    # Every primitive of every mesh, because a multi-material model (nerf.glb is three) carries one
+    # per material and drawing only the first would render a third of the gun.
     # ContentTool's reader applies S = diag(-1,1,1) on read (GlbCodec.Convert), so the file carries
     # S-applied coordinates. Undo it here and we are looking at exactly what the game will show.
-    pos = [(-p[0], p[1], p[2]) for p in accessor(gltf, blob, prim["attributes"]["POSITION"])]
-    nrm = [(-n[0], n[1], n[2]) for n in accessor(gltf, blob, prim["attributes"]["NORMAL"])]
-    idx = [i[0] for i in accessor(gltf, blob, prim["indices"])]
+    pos, nrm, idx = [], [], []
+    for mesh in gltf["meshes"]:
+        for prim in mesh["primitives"]:
+            base = len(pos)
+            pos += [(-p[0], p[1], p[2]) for p in accessor(gltf, blob, prim["attributes"]["POSITION"])]
+            nrm += [(-n[0], n[1], n[2]) for n in accessor(gltf, blob, prim["attributes"]["NORMAL"])]
+            idx += [base + i[0] for i in accessor(gltf, blob, prim["indices"])]
 
     # Side view: the barrel (+Z) runs left-to-right across the icon, +Y is up, and we look down
     # -X, which is the view every shipped weapon icon uses.

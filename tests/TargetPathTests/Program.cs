@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using Morgott.ContentTool.Bake;
 using Morgott.ContentTool.Dev;
 using Morgott.ContentTool.Project;
+using Morgott.ContentTool.Tactical;
 
 /// <summary>
 /// Gate R0 (FINAL-PLAN 39.7, Task 22), offline: every anchor form and every subpath form survives
@@ -54,6 +55,16 @@ internal static class Program
         StopEventArm();
         WeaponTintArm();
         FitBelowRootArm();
+        FitAlgebraArm();
+        FitOffsetArm();
+        FitSaveArm();
+        BenchListArm();
+        GizmoPickArm();
+        GizmoDragArm();
+        MirrorSaveArm();
+        BenchHolesArm();
+        TransportArm();
+        RingArm();
 
         Console.WriteLine(failures == 0 ? "R0: ALL PASS" : "R0: " + failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
@@ -1954,12 +1965,268 @@ internal static class Program
             "blind pass");
     }
 
+    /// <summary>
+    /// Gate S22: the fit's TRANSFORM ALGEBRA. The node the fit is written to carries a rotation as
+    /// well as a scale and an offset, and a child transform composes as `p + R * (s * v)` - so the
+    /// offset that lands the model's centre on the donor's is `dst - s * (R * src)`. The shipped body
+    /// computed `dst - s * src`, in unrotated space, and the rotation then swung the model off that
+    /// centre: the gun rode above the hand that was supposed to be on its trigger, at the right size.
+    ///
+    /// Every arm below carries its own falsifying control in the same run: the offset with the
+    /// rotation dropped must MISS, the scale must change when the turn is taken out, and a DECLARED
+    /// rotation must be measured through its own matrix rather than through the long-axis permutation
+    /// the shipped body used for every case.
+    /// </summary>
+    private static void FitAlgebraArm()
+    {
+        // The donor's real box (PX_AssaultRifle's own mesh) against a gun modelled 1 m down X and
+        // OFF its own origin - the only case where the rotation shows up in the offset at all.
+        float[] tc = { 0.00435f, 0.02574f, 0.30869f };
+        float[] te = { 0.03774f, 0.11355f, 0.46011f };
+        float[] sc = { 0.42f, 0.11f, -0.03f };
+        float[] se = { 0.5f, 0.06f, 0.04f };
+        float[] yaw = { 0, 0, 1, 0, 1, 0, -1, 0, 0 };     // Unity's yaw 90: (x,y,z) -> (z, y, -x)
+
+        float scale; float[] offset; string why;
+        if (!FitBox.Solve(sc, se, tc, te, yaw, out scale, out offset, out why))
+        { Fail("S23-solve", "a normal turned fit was refused: " + why); return; }
+
+        float[] landed = Land(offset, scale, yaw, sc);
+        Check("S23-centre", Dist(landed, tc) < 1e-5f,
+            "the TURNED, scaled centre lands on the donor's own centre -> " + Fmt(landed) + " vs " + Fmt(tc));
+
+        // The control: the offset the shipped body computed, with the rotation left out.
+        float[] blind = Land(new[] { tc[0] - scale * sc[0], tc[1] - scale * sc[1], tc[2] - scale * sc[2] },
+                             scale, yaw, sc);
+        Check("S23-centre-ctl", Dist(blind, tc) > 0.05f,
+            "while dropping the rotation from the offset misses that centre by " +
+            Dist(blind, tc).ToString("0.000") + " m -> " + Fmt(blind) + " - the gun above the hand");
+
+        // The extents are seen through the turn as well, or the scale is measured against a box the
+        // mesh never presents.
+        float want = Math.Min(te[0] / se[2], Math.Min(te[1] / se[1], te[2] / se[0]));
+        Check("S23-extent", Math.Abs(scale - want) < 1e-6f,
+            "the scale is measured against the TURNED box: " + scale.ToString("0.0000") + " vs " +
+            want.ToString("0.0000"));
+        float straight; float[] unused;
+        FitBox.Solve(sc, se, tc, te, null, out straight, out unused, out why);
+        Check("S23-extent-ctl", Math.Abs(straight - scale) > 1e-4f,
+            "and taking the turn out changes it to " + straight.ToString("0.0000") +
+            ", so the arm above is a measurement and not a blind pass");
+
+        // A DECLARED rotation that does NOT move the long axis: pitch -90 about X on the same X-long
+        // gun. The shipped permutation was keyed on the LONG AXIS, so it measured this against
+        // {z,y,x} whatever the manifest actually asked for.
+        float[] pitch = { 1, 0, 0, 0, 0, 1, 0, -1, 0 };   // (x,y,z) -> (x, z, -y)
+        float declared;
+        FitBox.Solve(sc, se, tc, te, pitch, out declared, out unused, out why);
+        float real = Math.Min(te[0] / se[0], Math.Min(te[1] / se[2], te[2] / se[1]));
+        Check("S23-declared", Math.Abs(declared - real) < 1e-6f && Math.Abs(real - want) > 1e-4f,
+            "a declared rotation is measured through its OWN matrix (" + declared.ToString("0.0000") +
+            " = " + real.ToString("0.0000") + "), not through the long-axis permutation, which would " +
+            "have answered " + want.ToString("0.0000"));
+
+        Check("S23-identity", FitBox.Solve(sc, se, tc, te, null, out straight, out unused, out why)
+                              && Math.Abs((straight * sc[0] + unused[0]) - tc[0]) < 1e-6f,
+            "and the un-rotated case is exactly what it always was");
+    }
+
+    /// <summary>Where a child transform actually puts a point: offset + R * (scale * v).</summary>
+    private static float[] Land(float[] offset, float scale, float[] r, float[] v)
+    {
+        float[] o = new float[3];
+        for (int i = 0; i < 3; i++)
+            o[i] = offset[i] + scale * (r[i * 3] * v[0] + r[i * 3 + 1] * v[1] + r[i * 3 + 2] * v[2]);
+        return o;
+    }
+
+    private static float Dist(float[] a, float[] b)
+    {
+        float d = 0f;
+        for (int i = 0; i < 3; i++) d += (a[i] - b[i]) * (a[i] - b[i]);
+        return (float)Math.Sqrt(d);
+    }
+
+    private static string Fmt(float[] v)
+    {
+        return v[0].ToString("0.000") + "," + v[1].ToString("0.000") + "," + v[2].ToString("0.000");
+    }
+
     /// <summary>No transform component of the fit is assigned to `prefab.transform` anywhere.</summary>
     private static bool FitStaysBelowRoot(string text)
     {
         return !Regex.IsMatch(text, @"prefab\.transform\.local(Scale|Position|Rotation)\s*=")
                && text.Contains("FitNode(prefab)");
     }
+
+    /// <summary>
+    /// Gate S24: "offset" NUDGES the auto fit, it does not replace it, and the sockets go with it.
+    ///
+    /// A bounding-box fit aligns CENTRES and a hand grips a GRIP, so the last centimetres are a thing
+    /// only an eye can judge - which is what the key is for. Two ways to get it wrong, and both are
+    /// silent: assigning it would throw the measured size and turn away, and leaving the socket box
+    /// alone would leave the muzzle where the donor's was while the barrel is elsewhere. MEASURED live
+    /// on D:\PP-Instance2 against the guns' own clone sources: the AR's trigger hand closed on nothing
+    /// until "0,-0.07,0", the sniper's grip sat 6 cm ahead of the hand until "0,0,0.06".
+    ///
+    /// Unity cannot run here, so the arm is over the SOURCE, with the assigning body as its control.
+    /// </summary>
+    private static void FitOffsetArm()
+    {
+        string src = SrcRoot();
+        string file = src == null ? null : Path.Combine(src, "Tactical", "WeaponBuild.cs");
+        string text = file != null && File.Exists(file) ? File.ReadAllText(file) : null;
+
+        Check("S24-offset-nudges", text != null && OffsetNudges(text),
+            "\"offset\" is ADDED to the offset the fit solved and the socket box moves with it, so " +
+            "the auto fit keeps the size and the turn and the muzzle stays on the barrel -> " + file);
+        Check("S24-offset-nudges-ctl", !OffsetNudges(AssignedOffset),
+            "while a body that ASSIGNS the declared offset over the solved one fails the same check, " +
+            "so the arm above is a measurement and not a blind pass");
+    }
+
+    /// <summary>
+    /// Gate S25: what the eye dialled in is what the manifest reloads - byte for byte everywhere else.
+    ///
+    /// The live fit workbench is only worth anything if SAVE and RELOAD are the same numbers. Two ways
+    /// to lose that, both silent: a value printed at one precision and re-read at another, and a splice
+    /// that lands in the wrong entry (two content mods may declare the same weapon id, and two entries
+    /// in one file certainly can). So the arm dials a fit into a manifest that has NONE of the three
+    /// keys yet, re-reads it through the very reader WeaponBuild.Parse uses, and asserts the numbers
+    /// came back - then asserts the sibling entry and every other byte are untouched, and that an
+    /// ambiguous id is a NAMED refusal rather than a write.
+    ///
+    /// The file half runs too, against a real file with a BOM and CRLF: preserving those is not
+    /// cosmetic - flipping either turns the author's whole ppcontent.json into a diff.
+    /// </summary>
+    private static void FitSaveArm()
+    {
+        const string manifest =
+            "{\r\n" +
+            "  \"publish\": { \"ar181\": \"WPN_AR181\" },\r\n" +
+            "  \"weapons\": [\r\n" +
+            "    {\r\n" +
+            "      \"id\": \"ar181\",\r\n" +
+            "      \"clone\": \"PX_AssaultRifle_WeaponDef\",\r\n" +
+            "      \"guid\": \"c0ffee01\",\r\n" +
+            "      \"model\": \"WPN_AR181\",\r\n" +
+            "      \"fit\": \"auto\",\r\n" +
+            "      \"flip\": \"true\"\r\n" +
+            "    },\r\n" +
+            "    {\r\n" +
+            "      \"id\": \"sniper\",\r\n" +
+            "      \"clone\": \"PX_SniperRifle_WeaponDef\",\r\n" +
+            "      \"guid\": \"c0ffee02\",\r\n" +
+            "      \"scale\": \"0.5000\",\r\n" +
+            "      \"rotate\": \"0,180,0\",\r\n" +
+            "      \"offset\": \"0,0,0.06\"\r\n" +
+            "    }\r\n" +
+            "  ]\r\n" +
+            "}\r\n";
+
+        // Three values no default and no accident produces, one negative, all exactly representable
+        // at the precision the writer prints: the arm must fail on a rounding change, not tolerate one.
+        const float scale = 0.7351f;
+        float[] rotate = { 0f, -90f, 12.5f };
+        float[] offset = { 0.012f, -0.0725f, 0.06f };
+
+        string why;
+        string wrote = WeaponManifest.Splice(manifest, "ar181", scale, rotate, offset, out why);
+        Check("S25-splice", wrote != null, "a dialled fit splices into the entry that owns the id: " + why);
+        if (wrote == null) return;
+
+        // The round trip, through the reader the game builds from.
+        string row = null, other = null;
+        foreach (WeaponManifest.Row r in WeaponManifest.Rows(wrote))
+            if (WeaponManifest.Field(r.Text, "id") == "ar181") row = r.Text; else other = r.Text;
+
+        float[] gotRot = row == null ? new float[3] : WeaponManifest.Vec(row, "rotate");
+        float[] gotOff = row == null ? new float[3] : WeaponManifest.Vec(row, "offset");
+        float gotScale = row == null ? 0f : WeaponManifest.Num(row, "scale");
+        Check("S25-roundtrip",
+            row != null && Math.Abs(gotScale - scale) < 1e-4f &&
+            Dist(gotRot, rotate) < 1e-3f && Dist(gotOff, offset) < 1e-4f,
+            "and it re-reads as exactly what was dialled: scale " + gotScale.ToString("0.0000") +
+            " rotate " + Fmt(gotRot) + " offset " + Fmt(gotOff));
+
+        // The keys the entry already carried are still there, and the OTHER entry is untouched.
+        Check("S25-preserves",
+            row != null && WeaponManifest.Field(row, "clone") == "PX_AssaultRifle_WeaponDef" &&
+            WeaponManifest.Field(row, "flip") == "true" && WeaponManifest.Field(row, "guid") == "c0ffee01" &&
+            other != null && WeaponManifest.Field(other, "offset") == "0,0,0.06" &&
+            wrote.Contains("\"publish\": { \"ar181\": \"WPN_AR181\" }") &&
+            wrote.IndexOf('\n') > 0 && wrote[wrote.IndexOf('\n') - 1] == '\r',
+            "every other byte survives - the sibling entry, the unrelated keys, the CRLF");
+
+        // An entry that ALREADY has the three keys is rewritten in place, not given a second copy.
+        string twice = WeaponManifest.Splice(wrote, "ar181", scale, rotate, offset, out why);
+        Check("S25-idempotent",
+            twice != null && twice == wrote,
+            "and saving the same numbers again changes nothing at all");
+
+        // The refusals. Both are ownership questions, and a wrong answer writes a fit into a weapon
+        // its author never dialled.
+        Check("S25-unknown-id",
+            WeaponManifest.Splice(manifest, "shotgun", scale, rotate, offset, out why) == null &&
+            why != null && why.Contains("0"),
+            "an id no entry carries is a named refusal: " + why);
+        Check("S25-two-arrays",
+            WeaponManifest.Splice(manifest + manifest, "ar181", scale, rotate, offset, out why) == null,
+            "and so is a file with two \"weapons\" arrays, where the row found may not be the row the " +
+            "game built from: " + why);
+
+        // The file half: a real write, with a BOM, atomically replaced.
+        string dir = Path.Combine(Path.GetTempPath(), "ct_s25_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "ppcontent.json");
+            using (FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write))
+            {
+                fs.Write(new byte[] { 0xEF, 0xBB, 0xBF }, 0, 3);
+                byte[] body = new UTF8Encoding(false).GetBytes(manifest);
+                fs.Write(body, 0, body.Length);
+            }
+            string dest = WeaponManifest.Save(path, "ar181", scale, rotate, offset, out why);
+            byte[] raw = File.ReadAllBytes(path);
+            string text = new UTF8Encoding(false).GetString(raw, 3, raw.Length - 3);
+            float[] backRot = new float[3], backOff = new float[3];
+            float backScale = 0f;
+            foreach (WeaponManifest.Row r in WeaponManifest.Rows(text))
+                if (WeaponManifest.Field(r.Text, "id") == "ar181")
+                {
+                    backRot = WeaponManifest.Vec(r.Text, "rotate");
+                    backOff = WeaponManifest.Vec(r.Text, "offset");
+                    backScale = WeaponManifest.Num(r.Text, "scale");
+                }
+            Check("S25-file",
+                dest == path && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF &&
+                Math.Abs(backScale - scale) < 1e-4f && Dist(backRot, rotate) < 1e-3f &&
+                Dist(backOff, offset) < 1e-4f && !File.Exists(path + ".ct_tmp"),
+                "the file on disk keeps its BOM, re-reads as what was dialled and leaves no temp " +
+                "behind -> " + (dest ?? ("REFUSED " + why)));
+
+            Check("S25-no-file",
+                WeaponManifest.Save(Path.Combine(dir, "nothing.json"), "ar181", scale, rotate, offset,
+                                    out why) == null && why != null,
+                "and a manifest that is not there is a named refusal, not an exception: " + why);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    /// <summary>Is the declared offset added to the solved one, and carried into the socket box?</summary>
+    private static bool OffsetNudges(string text)
+    {
+        return Regex.IsMatch(text, @"offset\[0\]\s*\+=\s*e\.offset\.x")
+               && Regex.IsMatch(text, @"offset\[1\]\s*\+=\s*e\.offset\.y")
+               && Regex.IsMatch(text, @"offset\[2\]\s*\+=\s*e\.offset\.z")
+               && Regex.IsMatch(text, @"dst\.center\s*\+=\s*e\.offset");
+    }
+
+    /// <summary>The wrong way round: the declared offset replacing the solved one, sockets untouched.</summary>
+    private const string AssignedOffset =
+        "offset[0] = e.offset.x; offset[1] = e.offset.y; offset[2] = e.offset.z;\n" +
+        "Sockets(dst, out shoot, out aim, out shell);\n";
 
     /// <summary>The body that shipped, and that the live game measured as a no-op.</summary>
     private const string ShippedRootFit =
@@ -2329,6 +2596,1157 @@ internal static class Program
         foreach (string bad in new[] { "#3FA9F", "#3FA9FFF", "#3FA9FG", "#3FA9FF80", "", "red", null })
             if (HexColor.TryParse(bad, out rgb, out why))
                 Fail("W1-lenient", "'" + (bad ?? "<null>") + "' was accepted as a colour");
+    }
+
+    /// <summary>
+    /// Gate S26, offline: the weapon fit workbench's own decisions - which weapon in the list a live
+    /// fit can be dialled on, what a typed filter leaves standing, and how far one axis press moves
+    /// the gun.
+    ///
+    /// THE CLASSIFICATION IS THE POINT. A shipped weapon has no ppcontent.json row, so a save on one
+    /// goes nowhere; the workbench lists it anyway - standing a downloaded gun beside the shipped one
+    /// it clones is the whole reason to look - and greys the axis buttons out. Get that backwards and
+    /// the only symptom in game is a save that refuses AFTER an author has dialled a gun in by eye.
+    ///
+    /// The Unity half - the squad bay, the camera hint, the canvases hidden and restored - cannot run
+    /// here and has no offline instrument. It is checked by opening it.
+    /// </summary>
+    /// <summary>The hotkey FitBench.cs actually declares, read out of the source. FitBench is full of
+    /// UnityEngine types and cannot be compiled into this gate, so the source line IS the instrument -
+    /// and it is the right one: the regression was someone choosing a KeyCode, not calling a
+    /// function. Null when the line cannot be found, which fails the check rather than passing it.</summary>
+    private static string FitBenchHotkey()
+    {
+        string root = SrcRoot();
+        if (root == null) return null;
+        string src = Path.Combine(root, @"Dev\FitBench.cs");
+        if (!File.Exists(src)) return null;
+        Match m = Regex.Match(File.ReadAllText(src),
+                              @"const\s+KeyCode\s+Hotkey\s*=\s*KeyCode\.(\w+)\s*;");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    /// <summary>
+    /// Gate S34, offline: WHICH ARROW A CLICK LANDS ON.
+    ///
+    /// The workbench now draws editor-style translation handles on the weapon. Every part of that
+    /// which can be wrong SILENTLY is here, because in game a bad hit test looks like "the gizmo
+    /// ignored me" or - far worse - "I grabbed X and Y moved", and neither says a word in the log.
+    ///
+    /// Two refusals carry most of the weight. WorldToScreenPoint returns a screen position for a
+    /// point BEHIND the camera, mirrored through the centre, so an arrow whose tip has gone behind
+    /// the near plane would be pickable in a place it is not drawn. And an arrow pointing nearly at
+    /// the camera projects to a few pixels: unaimable, and its drag divides by almost nothing.
+    /// </summary>
+    private static void GizmoPickArm()
+    {
+        // ---- the distance is to a SEGMENT, not to the infinite line ----
+        Check("S34-seg", Math.Abs(BenchList.SegmentDistance(150f, 103f, 100f, 100f, 200f, 100f) - 3f) < 1e-4f,
+              "3 px off the middle of the shaft");
+        Check("S34-segpast",
+              Math.Abs(BenchList.SegmentDistance(300f, 100f, 100f, 100f, 200f, 100f) - 100f) < 1e-4f,
+              "100 px PAST the tip is 100 px away, not 0 - the arrow is finite");
+
+        // ---- behind the camera, and too short ----
+        Check("S34-behindpivot",
+              !BenchList.AxisVisible(-1f, 5f, 0.3f, 100f, 100f, 300f, 100f, 12f),
+              "a pivot behind the near plane is never visible or pickable");
+        Check("S34-behindtip",
+              !BenchList.AxisVisible(5f, -1f, 0.3f, 100f, 100f, 300f, 100f, 12f),
+              "a tip behind the near plane likewise (its projection is MIRRORED)");
+        Check("S34-tooshort",
+              !BenchList.AxisVisible(5f, 5f, 0.3f, 100f, 100f, 105f, 100f, 12f),
+              "5 px of arrow is an axis pointing at the camera: refused, not approximated");
+        Check("S34-visible",
+              BenchList.AxisVisible(5f, 5f, 0.3f, 100f, 100f, 130f, 100f, 12f),
+              "30 px of arrow is aimable");
+
+        // ---- the pick itself, against three arrows sharing one pivot ----
+        float[] tipX = { 200f, 100f, 105f }, tipY = { 100f, 200f, 105f };
+        bool[] valid = { true, true, false };            // Z is the near-parallel one, dimmed
+        Check("S34-pickx",
+              BenchList.NearestAxis(100f, 100f, tipX, tipY, valid, 150f, 103f, 10f) == 0, "X");
+        Check("S34-picky",
+              BenchList.NearestAxis(100f, 100f, tipX, tipY, valid, 103f, 150f, 10f) == 1, "Y");
+        // The dimmed axis lies right under the pivot, so without the validity gate it would win every
+        // click near the origin of the gizmo - the exact bug this refusal prevents.
+        Check("S34-pickdim",
+              BenchList.NearestAxis(100f, 100f, tipX, tipY, valid, 103f, 103f, 10f) != 2,
+              "a refused axis is never picked, even when it is nearest");
+        Check("S34-pickmiss",
+              BenchList.NearestAxis(100f, 100f, tipX, tipY, valid, 400f, 400f, 10f) == -1,
+              "empty space picks nothing, so the orbit gets the press");
+
+        // ---- constant screen size ----
+        // 90 px at 10 m of depth, 60 deg vertical FOV, 800 px tall: 90 * 2*10*tan(30) / 800.
+        float want = (float)(90.0 * 2.0 * 10.0 * Math.Tan(30.0 * Math.PI / 180.0) / 800.0);
+        float got = BenchList.WorldSize(90f, 10f, 60f, 800f);
+        Check("S34-size", Math.Abs(got - want) < 1e-4f, got + " (want " + want + ")");
+        // Twice as far away, twice as big in metres - which is what keeps it 90 px on screen.
+        Check("S34-sizescales",
+              Math.Abs(BenchList.WorldSize(90f, 20f, 60f, 800f) - 2f * got) < 1e-4f,
+              "doubling the depth doubles the world size");
+    }
+
+    /// <summary>
+    /// Gate S35, offline: HOW FAR THE DRAG MOVED THE GUN, and in WHICH SPACE.
+    ///
+    /// Two separate ways to be wrong, both invisible in game until a save is reloaded.
+    ///
+    /// The constraint plane is the standard editor technique and it has two degenerate cases that must
+    /// REFUSE rather than answer: an axis pointing at the camera (no plane normal exists) and a ray
+    /// sliding along the plane (the intersection runs off to infinity). Either one answers a one-pixel
+    /// drag with a jump of tens of metres.
+    ///
+    /// And the SPACE. The manifest's "offset" is in the mesh child's PARENT-LOCAL frame, so a world
+    /// displacement has to be divided by the parent's scale on the way in. Unity's TransformDirection
+    /// normalises that scale away - use it and every drag on a hand scaled by 2 saves half the number
+    /// the eye just approved. That is the arm below with a scaled parent, and it is the one that would
+    /// have caught it.
+    /// </summary>
+    private static void GizmoDragArm()
+    {
+        float[] pivot = { 0f, 0f, 0f };
+        float[] view = { 0f, 0f, 1f };
+        float[] eye = { 0f, 0f, -10f };
+        float[] straight = { 0f, 0f, 1f };
+
+        // Camera 10 m back looking down +Z, dragging the X arrow. The second ray leans 2 m to the
+        // right at the plane z = 0, so the gun must move exactly 2 m along +X.
+        double len = Math.Sqrt(2.0 * 2.0 + 10.0 * 10.0);
+        float[] leaning = { (float)(2.0 / len), 0f, (float)(10.0 / len) };
+        float along;
+        bool ok = BenchList.PlaneDelta(pivot, new[] { 1f, 0f, 0f }, view, eye, straight, eye, leaning,
+                                       BenchList.MinPlaneDenom, out along);
+        Check("S35-delta", ok && Math.Abs(along - 2f) < 1e-3f, ok ? along.ToString() : "REFUSED");
+
+        // Nothing moved: the same ray twice is zero, not noise.
+        ok = BenchList.PlaneDelta(pivot, new[] { 1f, 0f, 0f }, view, eye, straight, eye, straight,
+                                  BenchList.MinPlaneDenom, out along);
+        Check("S35-still", ok && Math.Abs(along) < 1e-5f, ok ? along.ToString() : "REFUSED");
+
+        // Only the ALONG-AXIS part counts: a drag straight up the screen moves the X arrow by nothing.
+        double up = Math.Sqrt(2.0 * 2.0 + 10.0 * 10.0);
+        float[] upward = { 0f, (float)(2.0 / up), (float)(10.0 / up) };
+        ok = BenchList.PlaneDelta(pivot, new[] { 1f, 0f, 0f }, view, eye, straight, eye, upward,
+                                  BenchList.MinPlaneDenom, out along);
+        Check("S35-onlyalong", ok && Math.Abs(along) < 1e-4f,
+              ok ? "sideways drag along X = " + along : "REFUSED");
+
+        // REFUSAL 1: the axis points straight at the camera, so there is no plane containing it that
+        // faces the viewer at all.
+        Check("S35-parallel",
+              !BenchList.PlaneDelta(pivot, new[] { 0f, 0f, 1f }, view, eye, straight, eye, leaning,
+                                    BenchList.MinPlaneDenom, out along),
+              "an axis aimed at the camera is REFUSED, not approximated");
+        // REFUSAL 2: the ray runs along the plane rather than across it.
+        Check("S35-grazing",
+              !BenchList.PlaneDelta(pivot, new[] { 1f, 0f, 0f }, view, eye, new[] { 1f, 0f, 0f },
+                                    eye, leaning, BenchList.MinPlaneDenom, out along),
+              "a ray grazing the drag plane is REFUSED");
+
+        // ---- world -> parent-local, WITH the parent's scale ----
+        // A parent scaled 2x on its own x: columns of localToWorld are (2,0,0),(0,1,0),(0,0,1).
+        float[] scaled = { 2f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f };
+        float[] local;
+        ok = BenchList.LocalFromWorld(scaled, new[] { 2f, 0f, 0f }, out local);
+        Check("S35-scaledparent",
+              ok && Math.Abs(local[0] - 1f) < 1e-5f && Math.Abs(local[1]) < 1e-5f &&
+              Math.Abs(local[2]) < 1e-5f,
+              ok ? "2 m of world along a 2x parent = " + local[0] + " local (TransformDirection would " +
+                   "have said 2)" : "REFUSED");
+
+        // ... and with a rotation in the basis too: local x maps to world -2z, local y to +2y,
+        // local z to +2x. 4 m along world -z must read as 2 units of local x.
+        float[] turned = { 0f, 0f, -2f, 0f, 2f, 0f, 2f, 0f, 0f };
+        ok = BenchList.LocalFromWorld(turned, new[] { 0f, 0f, -4f }, out local);
+        Check("S35-turnedparent",
+              ok && Math.Abs(local[0] - 2f) < 1e-5f && Math.Abs(local[1]) < 1e-5f &&
+              Math.Abs(local[2]) < 1e-5f,
+              ok ? local[0] + "," + local[1] + "," + local[2] : "REFUSED");
+
+        // A parent flattened on one axis has no local answer at all. Inventing one sends the gun to
+        // infinity and the manifest with it.
+        Check("S35-degenerate",
+              !BenchList.LocalFromWorld(new[] { 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f },
+                                        new[] { 1f, 0f, 0f }, out local),
+              "a collapsed parent basis is REFUSED");
+        // But a legitimately TINY parent (a 1/100-scale hand) is not degenerate and must still work -
+        // which is why the test is relative to the columns' own size, not an absolute epsilon.
+        ok = BenchList.LocalFromWorld(new[] { 0.01f, 0f, 0f, 0f, 0.01f, 0f, 0f, 0f, 0.01f },
+                                      new[] { 0.02f, 0f, 0f }, out local);
+        Check("S35-tinyparent", ok && Math.Abs(local[0] - 2f) < 1e-4f,
+              ok ? local[0].ToString() : "REFUSED a legitimately small parent");
+    }
+
+    /// <summary>
+    /// Gate S36, offline: A SAVE THAT SURVIVES THE NEXT DEPLOY.
+    ///
+    /// SAVE writes the manifest the GAME loaded - the deployed copy - while the author's truth is his
+    /// repo, and deploy.ps1 copies repo over deployed. So the bench mirrors the saved bytes back to
+    /// the source folder deploy.ps1 recorded in its marker. This runs against REAL folders because
+    /// every failure mode here is a filesystem fact: a mod that was not deployed by our script, a
+    /// source folder that has since moved, a mod deployed onto its own source.
+    ///
+    /// The rule under all of them: a mirror that cannot happen SAYS SO. Losing an afternoon of
+    /// dialling to a silent no-op is the whole thing this exists to prevent.
+    /// </summary>
+    private static void MirrorSaveArm()
+    {
+        string tmp = Path.Combine(Path.GetTempPath(), "ct-mirror-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string deployed = Path.Combine(tmp, "Mods", "WeaponAdd");
+            string source = Path.Combine(tmp, "repo", "demos", "WeaponAdd");
+            Directory.CreateDirectory(deployed);
+            Directory.CreateDirectory(source);
+            string live = Path.Combine(deployed, "ppcontent.json");
+            File.WriteAllText(live, "{ \"weapons\": [ { \"id\": \"tuned\" } ] }");
+            File.WriteAllText(Path.Combine(source, "ppcontent.json"), "{ \"weapons\": [] }");
+
+            // 1. NO MARKER: an honest "there is nowhere to put it", never a silent success.
+            string why;
+            Check("S36-nomarker", BenchList.MirrorTarget(live, out why) == null &&
+                                  why != null && why.IndexOf("DEPLOYED COPY ONLY", StringComparison.Ordinal) >= 0,
+                  why ?? "returned a target with no marker");
+
+            // 2. THE ROUND TRIP: deploy.ps1's marker written, read back, target resolved, bytes copied.
+            File.WriteAllText(Path.Combine(deployed, BenchList.SourceMarker), source + Environment.NewLine);
+            string target = BenchList.MirrorTarget(live, out why);
+            Check("S36-target",
+                  target != null &&
+                  string.Equals(target, Path.GetFullPath(Path.Combine(source, "ppcontent.json")),
+                                StringComparison.OrdinalIgnoreCase),
+                  target ?? ("refused: " + why));
+            string said = BenchList.MirrorSave(live);
+            Check("S36-copied",
+                  File.ReadAllText(Path.Combine(source, "ppcontent.json")) == File.ReadAllText(live) &&
+                  said.IndexOf("mirrored back", StringComparison.Ordinal) >= 0,
+                  said);
+
+            // 3. THE SOURCE HAS MOVED. The deployed save already succeeded, so this is a warning about
+            //    the mirror and must say the save itself is safe.
+            Directory.Delete(source, true);
+            Check("S36-sourcegone", BenchList.MirrorTarget(live, out why) == null &&
+                                    why != null && why.IndexOf("GONE", StringComparison.Ordinal) >= 0,
+                  why ?? "resolved a target into a folder that does not exist");
+
+            // 4. DEPLOYED ONTO ITSELF: the two paths are one file and there is nothing to do.
+            File.WriteAllText(Path.Combine(deployed, BenchList.SourceMarker), deployed);
+            Check("S36-selfsame", BenchList.MirrorTarget(live, out why) == null &&
+                                  why != null && why.IndexOf("IS the source", StringComparison.Ordinal) >= 0,
+                  why ?? "tried to copy a file onto itself");
+
+            // 5. An EMPTY marker is not a path.
+            File.WriteAllText(Path.Combine(deployed, BenchList.SourceMarker), "   \r\n");
+            Check("S36-emptymarker", BenchList.MirrorTarget(live, out why) == null && why != null,
+                  why ?? "accepted an empty marker");
+
+            // 6. The key carries the manifest path, and that is what the bench hands in.
+            string key = "Vulture_WeaponDef" + BenchList.Separator + live;
+            Check("S36-key", BenchList.Manifest(key) == live && BenchList.Manifest("loose") == null,
+                  BenchList.Manifest(key) ?? "null");
+        }
+        finally
+        {
+            try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch (Exception) { }
+        }
+    }
+
+    /// <summary>
+    /// Gate S37: THE WORKBENCH CAN ALWAYS BE LEFT.
+    ///
+    /// FitBench.cs is full of UnityEngine types and cannot be compiled into this gate, so - exactly as
+    /// with the hotkey above - the SOURCE is the instrument, and it is the right one: every defect
+    /// here was a missing line, not a wrong computation. Five holes an independent review found, each
+    /// asserted by the shape that closes it.
+    ///
+    /// They share one failure mode. Each leaves the GAME altered - canvases hidden, a CinemachineBrain
+    /// disabled, an addons manager quiesced - with NO PANEL on screen and no key that reaches the exit
+    /// path any more. There is no in-game instrument for that: by the time it is visible, the thing
+    /// that would report it is gone. The source shape is what there is.
+    /// </summary>
+    private static void BenchHolesArm()
+    {
+        string root = SrcRoot();
+        string path = root == null ? null : Path.Combine(root, @"Dev\FitBench.cs");
+        if (path == null || !File.Exists(path)) { Fail("S37-src", "cannot find src\\Dev\\FitBench.cs"); return; }
+        string src = File.ReadAllText(path);
+
+        // HOLE 1: a throw between SetAutorefreshOnTagsChanged(false) and the rebuild's own callback
+        // left the addons manager quiesced for the session. It must be un-quiesced on the throw path
+        // AND unconditionally by Close (the rebuild is a coroutine, so a finally would re-enable it
+        // inside the very window the game turns it off for).
+        Check("S37-autorefresh",
+              Regex.IsMatch(src, @"catch \(Exception ex\)[\s\S]{0,2000}?SetAutorefreshOnTagsChanged\(true\)") &&
+              Regex.IsMatch(src, @"Step\(failed, ""the addons manager's autorefresh"""),
+              "autorefresh restored on the throw path and by Close");
+
+        // HOLE 2: one brain reference and one remembered pose could not survive a REPLACEMENT camera -
+        // the old brain stayed disabled forever and Close wrote the old pose onto the new camera.
+        Check("S37-cameraledger",
+              Regex.IsMatch(src, @"List<Held>\s+cameras") &&
+              Regex.IsMatch(src, @"foreach \(Held h in cameras\) if \(h\.camera == cam\) return;") &&
+              Regex.IsMatch(src, @"foreach \(Held h in cameras\)[\s\S]{0,800}?h\.brain\.enabled = true"),
+              "one ledger row per touched camera, never overwritten, all restored");
+        Check("S37-noSingleBrain",
+              !Regex.IsMatch(src, @"^\s*private static Behaviour brain;", RegexOptions.Multiline),
+              "the single-slot brain/pose fields are gone, not merely shadowed");
+
+        // HOLE 3: Close cleared `entered` on its first line and then swallowed every failure, so one
+        // bad restore left 'ct_bench close' answering "not open" while the screen stayed gone.
+        Check("S37-closeretryable",
+              Regex.IsMatch(src, @"if \(failed\.Count > 0\)[\s\S]{0,600}?return ""ct_bench NOT FULLY CLOSED") &&
+              Regex.IsMatch(src, @"if \(failed\.Count > 0\)[\s\S]{0,700}?entered = false;"),
+              "entered is cleared only AFTER the failure check, so the rescue stays retryable");
+        Check("S37-closenames",
+              Regex.IsMatch(src, @"string\.Join\("";\s*"", failed\.ToArray\(\)\)"),
+              "the failures are NAMED, not counted");
+        Check("S37-partialundo",
+              Regex.IsMatch(src, @"masks\.RemoveAll\(") && Regex.IsMatch(src, @"hidden\.RemoveAll\("),
+              "a canvas/mask that failed stays on its list for the retry; the rest are dropped");
+
+        // HOLE 4: only Uninstall reached Close, so a destroyed or disabled arm left everything altered.
+        Check("S37-lifecycle",
+              Regex.IsMatch(src, @"private void OnDisable\(\)\s*\{\s*Rescue\(") &&
+              Regex.IsMatch(src, @"private void OnDestroy\(\)\s*\{\s*Rescue\(") &&
+              Regex.IsMatch(src, @"if \(!entered\) \{ open = false; return ""ct_bench: nothing to close"),
+              "cleanup hangs off the lifecycle too, and Close is idempotent");
+
+        // HOLE 5: Close forced the Geoscape scene and DefaultLightingSettings unconditionally - which
+        // is a CHANGE unless that is what was there. Both are readable, so both are snapshotted.
+        Check("S37-snapshot",
+              Regex.IsMatch(src, @"priorScene = ActiveScene\(") &&
+              Regex.IsMatch(src, @"priorLighting = lighting == null \? null : lighting\.CurrentLightingSettingsDef") &&
+              Regex.IsMatch(src, @"ActivateScene\(priorScene\)") &&
+              Regex.IsMatch(src, @"lighting\.SetLighting\(priorLighting, null\)"),
+              "the scene and lighting that WERE there, restored - not 'default'");
+        Check("S37-nodefaultrestore",
+              !Regex.IsMatch(src, @"SetLighting\(level\.View\.DefaultLightingSettings"),
+              "no unconditional restore to DefaultLightingSettings anywhere");
+
+        // And the gizmo's own two non-negotiables, likewise unreachable from here except as shape.
+        string gizmo = Path.Combine(root, @"Dev\FitGizmo.cs");
+        if (!File.Exists(gizmo)) { Fail("S37-gizmosrc", "cannot find src\\Dev\\FitGizmo.cs"); return; }
+        string g = File.ReadAllText(gizmo);
+        Check("S37-commitpath",
+              Regex.IsMatch(g, @"WeaponBuild\.Set\(dragKey,") &&
+              !Regex.IsMatch(g, @"mesh\.(localPosition|position)\s*="),
+              "every drag commits through WeaponBuild.Set; the live transform is never written");
+        Check("S37-shaderprobe",
+              Regex.IsMatch(g, @"Shader\.Find\(""Hidden/Internal-Colored""\)") &&
+              Regex.IsMatch(g, @"if \(shader == null\)[\s\S]{0,400}?return null;"),
+              "the shader is probed once and its absence disables the gizmo cleanly");
+        Check("S37-onecamera",
+              Regex.IsMatch(g, @"Camera\.current != cam"),
+              "the handles are drawn for ONE camera, so no secondary camera duplicates them");
+    }
+
+    private static void BenchListArm()
+    {
+        string[] keys =
+        {
+            "SpiderGun_WeaponDef @ D:\\Mods\\SpiderDemo\\ppcontent.json",
+            "Sidearm_WeaponDef @ D:\\Mods\\Other\\ppcontent.json"
+        };
+        Check("S26-id", BenchList.Id(keys[0]) == "SpiderGun_WeaponDef", BenchList.Id(keys[0]));
+        // A path with no separator is its own id rather than an exception - the GUI loop reads this
+        // every repaint and must not be the thing that throws.
+        Check("S26-idbare", BenchList.Id("loose") == "loose" && BenchList.Id(null) == "", "degenerate keys");
+
+        Check("S26-tunable", BenchList.KeyFor("SpiderGun_WeaponDef", keys) == keys[0],
+              "the mod's own weapon resolves to its manifest key");
+        Check("S26-vanilla", BenchList.KeyFor("PX_AssaultRifle_WeaponDef", keys) == null,
+              "a shipped weapon is NOT tunable");
+        // The id must match WHOLE, not by prefix: "Sidearm_WeaponDef" and a hypothetical
+        // "Sidearm_WeaponDef_Mk2" are different guns and must not share a manifest row.
+        Check("S26-whole", BenchList.KeyFor("Sidearm", keys) == null &&
+                           BenchList.KeyFor("Sidearm_WeaponDef_Mk2", keys) == null,
+              "no prefix or substring match on the id");
+
+        Check("S26-filter", BenchList.Matches("SpiderGun_WeaponDef", "GUN") &&
+                            !BenchList.Matches("PX_AssaultRifle_WeaponDef", "gun"),
+              "case-insensitive substring");
+        Check("S26-filterall", BenchList.Matches("PX_AssaultRifle_WeaponDef", "") &&
+                               BenchList.Matches("PX_AssaultRifle_WeaponDef", null),
+              "an empty filter keeps everything");
+
+        float[] d = BenchList.Delta(1, -1f, 0.05f);
+        Check("S26-delta", d[0] == 0f && Math.Abs(d[1] + 0.05f) < 1e-6f && d[2] == 0f,
+              "Y- 0.05 -> " + d[0] + "," + d[1] + "," + d[2]);
+        float[] none = BenchList.Delta(3, 1f, 0.05f);
+        Check("S26-deltabad", none[0] == 0f && none[1] == 0f && none[2] == 0f, "an axis out of range moves nothing");
+
+        Check("S26-step", Math.Abs(BenchList.NextStep(0.001f) - 0.005f) < 1e-6f &&
+                          Math.Abs(BenchList.NextStep(BenchList.Steps[BenchList.Steps.Length - 1]) -
+                                   BenchList.Steps[0]) < 1e-6f &&
+                          Math.Abs(BenchList.NextStep(7f) - BenchList.Steps[0]) < 1e-6f,
+              "the move ladder advances, wraps, and recovers from an off-ladder value");
+        Check("S26-turn", Math.Abs(BenchList.NextTurn(90f) - 0.5f) < 1e-6f, "the turn ladder wraps");
+
+        // ---- the hotkey, which is not a free choice ----
+        // The 2026-08-29 regression, as an assert. The workbench opened on F9; F9 is the game's own
+        // QuickLoad (GeoscapeViewState.cs:175-178), so every press opened the panel AND reloaded the
+        // campaign behind it - and on a quicksave the game could not deserialize, that load ended at
+        // the main menu with the campaign gone. In game there is nothing to see: the game's action
+        // fires normally and no mod code throws. Offline it is one line.
+        Check("S26-keyowned", BenchList.IsGameOwned("F9") && BenchList.IsGameOwned("f5") &&
+                              BenchList.IsGameOwned("F4") && BenchList.IsGameOwned("F10"),
+              "the game's own keys are recognised, case-insensitively");
+        Check("S26-keyfree", !BenchList.IsGameOwned("B") && !BenchList.IsGameOwned("F12") &&
+                             !BenchList.IsGameOwned("") && !BenchList.IsGameOwned(null),
+              "a free key, DevRunner's own F12 and a degenerate name are not claimed");
+        // The one that would have caught it: the workbench's ACTUAL hotkey, by the same name the
+        // KeyCode prints, must not be a key the game answers to.
+        string chosen = FitBenchHotkey();
+        Check("S26-keybench", chosen != null && !BenchList.IsGameOwned(chosen),
+              "the fit workbench's hotkey is '" + (chosen ?? "UNREADABLE") + "', not a key the game owns");
+
+        // ---- the offer list: what a unit may be handed, and what falls out of its hand ----
+        // Stand-ins for the WeaponDefs: the game's slot test is the predicate in the real thing, and
+        // it needs a rig and a chassis; what is measured HERE is the half that has neither - keep,
+        // drop, and above all what happens to the SELECTION when the unit underneath it changes.
+        List<string> catalogue = new List<string> { "Rifle", "Claw", "Cannon" };
+        string held = "Rifle";
+        List<string> handed = BenchList.Offer(catalogue, n => n != "Claw", ref held);
+        Check("S26-offer", handed.Count == 2 && handed.Contains("Rifle") && handed.Contains("Cannon") &&
+                           held == "Rifle",
+              "incompatible dropped, compatible kept, a still-valid selection survives");
+
+        // The mutoid case: the rifle in the previous soldier's hand must not survive the switch.
+        held = "Rifle";
+        List<string> quadruped = BenchList.Offer(catalogue, n => n == "Claw", ref held);
+        Check("S26-offerdrop", quadruped.Count == 1 && quadruped[0] == "Claw" && held == null,
+              "a selection the new unit cannot hold comes back null, not stale");
+
+        // "Nothing fits" and "we could not ask" must not look the same. A null test keeps everything
+        // (the caller passes null when the unit has no addons manager to ask about); a test that
+        // refuses everything really does leave an empty list, which is what the message line is for.
+        held = "Rifle";
+        Check("S26-offerall", BenchList.Offer(catalogue, null, ref held).Count == 3 && held == "Rifle",
+              "no test means the whole catalogue, never an empty panel");
+        held = "Rifle";
+        List<string> nothing = BenchList.Offer(catalogue, n => false, ref held);
+        Check("S26-offernone", nothing.Count == 0 && held == null,
+              "a unit that can hold nothing gets an empty list AND an empty hand");
+
+        held = "Rifle";
+        Check("S26-offernull", BenchList.Offer<string>(null, null, ref held).Count == 0 && held == null,
+              "no catalogue at all is empty rather than an exception in the GUI loop");
+
+        BenchMineArm();
+        BenchFrameArm();
+        BenchPanelArm();
+        BenchOrbitArm();
+        BenchSavedArm();
+        BenchRecoveryArm();
+    }
+
+    /// <summary>
+    /// ============ S29: THE PANEL FITS, BOTH WAYS ============
+    ///
+    /// Defect 2, as asserts. Two independent clippings, and IMGUI is silent about both:
+    ///   WIDTH  - an over-wide GUILayout row is not clipped to its BeginArea, it is DRAWN PAST THE EDGE.
+    ///            The step row was three 140 px buttons inside a 324 px content width, so the third one
+    ///            was on screen only in the sense that its pixels existed.
+    ///   HEIGHT - the dial block was drawn last, below a 130 px and a 180 px list, and fell off the
+    ///            bottom of an 803 px window. "какие то кнопки в самом низу когда выбрал кастомное
+    ///            оружие из модов" - exactly that.
+    /// Both are pure arithmetic over the panel's own constants, so both are decidable here, which is
+    /// the only place they CAN be decided: in game the symptom is a button that is simply not there.
+    /// </summary>
+    private static void BenchPanelArm()
+    {
+        // ---- width ----
+        Check("S29-row", BenchList.RowFits(3, 112f, BenchList.PanelWidth),
+              "the three step buttons fit the panel: 3x112 + gaps vs content width " +
+              BenchList.ContentWidth(BenchList.PanelWidth));
+        // The shipped geometry, as the control in the same run. Without it the arm above would pass on
+        // any panel wide enough for anything, and would never have caught what the user saw.
+        Check("S29-row-ctl", !BenchList.RowFits(3, 140f, 340f),
+              "while the geometry that shipped - three 140 px buttons in a 340 px panel - does NOT, " +
+              "so the check is a measurement and not a blind pass");
+        Check("S29-row-edge", BenchList.RowFits(0, 999f, 100f) && !BenchList.RowFits(1, 999f, 100f),
+              "no buttons always fit; one button wider than the panel never does");
+
+        // ---- the long def name ----
+        const string longName = "Morgott_VultureAssaultRifle_Mk2_WeaponDef";
+        string cut = BenchList.Elide(longName, 20);
+        Check("S29-elide", cut.Length == 20 && cut.StartsWith("Morgott") && cut.EndsWith("WeaponDef"),
+              "a long name is shortened from the MIDDLE, keeping both ends -> " + cut);
+        Check("S29-elide-short", BenchList.Elide("AR_181", 20) == "AR_181" &&
+                                 BenchList.Elide(null, 20) == "" && BenchList.Elide("abcdefgh", 1).Length == 5,
+              "a name that already fits is untouched, and neither null nor a silly cap throws in the " +
+              "GUI loop");
+        // The point of eliding at all: it must never make the string LONGER, i.e. never widen the panel.
+        foreach (int cap in new[] { 5, 12, 20, 44, 200 })
+            Check("S29-elide-cap", BenchList.Elide(longName, cap).Length <= Math.Max(5, cap),
+                  "cap " + cap + " -> " + BenchList.Elide(longName, cap).Length + " chars");
+
+        // ---- height: the dial block is above the fold ----
+        // 1277x803 is the window in the screenshot the user sent; the panel insets 8 px top and bottom.
+        const float His = 803f - 2f * BenchList.PanelInset;
+        Check("S29-dial-his", BenchList.DialReachable(His),
+              "at the user's own 803 px window the dial block, SAVE row and answer line are all on " +
+              "screen without scrolling");
+        Check("S29-dial-small", BenchList.DialReachable(600f - 2f * BenchList.PanelInset),
+              "and still at 600 px, which is smaller than anything he is likely to play at");
+        Check("S29-dial-tiny", !BenchList.DialReachable(300f),
+              "while a 300 px window genuinely cannot hold it - the outer scroll view is the backstop " +
+              "there, and this arm proves the check is not vacuously true");
+
+        // ---- height: the lists take only what is left, and collapse when there is nothing left ----
+        float u, w;
+        BenchList.Rows(His, true, true, true, out u, out w);
+        Check("S29-rows", u > 0f && w > 0f && u <= BenchList.ListMax && w <= BenchList.ListMax,
+              "at 803 px both pickers get room, capped at " + BenchList.ListMax + " -> " + u + " / " + w);
+        Check("S29-rows-fit",
+              BenchList.ChromeRows * BenchList.Row + BenchList.DialRows * BenchList.Row +
+              BenchList.MessageHeight + 2f * BenchList.Row + u + w <= His,
+              "and the whole panel - chrome, dial, message, both headers, both lists - fits the window");
+
+        BenchList.Rows(470f, true, true, true, out u, out w);
+        Check("S29-rows-collapse", u == 0f && w == 0f && BenchList.DialReachable(470f),
+              "squeezed, the PICKERS give way and the dial block still fits: " + u + " / " + w);
+
+        BenchList.Rows(His, true, false, true, out u, out w);
+        Check("S29-rows-one", u == 0f && w > 0f,
+              "a collapsed list takes nothing, and the other one still gets its cap: " + u + " / " + w);
+        BenchList.Rows(His, true, false, false, out u, out w);
+        Check("S29-rows-none", u == 0f && w == 0f, "both collapsed is zero, not negative");
+        BenchList.Rows(-5f, true, true, true, out u, out w);
+        Check("S29-rows-junk", u == 0f && w == 0f, "a degenerate viewport collapses rather than throwing");
+
+        // Without a weapon selected there is no dial block, so the pickers may have MORE room. If they
+        // did not, the panel would waste a third of itself on a block that is one line of text.
+        float u2, w2;
+        BenchList.Rows(500f, false, true, true, out u2, out w2);
+        BenchList.Rows(500f, true, true, true, out u, out w);
+        Check("S29-rows-nodial", u2 > u,
+              "with no weapon picked the pickers get the dial block's room back: " + u2 + " vs " + u);
+    }
+
+    /// <summary>
+    /// ============ S30: THE VIEW CANNOT BE DRIVEN SOMEWHERE THERE IS NO WAY BACK FROM ============
+    ///
+    /// Defect 1's second half. The workbench's own log line is followed by nothing that says what went
+    /// wrong, because nothing DID go wrong in the exception sense: 'lift' was an unbounded float that
+    /// a repeated button press walked off the model, and 'reframe' only re-MEASURED at the current
+    /// knobs, so it re-computed the same empty screen. The user's words were "я что-то нажал и вообще
+    /// всё исчезло и не вернуть обратно" and that is the mechanism.
+    ///
+    /// Every knob the mouse and the buttons drive is now clamped, and the clamp is asserted against
+    /// deliberately absurd input - a thousand-pixel drag, a hundred wheel notches, a NaN - because the
+    /// in-game symptom of an unclamped one is a black screen with no message anywhere.
+    /// </summary>
+    private static void BenchOrbitArm()
+    {
+        // ---- pitch: the clamp that matters, since an unclamped one flips the camera upside down ----
+        float pitch = 0f;
+        for (int i = 0; i < 200; i++) pitch = BenchList.Tilt(pitch, -50f);
+        Check("S30-pitch-max", pitch <= BenchList.PitchMax + 1e-4f && pitch >= BenchList.PitchMax - 1e-4f,
+              "ten thousand pixels of downward drag stops dead at " + BenchList.PitchMax + " -> " + pitch);
+        for (int i = 0; i < 400; i++) pitch = BenchList.Tilt(pitch, 50f);
+        Check("S30-pitch-min", Math.Abs(pitch - BenchList.PitchMin) < 1e-4f,
+              "and the same upward -> " + pitch);
+        Check("S30-pitch-nan", BenchList.Tilt(float.NaN, 1f) == BenchList.PitchMin &&
+                               BenchList.Clamp(float.NaN, -1f, 1f) == -1f,
+              "a NaN lands on a real number rather than propagating into the camera transform");
+
+        // ---- yaw: free, but WRAPPED, so the number on screen stays readable and never drifts to 1e9 ----
+        float yaw = 0f;
+        for (int i = 0; i < 500; i++) yaw = BenchList.Orbit(yaw, 37f);
+        Check("S30-yaw-wrap", yaw >= 0f && yaw < 360f, "yaw stays in [0,360) after 500 drags -> " + yaw);
+        Check("S30-yaw-dir", BenchList.Orbit(0f, 100f) < 180f && BenchList.Orbit(0f, -100f) > 180f,
+              "dragging right swings the camera one way and left the other - not the same way twice");
+        Check("S30-yaw-gain",
+              Math.Abs(BenchList.Orbit(180f, 100f) - (180f + 100f * BenchList.DegreesPerPixel)) < 1e-3f,
+              "at FreeCamera's own 0.2 deg/px: 100 px -> 20 deg");
+
+        // ---- the drag SENSE, and the two toggles that own it ----
+        // The reported defect: both axes felt backwards, the drag pushed the model away from the hand
+        // instead of carrying it along. The default is now the flipped one, and each toggle flips
+        // EXACTLY its own axis - a toggle that quietly moved the other one would be the same bug again.
+        Check("S30-invert-default", BenchList.InvertX && BenchList.InvertY,
+              "both axes ship inverted: dragging grabs and turns the model itself");
+        Check("S30-drag-sign-x", BenchList.Orbit(180f, 100f) > 180f,
+              "a positive (rightward) drag raises yaw -> " + BenchList.Orbit(180f, 100f));
+        Check("S30-drag-sign-y", BenchList.Tilt(0f, 100f) < 0f,
+              "a positive (upward) drag lowers pitch -> " + BenchList.Tilt(0f, 100f));
+        try
+        {
+            BenchList.InvertX = false;
+            Check("S30-invert-x-only",
+                  BenchList.Orbit(180f, 100f) < 180f && BenchList.Tilt(0f, 100f) < 0f,
+                  "'invert X' off flips yaw back and leaves pitch exactly where it was");
+            BenchList.InvertX = true;
+            BenchList.InvertY = false;
+            Check("S30-invert-y-only",
+                  BenchList.Tilt(0f, 100f) > 0f && BenchList.Orbit(180f, 100f) > 180f,
+                  "'invert Y' off flips pitch back and leaves yaw exactly where it was");
+        }
+        finally { BenchList.InvertX = true; BenchList.InvertY = true; }
+
+        // ---- zoom: proportional, clamped, and monotone in the right direction ----
+        float zoom = BenchList.ZoomDefault;
+        for (int i = 0; i < 100; i++) zoom = BenchList.Wheel(zoom, 1f);
+        Check("S30-zoom-in", Math.Abs(zoom - BenchList.ZoomMin) < 1e-4f,
+              "a hundred notches in bottoms out at " + BenchList.ZoomMin + " -> " + zoom);
+        for (int i = 0; i < 200; i++) zoom = BenchList.Wheel(zoom, -1f);
+        Check("S30-zoom-out", Math.Abs(zoom - BenchList.ZoomMax) < 1e-4f,
+              "and out tops out at " + BenchList.ZoomMax + " -> " + zoom);
+        Check("S30-zoom-dir", BenchList.Wheel(4f, 1f) < 4f && BenchList.Wheel(4f, -1f) > 4f,
+              "scroll up is closer, scroll down is further - " + BenchList.Wheel(4f, 1f) + " / " +
+              BenchList.Wheel(4f, -1f));
+        Check("S30-zoom-proportional",
+              Math.Abs(4f - BenchList.Wheel(4f, 1f)) > Math.Abs(2f - BenchList.Wheel(2f, 1f)),
+              "and one notch covers more ground when further out - FreeCamera's proportional feel");
+        Check("S30-zoom-junk", BenchList.Wheel(4f, float.NaN) >= BenchList.ZoomMin &&
+                               BenchList.Wheel(4f, 10000f) >= BenchList.ZoomMin &&
+                               BenchList.Wheel(4f, -10000f) <= BenchList.ZoomMax,
+              "a trackpad's absurd notch count and a NaN both stay inside the band");
+
+        // ---- lift: the one that actually caused it, now bounded ----
+        float lift = 0f;
+        for (int i = 0; i < 500; i++)
+            lift = BenchList.Clamp(lift - BenchList.LiftStep, BenchList.LiftMin, BenchList.LiftMax);
+        Check("S30-lift", Math.Abs(lift - BenchList.LiftMin) < 1e-4f,
+              "five hundred presses of 'up' stop at " + BenchList.LiftMin + " radii, not at minus sixty " +
+              "-> " + lift);
+
+        // ---- the pivot ----
+        // The orbit angles are NOT inputs to Frame, and that is the whole guarantee: the distance and
+        // the sideways step are functions of the unit's radius and the panel alone, so turning the
+        // camera cannot change how far it stands from the aim point. The aim point is the measured
+        // bounds centre (FitBench.Reframe), so the model stays the centre of the orbit by construction.
+        float d1, lat1, d2, lat2;
+        BenchList.Frame(1.7f, 40f, 1277f, 803f, BenchList.PanelWidth, 1.35f, out d1, out lat1);
+        BenchList.Frame(1.7f, 40f, 1277f, 803f, BenchList.PanelWidth, 1.35f, out d2, out lat2);
+        Check("S30-pivot", d1 == d2 && lat1 == lat2 && d1 > 0f,
+              "the framing distance is a function of the unit and the panel only - no orbit angle " +
+              "enters it, so an orbit is a rotation about the bounds centre and nothing else");
+
+        // ---- and where the mouse is allowed to act at all ----
+        Check("S30-overscene", BenchList.OverScene(BenchList.PanelWidth + 1f, BenchList.PanelWidth) &&
+                               !BenchList.OverScene(BenchList.PanelWidth, BenchList.PanelWidth) &&
+                               !BenchList.OverScene(0f, BenchList.PanelWidth),
+              "the mouse drives the view only right of the panel - the panel's own edge counts as panel");
+    }
+
+    /// <summary>
+    /// ============ S31: SAVED, OR MESSED ABOUT WITH ============
+    ///
+    /// "потом кнопку сохранить и сбросить. как бы я сейчас там не наколбасил" - the panel now says which
+    /// of the two states a fit is in, and this is the whole of that decision. The in-game symptom of
+    /// getting it wrong is the worst kind: a line that says SAVED over numbers that are not in the file,
+    /// which is precisely the reassurance being asked for, given falsely.
+    /// </summary>
+    private static void BenchSavedArm()
+    {
+        float[] euler = { 0f, 90f, 0f }, offset = { 0.01f, -0.02f, 0.1f };
+        const float scale = 0.5528f;
+
+        Check("S31-same", BenchList.Same(scale, euler, offset, scale,
+                                         new[] { 0f, 90f, 0f }, new[] { 0.01f, -0.02f, 0.1f }, 1e-5f),
+              "untouched reads SAVED");
+        Check("S31-offset", !BenchList.Same(scale, euler, offset, scale, euler,
+                                            new[] { 0.01f, -0.02f, 0.11f }, 1e-5f),
+              "one axis button - 0.01 on Z - flips it to MODIFIED");
+        Check("S31-euler", !BenchList.Same(scale, euler, offset, scale, new[] { 0f, 95f, 0f }, offset, 1e-5f),
+              "so does a turn");
+        Check("S31-scale", !BenchList.Same(scale, euler, offset, 0.56f, euler, offset, 1e-5f),
+              "so does a resize");
+        // The smallest nudge the panel can make is 0.001 (BenchList.Steps[0]); it MUST register, or the
+        // line would read SAVED through a whole session of fine work.
+        Check("S31-finest", !BenchList.Same(scale, euler, offset, scale, euler,
+                                            new[] { 0.01f, -0.02f, 0.1f + BenchList.Steps[0] }, 1e-5f),
+              "including the FINEST step on the ladder, " + BenchList.Steps[0]);
+        // ... while a float round-trip must not. Save writes these numbers out and reads them back, and
+        // an exact comparison would report MODIFIED the instant after a successful save.
+        Check("S31-roundtrip", BenchList.Same(scale, euler, offset, scale + 1e-7f,
+                                              new[] { 0f, 90f + 1e-6f, 0f },
+                                              new[] { 0.01f, -0.02f + 1e-7f, 0.1f }, 1e-5f),
+              "a float round-trip's last bits do not: SAVE would otherwise read MODIFIED immediately");
+        Check("S31-junk", !BenchList.Same(scale, null, offset, scale, euler, offset, 1e-5f) &&
+                          BenchList.Same(scale, null, null, scale, null, null, 1e-5f) &&
+                          !BenchList.Same(scale, new[] { 1f }, offset, scale, euler, offset, 1e-5f),
+              "a missing or short triple is answered, not dereferenced - this runs every repaint");
+    }
+
+    /// <summary>
+    /// ============ S32: A HALF-OPENED WORKBENCH CAN STILL BE CLOSED ============
+    ///
+    /// The heart of defect 1, and the one part of it that lives in the Unity half where no offline arm
+    /// can execute it - so it is asserted OVER THE SOURCE, the way S13-wired asserts the Harmony prefix,
+    /// with the broken shape as the control in the same run.
+    ///
+    /// What went wrong: Open mutated the game - hid the canvases, took the camera, swung the scene -
+    /// and only set `open = true` near the END. Anything that threw in between left `open` false with
+    /// every one of those changes still applied, and then 'ct_bench close' answered "not open" while
+    /// the screen stayed gone. Three things had to become true and all three are checked:
+    ///   1. a separate `entered` flag is raised BEFORE the first mutation,
+    ///   2. the console's close is gated on `entered`, never on `open`,
+    ///   3. Open's mutating half is inside a try whose catch calls Close.
+    /// Plus the SoftMask restore, which is the other half of the same defect.
+    /// </summary>
+    private static void BenchRecoveryArm()
+    {
+        string src = SrcRoot();
+        string path = src == null ? null : Path.Combine(src, "Dev", "FitBench.cs");
+        string raw = path != null && File.Exists(path) ? File.ReadAllText(path) : null;
+        Check("S32-source", raw != null, "src\\Dev\\FitBench.cs is readable -> " + (path ?? "NOT FOUND"));
+        if (raw == null) return;
+        // Strip() takes the string LITERALS out along with the comments, which is what makes these
+        // checks measure code rather than prose - so nothing below may depend on literal text.
+        string text = Strip(raw);
+
+        Check("S32-entered", Recoverable(text),
+              "close is gated on `entered`, Open raises it before mutating and undoes itself on a throw");
+        // The shape that shipped, as the control: `open` gates everything and there is no try.
+        Check("S32-entered-ctl",
+              !Recoverable(Strip("static string Run(string[] a) { case \"close\": return open ? Close() " +
+                                 ": \"not open\"; } static string Open() { hidden.Clear(); open = true; " +
+                                 "return \"open\"; }")),
+              "while the body that shipped fails the same check, so the arm is a measurement");
+        Check("S32-not-open-gated", !Regex.IsMatch(text, @"return\s+open\s*\?\s*Close\s*\("),
+              "and NO close path is gated on `open` any more - that is the one that answered " +
+              "'not open' while the screen was gone");
+
+        // The restore is now a RemoveAll rather than a foreach, because a mask that fails to come back
+        // has to STAY on the list for the retry (S37-partialundo). What this arm measures is unchanged:
+        // the masks are collected on the way in and switched back on by Close.
+        Check("S32-softmask", raw.Contains("SoftMask") &&
+                              Regex.IsMatch(text, @"masks\s*\.\s*Add") &&
+                              Regex.IsMatch(text, @"masks\s*\.\s*RemoveAll\s*\([\s\S]{0,200}?enabled\s*=\s*true"),
+              "the SoftMask components hidden with the canvases are switched back on by Close - the " +
+              "13,128 NullReferenceExceptions in the 2026-08-29 Player.log");
+        Check("S32-reset", Regex.IsMatch(text, @"static\s+string\s+ResetView\s*\(") &&
+                           raw.Contains("RESET VIEW") &&
+                           Regex.IsMatch(text, @"zoom\s*=\s*BenchList\.ZoomDefault\s*;\s*lift\s*=\s*0f\s*;"),
+              "and there is a RESET VIEW button that puts the knobs themselves back, not merely " +
+              "re-measures at the knobs that lost the picture");
+        // The "record the pose once" rule, in the form that replaced the single `cameraTaken` bool:
+        // a camera already on the ledger is returned from immediately, so a re-take can never record
+        // OUR computed pose as the one to restore. Same guarantee, now per camera rather than global -
+        // see S37-cameraledger for why a global one was not enough.
+        Check("S32-camera-once",
+              Regex.IsMatch(text, @"foreach\s*\(\s*Held\s+\w+\s+in\s+cameras\s*\)\s*if\s*\(\s*\w+\.camera\s*==\s*cam\s*\)\s*return\s*;"),
+              "a re-taken camera does not record OUR pose as the one to restore - or Close would " +
+              "leave the geoscape looking at a soldier's shoulder");
+    }
+
+    /// <summary>Does this source keep the workbench recoverable? See <see cref="BenchRecoveryArm"/>.</summary>
+    private static bool Recoverable(string text)
+    {
+        return Regex.IsMatch(text, @"return\s+entered\s*\?\s*Close\s*\(\s*\)")
+               && Regex.IsMatch(text, @"entered\s*=\s*true\s*;")
+               && Regex.IsMatch(text, @"catch\s*\(\s*Exception\s+\w+\s*\)\s*\{\s*string\s+\w+\s*=\s*Close\s*\(\s*\)\s*;");
+    }
+
+    /// <summary>
+    /// ============ S27: THE AUTHOR'S OWN WEAPON CANNOT VANISH ============
+    ///
+    /// The in-game defect this is the assert for: the weapon list showed nothing but shipped AC_/AN_
+    /// guns, so the one kind of weapon the workbench can actually TUNE was the one kind not on screen.
+    /// Two independent causes, both measured here:
+    ///   1. the mod's weapons sort wherever the alphabet puts them, i.e. below the fold of a scrolling
+    ///      list of two hundred - so they are now listed FIRST, unconditionally;
+    ///   2. the game's own slot test can legitimately refuse one for the selected unit, and a refused
+    ///      weapon simply disappeared. It is now kept and COUNTED, so the panel can say so in words.
+    /// In game both look identical to "my bake did not load". Offline they are two asserts.
+    /// </summary>
+    private static void BenchMineArm()
+    {
+        // The identity is the def's own ResourcePath (WeaponBuild.cs:136), not a live-fit lookup:
+        // WeaponBuild.Fitted() is EMPTY until a weapon has been instantiated in a hand, which is why
+        // the panel used to call the author's own guns vanilla for as long as it mattered.
+        Check("S27-mine", BenchList.IsMine("Morgott/ContentTool/SpiderGun") &&
+                          !BenchList.IsMine("Weapons/PX_AssaultRifle") && !BenchList.IsMine(null) &&
+                          !BenchList.IsMine("morgott/contenttool/x"),
+              "ResourcePath decides, exactly and case-sensitively");
+
+        List<string> shelf = new List<string> { "AC_Rifle", "AN_Cannon", "MyGun", "AZ_Pistol", "MyClaw" };
+        Func<string, bool> mine = n => n.StartsWith("My", StringComparison.Ordinal);
+        int refused;
+        string sel = "AC_Rifle";
+        // The unit refuses BOTH of the author's weapons and accepts every shipped one.
+        List<string> shown = BenchList.Offer(shelf, n => !mine(n), mine, ref sel, out refused);
+        Check("S27-kept", shown.Count == 5 && refused == 2,
+              "a refused mod weapon is still listed, and counted: " + shown.Count + "/" + refused);
+        Check("S27-first", shown[0] == "MyGun" && shown[1] == "MyClaw",
+              "the mod's own come FIRST, in catalogue order: " + string.Join(",", shown.ToArray()));
+        Check("S27-rest", shown[2] == "AC_Rifle" && shown[4] == "AZ_Pistol",
+              "the shipped ones follow, order untouched");
+        Check("S27-sel", sel == "AC_Rifle", "a still-listed selection survives");
+
+        // A shipped weapon the unit refuses still drops - the filter is not weakened for everyone,
+        // only for the weapons whose absence would read as a failed bake.
+        sel = "AC_Rifle";
+        List<string> narrow = BenchList.Offer(shelf, n => n == "AZ_Pistol", mine, ref sel, out refused);
+        Check("S27-drop", narrow.Count == 3 && narrow[2] == "AZ_Pistol" && sel == null && refused == 2,
+              "shipped refusals still drop, mod refusals do not: " + string.Join(",", narrow.ToArray()));
+
+        // And with no mod weapons at all, this is exactly the old list.
+        sel = null;
+        List<string> none = BenchList.Offer(new List<string> { "AC_Rifle", "AZ_Pistol" },
+                                            n => true, mine, ref sel, out refused);
+        Check("S27-nomine", none.Count == 2 && refused == 0, "no mod weapons changes nothing");
+    }
+
+    /// <summary>
+    /// ============ S28: THE CAMERA STANDS WHERE THE UNIT IS ON SCREEN ============
+    ///
+    /// The in-game defect: the workbench leaned on a CameraDirector hint, i.e. on framing authored for
+    /// the game's OWN equip screen, and the unit ended up a shoulder at the right edge with an empty
+    /// screen beside it. The framing is computed now, and this is the half of it that can be measured
+    /// without a screenshot: PROJECT the bounds back through the pose the math produced and assert the
+    /// pixels land inside the region the panel does not cover.
+    /// </summary>
+    private static void BenchFrameArm()
+    {
+        const float W = 1277f, H = 720f, P = 340f, M = 1.35f, FOV = 40f;
+
+        float d, lat;
+        BenchList.Frame(1f, FOV, W, H, P, M, out d, out lat);
+
+        // The projection, done the plain way: the camera looks straight down its own forward axis, the
+        // unit's centre sits `lat` to its right, and a point `x` right of the camera lands at
+        // W/2 * (1 + x / (d*tanH)).
+        double tanV = Math.Tan(FOV * 0.5 * Math.PI / 180.0);
+        double tanH = tanV * (W / H);
+        Func<double, double> sx = x => W / 2.0 * (1.0 + x / (d * tanH));
+        Func<double, double> sy = y => H / 2.0 * (1.0 + y / (d * tanV));
+
+        Check("S28-centre", Math.Abs(sx(lat) - (P + W) / 2.0) < 0.5,
+              "the unit lands dead centre of the FREE region, not of the screen: " +
+              sx(lat).ToString("0.0") + " vs " + ((P + W) / 2.0).ToString("0.0"));
+
+        double left = sx(lat - 1.0), right = sx(lat + 1.0), top = sy(1.0), bottom = sy(-1.0);
+        Check("S28-clear", left > P && right < W && bottom > 0f && top < H,
+              "the whole unit is inside the free region: x " + left.ToString("0") + ".." +
+              right.ToString("0") + " (panel ends " + P + ", screen " + W + "), y " +
+              bottom.ToString("0") + ".." + top.ToString("0"));
+        // ... and with room to spare, which is what the margin is for. A frame that only just fits
+        // reads as cramped, and "just fits" is also where a rounding error becomes a clipped elbow.
+        Check("S28-margin", left - P > (W - P) * 0.05 && W - right > (W - P) * 0.05,
+              "at least 5% of the free width as breathing room on each side");
+
+        // The panel is EXCLUDED, not merely accounted for: with no panel the camera does not step
+        // sideways at all, and the unit is centred on the screen.
+        float d0, lat0;
+        BenchList.Frame(1f, FOV, W, H, 0f, M, out d0, out lat0);
+        Check("S28-nopanel", Math.Abs(lat0) < 1e-4f && lat > 0.05f,
+              "no panel means no sideways step; a panel means a positive one: " + lat0 + " / " + lat);
+        Check("S28-narrower", d >= d0,
+              "a panel never brings the camera CLOSER: " + d + " >= " + d0);
+        // ... and when the width is what binds - a wide window, where the unit would otherwise be
+        // nowhere near the top and bottom edges - the panel really does push the camera back.
+        float dNoPanel, dPanel, latIgnore;
+        BenchList.Frame(1f, FOV, 2400f, 600f, 0f, 1f, out dNoPanel, out latIgnore);
+        BenchList.Frame(1f, FOV, 2400f, 600f, 2100f, 1f, out dPanel, out latIgnore);
+        Check("S28-widthbound", dPanel > dNoPanel * 1.5f,
+              "when the free WIDTH is the binding constraint the panel pushes the camera back: " +
+              dPanel + " vs " + dNoPanel);
+
+        // A bigger unit is seen from further back, proportionally - this is what makes a Crabman, a
+        // four-legged mutoid and a vehicle work without three hand-tuned numbers each.
+        float dBig, latBig;
+        BenchList.Frame(3f, FOV, W, H, P, M, out dBig, out latBig);
+        Check("S28-taller", dBig > d && Math.Abs(dBig - 3f * d) < 1e-3f,
+              "three times the radius is three times the distance: " + dBig + " vs " + d);
+        double bigLeft = W / 2.0 * (1.0 + (latBig - 3.0) / (dBig * tanH));
+        double bigRight = W / 2.0 * (1.0 + (latBig + 3.0) / (dBig * tanH));
+        Check("S28-tallclear", bigLeft > P && bigRight < W,
+              "and the bigger unit is inside the free region too: " + bigLeft.ToString("0") + ".." +
+              bigRight.ToString("0"));
+
+        // ONE formula, both constraints, and which one binds is the aspect's business rather than a
+        // branch of ours: a PORTRAIT window is narrow, so the free width is what runs out first; a wide
+        // one has width to spare and the viewport HEIGHT binds instead - at exactly radius/tan(fov/2).
+        float dTall, dWide, ignore;
+        BenchList.Frame(1f, FOV, 600f, 1200f, 100f, 1f, out dTall, out ignore);
+        BenchList.Frame(1f, FOV, 2400f, 600f, 100f, 1f, out dWide, out ignore);
+        Check("S28-bound", dTall > dWide && Math.Abs(dWide - 1f / (float)tanV) < 1e-3f,
+              "portrait is width-bound (" + dTall + "), landscape is height-bound (" + dWide +
+              " == radius/tanV " + (1f / tanV).ToString("0.000") + ")");
+
+        // A GUI loop must not be where a minimised window, a silly FOV or a unit whose renderers all
+        // failed to load turns into an exception or a NaN camera position.
+        float dJunk, latJunk;
+        BenchList.Frame(0f, 0f, 0f, 0f, -50f, 0f, out dJunk, out latJunk);
+        Check("S28-junk", !float.IsNaN(dJunk) && !float.IsInfinity(dJunk) && dJunk > 0f &&
+                          !float.IsNaN(latJunk) && Math.Abs(latJunk) < 1e-6f,
+              "degenerate input gives a finite pose, not a NaN: " + dJunk + " / " + latJunk);
+        float dHuge, latHuge;
+        BenchList.Frame(1f, FOV, 1000f, 800f, 100000f, M, out dHuge, out latHuge);
+        Check("S28-panelcap", !float.IsInfinity(dHuge) && dHuge > 0f,
+              "a panel wider than the screen is clamped rather than dividing by zero: " + dHuge);
+    }
+
+    /// <summary>
+    /// ============ S38: THE TRANSPORT UNDER THE MODEL ============
+    ///
+    /// The animation strip's arithmetic. Every arm here is something whose in-game symptom is a WRONG
+    /// PICTURE with no error anywhere: a looped clip that sits on its last frame instead of restarting,
+    /// a scrub that walks past the end of the clip, a drag on the slider that also swings the camera, or
+    /// a unit framed into screen the strip is standing on top of.
+    /// </summary>
+    private static void TransportArm()
+    {
+        // ---- the scrub slider's value, which arrives from a mouse and can be past either end ----
+        Check("S38-normalized",
+              BenchList.Normalized(-0.2f) == 0f && BenchList.Normalized(1.4f) == 1f &&
+              BenchList.Normalized(0.5f) == 0.5f && BenchList.Normalized(float.NaN) == 0f,
+              "a slider value is clamped into [0,1] at BOTH ends - a normalized time outside it is a " +
+              "state the animator does not have");
+
+        // ---- one frame of playback ----
+        bool ended;
+        // A LOOP MUST RESTART, NOT STALL. next = 0.9 + 0.25*1/1.25 = 1.1 -> 0.1, i.e. back round.
+        // (0.25 s is exactly BenchList.MaxDelta, so the cap below is not what is being measured here.)
+        float wrapped = BenchList.Advance(0.9f, 0.25f, 1f, 1.25f, true, out ended);
+        Check("S38-loop-wrap", Math.Abs(wrapped - 0.1f) < 1e-4f && !ended,
+              "a looped clip past its end comes back to the START (" + wrapped + "), which is a " +
+              "restart - a clamp here reads in game as 'the animation froze on the last frame'");
+        // ... and it must not stall on the NEXT frame either: from the wrapped position it keeps going.
+        float again = BenchList.Advance(wrapped, 0.25f, 1f, 1.25f, true, out ended);
+        Check("S38-loop-runs", again > wrapped && again < 1f,
+              "and it keeps running from there rather than sticking: " + wrapped + " -> " + again);
+
+        float clamped = BenchList.Advance(0.9f, 0.25f, 1f, 1.25f, false, out ended);
+        Check("S38-noloop-clamp", Math.Abs(clamped - 1f) < 1e-6f && ended,
+              "with loop OFF the same frame clamps to the end AND says so, so the caller can stop " +
+              "rather than re-asserting the last pose forever");
+
+        // The speed knob is clamped, not trusted: it drives a division and a runaway one skips the clip.
+        float fast = BenchList.Advance(0f, 1f, 1000f, 1f, false, out ended);
+        float capped = BenchList.Advance(0f, 1f, BenchList.SpeedMax, 1f, false, out ended);
+        Check("S38-speed-clamp", Math.Abs(fast - capped) < 1e-6f,
+              "an absurd speed is clamped to SpeedMax (" + BenchList.SpeedMax + "), not obeyed");
+        float slow = BenchList.Advance(0f, 1f, 0f, 10f, false, out ended);
+        Check("S38-speed-floor", slow > 0f &&
+                                 Math.Abs(slow - BenchList.MaxDelta * BenchList.SpeedMin / 10f) < 1e-6f,
+              "and a zero speed lands on SpeedMin rather than making PLAY do nothing at all: " + slow);
+
+        // A stall, a breakpoint or a level load hands over a whole second of delta.
+        float hitch = BenchList.Advance(0f, 10f, 1f, 4f, false, out ended);
+        float cappedDt = BenchList.Advance(0f, BenchList.MaxDelta, 1f, 4f, false, out ended);
+        Check("S38-dt-cap", Math.Abs(hitch - cappedDt) < 1e-6f,
+              "a hitch does not teleport the clip - dt is capped at " + BenchList.MaxDelta + "s");
+        Check("S38-junk",
+              !float.IsNaN(BenchList.Advance(float.NaN, float.NaN, float.NaN, 0f, true, out ended)),
+              "and every input being junk gives a number, not a NaN handed to the animator");
+
+        Check("S38-seconds",
+              Math.Abs(BenchList.Seconds(0.5f, 2f) - 1f) < 1e-6f && BenchList.Seconds(0.5f, 0f) == 0f,
+              "the readout is normalized*length, and a clip with no length reads 0 rather than NaN");
+
+        Check("S38-speed-ladder",
+              BenchList.NextSpeed(1f) == 2f && BenchList.NextSpeed(2f) == BenchList.Speeds[0] &&
+              BenchList.NextSpeed(3.7f) == BenchList.Speeds[0],
+              "the speed ladder wraps, and a value off the ladder lands on the first rung");
+
+        // ---- where the strip is, and what it is allowed to claim ----
+        const float W = 1920f, H = 1080f, P = BenchList.PanelWidth;
+        Check("S38-strip-shown", BenchList.StripShown(W, H, P),
+              "a normal window has room for the strip");
+        Check("S38-strip-hit",
+              BenchList.OverStrip(P + 1f, 5f, W, H, P) &&
+              BenchList.OverStrip(W - 1f, BenchList.StripHeight, W, H, P),
+              "the band right of the panel and below its top edge belongs to the transport");
+        Check("S38-strip-not-panel",
+              !BenchList.OverStrip(P, 5f, W, H, P) && !BenchList.OverStrip(0f, 5f, W, H, P),
+              "and it does NOT overlap the panel - the panel's own column and edge stay the panel's");
+        Check("S38-strip-not-gizmo",
+              !BenchList.OverStrip(P + 1f, BenchList.StripHeight + 1f, W, H, P) &&
+              !BenchList.OverStrip(W * 0.5f, H * 0.5f, W, H, P),
+              "and it claims NOTHING above its own top edge - everything up there is still the " +
+              "gizmo's and the orbit's");
+        Check("S38-strip-top",
+              Math.Abs(BenchList.StripTop(W, H, P) - (H - BenchList.StripHeight)) < 1e-6f,
+              "the same edge in IMGUI's own convention, which is what the gizmo compares against");
+
+        // No room = no strip, and then NO HEIGHT IS RESERVED either: a framing that paid for a strip
+        // that was never drawn would stand the unit too low with nothing on screen to say why.
+        const float Narrow = BenchList.PanelWidth + BenchList.StripMinWidth - 1f;
+        Check("S38-strip-noroom",
+              !BenchList.StripShown(Narrow, H, P) && !BenchList.OverStrip(Narrow - 1f, 5f, Narrow, H, P) &&
+              BenchList.StripReserve(Narrow, H, P) == 0f &&
+              BenchList.StripTop(Narrow, H, P) == float.MaxValue,
+              "a free region narrower than " + BenchList.StripMinWidth + " px gets no strip, claims no " +
+              "mouse and costs no height");
+        Check("S38-strip-short",
+              !BenchList.StripShown(W, BenchList.StripHeight * 3f - 1f, P) &&
+              BenchList.StripReserve(W, H, P) == BenchList.StripHeight,
+              "nor does a window too short to spare the height; a normal one reserves exactly " +
+              BenchList.StripHeight);
+
+        // ---- and the framing that has to leave room for it ----
+        float dNo, latNo, vNo, dYes, latYes, vYes;
+        BenchList.Frame(1.7f, 40f, W, H, P, 0f, 1.35f, out dNo, out latNo, out vNo);
+        BenchList.Frame(1.7f, 40f, W, H, P, BenchList.StripHeight, 1.35f, out dYes, out latYes, out vYes);
+        Check("S38-frame-strip", dYes > dNo && vYes > 0f && vNo == 0f,
+              "the strip's height pushes the camera BACK (" + dNo + " -> " + dYes + ") and DOWN (" +
+              vYes + "), which is what stands the unit clear above the transport");
+        Check("S38-frame-vertical-shape",
+              Math.Abs(vYes - dYes * (float)Math.Tan(40f * 0.5 * Math.PI / 180.0) *
+                              (BenchList.StripHeight / H)) < 1e-3f,
+              "and that drop is the vertical mirror of the panel's lateral offset - the same sum with " +
+              "the vertical half-angle, not a second hand-tuned number");
+        // The old five-out-parameter call is what S28 and S30 measure; it must still mean "no strip".
+        float dOld, latOld;
+        BenchList.Frame(1.7f, 40f, W, H, P, 1.35f, out dOld, out latOld);
+        Check("S38-frame-compat", dOld == dNo && latOld == latNo,
+              "and the strip-less overload is exactly the strip height of zero, so every earlier arm " +
+              "still measures what it measured");
+        float dJunk, latJunk, vJunk;
+        BenchList.Frame(1.7f, 40f, W, H, P, float.NaN, 1.35f, out dJunk, out latJunk, out vJunk);
+        Check("S38-frame-junk", !float.IsNaN(dJunk) && vJunk == 0f && dJunk > 0f,
+              "a junk strip height is answered, not multiplied into the camera's position");
+    }
+
+    /// <summary>
+    /// ============ S39: THE ROTATION RINGS ============
+    ///
+    /// "ещё бы сферу сделать а не тока стрелки чтобы по осям можно было вертеть". A ring drag has one
+    /// number in it - a signed angle about one axis - and every way of getting it wrong looks in game
+    /// like "the gun jumped" with nothing to read. So the angle, the accumulate-from-press rule, each
+    /// degenerate refusal and the non-uniform-parent guard are all measured here instead.
+    /// </summary>
+    private static void RingArm()
+    {
+        float[] pivot = { 0f, 0f, 0f };
+        float[] up = { 0f, 1f, 0f };
+        // Two rays straight DOWN onto the y = 0 plane: the first hits (1,0,0), the second (0,0,1).
+        float[] down = { 0f, -1f, 0f };
+        float[] fromX = { 1f, 5f, 0f };
+        float[] fromZ = { 0f, 5f, 1f };
+        float[] fromDiag = { 1f, 5f, 1f };
+
+        float deg;
+        bool ok = BenchList.RingAngle(pivot, up, fromX, down, fromZ, down,
+                                      BenchList.MinRingDot, 0.01f, out deg);
+        // +X to +Z about +Y is MINUS ninety by the right-hand rule (about +Y, +X goes to -Z).
+        Check("S39-angle-sign", ok && Math.Abs(deg + 90f) < 1e-3f,
+              "+X to +Z about +Y is a signed -90 degrees, not +90 and not 90 without a sign -> " + deg);
+        ok = BenchList.RingAngle(pivot, up, fromX, down, fromDiag, down,
+                                 BenchList.MinRingDot, 0.01f, out deg);
+        Check("S39-angle-magnitude", ok && Math.Abs(deg + 45f) < 1e-3f,
+              "and half that turn reads exactly half the angle -> " + deg);
+        // Flipping the AXIS flips the sign, which is the whole reason the measure is signed about it.
+        float[] downAxis = { 0f, -1f, 0f };
+        float flipped;
+        BenchList.RingAngle(pivot, downAxis, fromX, down, fromZ, down,
+                            BenchList.MinRingDot, 0.01f, out flipped);
+        Check("S39-angle-axis", Math.Abs(flipped - 90f) < 1e-3f,
+              "measured about -Y the same drag is +90 -> " + flipped);
+
+        // ---- accumulate from the PRESS, never from the previous frame ----
+        // The same 'now' ray asked twice gives the SAME angle, so a drag held still cannot creep and a
+        // drag re-measured cannot double-apply. This is the arm that fails if anyone rewrites the ring
+        // as a per-frame delta.
+        float first, second;
+        BenchList.RingAngle(pivot, up, fromX, down, fromZ, down, BenchList.MinRingDot, 0.01f, out first);
+        BenchList.RingAngle(pivot, up, fromX, down, fromZ, down, BenchList.MinRingDot, 0.01f, out second);
+        Check("S39-no-double", first == second,
+              "two successive measures of the same pointer position are IDENTICAL (" + first + " / " +
+              second + ") - the angle is always press-to-now, so nothing accumulates twice");
+        // ... and walking the pointer through the halfway point does not add up to more than the whole.
+        float half, whole;
+        BenchList.RingAngle(pivot, up, fromX, down, fromDiag, down, BenchList.MinRingDot, 0.01f, out half);
+        BenchList.RingAngle(pivot, up, fromX, down, fromZ, down, BenchList.MinRingDot, 0.01f, out whole);
+        Check("S39-path-free", Math.Abs(whole - 2f * half) < 1e-3f,
+              "a drag through the halfway point ends at the same angle as one straight there (" +
+              half + " then " + whole + "), because the path is never integrated");
+
+        // ---- the three refusals, none of them approximated ----
+        // NEARLY parallel, not exactly: an exactly-parallel ray is refused by the plane solve itself,
+        // so an arm built on one would pass with the minDot guard deleted. |dir.axis| here is ~0.05,
+        // which is a real intersection a hundred units away and below MinRingDot.
+        float[] sideways = { 1f, -0.05f, 0f };
+        Check("S39-parallel",
+              !BenchList.RingAngle(pivot, up, fromX, down, fromX, sideways,
+                                   BenchList.MinRingDot, 0.01f, out deg) && deg == 0f,
+              "a ray sliding ALONG the ring's plane is refused - its intersection runs to infinity and " +
+              "one pixel of drag would answer with a hundred degrees");
+        float[] away = { 0f, 1f, 0f };
+        Check("S39-behind",
+              !BenchList.RingAngle(pivot, up, fromX, down, fromX, away,
+                                   BenchList.MinRingDot, 0.01f, out deg),
+              "so is a ray pointing away from the plane - the ring is behind the camera");
+        // NEAR the pivot, not exactly on it, for the same reason: an exact hit has no direction and is
+        // refused by the normalise, so the minRadius guard would not be what the arm measured.
+        float[] atPivot = { 0.1f, 5f, 0f };
+        Check("S39-on-pivot",
+              !BenchList.RingAngle(pivot, up, fromX, down, atPivot, down,
+                                   BenchList.MinRingDot, 0.5f, out deg) &&
+              BenchList.RingAngle(pivot, up, fromX, down, atPivot, down,
+                                  BenchList.MinRingDot, 0.05f, out deg),
+              "a hit landing inside the ring's own middle is refused - the angle read off a pixel-wide " +
+              "lever is noise - while the SAME hit is accepted once the ring is small enough to mean it");
+        Check("S39-degenerate-axis",
+              !BenchList.RingAngle(pivot, new[] { 0f, 0f, 0f }, fromX, down, fromZ, down,
+                                   BenchList.MinRingDot, 0.01f, out deg) &&
+              !BenchList.RingAngle(null, up, fromX, down, fromZ, down,
+                                   BenchList.MinRingDot, 0.01f, out deg),
+              "a zero axis or a missing pivot is answered, not dereferenced - this runs every drag frame");
+
+        // ---- the parent frame the rotation has to be writable in ----
+        string why;
+        float[] identity = { 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f };
+        Check("S39-uniform-ok", BenchList.RingsUsable(identity, BenchList.ScaleTolerance, out why) &&
+                                why == null,
+              "an ordinary parent frame carries a ring");
+        float[] scaled = { 0.4f, 0f, 0f, 0f, 0.4f, 0f, 0f, 0f, 0.4f };
+        Check("S39-uniform-scaled", BenchList.RingsUsable(scaled, BenchList.ScaleTolerance, out why),
+              "and so does a uniformly SCALED one - a hand at 0.4 is legitimate, not degenerate");
+        float[] stretched = { 1f, 0f, 0f, 0f, 2f, 0f, 0f, 0f, 1f };
+        Check("S39-nonuniform",
+              !BenchList.RingsUsable(stretched, BenchList.ScaleTolerance, out why) &&
+              why != null && why.Contains("UNEVENLY"),
+              "a materially UNEVEN parent scale is refused with a word, because a world rotation under " +
+              "it is not representable as a child-local one and the skew would be silent -> " + why);
+        float[] mirrored = { 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, -1f };
+        Check("S39-mirrored",
+              !BenchList.RingsUsable(mirrored, BenchList.ScaleTolerance, out why) &&
+              why != null && why.Contains("MIRRORED"),
+              "so is a mirrored one, where the ring would turn the gun the opposite way to the drag");
+        float[] collapsed = { 1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 1f };
+        Check("S39-collapsed",
+              !BenchList.RingsUsable(collapsed, BenchList.ScaleTolerance, out why) && why != null &&
+              !BenchList.RingsUsable(null, BenchList.ScaleTolerance, out why),
+              "and a parent scaled to nothing, and no parent at all");
+
+        // ---- what is clickable is what is drawn ----
+        // A unit square as a closed polyline: the ring, sampled.
+        float[] sqX = { 0f, 10f, 10f, 0f }, sqY = { 0f, 0f, 10f, 10f };
+        Check("S39-polyline",
+              Math.Abs(BenchList.PolylineDistance(sqX, sqY, 5f, 0f)) < 1e-4f &&
+              Math.Abs(BenchList.PolylineDistance(sqX, sqY, 5f, 5f) - 5f) < 1e-4f &&
+              Math.Abs(BenchList.PolylineDistance(sqX, sqY, 0f, 5f)) < 1e-4f,
+              "distance to the CLOSED polyline: zero on an edge, and the centre is half a side away - " +
+              "the closing segment is walked, or a quarter of every ring would be unclickable");
+        Check("S39-polyline-junk",
+              BenchList.PolylineDistance(null, sqY, 0f, 0f) == float.MaxValue &&
+              BenchList.PolylineDistance(new[] { 1f }, new[] { 1f }, 0f, 0f) == float.MaxValue,
+              "and a missing or one-point ring answers 'nowhere near', not an exception");
+
+        float[][] rings = { new[] { 0f, 10f, 10f, 0f }, new[] { 100f, 110f, 110f, 100f },
+                            new[] { 0f, 10f, 10f, 0f } };
+        float[][] ringsY = { new[] { 0f, 0f, 10f, 10f }, new[] { 0f, 0f, 10f, 10f },
+                             new[] { 0f, 0f, 10f, 10f } };
+        bool[] all = { true, true, true }, second0 = { false, true, false };
+        Check("S39-nearest",
+              BenchList.NearestRing(rings, ringsY, all, 102f, 1f, BenchList.RingPickRadius) == 1 &&
+              BenchList.NearestRing(rings, ringsY, all, 5f, 1f, BenchList.RingPickRadius) == 0,
+              "the nearest ring wins");
+        Check("S39-nearest-valid",
+              BenchList.NearestRing(rings, ringsY, second0, 5f, 1f, BenchList.RingPickRadius) == -1,
+              "a ring marked unusable is NOT pickable, which is what makes a dimmed ring honest");
+        Check("S39-nearest-radius",
+              BenchList.NearestRing(rings, ringsY, all, 5f, 60f, BenchList.RingPickRadius) == -1 &&
+              BenchList.NearestRing(rings, ringsY, null, 5f, 1f, BenchList.RingPickRadius) == -1,
+              "and a click further than " + BenchList.RingPickRadius + " px from every ring picks none");
     }
 
     private static void Fail(string gate, string detail) { failures++; Console.WriteLine(gate + " FAIL " + detail); }

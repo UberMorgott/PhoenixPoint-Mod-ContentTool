@@ -165,6 +165,24 @@
       <HintPath>$(UnityManaged)\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Canvas. The weapon fit workbench (src\Dev\FitBench.cs) hides the screen the user came from
+         by disabling its ROOT CANVASES rather than by touching the UI state stack - the project law
+         is never to Enter a popped UI state, and the cheapest way to keep it is to push none. The
+         type lives in its own module (verified against this install: UnityEngine.UIModule.dll,
+         23,552 B), not in CoreModule, and the game ships it. The panel itself is IMGUI, which the
+         game already reaches for the same way (GameConsoleWindow is a full-screen OnGUI). -->
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(UnityManaged)\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- GUI / GUILayout - the workbench's own panel. IMGUI is not a shortcut here: it is the surface
+         the game itself uses for a full-screen developer window (GameConsoleWindow.cs:15 is an
+         OnGUI), so this costs no prefab, no canvas and no third-party UI. Verified present in this
+         install: UnityEngine.IMGUIModule.dll, 156,160 B. -->
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(UnityManaged)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- AkSoundEngine / AkCallbackManager / AkDurationCallbackInfo. The game ships it; the mod
          only calls into it. -->
     <Reference Include="AK.Wwise.Unity.API">

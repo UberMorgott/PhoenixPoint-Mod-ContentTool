@@ -43,6 +43,22 @@
     <!-- The weapon manifest's "tint" parse. Deliberately free of UnityEngine (three floats, not a
          Color), so gate W1 measures the refusals offline instead of only inside a game session. -->
     <Compile Include="..\..\src\Bake\HexColor.cs" Link="HexColor.cs" />
+    <!-- The fit's algebra: a uniform scale, a turn and the offset that lands the turned centre on
+         the donor's. Pure floats, no UnityEngine (the rotation arrives as nine numbers), so gate
+         S23 measures the transform composition offline - the one place it CAN be measured without
+         a soldier's hand to look at. -->
+    <Compile Include="..\..\src\Bake\FitBox.cs" Link="FitBox.cs" />
+    <!-- And the other half of a live fit: reading a "weapons" row and writing the three keys a dialled
+         fit produces back into the author's own ppcontent.json. Deliberately free of UnityEngine (the
+         values arrive as floats, not Vector3s), so gate S25 measures the ROUND TRIP offline - tune,
+         save, re-read, get the same numbers - which is the one thing a soldier's hand cannot check. -->
+    <Compile Include="..\..\src\Tactical\WeaponManifest.cs" Link="WeaponManifest.cs" />
+    <!-- The weapon fit workbench's own decisions: which listed weapon a live fit can be dialled on,
+         what a typed filter leaves, and one axis press as three numbers. Deliberately free of
+         UnityEngine (the Unity half is src\Dev\FitBench.cs), so gate S26 measures the
+         tunable-vs-vanilla classification offline - the half whose only in-game symptom would be a
+         save that refuses after a gun has already been dialled in by eye. -->
+    <Compile Include="..\..\src\Dev\BenchList.cs" Link="BenchList.cs" />
     <Compile Include="..\..\src\Project\Package.cs" Link="Package.cs" />
     <Compile Include="..\..\src\Project\PatchCache.cs" Link="PatchCache.cs" />
   </ItemGroup>

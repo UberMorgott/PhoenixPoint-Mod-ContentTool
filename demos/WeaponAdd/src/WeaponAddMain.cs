@@ -20,20 +20,17 @@ namespace Morgott.WeaponAdd
     ///
     /// THE WORKFLOW:
     ///
-    ///   1. Pick the SHIPPED weapon to clone.  Not by taste - by CLASS. Phoenix Point picks a
-    ///                                         soldier's hold pose and firing animation set off the
-    ///                                         weapon's tags, so a pistol cloned from a rifle is held
-    ///                                         like a rifle. Match the silhouette to the class and
-    ///                                         that problem cannot happen.
+    ///   1. Pick the SHIPPED weapon to clone.  Not by taste - by CLASS. ContentTool appends the
+    ///                                         clone beside its donor in equipment-filtered action
+    ///                                         defs and EquipmentListDefs, which select hold and fire
+    ///                                         animation. Match the silhouette to the class.
     ///   2. Add an entry to "weapons".         id, name, clone, guid. That is the minimum.
     ///   3. Change the numbers you care about. "damage" and "spread" override the clone's; leave
     ///                                         either out and the shipped value stands.
     ///   4. OPTIONAL: give it your own model.  Publish a prefab key in "publish", name it in
-    ///                                         "model", and give the three socket positions the
-    ///                                         demo's fit script DERIVES for you. Leave "model" out
-    ///                                         and the weapon wears the art of the gun it cloned -
-    ///                                         which is the honest state for a model that has not
-    ///                                         been through Blender yet.
+    ///                                         "model", then use "fit": "auto" to derive the four
+    ///                                         sockets or declare shoot/aim/shell for a pre-fitted
+    ///                                         model. Leave "model" out to keep the donor's art.
     ///
     /// WHY THEY EXIST AT CAMPAIGN START: a new campaign fills the base from
     /// GameDifficultyLevelDef.StartingStorage (GameDifficultyLevelDef.cs:43), so appending to it puts

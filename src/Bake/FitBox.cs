@@ -38,9 +38,19 @@ namespace Morgott.ContentTool.Bake
         ///
         /// Returns false with a reason when the source has no size on some axis - a flat or empty
         /// mesh, where every ratio is infinite and the fit is meaningless.
+        ///
+        /// <paramref name="rot3x3"/> is the rotation the SAME transform carries, row-major, or null
+        /// for none. It is not decoration: a child transform composes as
+        /// <c>p + R * (s * v)</c>, so the offset that lands the source centre on the target's is
+        /// <c>target - s * (R * source)</c>, not <c>target - s * source</c>. Computing it in
+        /// unrotated space is what put the gun above the hand it was supposed to sit in. The box the
+        /// scale is measured against has to be seen through R for the same reason, and the
+        /// axis-aligned extent of a rotated box is <c>|R| * extent</c> - which is the right-angle
+        /// permutation for a right angle, and correct for a rotation the manifest declared by hand,
+        /// where a permutation is simply wrong.
         /// </summary>
         internal static bool Solve(float[] sourceCenter, float[] sourceExtent,
-                                   float[] targetCenter, float[] targetExtent,
+                                   float[] targetCenter, float[] targetExtent, float[] rot3x3,
                                    out float scale, out float[] offset, out string why)
         {
             scale = 1f;
@@ -53,16 +63,29 @@ namespace Morgott.ContentTool.Bake
                 return false;
             }
 
+            bool turned = rot3x3 != null && rot3x3.Length >= 9;
+            float[] ext = new float[3], ctr = new float[3];
+            for (int i = 0; i < 3; i++)
+            {
+                if (!turned) { ext[i] = sourceExtent[i]; ctr[i] = sourceCenter[i]; continue; }
+                ext[i] = Math.Abs(rot3x3[i * 3]) * sourceExtent[0] +
+                         Math.Abs(rot3x3[i * 3 + 1]) * sourceExtent[1] +
+                         Math.Abs(rot3x3[i * 3 + 2]) * sourceExtent[2];
+                ctr[i] = rot3x3[i * 3] * sourceCenter[0] +
+                         rot3x3[i * 3 + 1] * sourceCenter[1] +
+                         rot3x3[i * 3 + 2] * sourceCenter[2];
+            }
+
             float smallest = float.MaxValue;
             for (int i = 0; i < 3; i++)
             {
-                if (sourceExtent[i] <= 1e-9f)
+                if (ext[i] <= 1e-9f)
                 {
                     why = "the model has no thickness on axis " + i.ToString(CultureInfo.InvariantCulture) +
                           ", so there is nothing to scale; it is flat or empty";
                     return false;
                 }
-                float ratio = targetExtent[i] / sourceExtent[i];
+                float ratio = targetExtent[i] / ext[i];
                 if (ratio < smallest) smallest = ratio;
             }
             if (smallest <= 0f || float.IsInfinity(smallest) || float.IsNaN(smallest))
@@ -72,9 +95,10 @@ namespace Morgott.ContentTool.Bake
             }
 
             scale = smallest;
-            // Scale about the SOURCE CENTRE, then move that centre onto the target's: the mesh's own
-            // origin is the artist's and means nothing here.
-            for (int i = 0; i < 3; i++) offset[i] = targetCenter[i] - scale * sourceCenter[i];
+            // Scale and TURN about the SOURCE CENTRE, then move that centre onto the target's: the
+            // mesh's own origin is the artist's and means nothing here, and the turn is part of the
+            // same transform, so it has to be in the same algebra.
+            for (int i = 0; i < 3; i++) offset[i] = targetCenter[i] - scale * ctr[i];
             return true;
         }
 

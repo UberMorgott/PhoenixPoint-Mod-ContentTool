@@ -58,6 +58,9 @@ MyWeapon\
 }
 ```
 
+This is a generic no-model recipe, not the shipped `WeaponAdd` demo: all three Vulture rows now
+declare their own `model` key (`demos/WeaponAdd/ppcontent.json:26-77`).
+
 Do the first enable with `damage` and `spread` omitted. Every weapon prints the donor's real tuning
 on the left of each arrow and the clone's value on the right. This captured line, for example, says
 the donor dealt 40 damage with 2 degrees of spread before the demo overrode them:
@@ -129,6 +132,7 @@ MyRifle\
       "icon": "Icons\\field_rifle.png",
       "model": "yourname.myrifle/models/field_rifle",
       "fit": "auto",
+      "offset": "0,-0.07,0",
       "damage": 40,
       "spread": 2.5,
       "count": 1,
@@ -147,9 +151,141 @@ Override the fit solver when it gives the wrong answer:
 - `scale`: float — explicit uniform mesh scale, replaces the computed value.
 - `rotate`: `"x,y,z"` euler degrees — explicit mesh rotation, replaces the axis-aligned auto
   rotation and `flip`.
+- `offset`: `"x,y,z"` metres — adds a local-position nudge after the fit has solved rotation,
+  scale and centre. It does not replace the solved position. The derived shoot, aim and shell
+  sockets move by the same vector (`WeaponBuild.cs:797-840`). Without `fit: auto`, it adds to the
+  baked mesh child's existing local position (`WeaponBuild.cs:906-920`).
 
-Both are written to the prefab's mesh CHILD, not the root — see *Why the fit must live below the
+All three are written to the prefab's mesh CHILD, not the root — see *Why the fit must live below the
 prefab root* below.
+
+### Fit the model in the workbench
+
+The automatic solve can match one bounding box to another, but it cannot see a trigger or decide
+where a hand should close around a grip. The weapon fit workbench puts the selected weapon in a
+unit's hand inside the running game, so the last centimetres can be fitted by eye instead of by
+editing numbers, rebuilding and relaunching after every guess.
+
+The fit is not baked into the AssetBundle. The bundle carries the baked model and its render assets;
+`scale`, `rotate` and `offset` remain in the content mod's `ppcontent.json` and are applied when
+`WeaponBuild.Build` creates the weapon. Tuning those fields never needs another `ct_project`, and
+rebaking changed art does not remove the tuning from the manifest.
+
+First bake the model, build the content mod's DLL and enable the mod so its `WeaponBuild.Build` call
+has created the weapon. Start or load a campaign and wait for the geoscape to finish loading, then
+press **Ctrl+Alt+B**. The workbench uses the geoscape SquadBay and refuses to open from the main menu,
+during a load, or in any other level that has no SquadBay. The console reaches the same entry and
+exit paths:
+
+```text
+ct_bench open
+ct_bench close
+ct_bench reset
+```
+
+With no argument, `ct_bench` toggles the workbench. Close it with the on-screen **CLOSE
+(Ctrl+Alt+B)** button, the same key chord, or `ct_bench close`. `ct_bench reset` and **RESET VIEW**
+restore the workbench's default camera, orbit, zoom, model turn and animation state without changing
+the fit.
+
+Do not rebind this tool to **F4**, **F5**, **F9** or **F10**. Phoenix Point owns those keys: F5 and F9
+are quicksave and quickload, while F4 and F10 invoke other game tools. Unity sends one press to both
+the mod and the game, so assigning one of those keys would run both actions. ContentTool refuses to
+arm a workbench hotkey on any of them.
+
+Use this first-fit path:
+
+1. Open **unit**, type part of a def name if needed, and select a buildable `TacCharacterDef`.
+   Soldiers, Pandorans and vehicles are available when their template has the view and addons data
+   needed to stand it in the SquadBay.
+2. Open **weapon** and select the new weapon. ContentTool asks
+   `CommonCharacterUtils.CanSwapItem` which shipped weapons that body can carry. Weapons built by
+   ContentTool remain at the top even when that test refuses them, so a bad donor or body choice is
+   visible rather than missing; the unit's hand stays empty in that case. `*` marks a ContentTool
+   weapon, and `* live` means its fit record is loaded this session and its controls are ready.
+3. Left-drag beside the panel to orbit around the unit and use the wheel to zoom. **invert X** and
+   **invert Y** change the orbit direction for this session. Right-drag turns the whole model for
+   inspection; it does not change the saved weapon fit. Use **RESET VIEW** if the view becomes
+   unusable.
+4. Drag an arrow on the weapon for a coarse move along that parent-local axis. Drag a ring to turn
+   the weapon about its matching axis. Both gestures use the same fit service as the buttons, so the
+   manifest values, derived sockets and every live copy of the weapon follow what is on screen.
+5. Use the **move** row's **X-**, **X+**, **Y-**, **Y+**, **Z-** and **Z+** buttons, and the matching
+   **turn** row, for exact changes. The step buttons labelled **move**, **turn** and **scale** cycle
+   their increments; use the **scale** row's **-** and **+** buttons for uniform scale. There is no
+   per-axis scale.
+6. Use the strip under the model to choose one of the live controller's playable states. It provides
+   **PLAY** / **PAUSE**, **loop**, a normalized scrub slider and a speed button that cycles from
+   `x0.05` to `x2`. Return to **IDLE** before judging the ordinary hold pose.
+7. Watch the status above the controls. **MODIFIED** means the live numbers differ from the last
+   values read from or written to the manifest; no file has changed yet. **REVERT** discards the live
+   experiment and re-reads that weapon row. **RESET AUTO** discards all three live overrides and
+   recomputes the bounding-box solve. Neither button writes to disk.
+8. Press **SAVE TO FILE** when the grip, motion and scale are correct. The answer box prints the
+   exact `ppcontent.json` written and, when source mirroring is configured, the exact source path
+   that received the same bytes. Do not close the workbench until that answer names the copy you
+   intend to keep.
+
+SAVE splices only `scale`, `rotate` and `offset` into that weapon's flat manifest row. It preserves
+the file's other bytes, including key order, indentation, line endings and BOM. It does not write the
+AssetBundle, GLB or any shipped Phoenix Point file. After saving, close the workbench and verify
+muzzle position, aim, firing, reload, holster and the full animation set in play. If only the fit
+changed, go directly to `ct_package`; do not rebake the model.
+
+The older console dial remains available when the panel or drag handles cannot be used:
+
+```text
+ct_fit show
+ct_fit <weapon> <dx,dy,dz>
+```
+
+The second form adds the declared delta to the prefab and matching live instances, then prints a
+paste-ready `scale` / `rotate` / `offset` block. Repeating it accumulates deltas. The workbench's
+**SAVE TO FILE** button writes that block into the correct row, so no manual paste is needed.
+
+### Know which `ppcontent.json` SAVE changes
+
+The live weapon remembers the absolute `ppcontent.json` path passed to `WeaponBuild.Build`. SAVE
+always writes that file first because it is the copy from which the running game built the weapon.
+In a project kept directly under `<Phoenix Point>\Mods\MyRifle`, that file is already the author's
+working copy and no second destination is needed. Without a marker, the answer says that no source
+was recorded; that is expected when the one file is both the working and loaded copy.
+
+When a repository source folder is copied to a separate game installation, put a one-line
+`.contenttool-source` file beside the deployed `ppcontent.json`. Its line is the absolute path to the
+source mod folder. ContentTool's `deploy.ps1` writes this marker for ContentTool and every demo it
+deploys. After the deployed manifest has been saved successfully, the workbench reads the marker and
+copies the exact saved bytes to `<recorded source folder>\ppcontent.json`.
+
+Source mirroring belongs to the workbench's **SAVE TO FILE** path. The console form
+`ct_fit <weapon> save` writes the originating manifest but does not perform this second copy.
+
+In the separate-repository layout, the source manifest remains authoritative. A successful answer
+names the deployed path and then says `AND mirrored back to the source:` followed by the repository
+path. Continue editing, committing and packaging from that source folder. If the marker is absent,
+points to a folder that no longer exists, or cannot be written, the answer says so and confirms that
+the deployed file was still saved. Copy that newer deployed `ppcontent.json` back to the repository
+before the next deploy; otherwise the next copy from source can overwrite the fit. The supplied
+`deploy.ps1` also warns before it overwrites a deployed demo whose manifest differs from its source
+copy.
+
+### Workbench limits
+
+- A fully loaded geoscape campaign is required because the preview stands in its SquadBay.
+- A shipped weapon can be held for comparison, but it has no content-mod manifest row and therefore
+  no fit controls or SAVE operation.
+- The gizmo has translation arrows and rotation rings, but no scale handle; use the **scale** row's
+  **-** and **+** buttons.
+- An arrow or ring nearly edge-on to the camera is dimmed and refuses the drag. Its screen projection
+  cannot produce an accurate distance or angle, so the workbench does not approximate one; orbit a
+  little or use that axis's buttons.
+- Rotation rings also refuse a mirrored or unevenly scaled parent because the world-space turn
+  cannot be represented as an exact child-local rotation there. The local **turn X/Y/Z** buttons
+  remain exact.
+- The animation strip lists only clip names that the live Animator confirms are playable state names.
+  A controller with no such names remains in the weapon-appropriate idle.
+- **RESET AUTO** applies only to a row with `"fit": "auto"`; an offline-placed model has no automatic
+  solve to restore, so use **REVERT** instead.
 
 The weapon needs attachment transforms for projectile origin/muzzle flash, aim/IK and shell
 ejection. With `fit: auto`, ContentTool derives them. For a model pre-fitted in your art tool, provide
@@ -256,7 +392,7 @@ directly is safe, but mutating them repaints every weapon in the game that uses 
 `Addon.AttachVisuals` (`Assembly-CSharp`, `Addon.cs:1079-1080`) does
 `VisualRoot.SetParent(attachTransform); VisualRoot.ResetTransform();` — that zeroes
 localPosition/localRotation/localScale of the prefab ROOT on attach. ContentTool therefore writes
-fit/scale/rotate to the prefab's existing mesh CHILD (commit `477a2dc`). Known ceiling: a foreign
+fit/scale/rotate/offset to the prefab's existing mesh CHILD (`WeaponBuild.cs:906-920`). Known ceiling: a foreign
 prefab whose mesh sits ON the root has nowhere below the root to write, and keeps the erased-at-attach
 behaviour.
 
@@ -362,7 +498,8 @@ to confirm private copies when using `tint` or `trail`.
 - Existing saves do not receive starting-storage additions.
 - A model does not bring actor hold/firing animations; the donor's `EquipmentListDef` membership selects them.
 - Auto-fit is a bounding-box fit, not semantic weapon setup. Inspect all sockets in live firing.
-  Override with `scale` (uniform) and `rotate` (`"x,y,z"` euler degrees) when auto gives the wrong answer.
+  Override with `scale` (uniform) and `rotate` (`"x,y,z"` euler degrees); use `offset` (`"x,y,z"`
+  metres) to move the grip without discarding the solve.
 - Damage keywords and damage type defs must already exist and be found by exact def name.
 - Weapon GUID checks inside one manifest do not protect against another mod. If two mods use the
   same weapon `guid`, the first enabled mod wins; the second weapon is never created, so its stats,

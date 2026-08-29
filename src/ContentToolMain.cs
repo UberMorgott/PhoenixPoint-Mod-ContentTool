@@ -131,6 +131,11 @@ namespace Morgott.ContentTool
             // Characters-layer collider, which no shipped unit ever is (Tactical.CreatureFit).
             try { Tactical.CreatureFit.Install(m => log?.LogInfo(m)); }
             catch (Exception ex) { log?.LogError("ct_creature install THREW " + ex); }
+            // The weapon fit workbench's hotkey poll. Armed unconditionally because it is one
+            // GetKeyDown per frame and the whole point is that it is there when an eye needs it; the
+            // view itself allocates nothing until it is opened.
+            try { Dev.FitBench.Install(); }
+            catch (Exception ex) { log?.LogError("ct_bench install THREW " + ex); }
             Dev.AutoRun.MaybeStart(ModDir, m => log?.LogInfo(m));
         }
 
@@ -179,6 +184,9 @@ namespace Morgott.ContentTool
             if (Dev.SeamSwap.Active) log?.LogInfo(Dev.SeamSwap.Run(new[] { "off" }));
             // A watcher thread and a coroutine must not outlive the mod that made them.
             if (Dev.DevLoop.Enabled) log?.LogInfo(Dev.DevRunner.Run(new[] { "off" }));
+            // Closes the workbench first if it is open, so a mod switched off mid-fit does not leave
+            // the geoscape's canvases hidden and its camera hinted at an empty squad bay.
+            Dev.FitBench.Uninstall();
             Tactical.CreatureFit.Uninstall();
             Project.ModRoster.Uninstall();
             ConsoleBridge.Unregister();
@@ -579,6 +587,20 @@ namespace Morgott.ContentTool
             {
                 try { Out(console, Dev.SeamSwap.Replace(args)); }
                 catch (Exception ex) { Out(console, "ct_replace THREW " + ex); }
+            }
+
+            [ConsoleCommand(Command = "ct_fit", Description = "ContentTool (dev workbench): dial a built weapon's fit in LIVE - move its mesh in the soldier's hand while you look at it, no rebuild and no restart, and print the ready-to-paste manifest block (scale/rotate/offset). A box fit aligns CENTRES and a hand grips a GRIP, so the last centimetres are a thing only an eye can judge. Args: [show] | <weapon> [<dx,dy,dz> | move <dx,dy,dz> | pos <x,y,z> | turn <dx,dy,dz> | rot <x,y,z> | scale <f> | save | reload]. 'save' writes scale/rotate/offset back into the mod's OWN ppcontent.json, every other byte preserved.")]
+            public static void CtFit(IConsole console, params string[] args)
+            {
+                try { Out(console, Tactical.WeaponBuild.Fit(args)); }
+                catch (Exception ex) { Out(console, "ct_fit THREW " + ex); }
+            }
+
+            [ConsoleCommand(Command = "ct_bench", Description = "ContentTool (dev workbench): the WEAPON FIT WORKBENCH - a full-screen view with a unit standing in the squad bay and lists to pick a unit template, pick a weapon, nudge its position/rotation/scale per axis and save. Same service ct_fit drives, with an eye on it. Needs a loaded geoscape campaign (the squad bay lives there); shipped weapons are viewable for comparison but have no manifest row to tune or save. Hotkey Ctrl+Alt+B (NOT F9 - that is the game's own quickload). Args: [open|close], none toggles.")]
+            public static void CtBench(IConsole console, params string[] args)
+            {
+                try { Out(console, Dev.FitBench.Run(args)); }
+                catch (Exception ex) { Out(console, "ct_bench THREW " + ex); }
             }
 
             [ConsoleCommand(Command = "ct_revert", Description = "ContentTool (dev workbench): put every replaced asset back.")]
