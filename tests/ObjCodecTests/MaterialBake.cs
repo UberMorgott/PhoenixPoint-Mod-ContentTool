@@ -166,7 +166,7 @@ internal static class MaterialBake
                     },
                     MaterialFields.EmissionKeyword);
             });
-            SkinFields.BuildModel(af.file, m.ClassDatabase, () => next++, Root, skin, materialId);
+            SkinFields.BuildModel(af.file, m.ClassDatabase, () => next++, Root, skin, new[] { materialId });
 
             // Without this the bundle writes its ORIGINAL directory entry and everything added
             // vanishes silently - the same line BundleBaker.Write carries.

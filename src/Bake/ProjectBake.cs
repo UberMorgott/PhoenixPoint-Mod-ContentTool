@@ -789,12 +789,12 @@ namespace Morgott.ContentTool.Bake
             // has to be somewhere in that role's clip, and only the animation knows where - so an
             // undeclared one is named here rather than invented at load time.
             List<string> gaps = new List<string>();
-            foreach (KeyValuePair<string, string[]> need in RoleEvents)
+            foreach (KeyValuePair<string, CreatureRoles.Event[]> need in CreatureRoles.Blocking)
             {
                 if (man.ClipFor(need.Key) == null) continue;
                 string[] have = man.EventsFor(need.Key).Select(e => e.Name).ToArray();
-                foreach (string ev in need.Value)
-                    if (!have.Contains(ev)) gaps.Add(need.Key + "." + ev);
+                foreach (CreatureRoles.Event ev in need.Value)
+                    if (!have.Contains(ev.Name)) gaps.Add(need.Key + "." + ev.Name);
             }
             log.AppendLine("creature-events " + (gaps.Count == 0 ? "PASS" : "WARN") + " " +
                 (gaps.Count == 0 ? "every blocking event the game waits for is declared"
@@ -807,18 +807,6 @@ namespace Morgott.ContentTool.Bake
                 " discovered animation(s); every required role (" +
                 string.Join(", ", CreatureManifest.RequiredRoles) + ") is mapped");
         }
-
-        /// <summary>
-        /// Which blocking animation events each role's clip has to carry. HARD FACTS of the decompile,
-        /// not a policy: TacticalAbility.cs:1206,1214 wait for ActionDo then ActionEnd,
-        /// BashAbility.cs:465 for ShootShot in between, RagdollDieAbility.cs:95 for Ragdoll. The engine
-        /// knows the NAMES; only the animation knows the TIMES, which is why the manifest carries those.
-        /// </summary>
-        private static readonly KeyValuePair<string, string[]>[] RoleEvents =
-        {
-            new KeyValuePair<string, string[]>("attack", new[] { "ActionDo", "ShootShot", "ActionEnd" }),
-            new KeyValuePair<string, string[]>("death", new[] { "Ragdoll" }),
-        };
 
         private static string ImportedClips(BundleBaker baker, ContentProject p, ImportedModel m,
                                             StringBuilder log)
@@ -843,7 +831,7 @@ namespace Morgott.ContentTool.Bake
                 if (paced != null) log.AppendLine("clip '" + c.Name + "' " + paced);
                 List<ClipFields.Binding> bindings = ClipFields.Bindings(c, m.Baked, notes, p.Scale);
                 foreach (string note in notes) log.AppendLine(note);
-                bool loop = loops.Contains(c.Name);
+                bool loop = ClipFields.Wants(loops, c.Name);
                 string key = baker.AddAnimationClip("clips/" + e.Key, bindings,
                                                     c.Times.Length, c.SampleRate, loop);
                 if (e.Key == plan[chosen].Key) play = key;

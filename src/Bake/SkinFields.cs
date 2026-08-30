@@ -155,7 +155,7 @@ namespace Morgott.ContentTool.Bake
 
             PrefabFields.Create(afile, cldb, ids.Renderer, AssetClassID.SkinnedMeshRenderer, r =>
             {
-                FillRenderer(r, ids.SkinGameObject, ids.Mesh, materialPathId, baked);
+                FillRenderer(r, ids.SkinGameObject, ids.Mesh, new[] { materialPathId }, baked);
                 AssetTypeValueField bones = r["m_Bones"]["Array"];
                 foreach (long b in new[] { ids.Bone0Transform, ids.Bone1Transform })
                 {
@@ -179,8 +179,12 @@ namespace Morgott.ContentTool.Bake
         /// <param name="rootBindPose">the ROOT bone's bind pose, column-major (index = col*4 + row) -
         /// what m_AABB has to be expressed through, see <see cref="RendererAabb"/>. null means the root
         /// bone rests at the identity, which is true of the two-bone bake and of nothing else.</param>
+        /// <param name="materialPathIds">one per SUBMESH, in submesh order - Unity draws submesh i with
+        /// m_Materials[i] and draws NOTHING at all for a submesh past the end of that array. A model
+        /// that arrived as several meshes over several materials (a body, its clothes, its hair) is
+        /// therefore invisible from the second surface on if this carries a single entry.</param>
         private static void FillRenderer(AssetTypeValueField r, long skinGameObject, long meshPathId,
-                                         long materialPathId, BakedMesh baked, float[] rootBindPose = null)
+                                         long[] materialPathIds, BakedMesh baked, float[] rootBindPose = null)
         {
             PrefabFields.Pptr(r["m_GameObject"], skinGameObject);
             r["m_Enabled"].AsBool = true;
@@ -199,10 +203,14 @@ namespace Morgott.ContentTool.Bake
             r["m_SkinnedMotionVectors"].AsBool = true;
 
             AssetTypeValueField mats = r["m_Materials"]["Array"];
-            AssetTypeValueField mm = ValueBuilder.DefaultValueFieldFromArrayTemplate(mats);
-            mm["m_FileID"].AsInt = 0;
-            mm["m_PathID"].AsLong = materialPathId;
-            mats.Children.Add(mm);
+            if (materialPathIds == null || materialPathIds.Length == 0) materialPathIds = new long[] { 0 };
+            foreach (long id in materialPathIds)
+            {
+                AssetTypeValueField mm = ValueBuilder.DefaultValueFieldFromArrayTemplate(mats);
+                mm["m_FileID"].AsInt = 0;
+                mm["m_PathID"].AsLong = id;
+                mats.Children.Add(mm);
+            }
 
             PrefabFields.Pptr(r["m_Mesh"], meshPathId);
 
@@ -274,7 +282,7 @@ namespace Morgott.ContentTool.Bake
         /// own GameObject, and the bone paths written here are exactly those. 0 bakes no Animator, which
         /// is what a model with nothing to play it wants - a dangling controller PPtr is worse than none.</param>
         internal static long BuildModel(AssetsFile afile, ClassDatabaseFile cldb, Func<long> nextPathId,
-                                        string rootName, BakedSkin skin, long materialPathId,
+                                        string rootName, BakedSkin skin, long[] materialPathIds,
                                         long controllerPathId = 0)
         {
             if (afile == null) throw new ArgumentNullException(nameof(afile));
@@ -349,7 +357,7 @@ namespace Morgott.ContentTool.Bake
             PrefabFields.Create(afile, cldb, renderer, AssetClassID.SkinnedMeshRenderer, r =>
             {
                 // m_RootBone below is bone 0, so bone 0's bind pose is the space m_AABB belongs in.
-                FillRenderer(r, skinGo, meshId, materialPathId, skin.Mesh, skin.BindPoses[0]);
+                FillRenderer(r, skinGo, meshId, materialPathIds, skin.Mesh, skin.BindPoses[0]);
                 AssetTypeValueField list = r["m_Bones"]["Array"];
                 for (int b = 0; b < bones; b++)
                 {

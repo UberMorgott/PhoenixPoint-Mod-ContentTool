@@ -334,7 +334,7 @@ namespace Morgott.ContentTool.Bake
         /// ponytail: the walk's CADENCE is wrong against a vertical face - the feet still swing as if the
         /// ground were under them, and the gait is timed for the walk's speed, not the climb's. Authored
         /// per-family art is the upgrade, and mapping a clip to the "climb" role takes it (see
-        /// <see cref="Tactical.CreatureManifest.Roles"/>). No pitch is written at all when the walk's
+        /// <see cref="Tactical.CreatureRoles.All"/>). No pitch is written at all when the walk's
         /// root carries no rotation channel - the rest rotation is then the only thing that pose has,
         /// and replacing it would tip the creature out of whatever correction the import folded in.
         /// </summary>
@@ -560,7 +560,7 @@ namespace Morgott.ContentTool.Bake
             {
                 bool found = false;
                 foreach (string have in clipNames)
-                    if (string.Equals(have, name, StringComparison.OrdinalIgnoreCase)) { found = true; break; }
+                    if (Wants(name, have)) { found = true; break; }
                 if (found) continue;
                 missing.Add(name);
                 // The skipped line is the one Bakeable wrote, and it opens with the clip's own quoted
@@ -579,6 +579,40 @@ namespace Morgott.ContentTool.Bake
                    (have2.Length == 0 ? "(no clip at all)" : string.Join(", ", have2)) +
                    (why.Count == 0 ? "" : " - and that name IS in the file, but " +
                                           string.Join(" ", why.ToArray()));
+        }
+
+        /// <summary>
+        /// Does one declared entry claim <paramref name="clip"/>? An exact, case-insensitive name -
+        /// UNLESS it carries a <c>*</c>, and then it is a glob.
+        ///
+        /// ponytail: `*` and nothing else - no character classes, no `?`. A model retargeted onto the
+        /// game's own skeleton arrives with HUNDREDS of clips under the game's own names, and
+        /// "which of these loop" is then a naming rule (<c>*_Loop_*</c>, <c>*Idle*</c>) and not a list
+        /// anyone can keep by hand. A project that ships four clips still writes four names.
+        /// </summary>
+        internal static bool Wants(string declared, string clip)
+        {
+            if (declared.IndexOf('*') < 0)
+                return string.Equals(declared, clip, StringComparison.OrdinalIgnoreCase);
+            string[] parts = declared.Split('*');
+            int at = 0;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (parts[i].Length == 0) continue;
+                int found = clip.IndexOf(parts[i], at, StringComparison.OrdinalIgnoreCase);
+                // An anchored end: the first part must sit at 0, the last must finish the name.
+                if (found < 0 || (i == 0 && found != 0)) return false;
+                at = found + parts[i].Length;
+            }
+            string tail = parts[parts.Length - 1];
+            return tail.Length == 0 || at == clip.Length;
+        }
+
+        /// <summary>Does ANY entry claim it? The set the bake asks per clip.</summary>
+        internal static bool Wants(IEnumerable<string> declared, string clip)
+        {
+            foreach (string d in declared) if (Wants(d, clip)) return true;
+            return false;
         }
 
         /// <summary>

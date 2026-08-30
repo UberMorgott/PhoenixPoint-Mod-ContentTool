@@ -95,6 +95,8 @@ internal static class Program
         Console.WriteLine(ClipImport.Run());
         Console.WriteLine(RootMotionBake.Run());
         Console.WriteLine(ClimbSynthesis.Run());
+        Console.WriteLine(RoleFill.Run());
+        Console.WriteLine(StartRoster.Run());
         Console.WriteLine(ClipBake.Run());
         Console.WriteLine(ClipPlan.Run());
         Console.WriteLine(Compressed.Run());

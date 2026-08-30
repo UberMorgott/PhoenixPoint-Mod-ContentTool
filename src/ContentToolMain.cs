@@ -169,6 +169,12 @@ namespace Morgott.ContentTool
             catch (Exception ex) { log?.LogError("ct_cache prune THREW " + ex); }
             try { string moved = Project.ModRoster.Reconcile(ModDir); if (moved != null) log?.LogInfo(moved); }
             catch (Exception ex) { log?.LogError("ct_content reconcile THREW " + ex); }
+            // The creature route's half of the same roster read. A content mod that declares a
+            // "creature" block and ships no C# has nobody else to build it - the only caller of
+            // CreatureBuild.Build was a mod's own DLL, so such a mod loaded and minted nothing,
+            // silently. AFTER the reconcile: the bundle it loads is the one the reconcile installed.
+            try { string born = Tactical.CreatureBuild.BuildAll(ModDir); if (born != null) log?.LogInfo(born); }
+            catch (Exception ex) { log?.LogError("ct_creature BuildAll THREW " + ex); }
             // The startup pass is over - the roster above was read from its final flags. From here
             // the mod manager's checkbox is the only thing that decides, so the dependency keep-alive
             // (ModRoster.BeforeDisable) must stop having an opinion: a mod the player switches OFF

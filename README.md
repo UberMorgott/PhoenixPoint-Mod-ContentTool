@@ -17,7 +17,8 @@
 **[Open the ContentTool documentation](https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/)**
 
 ContentTool lets Phoenix Point mods replace or add textures, materials, models, animations, sounds,
-videos, creatures and weapons. It is an engine for other mods; it changes nothing by itself.
+videos, creatures, weapons, and foreign humanoid soldiers. It is an engine for other mods; it
+changes nothing by itself.
 
 ## Players
 
@@ -53,6 +54,11 @@ covers the complete authoring loop.
 - [NoDepTexture](https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/demos/#nodeptexture) — measures what happens when a texture mod omits the ContentTool dependency.
 - [CustomCreature](https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/demos/#customcreature) — builds a squad creature with its own rig, clips, hitbox and attacks.
 - [WeaponAdd](https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/demos/#weaponadd) — clones weapon defs, publishes new models and applies per-weapon tuning.
+
+**The foreign-humanoid pair — ADD a person, or RE-BODY one the game already has:**
+
+- [Humanoid soldier](https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/guides/humanoid-soldier/) — retargets a foreign model onto PP's animations as a playable soldier while preserving its proportions, with zero C#. The [HumanoidSoldier demo](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/HumanoidSoldier) carries the manifest, the model and the exact commands — bake it and it runs.
+- [A shipped character's new body](https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/guides/replace-character-body/) — the REPLACE half of that pair: one manifest key, `"replaceBody"`, gives a character the game already ships a different body while she keeps her def, name, class and story role. The [ReplaceCharacterBody demo](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/ReplaceCharacterBody) is the worked instance.
 
 ## License
 

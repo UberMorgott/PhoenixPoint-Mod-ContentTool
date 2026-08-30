@@ -1,0 +1,8 @@
+{
+  "ID": "morgott.demo.humanoidsoldier",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Humanoid Soldier" } ],
+  "Description": [ { "Key": "English", "Value": "A foreign humanoid - downloaded, sculpted or generated, with its OWN skeleton and NO clips of its own - becomes a PLAYABLE SOLDIER in the player's roster and aboard the starting Manticore, with ZERO C#: everything here is manifest data. It is the counterpart of ContentTool Demo: Custom Creature, which covers the opposite case (a creature that ships its own clips and its own DLL), and the ADD half of the pair whose REPLACE half is ContentTool Demo: Replace a Character's Body.\nThe model SHIPS, so this works as installed - run 'ct_project HumanoidSoldier' in the console once, restart, and start a NEW campaign. It carries ALL 300 of Phoenix Point's retargeted clips and is ~36 MB - compressed with tools\\ppzip.py, which rewrites how the same curves are stored and drops nothing, not trimmed. Shipping the whole clip set is correct and deliberate: a soldier reaches states no manifest role names - aiming, reloading, crouching, every weapon family - and a clip the file does not contain cannot be substituted by anything. Trimming clips to save space produces an aimed shot that never returns and a camera frozen on the actor. Read README.md and docs\\guides\\humanoid-soldier.md - they are the demo." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

@@ -1,0 +1,8 @@
+{
+  "ID": "morgott.demo.replacecharacterbody",
+  "Version": "1.0.0",
+  "Author": [ { "Key": "English", "Value": "Morgott" } ],
+  "Name": [ { "Key": "English", "Value": "ContentTool Demo: Replace a Character's Body" } ],
+  "Description": [ { "Key": "English", "Value": "SAME PERSON, NEW BODY. Eileen - the named Synedrion character shipped with the Festering Skies DLC - keeps her def, her name, her class, her story role and every event that names her, and gets a DIFFERENT BODY: a foreign humanoid model served out of this mod, with ZERO C#. It is the REPLACE half of the pair whose ADD half is ContentTool Demo: Humanoid Soldier, and it is one manifest key: \"replaceBody\": \"S_SY_Eileen_CharacterTemplateDef\".\nThe model ships, so this works as installed - bake it once with `ct_project ReplaceCharacterBody` in the console, restart, and Eileen wears it. It is ~36 MB and carries ALL 300 of Phoenix Point's retargeted clips - compressed with tools\\ppzip.py, which rewrites how the same curves are stored and drops nothing, not trimmed - because she is a soldier the player actually fights with: a clip the file does not contain cannot be substituted, and the missing-clip symptom is an aimed shot that never returns and a camera frozen on her.\nShe arrives with no bodypart armour and no equipment: on a human, PP's body IS its bodypart items, so a body swap empties them and she is re-equipped from stores. Needs the Festering Skies DLC - without it the def is absent and the mod refuses BY NAME and changes nothing. Read README.md and docs\\guides\\replace-character-body.md." } ],
+  "Dependencies": [ "com.morgott.ContentTool" ]
+}

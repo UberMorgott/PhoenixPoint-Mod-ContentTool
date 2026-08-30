@@ -5,6 +5,11 @@ A custom creature is not a standalone actor imported from a GLB. ContentTool clo
 support. Read [the clone model](../SHIPPING-A-CONTENT-MOD.md#1-understand-the-clone-model) before
 choosing a donor or source model.
 
+For a playable HUMAN soldier whose foreign humanoid model keeps its own proportions but plays PP's
+animations, use the [humanoid soldier guide](humanoid-soldier.md) instead. That track ships no
+source clips and needs no C#; it uses the same `creature` block and `startingRoster` key after an
+offline retargeting pipeline.
+
 The content engine builds the def. Your mod's DLL decides where that def enters the game: starting
 squad, faction deployment, an ability, or another campaign rule.
 
@@ -260,10 +265,27 @@ For a ranged creature, set `ranged` to a shipped `WeaponDef` and optionally set 
 keeps its animation separate from melee. Test both attacks because their required events and target
 frames can differ.
 
-## 7. Build the def from your DLL
+## 7. Join the campaign start without a DLL
 
-`ppcontent.json` cannot decide where a new actor belongs in the campaign, so a creature requires a
-real DLL. Start from the complete [project, references and `ModMain` skeleton](behavior-dll.md), and
+Set `"startingRoster": true` in the `creature` block. ContentTool then adds the def it built to the
+player's starting aircraft in both campaign starts, and logs the roster back. Nothing else is needed:
+no DLL, no Harmony, no `Build` call.
+
+The key is a boolean because the game offers no second choice. Phoenix starts with exactly one
+aircraft and `GeoPhoenixFaction.cs:1966` puts the whole starting squad on `base.Vehicles.First()`, so
+"in the campaign start" and "aboard the starting Manticore" are one statement. The soldier's class is
+the donor's, so a sniper is a data choice: `"donor": "PX_SniperStarting_TacCharacterDef"`.
+
+Two limits, both deliberate. `GeoVehicle.AddCharacter` computes the space sum and discards it, so
+several mods asking for the start can overfill the aircraft — the logged `used/max` is the warning.
+And this is not an append to `GameDifficultyLevelDef.StartingSquadTemplate`: that array is exact in a
+normal start but `GeoscapeTutorial.InitSquad:313` reads it for its length only, so appending yields
+one extra generic soldier and never your creature when the tutorial is on.
+
+## 8. Build the def from your DLL
+
+Use a DLL when the creature belongs somewhere `startingRoster` cannot put it — a faction deployment
+list, an ability, a mid-campaign event. Start from the complete [project, references and `ModMain` skeleton](behavior-dll.md), and
 read its [profile-wide `Managed\` module warning](behavior-dll.md#managed-module-load-failure)
 before adding references. Substitute `MyCreature` for `MyMod` in that project file.
 
@@ -356,7 +378,7 @@ different campaign design, keep the `Build` call but replace these two injection
 `ct_package` finds the already-built DLL named by `AssemblyName`; it never compiles. Follow the
 [build-to-mod-folder and restart loop](behavior-dll.md#name-the-real-dll) after every code change.
 
-## 8. Test and ship
+## 9. Test and ship
 
 Test from a new campaign if your behavior adds the unit only during squad or storage creation.
 Verify all of these in a tactical mission:

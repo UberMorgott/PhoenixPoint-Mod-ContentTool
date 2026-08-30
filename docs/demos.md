@@ -1,6 +1,6 @@
 # Working demos
 
-The repository contains ten installable demo mods under
+The repository contains eleven installable demo mods under
 [`demos\`](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos). Each has its
 own `meta.json`, `ppcontent.json` and README. Begin with the demo closest to your mod, copy its
 structure, then use the linked recipe for the full field reference and failure cases.
@@ -100,6 +100,37 @@ Start with the `"creature"` block in `ppcontent.json`, then inspect
 `Content\Models\cyborg_spider.glb` and the small entry point in `src\CustomCreatureMain.cs`. The
 README is the detailed account of the rig, root motion, events, hitbox and donor choice. Read the
 [creature recipe](guides/creature.md).
+
+## [HumanoidSoldier](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/HumanoidSoldier)
+
+Turns a foreign humanoid — its own skeleton, none of its own clips — into a playable soldier in the
+starting roster, with zero C#. It teaches the opposite case to CustomCreature: the rig is renamed onto
+Phoenix Point's bone paths and carries retargeted copies of PP's own clips, so the model keeps its own
+proportions while playing the game's animations.
+
+The model ships (`Content\Models\soldier.glb`, 36,254,816 B, all 300 retargeted clips), so
+`ct_project HumanoidSoldier` is all it takes. To put your OWN model through the same route, take it
+through the three offline tools in `tools\` (`ppskel.py` → `ClipCensus --export` → `ppretarget.py`,
+in that order), then run `tools\ppzip.py` over the result — RECOMMENDED, and the reason the shipped
+file is 36 MB rather than 104,511,576 B (-65.3%). It compresses how the curves are STORED and keeps
+every one of the 300 clips and all 29,082 channels. `tools\ppslim.py` is the other one and is NOT
+part of that route: it drops clip families, and a playable soldier reaches states no manifest role
+names — a clip the file lacks freezes the camera on an aimed shot rather than merely looking wrong. Start with the
+`"creature"` block and `"startingRoster"` in `ppcontent.json`, then read the
+[humanoid soldier recipe](guides/humanoid-soldier.md).
+
+## [ReplaceCharacterBody](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/ReplaceCharacterBody)
+
+The mirror image of HumanoidSoldier, and the other half of the same lesson: instead of ADDING a
+person, it gives an EXISTING one a different body. Eileen — the named Synedrion character the
+Festering Skies DLC ships — keeps her def, her name, her class, her story role and every event that
+names her, and wears the foreign model instead. Zero C#; the whole swap is one manifest key,
+`"replaceBody": "S_SY_Eileen_CharacterTemplateDef"`.
+
+The model ships here too — byte-identical to the sibling's, with the full clip set, because Eileen is
+a soldier the player actually fights with. Start with the `"creature"` block in `ppcontent.json`, then read
+[a shipped character's new body](guides/replace-character-body.md), which has the seam it writes to
+and the honest limits (she arrives with no armour and no weapon, and her portrait does not change).
 
 ## [WeaponAdd](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/WeaponAdd)
 

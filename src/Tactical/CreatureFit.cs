@@ -8,6 +8,7 @@ using HarmonyLib;
 using PhoenixPoint.Common.Entities.Addons;
 using PhoenixPoint.Common.Utils;
 using PhoenixPoint.Tactical.Entities;
+using PhoenixPoint.Tactical.Entities.Weapons;
 using UnityEngine;
 
 namespace Morgott.ContentTool.Tactical
@@ -105,6 +106,9 @@ namespace Morgott.ContentTool.Tactical
             // keeps the creature from blocking its own line of fire the way no shipped unit does.
             harmony.Patch(AccessTools.Method(typeof(AddonsManager), nameof(AddonsManager.SetRagdollMode)),
                 postfix: new HarmonyMethod(AccessTools.Method(typeof(CreatureFit), nameof(AfterRagdollMode))));
+            // The aim IK, for an actor whose model carries no FinalIK rig. See BeforeSetupAimIK.
+            harmony.Patch(AccessTools.Method(typeof(Weapon), nameof(Weapon.TrySetupAimIK)),
+                prefix: new HarmonyMethod(AccessTools.Method(typeof(CreatureFit), nameof(BeforeSetupAimIK))));
             cameraCache = AccessTools.Field(typeof(TacticalActorViewBase), "_cameraColliders");
         }
 
@@ -153,6 +157,56 @@ namespace Morgott.ContentTool.Tactical
                 __result = Find(rig, AimName) ?? (rig == null ? null : rig.Find(HitName)) ?? __instance.transform;
             }
             catch (Exception) { __result = __instance.transform; }
+        }
+
+        /// <summary>
+        /// ============ THE SHOT THAT NEVER COMES BACK ============
+        ///
+        /// MEASURED 30.08.2026 (Player.log, 245,976 s): a custom soldier fired a pistol and the game
+        /// stopped answering.
+        ///   Ability Handgun_ShootAbilityDef ... Source: Morgott_VultureSidearm_WeaponDef
+        ///   NullReferenceException
+        ///     at Weapon.SetAimIKTarget (AimIK aimIK, ...) [0x00047]
+        ///     at Weapon.TrySetupAimIK (TacticalAbilityTarget targetData) [0x00055]
+        ///     at TacticalLevelController+&lt;FireWeaponAtTargetCrt&gt;d__322.MoveNext ()
+        ///   CHECK/REPORT PREVIOUS ERROR!!! Broken coroutine call chain: FireWeaponAtTargetCrt ...
+        /// The shot coroutine dies mid-flight, so the PlayingAction that started it is never completed
+        /// and the actor never becomes idle again - the freeze the player sees.
+        ///
+        /// WHY. <c>TacticalActor.InitIK:2044</c> is <c>GetComponentInChildren&lt;AimIK&gt;()</c>: the FinalIK
+        /// component lives on the shipped MODEL, and a creature built from a .glb has no such component,
+        /// so <c>TacticalActor.AimIK</c> is null. <c>Weapon.TrySetupAimIK:962</c> then calls
+        /// <c>AimEnable</c>, which returns AT ONCE on a null AimIK (<c>TacticalActor.cs:2016</c>) - and
+        /// hands that same null straight to <c>SetAimIKTarget:1007</c>, which dereferences
+        /// <c>aimIK.solver</c> unguarded. The engine KNOWS this can be null - <c>BashAbility.cs:440,444</c>
+        /// tests exactly that before touching it, and guards its own teardown at :504 - so this is one
+        /// missing check on one path, not an unsupported creature.
+        ///
+        /// THE ANSWER IS THE ENGINE'S OWN. Returning false is precisely what <c>ShouldUseAimIK</c>
+        /// returning false already means, and every caller is written for it: <c>FireWeaponAtTargetCrt</c>
+        /// carries it as <c>useAimIK</c> and skips <c>TacticalLevelController.cs:1784,1822</c> - the only
+        /// other two unguarded dereferences in the shooting path - while <c>IdleAbility.GetAimIK:149-156</c>
+        /// reaches its own null test first. So one prefix closes all of them.
+        ///
+        /// The cost is honest and cosmetic: no spine-bend towards the target. Aim IK is a LOOK, not the
+        /// shot - the projectile, the damage and the animation are unaffected. Adding a real AimIK solver
+        /// would mean choosing a bone chain and an aim axis for a foreign rig, which is a guess that
+        /// deforms the model when it is wrong; a creature that shoots straight and does not lean is
+        /// strictly better than one that hangs.
+        ///
+        /// Only where the game itself would have thrown - a shipped actor has its AimIK and is untouched.
+        /// </summary>
+        private static bool BeforeSetupAimIK(Weapon __instance, ref bool __result)
+        {
+            try
+            {
+                TacticalActor actor = __instance.TacticalActor;
+                if (actor == null || actor.AimIK != null) return true;   // run the original
+                actor.AimEnable(enable: false);
+                __result = false;
+                return false;
+            }
+            catch (Exception) { return true; }
         }
 
         /// <summary>

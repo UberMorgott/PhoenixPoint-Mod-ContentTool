@@ -219,7 +219,7 @@ internal static class ModelRoundTrip
                 ClipFields.FillOverrideController(a, BaseFileId, BaseController, BaseFileId, BaseClip, clipId);
             });
 
-            SkinFields.BuildModel(af.file, m.ClassDatabase, () => next++, Root, skin, materialPathId, aocId);
+            SkinFields.BuildModel(af.file, m.ClassDatabase, () => next++, Root, skin, new[] { materialPathId }, aocId);
 
             // Without this the bundle writes its ORIGINAL directory entry and everything added
             // vanishes silently - the same line BundleBaker.Write carries.

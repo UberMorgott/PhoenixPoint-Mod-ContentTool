@@ -35,7 +35,13 @@ Write-Host "Deployed ContentTool to $dest"
 # under Mods\ContentTool\ can never be listed or switched off. One folder per demo beside us.
 # Only the shipped parts are copied - sources, build output and authoring tools are not a mod.
 $mods = Split-Path $dest -Parent
-foreach ($demo in Get-ChildItem (Join-Path $PSScriptRoot 'demos') -Directory) {
+# local\ is the same loop over content that must never ship (gitignored, see local\README.md), so a
+# scratch model can be looked at in game without ever being a candidate for the Workshop upload.
+$folders = @(Get-ChildItem (Join-Path $PSScriptRoot 'demos') -Directory)
+if (Test-Path (Join-Path $PSScriptRoot 'local')) {
+    $folders += Get-ChildItem (Join-Path $PSScriptRoot 'local') -Directory
+}
+foreach ($demo in $folders) {
     if (-not (Test-Path (Join-Path $demo.FullName 'meta.json'))) { continue }
     $to = Join-Path $mods $demo.Name
     New-Item -ItemType Directory -Force -Path $to | Out-Null

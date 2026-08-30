@@ -28,6 +28,19 @@
          agree - the clips a climb needs and the navmesh areas that route one - are checked here
          rather than by watching a creature stick to a wall in game. -->
     <Compile Include="..\..\src\Tactical\ClimbPlan.cs" Link="ClimbPlan.cs" />
+    <!-- Same arrangement for the ROLE contract: which roles the game blocks on (so a hole must be
+         filled) and which the engine degrades on its own (so a hole must be LEFT) carries no
+         UnityEngine type, and getting it wrong is a creature frozen mid-battle. -->
+    <Compile Include="..\..\src\Tactical\CreatureRoles.cs" Link="CreatureRoles.cs" />
+    <Compile Include="RoleFill.cs" />
+    <!-- The MANIFEST reader carries no UnityEngine type either (it is regex over the raw text, for the
+         reason its own Parse records), so the one key that decides whether a mod rewrites a player's
+         campaign start is proven here rather than by starting a campaign. ContentMods comes with it -
+         it is UnityEngine-free on purpose too and only supplies the file name. -->
+    <Compile Include="..\..\src\Project\ModGate.cs" Link="ModGate.cs" />
+    <Compile Include="..\..\src\Project\ContentMods.cs" Link="ContentMods.cs" />
+    <Compile Include="..\..\src\Tactical\CreatureManifest.cs" Link="CreatureManifest.cs" />
+    <Compile Include="StartRoster.cs" />
     <Compile Include="ClipPlan.cs" />
     <Compile Include="Compressed.cs" />
     <Compile Include="DracoTests.cs" />

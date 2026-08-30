@@ -184,7 +184,8 @@ sources aimed at one media ID are refused.
 | `events` | none | Role to ordered `EventName fraction` entries. Fractions are clamped to 0–1. |
 | `name` | donor name | Roster display name. |
 | `model` | the only GLB | Stem under `Content\Models`; set it when more than one model exists. |
-| `donor` | `Swarmer_TacCharacterDef` | Shipped creature definition whose component and combat structure is cloned. |
+| `donor` | `Swarmer_TacCharacterDef` | Shipped creature definition whose component and combat structure is cloned. Ignored when `replaceBody` is set. |
+| `replaceBody` | empty | Name of a shipped `TacCharacterDef` whose BODY this model replaces, in place: that character keeps her def, name, class, story role and stats, and the new rig is written onto a clone of her own component set. Empty (the default) mints a new def from `donor` and touches nothing shipped. Replaces `donor`, never written with it. See [a shipped character's new body](replace-character-body.md). |
 | `up` | `0,1,0` | Model's imported up axis. |
 | `lift` | `0` | File-unit distance from origin down to the lowest vertex. |
 | `health` | donor value | Starting strength; zero keeps the donor value. |
@@ -195,6 +196,7 @@ sources aimed at one media ID are refused.
 | `aiAction` | `MoveAndShoot_AIActionDef` | AI action added for the ranged attack. |
 | `shootBone` | measured | Bone used for the synthesized shoot point. |
 | `accuracy` | donor value | Accuracy for the ranged body part; zero keeps the donor value. |
+| `startingRoster` | `false` | `true` adds the built unit to the player's starting aircraft in both campaign starts, with no DLL. Only the literal `true` opts in. The unit's class is the donor's. |
 | `colliders` | on | The value `off` disables synthesized hit/hover colliders. |
 | `aim` | measured/root | Bone used for the aim marker. |
 | `hitRadius` | measured | Radius for per-bone sphere colliders. |

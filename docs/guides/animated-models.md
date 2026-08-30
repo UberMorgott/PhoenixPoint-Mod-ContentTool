@@ -107,6 +107,19 @@ The normal workflow begins with an empty `creature` object and lets `ct_project`
 clip names. The explicit list above illustrates the final shape; never rename source clips merely to
 match it. Continue with [A new creature](creature.md).
 
+## Bring a foreign humanoid onto PP's own animations — no clips, no C#
+
+A third route starts with a model that has its own skeleton and bone names but no clips. Offline
+tools in `ContentTool\tools\` rename the rig onto PP's bone paths, give it PP's rest orientation
+without changing its segment lengths, and remove the position curves that would pin those lengths
+back to PP's rig. The result is a playable human soldier with the full weapon armoury, all classes,
+and zero C#; everything is manifest data.
+
+This route uses the same `creature` block in `ppcontent.json` and the same `startingRoster` key as
+the creature route above.
+
+Read the full walkthrough: [Humanoid soldier](humanoid-soldier.md).
+
 ## What name matching does and does not mean
 
 For a shipped-skeleton mesh replacement, bone names are a strict structural contract and clip names

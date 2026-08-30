@@ -1,0 +1,333 @@
+{
+ "source": "tiffany_cox_idle_animation.glb",
+ "ppRig": "extracted/GameData/prefabs/CHR_Human_Rig_Ready.json",
+ "animatorRootInConverted": "CHR_Human_Rig_Ready (was _rootJoint) - PP paths start below it",
+ "renames": {
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint": {
+   "pp": "CHR_Human_Rig_Ready",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02": {
+   "pp": "BaseManReference",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03": {
+   "pp": "Root",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04": {
+   "pp": "Spine_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05": {
+   "pp": "Spine_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06": {
+   "pp": "Chest",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/neck_01_051": {
+   "pp": "Neck",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/neck_01_051/neck_02_052/head_053": {
+   "pp": "Head",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07": {
+   "pp": "L.Shoulder",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08": {
+   "pp": "L.Arm",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09": {
+   "pp": "L.ForeArm",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010": {
+   "pp": "L.Hand",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/index_01_l_011": {
+   "pp": "L.Index_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/index_01_l_011/index_02_l_012": {
+   "pp": "L.Index_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/index_01_l_011/index_02_l_012/index_03_l_013": {
+   "pp": "L.Index_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/middle_01_l_014": {
+   "pp": "L.Middle_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/middle_01_l_014/middle_02_l_015": {
+   "pp": "L.Middle_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/middle_01_l_014/middle_02_l_015/middle_03_l_016": {
+   "pp": "L.Middle_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/pinky_01_l_017": {
+   "pp": "L.Pinky_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/pinky_01_l_017/pinky_02_l_018": {
+   "pp": "L.Pinky_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/pinky_01_l_017/pinky_02_l_018/pinky_03_l_019": {
+   "pp": "L.Pinky_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/ring_01_l_020": {
+   "pp": "L.Ring_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/ring_01_l_020/ring_02_l_021": {
+   "pp": "L.Ring_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/ring_01_l_020/ring_02_l_021/ring_03_l_022": {
+   "pp": "L.Ring_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/thumb_01_l_023": {
+   "pp": "L.Thumb_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/thumb_01_l_023/thumb_02_l_024": {
+   "pp": "L.Thumb_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/thumb_01_l_023/thumb_02_l_024/thumb_03_l_025": {
+   "pp": "L.Thumb_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_l_07/upperarm_l_08/lowerarm_l_09/hand_l_010/weapon_attach_l_026": {
+   "pp": "gun_point_shield",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_l_0128": {
+   "pp": "L.UpLeg",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_l_0128/calf_l_0129": {
+   "pp": "L.Leg",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_l_0128/calf_l_0129/foot_l_0131": {
+   "pp": "L.Foot",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_l_0128/calf_l_0129/foot_l_0131/ball_l_0132": {
+   "pp": "L.Foot_Toes",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_l_0128/calf_l_0129/foot_l_0131/ball_l_0132/middle_proximal_phalange_l_0133": {
+   "pp": "L.Foot_Tip",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029": {
+   "pp": "R.Shoulder",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030": {
+   "pp": "R.Arm",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031": {
+   "pp": "R.ForeArm",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032": {
+   "pp": "R.Hand",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/index_01_r_033": {
+   "pp": "R.Index_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/index_01_r_033/index_02_r_034": {
+   "pp": "R.Index_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/index_01_r_033/index_02_r_034/index_03_r_035": {
+   "pp": "R.Index_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/middle_01_r_036": {
+   "pp": "R.Middle_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/middle_01_r_036/middle_02_r_037": {
+   "pp": "R.Middle_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/middle_01_r_036/middle_02_r_037/middle_03_r_038": {
+   "pp": "R.Middle_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/pinky_01_r_039": {
+   "pp": "R.Pinky_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/pinky_01_r_039/pinky_02_r_040": {
+   "pp": "R.Pinky_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/pinky_01_r_039/pinky_02_r_040/pinky_03_r_041": {
+   "pp": "R.Pinky_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/ring_01_r_042": {
+   "pp": "R.Ring_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/ring_01_r_042/ring_02_r_043": {
+   "pp": "R.Ring_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/ring_01_r_042/ring_02_r_043/ring_03_r_044": {
+   "pp": "R.Ring_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/thumb_01_r_045": {
+   "pp": "R.Thumb_1",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/thumb_01_r_045/thumb_02_r_046": {
+   "pp": "R.Thumb_2",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/thumb_01_r_045/thumb_02_r_046/thumb_03_r_047": {
+   "pp": "R.Thumb_3",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/spine_01_04/spine_02_05/spine_03_06/clavicle_r_029/upperarm_r_030/lowerarm_r_031/hand_r_032/weapon_attach_r_048": {
+   "pp": "gun_point_hand",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_r_0135": {
+   "pp": "R.UpLeg",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_r_0135/calf_r_0136": {
+   "pp": "R.Leg",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_r_0135/calf_r_0136/foot_r_0138": {
+   "pp": "R.Foot",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_r_0135/calf_r_0136/foot_r_0138/ball_r_0139": {
+   "pp": "R.Foot_Toes",
+   "skinJoint": true
+  },
+  "Sketchfab_model/8b33589a0c61474ca02a168903ae56b5.fbx/Object_2/RootNode/Object_4/_rootJoint/normal_stand_idle1_02/pelvis_03/thigh_r_0135/calf_r_0136/foot_r_0138/ball_r_0139/middle_proximal_phalange_r_0140": {
+   "pp": "R.Foot_Tip",
+   "skinJoint": true
+  }
+ },
+ "insertedIntermediates": {
+  "Chest": [
+   "Spine_3"
+  ],
+  "L.ForeArm": [
+   "L.Arm_Roll_1",
+   "L.Arm_Roll_2"
+  ],
+  "L.Hand": [
+   "L.ForeArm_Roll_1",
+   "L.ForeArm_Roll_2"
+  ],
+  "L.Leg": [
+   "L.UpLeg_Roll_1",
+   "L.UpLeg_Roll_2"
+  ],
+  "L.Foot": [
+   "L.Leg_Roll_1"
+  ],
+  "R.ForeArm": [
+   "R.Arm_Roll_1",
+   "R.Arm_Roll_2"
+  ],
+  "R.Hand": [
+   "R.ForeArm_Roll_1",
+   "R.ForeArm_Roll_2"
+  ],
+  "R.Leg": [
+   "R.UpLeg_Roll_1",
+   "R.UpLeg_Roll_2"
+  ],
+  "R.Foot": [
+   "R.Leg_Roll_1"
+  ]
+ },
+ "collapsed": [
+  {
+   "kept": "Head",
+   "hoistedPast": "neck_02_052"
+  }
+ ],
+ "createdEmptyPpNodes": [
+  "Character_UpperHighlight_Light",
+  "Character_Radius_Point Light",
+  "BaseManReference/EXT_AboveUnit",
+  "BaseManReference/EXT_RecruitRing",
+  "BaseManReference/Root/gun_point_hips",
+  "BaseManReference/Root/gun_point_hips/EXT_SwarmerMeleImpact",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/EXT_MainContext",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Spine_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/EXT_BackShield",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/EXT_BackShield_Heavy",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/EXT_CorruptionOnApply",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/EXT_VoiceContext",
+  "BaseManReference/Root/L.UpLeg/L.UpLeg_Roll_1/L.UpLeg_Roll_2/L.Leg/L.Leg_Roll_1/L.Foot/EXT_LeftFootContext",
+  "BaseManReference/Root/R.UpLeg/R.UpLeg_Roll_1/R.UpLeg_Roll_2/R.Leg/R.Leg_Roll_1/R.Foot/EXT_RightFootContext",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/Head_Tip_2",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/Jaw",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/L.Eye_LowEyelid",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/L.Eye_Socket_2",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/L.Eye_UpEyelid",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/R.Eye_LowEyelid",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/R.Eye_Socket_2",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/R.Eye_UpEyelid",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/EXT_MountPoint",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/EXT_Scream",
+  "BaseManReference/Root/L.UpLeg/L.UpLeg_Roll_1/L.UpLeg_Roll_2/L.Leg/L.Leg_Roll_1/L.Foot/L.Foot_Toes/EXT_AreaStun_L",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/Jaw/Jaw_Tip_2",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/L.Eye_LowEyelid/L.Eye_LowEyelid_Tip_2",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/L.Eye_UpEyelid/L.Eye_UpEyelid_Tip_2",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/R.Eye_LowEyelid/R.Eye_LowEyelid_Tip_2",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/Neck/Head/R.Eye_UpEyelid/R.Eye_UpEyelid_Tip_2",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Hand_End",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Pinky_Metacarpal",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Ring_Metacarpal",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Hand_End",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Pinky_Metacarpal",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Ring_Metacarpal",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/EXT_BashNoEquipment",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Pinky_Metacarpal/L.Pinky_Metacarpal_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Ring_Metacarpal/L.Ring_Metacarpal_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Pinky_Metacarpal/R.Pinky_Metacarpal_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Ring_Metacarpal/R.Ring_Metacarpal_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Index_1/L.Index_2/L.Index_3/L.Index_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Middle_1/L.Middle_2/L.Middle_3/L.Middle_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Pinky_1/L.Pinky_2/L.Pinky_3/L.Pinky_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Ring_1/L.Ring_2/L.Ring_3/L.Ring_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/L.Shoulder/L.Arm/L.Arm_Roll_1/L.Arm_Roll_2/L.ForeArm/L.ForeArm_Roll_1/L.ForeArm_Roll_2/L.Hand/L.Thumb_1/L.Thumb_2/L.Thumb_3/L.Thumb_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Index_1/R.Index_2/R.Index_3/R.Index_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Middle_1/R.Middle_2/R.Middle_3/R.Middle_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Pinky_1/R.Pinky_2/R.Pinky_3/R.Pinky_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Ring_1/R.Ring_2/R.Ring_3/R.Ring_Tip",
+  "BaseManReference/Root/Spine_1/Spine_2/Spine_3/Chest/R.Shoulder/R.Arm/R.Arm_Roll_1/R.Arm_Roll_2/R.ForeArm/R.ForeArm_Roll_1/R.ForeArm_Roll_2/R.Hand/R.Thumb_1/R.Thumb_2/R.Thumb_3/R.Thumb_Tip"
+ ]
+}

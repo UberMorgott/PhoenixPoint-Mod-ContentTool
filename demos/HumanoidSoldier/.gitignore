@@ -1,0 +1,10 @@
+# The MODEL SHIPS. `Content/Models/soldier.glb` is a demo file this repository carries, and its own
+# record - title, author, licence, source - travels inside the .glb, in the glTF `asset` block, so
+# there is no second file to keep in step with it.
+#
+# What is excluded is the RAW download the four offline tools consume, and the bundle, which is baked
+# from the model on your machine and is a build output rather than a source.
+tiffany_cox_idle_animation.glb
+Dist/
+bin/
+obj/

@@ -287,11 +287,14 @@ namespace Morgott.ContentTool.Bake
             AssetsFile afile = afileInst.file;
             long root;
             if (model.Rigged)
-                // The rigged path is the creature line and takes ONE material, unchanged: a skinned
-                // model here has always come from a single-material export, and giving it submesh
-                // material binding is a separate change with its own gate.
+                // The rigged path takes ONE MATERIAL PER SUBMESH, exactly like the static one above.
+                // It used to take only materialPathIds[0], on the reasoning that a skinned model comes
+                // from a single-material export. A downloaded character does not: the humanoid this was
+                // measured on ships body, clothes, eyes, teeth, lashes and hair as six materials, and a
+                // one-entry m_Materials array made Unity draw submesh 0 and skip the other five - so the
+                // character rendered as a bare body while its clothes were in the bundle all along.
                 root = SkinFields.BuildModel(afile, man.ClassDatabase, () => nextPathId++,
-                                             rootName, model, materialPathIds[0],
+                                             rootName, model, materialPathIds,
                                              controllerAssetName == null ? 0 : PathIdOf(controllerAssetName));
             else
             {

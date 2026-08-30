@@ -27,7 +27,7 @@ Start here, in this order:
 3. [Discover game content](guides/discovery.md) — find the bundle, asset, def, media ID, video row,
    bone names, material properties and clip data you need.
 4. [Pick a recipe](guides/index.md) — texture, material, mesh, animated model, sound, video,
-   creature or weapon.
+   creature, weapon, or a [foreign humanoid soldier](guides/humanoid-soldier.md).
 5. [Manifest and command reference](guides/reference.md) — every supported field and author-facing
    console command.
 
@@ -39,7 +39,8 @@ sound and publishes a model from one `ppcontent.json`.
 
 A content-only mod needs no DLL and no stub DLL. Use `"AssemblyName": ""` in `meta.json`, or omit
 that field. Add a real DLL only when your mod needs behaviour: a hotkey, a trigger, a def change, or
-the call that builds a declared creature or weapon. ContentTool supplies an in-memory loader shim so
+the call that builds a declared creature or weapon — with one exception, `"startingRoster": true`,
+which boards a declared creature at campaign start with no code of your own. ContentTool supplies an in-memory loader shim so
 the mod-manager checkbox works for a code-less content mod; there is no fake file on disk to hit,
 protect, rename or delete.
 

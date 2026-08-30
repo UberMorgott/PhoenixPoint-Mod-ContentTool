@@ -1,0 +1,30 @@
+{
+  "id": "morgott.demo.humanoidsoldier",
+  "bundle": "HumanoidSoldier.bundle",
+  "scale": 1.0,
+  "play": "HL_IdleAlert_NoGun",
+  "loop": "*Loop*, *Idle*",
+  "creature": {
+    "clips": {
+      "HL_IdleAlert_NoGun": "idle",
+      "MV_RunFwd_Loop_NoGunA": "walk",
+      "FF_Punch_ShotLoop": "attack",
+      "HL_Death_AR": "death",
+      "HL_HurtFront_AR": "reaction"
+    },
+    "events": {
+      "attack": "ActionDo 0.3, ShootShot 0.5, ActionEnd 0.9",
+      "death": "Ragdoll 0.9"
+    },
+    "name": "HumanoidSoldier",
+    "model": "soldier",
+    "donor": "PX_SniperStarting_TacCharacterDef",
+    "startingRoster": true,
+    "up": "0,1,0",
+    "lift": 0.0,
+    "health": 40,
+    "will": 10,
+    "speed": 16,
+    "volume": 1
+  }
+}

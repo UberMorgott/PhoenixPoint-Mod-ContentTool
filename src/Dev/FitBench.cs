@@ -4,6 +4,9 @@ using System.Globalization;
 using Base.Cameras;
 using Base.Core;
 using Base.Defs;
+// Base.Input holds no type called 'Input', so the bare 'Input' the Arm below reads is still
+// UnityEngine's - which is the whole point: the bench keeps its own mouse while the game loses its.
+using Base.Input;
 using Base.Levels;
 using Base.Lighting;
 using PhoenixPoint.Common.Core;
@@ -141,6 +144,26 @@ namespace Morgott.ContentTool.Dev
         private static Vector3 scenePosition, sceneScale, platformScale;
         private static readonly List<Canvas> hidden = new List<Canvas>();
         /// <summary>
+        /// ============ THE RIGHT-CLICK THAT GREYED THE MODEL AND MADE IT HUGE (2026-08-29) ============
+        ///
+        /// The workbench hides the canvases, but the STATE STACK underneath them is still listening: RMB
+        /// is the game's own 'Cancel' action (GameData\input\inputmap.json), and the screen the user came
+        /// from answers it by POPPING itself (UIStateEditSoldier.cs:248-260, UIStateGeoRoster.cs:233-245).
+        /// Its exit path then re-applies DefaultLightingSettings over the bench's edit lighting - that is
+        /// the "grey" - and the module that rebuilds behind it writes its own localScale onto the char
+        /// root and the platform (UIModuleActorCycle.cs:435-468) - that is the "huge". Neither is a bug
+        /// in anything this file does; both are the game correctly answering an input the bench never
+        /// meant to forward.
+        ///
+        /// So the bench does what the game's OWN dev surface does while it is up: it holds
+        /// <c>InputController.IncDisableHandlersCalling</c> (GameConsoleInput.cs:242-253), which is a
+        /// REFERENCE COUNT (InputController.cs:637-645) gating the whole dispatch (:1099-1108). No
+        /// Harmony patch, no state pushed, and raw <c>UnityEngine.Input</c> - which is all the bench
+        /// itself reads - is untouched.
+        /// </summary>
+        private static InputController input;
+        private static bool inputHeld;
+        /// <summary>
         /// ============ THE 13,128 EXCEPTIONS THAT ATE THE SCREEN (2026-08-29) ============
         ///
         /// The user's Player.log, one line after "ct_bench open", then thirteen thousand more:
@@ -166,15 +189,30 @@ namespace Morgott.ContentTool.Dev
         private static readonly List<Behaviour> masks = new List<Behaviour>();
 
         private static List<TacCharacterDef> units = new List<TacCharacterDef>();
+        /// <summary>Which of <see cref="units"/> a content mod BUILT, by identity. Computed once per
+        /// catalogue read so the picker, the sort and the clip markers all answer from one set rather
+        /// than each asking CreatureBuild again inside a GUI loop.</summary>
+        private static HashSet<TacCharacterDef> ourUnits = new HashSet<TacCharacterDef>();
         private static List<WeaponDef> weapons = new List<WeaponDef>();
         private static List<WeaponDef> offered = new List<WeaponDef>();
         private static bool offerAll;
         private static int mine, refused;      // weapons this mod built, and how many this unit refuses
         private static TacCharacterDef unit;
         private static WeaponDef weapon;
+        /// <summary>What UNEQUIP took out of the hand, so RE-EQUIP has something to put back.</summary>
+        private static WeaponDef lastWeapon;
         private static string unitFilter = "", weaponFilter = "";
         private static Vector2 unitScroll, weaponScroll, messageScroll;
         private static float step = 0.01f, turn = 5f, scaleStep = 0.01f;
+        /// <summary>
+        /// The PREVIEW model scale: a multiplier on the pose the game itself chose for the displayed
+        /// character, and nothing else. It is a view knob exactly like <see cref="zoom"/> and
+        /// <see cref="lift"/> - it is written into no def, no manifest and no save, and Close puts
+        /// <c>SceneRoot.localScale</c> back off the open-time snapshot regardless of it. Its one job is
+        /// the judgement no number can make: is this foreign model the right SIZE next to a soldier.
+        /// </summary>
+        private static float viewScale = 1f;
+        private static string scaleText = "1.00";
         private static string message = "";
         private static Texture2D backdrop;
 
@@ -199,6 +237,33 @@ namespace Morgott.ContentTool.Dev
             internal Vector3 position;
             internal Quaternion rotation;
             internal Behaviour brain;          // its CinemachineBrain, if it had one that was on
+            /// <summary>
+            /// ============ WHY THE HANDLES WENT SOFT OFF THE BODY (2026-08-29) ============
+            ///
+            /// The arrows and rings are drawn from <c>OnRenderObject</c>, i.e. straight into the
+            /// camera's colour target - and that target is then handed to POST-PROCESSING before
+            /// anyone sees it. The lighting the bench installs (level.View.EditSolderLightingSettings)
+            /// brings its own PostProcessVolume: LightingManager.ApplyPostProcessOptions:168-178 reads
+            /// the volume off the lights root and switches AmbientOcclusion / Bloom / DEPTH OF FIELD /
+            /// ... on it. DOF blurs by circle of confusion, and the CoC is taken from the DEPTH
+            /// BUFFER - which the gizmo's GL lines do not write. So over the character the gizmo
+            /// inherits the character's in-focus CoC and stays crisp, and over the background it
+            /// inherits the background's, which is exactly the "soft and washed out off the body" the
+            /// user sees. Bloom then adds the wash.
+            ///
+            /// The fix is the game's OWN lever: PostProcessLayer.enabled, which is what
+            /// ForcedPostProcessLayerSettings' 'dbg_toggle_post_processing' console command toggles
+            /// (:20-31). One Behaviour flag on the bench's camera, remembered here and put back by
+            /// <see cref="ReleaseCamera"/> next to the brain - and a bench with no bloom and no DOF is
+            /// the right picture anyway, because a fit is judged on an edge. Fetched BY NAME for the
+            /// same reason the brain is: the post-processing assembly is not referenced by this mod and
+            /// does not need to be for one bool.
+            /// </summary>
+            internal Behaviour post;
+            /// <summary>Its near plane before <see cref="BenchList.NearClip"/> was written over it.
+            /// The geoscape's own near plane is authored for a planet, and at the close range the zoom
+            /// clamp now allows it clipped the weapon away.</summary>
+            internal float near;
         }
         private static readonly List<Held> cameras = new List<Held>();
         private static Vector3 framePos; private static Quaternion frameRot;
@@ -212,10 +277,30 @@ namespace Morgott.ContentTool.Dev
         /// zoom and lift, and RESET VIEW puts all four back.</summary>
         private static float yaw, pitch;
         private static float frameRadius;
+        /// <summary>
+        /// ============ THE FREE CAMERA, AND WHY IT IS ONE VECTOR ============
+        ///
+        /// The orbit is always about the MEASURED CENTRE of what is standing there, and that is right
+        /// until the zoom goes in close: the pivot is then inside the body, the weapon is off screen,
+        /// and no amount of orbiting brings it back. So the aim point itself moves - a world-space
+        /// offset added to the measured centre in <see cref="Reframe"/>, which shifts the pivot AND the
+        /// camera together, i.e. exactly the "pan" of every DCC viewport. Middle-drag moves it in the
+        /// camera's own screen plane, WASD/QE fly it along the view axes, and RECENTRE puts it back to
+        /// zero - which is the whole of the restore path, because the offset is the only state.
+        /// </summary>
+        private static Vector3 pan;
+        /// <summary>The distance the last <see cref="Reframe"/> computed, kept because the pan has to
+        /// convert PIXELS into metres and the conversion is a function of that distance.</summary>
+        private static float frameDist;
 
         /// <summary>The rig's own anim actions, as DisplayCharacter hands them back - the thing that
         /// swaps a soldier's idle for the number of hands his weapon needs.</summary>
         private static TacActorAnimActions animActions;
+
+        /// <summary>The LIVE Equipment the last rebuild produced for <see cref="weapon"/> - what
+        /// <see cref="Handed"/> found, kept because the transport needs the same object to ask for the
+        /// clip set that matches what is actually in the hand. Null when the hand is empty.</summary>
+        private static Equipment held;
 
         // ---------------------------------------------------------------- enter
 
@@ -258,6 +343,10 @@ namespace Morgott.ContentTool.Dev
             cameras.Clear();
             try
             {
+                // FIRST of all the mutations: while the bench is up, the game must not answer input at
+                // all. See the comment on <see cref="input"/> - a stray RMB is 'Cancel', and Cancel pops
+                // the screen the bench is standing on top of.
+                SuspendInput();
                 // WHAT WAS THERE, not what the default is. Close used to force the Geoscape scene and
                 // the DEFAULT lighting settings unconditionally, which is only the right answer if the
                 // workbench was opened from the geoscape with untouched lighting - open it from the
@@ -301,9 +390,32 @@ namespace Morgott.ContentTool.Dev
                 return "ct_bench REFUSED: opening threw " + ex.GetType().Name + ": " + ex.Message +
                        " - everything it had already changed was put back. " + undone;
             }
-            return "ct_bench open (" + units.Count + " unit template(s), " + weapons.Count +
+            return "ct_bench open (" + units.Count + " unit template(s), " + ourUnits.Count +
+                   " of them built by a content mod and listed FIRST, " + weapons.Count +
                    " weapon(s), " + mine + " of them built by this mod and listed FIRST). " +
                    HotkeyLabel + ", the RESET VIEW button, or 'ct_bench close' to leave.";
+        }
+
+        /// <summary>Take the input lock, at most once - the count is the game's and an unbalanced
+        /// increment leaves the game deaf for the rest of the session.</summary>
+        private static void SuspendInput()
+        {
+            if (inputHeld) return;
+            input = GameUtl.GameComponent<InputController>();
+            if (input == null) return;
+            input.IncDisableHandlersCalling();
+            inputHeld = true;
+        }
+
+        /// <summary>Give it back, exactly once, and only if the increment actually happened. Throwing is
+        /// deliberate: <see cref="Close"/> runs this as a named Step, so a failure is reported and
+        /// retried rather than silently leaving the game unable to hear a click.</summary>
+        private static void ResumeInput()
+        {
+            if (!inputHeld) { input = null; return; }
+            if (input != null) input.DecDisableHandlersCalling();
+            inputHeld = false;
+            input = null;
         }
 
         /// <summary>
@@ -372,7 +484,11 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         private static string ResetView()
         {
-            zoom = BenchList.ZoomDefault; lift = 0f; yaw = 0f; pitch = 0f;
+            zoom = BenchList.ZoomDefault; lift = 0f; yaw = 0f; pitch = 0f; pan = Vector3.zero;
+            // The preview scale is a view knob like the four above, so RESET VIEW puts it back with
+            // them. The transform it multiplies is re-asserted by the next Posed, and by Close either
+            // way.
+            viewScale = 1f; scaleText = "1.00";
             try { if (bay != null && bay.SceneRoot != null) bay.SceneRoot.rotation = sceneRotation; }
             catch (Exception) { }
             try { if (level != null && level.SceneReferences != null)
@@ -385,8 +501,12 @@ namespace Morgott.ContentTool.Dev
             // The transport is a knob like the others: RESET VIEW puts the animator's speed back and
             // stands the unit in the weapon's own idle again, then re-binds against the live rig.
             try { FitAnim.Release(); } catch (Exception) { }
-            try { if (bay != null && bay.CharacterBuilder != null) FitAnim.Bind(bay.CharacterBuilder); }
+            try { if (bay != null && bay.CharacterBuilder != null)
+                      FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips()); }
             catch (Exception) { }
+            // The pose re-asserted through the ordinary path, so the preview scale just put back to 1
+            // is actually ON SCREEN rather than waiting for the next rebuild.
+            try { Posed(); } catch (Exception) { }
             try { TakeCamera(); } catch (Exception) { }
             try { Reframe(); } catch (Exception) { }
             return "ct_bench: view RESET - zoom, lift, orbit, the animation transport and the bay's " +
@@ -396,25 +516,68 @@ namespace Morgott.ContentTool.Dev
         }
 
         /// <summary>
-        /// The two def lists, read ONCE per open. GetAllDefs walks the whole repository, and a unit
-        /// that cannot be built is filtered out here rather than throwing inside the GUI loop: a
-        /// TacCharacterDef with no addons manager has no rig to hang anything on, and one with no view
-        /// element cannot even be named.
+        /// The two def lists. GetAllDefs walks the whole repository, which is ALREADY the full runtime
+        /// set - a creature a content mod built is a def CreatureBuild.Clone registered into that same
+        /// repository, so it is in here beside the shipped soldiers and Pandorans with nothing extra to
+        /// do. A unit that cannot be built is filtered out here rather than throwing inside the GUI
+        /// loop: a TacCharacterDef with no addons manager has no rig to hang anything on, and one with
+        /// no view element cannot even be named.
+        ///
+        /// TWO deliberate exceptions to that filter, both for the mod author:
+        /// - a def a content mod BUILT is listed even when it is missing one of those two parts. Opening
+        ///   his own half-built creature and being told WHY is the whole reason he came; silently
+        ///   dropping it out of the list looks exactly like the mod not having loaded at all. Show()
+        ///   already reports a build that will not finish instead of throwing.
+        /// - those defs sort FIRST, like this mod's weapons do, because a repository of several hundred
+        ///   shipped templates is where one new creature goes to hide.
+        ///
+        /// Re-runnable: it is read at open and by the picker's own 'rescan', because a content mod
+        /// enabled after the bench was opened is otherwise invisible until the next open.
         /// </summary>
         private static void Catalog()
         {
             DefRepository repo = GameUtl.GameComponent<DefRepository>();
             units = new List<TacCharacterDef>();
+            ourUnits = new HashSet<TacCharacterDef>();
             foreach (TacCharacterDef d in repo.GetAllDefs<TacCharacterDef>())
             {
                 if (d == null) continue;
-                try { if (d.GetAddonsMangerDef() != null && d.GetViewElementDef() != null) units.Add(d); }
+                bool ours = Ours(d);
+                if (ours) ourUnits.Add(d);
+                try { if (ours || (d.GetAddonsMangerDef() != null && d.GetViewElementDef() != null))
+                          units.Add(d); }
                 catch (Exception) { }
             }
             weapons = new List<WeaponDef>();
             foreach (WeaponDef d in repo.GetAllDefs<WeaponDef>()) if (d != null) weapons.Add(d);
-            units.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+            units.Sort((a, b) =>
+            {
+                int m = (ourUnits.Contains(b) ? 1 : 0) - (ourUnits.Contains(a) ? 1 : 0);
+                return m != 0 ? m : string.CompareOrdinal(a.name, b.name);
+            });
             weapons.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+        }
+
+        /// <summary>Did a content mod build this character? The engine's own registry, by identity -
+        /// CreatureBuild keeps the cloned addons manager on the Creature it built, and that manager def
+        /// is what the character def points at. Never a name prefix: two mods may not collide.</summary>
+        private static bool Ours(TacCharacterDef d)
+        {
+            try { return d != null && CreatureBuild.ByManager(d.GetAddonsMangerDef()) != null; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>Every clip the content mod that built the DISPLAYED character shipped, or null for a
+        /// vanilla one - what <see cref="FitAnim"/> needs to tell a mod's clip from one the game swapped
+        /// in by itself.</summary>
+        private static AnimationClip[] ModClips()
+        {
+            try
+            {
+                Creature c = unit == null ? null : CreatureBuild.ByManager(unit.GetAddonsMangerDef());
+                return c == null ? null : c.Clips;
+            }
+            catch (Exception) { return null; }
         }
 
         // ---------------------------------------------------------------- the camera
@@ -455,13 +618,24 @@ namespace Morgott.ContentTool.Dev
             {
                 camera = cam,
                 position = cam.transform.position,
-                rotation = cam.transform.rotation
+                rotation = cam.transform.rotation,
+                near = cam.nearClipPlane
             };
             try
             {
                 Behaviour b = cam.GetComponent("CinemachineBrain") as Behaviour;
                 if (b != null && b.enabled) { b.enabled = false; row.brain = b; }
             }
+            catch (Exception) { }
+            // See Held.post: post-processing is what blurs the handles wherever they fall on the
+            // background, because they are drawn into the colour target before it runs.
+            try
+            {
+                Behaviour p = cam.GetComponent("PostProcessLayer") as Behaviour;
+                if (p != null && p.enabled) { p.enabled = false; row.post = p; }
+            }
+            catch (Exception) { }
+            try { if (cam.nearClipPlane > BenchList.NearClip) cam.nearClipPlane = BenchList.NearClip; }
             catch (Exception) { }
             cameras.Add(row);
         }
@@ -478,13 +652,16 @@ namespace Morgott.ContentTool.Dev
                 bool ok = true;
                 try { if (h.brain != null) h.brain.enabled = true; }
                 catch (Exception) { ok = false; }
+                try { if (h.post != null) h.post.enabled = true; }
+                catch (Exception) { ok = false; }
                 try { if (h.camera != null) { h.camera.transform.position = h.position;
-                                              h.camera.transform.rotation = h.rotation; } }
+                                              h.camera.transform.rotation = h.rotation;
+                                              h.camera.nearClipPlane = h.near; } }
                 catch (Exception) { ok = false; }
                 if (ok) continue;
                 left.Add(h);
                 if (failed != null)
-                    failed.Add("camera '" + (h.camera == null ? "?" : h.camera.name) + "' (pose/brain)");
+                    failed.Add("camera '" + (h.camera == null ? "?" : h.camera.name) + "' (pose/brain/post-processing/near plane)");
             }
             cameras.Clear();
             cameras.AddRange(left);
@@ -543,8 +720,13 @@ namespace Morgott.ContentTool.Dev
                 Quaternion rot = Quaternion.Euler(0f, yaw, 0f) * look * Quaternion.Euler(pitch, 0f, 0f);
                 Vector3 fwd = rot * Vector3.forward, right = rot * Vector3.right, up = rot * Vector3.up;
                 // lift is in RADII, not metres - the same press has to mean the same thing on a soldier
-                // and on something three times his size.
-                Vector3 aim = b.center + up * (lift * frameRadius);
+                // and on something three times his size. The pan is already in metres and in world
+                // space, and it moves the AIM POINT: the camera follows it because the pose below is
+                // built off the aim, so the pivot travels with the camera instead of staying buried in
+                // the model. See <see cref="pan"/>.
+                pan = Vector3.ClampMagnitude(pan, frameRadius * BenchList.PanMaxRadii);
+                Vector3 aim = b.center + up * (lift * frameRadius) + pan;
+                frameDist = distance;
                 // ... and DOWN by the strip's share, for the same reason the camera stands LEFT by the
                 // panel's: moving the camera down moves the image up, clear of the transport.
                 framePos = aim - fwd * distance - right * lateral - up * vertical;
@@ -552,6 +734,60 @@ namespace Morgott.ContentTool.Dev
                 framed = true;
             }
             catch (Exception ex) { framed = false; message = "ct_bench: frame - " + ex.GetType().Name + ": " + ex.Message; }
+        }
+
+        /// <summary>RECENTRE: the pan back to zero and nothing else. Deliberately NOT RESET VIEW - the
+        /// zoom, the lift and the orbit a session has been dialled in are worth keeping when all that
+        /// went wrong is that the camera was flown somewhere the model is not.</summary>
+        private static void Recentre()
+        {
+            pan = Vector3.zero;
+            Reframe();
+        }
+
+        /// <summary>One middle-drag, in PIXELS, turned into a world offset in the camera's own screen
+        /// plane: a pixel is worth <c>2 * distance * tan(fov/2) / screenHeight</c> metres at the aim
+        /// point's depth, which is the same algebra <see cref="BenchList.Frame"/> is built on. The sign
+        /// is grab-the-world - drag right and the model goes right, because the camera goes left.</summary>
+        private static void PanBy(float dxPixels, float dyPixels)
+        {
+            if (cam == null || !framed) return;
+            float mpp = 2f * Mathf.Max(0.01f, frameDist) *
+                        Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) /
+                        Mathf.Max(1f, Screen.height);
+            pan -= (frameRot * Vector3.right) * (dxPixels * mpp) +
+                   (frameRot * Vector3.up) * (dyPixels * mpp);
+            Reframe();
+        }
+
+        /// <summary>
+        /// WASD/QE fly, read raw from <c>UnityEngine.Input</c> like every other gesture here - the game
+        /// itself cannot hear any of it, because the bench holds
+        /// <c>InputController.IncDisableHandlersCalling</c> for as long as it is open (see
+        /// <see cref="input"/>).
+        ///
+        /// The one thing it MUST stand aside for is IMGUI's own keyboard: the panel has two text
+        /// filters, and typing "assault" into one of them would otherwise fly the camera on every 'a'
+        /// and 's'. <c>GUIUtility.keyboardControl</c> is non-zero exactly while a control has the
+        /// keyboard, which is the cheapest true answer to "is he typing".
+        /// </summary>
+        private static void Fly()
+        {
+            if (cam == null || !framed) return;
+            // BY NAME, not by "is anything focused". IMGUI keeps keyboardControl on the text field long
+            // after the pointer has left it - clicking the scene does not clear it - so a blanket
+            // "keyboardControl != 0" guard switched flying off for the rest of the session the first
+            // time a filter was typed in. Only the two filters are allowed to eat these keys, and a
+            // press on the scene drops their focus (see dropFocus).
+            if (typing) return;
+            float strafe = (Input.GetKey(KeyCode.D) ? 1f : 0f) - (Input.GetKey(KeyCode.A) ? 1f : 0f);
+            float rise = (Input.GetKey(KeyCode.E) ? 1f : 0f) - (Input.GetKey(KeyCode.Q) ? 1f : 0f);
+            float fwd = (Input.GetKey(KeyCode.W) ? 1f : 0f) - (Input.GetKey(KeyCode.S) ? 1f : 0f);
+            if (strafe == 0f && rise == 0f && fwd == 0f) return;
+            float metres = Mathf.Max(0.05f, frameRadius) * BenchList.FlyPerSecond * Time.deltaTime *
+                           (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? 4f : 1f);
+            pan += (frameRot * new Vector3(strafe, rise, fwd)) * metres;
+            Reframe();
         }
 
         // ---------------------------------------------------------------- leave
@@ -591,6 +827,9 @@ namespace Morgott.ContentTool.Dev
             hidden.RemoveAll(c => Restored(failed, "canvas '" + Named(c) + "'",
                                            () => { if (c != null) c.enabled = true; }));
 
+            // The game's ears back on FIRST: everything below it is a scene object that may or may not
+            // still exist, and being left deaf is the one failure the user cannot see or work around.
+            Step(failed, "the game's own input handling", ResumeInput);
             // The animator BEFORE the rebuild callback goes: it puts the speed back and plays the
             // default state, and both need the builder this callback still points at.
             Step(failed, "the animator's speed and the weapon's idle pose", FitAnim.Release);
@@ -752,10 +991,28 @@ namespace Morgott.ContentTool.Dev
                 // unconditional un-quiesce for the other end: a builder that dies before its callback.
                 try { if (manager != null) manager.SetAutorefreshOnTagsChanged(true); }
                 catch (Exception) { }
+
+                // ============ A FAILED SHOW MUST NOT LEAVE THE TRANSPORT ON THE OLD UNIT ============
+                // DisplayCharacter destroys the previous rig and instantiates the new one BEFORE
+                // anything below it can throw (AddonsCharacterBuilder.UseAddonManager:153-158). So on
+                // the way out of here the model on screen is ALREADY the new one, while the strip is
+                // still bound to the old one's Animator and still lists the old one's clips - which is
+                // how a humanoid came to be shown with a spider's clip names, none of which would play,
+                // because the Animator they were bound to had just been destroyed. Re-bind against the
+                // rig that is really standing there: with no anim actions to catalogue the strip says
+                // so, which is the honest answer while the build is broken.
+                animActions = null; held = null;
+                try { FitAnim.Bind(bay.CharacterBuilder, null, null, null, null); }
+                catch (Exception) { }
+
                 message = "ct_bench: could not build '" + unit.name + "' " +
                           (weapon == null ? "" : "holding '" + weapon.name + "' ") +
                           "- " + ex.GetType().Name + ": " + ex.Message;
-                ContentToolMain.Say(message);
+                // The MESSAGE is what fits the panel; the LOG gets the whole exception. A bare message
+                // named the type and nothing else, and "NullReferenceException" with no frame is not a
+                // diagnosis - it cost a whole session of reading the engine backwards to guess where it
+                // came from. ToString() carries the stack, and the log is where a stack belongs.
+                ContentToolMain.Say(message + "\n" + ex);
             }
         }
 
@@ -780,24 +1037,29 @@ namespace Morgott.ContentTool.Dev
                 AddonsManager manager = bay.CharacterBuilder.AddonsManager;
                 if (manager != null) manager.SetAutorefreshOnTagsChanged(true);
                 Handed(manager);
-                // AFTER Handed, and it drops back to the idle Handed just chose. The rig this rebuild
-                // produced is a new controller with new states, so a transport still holding the
-                // previous one's state hash is the one way this could pose a soldier with another
-                // creature's animation.
-                FitAnim.Bind(bay.CharacterBuilder);
+                // AFTER Handed, and with what Handed found: the clip set the transport lists is the one
+                // SetActiveNumberOfHands has just re-resolved for this weapon, so a rifle gets the rifle
+                // idle and an empty hand gets the empty-handed one. Bind keeps the selection when the
+                // same clip is still there - a rebuild is what a nudge causes, and being thrown back to
+                // frame 0 after every nudge is what a fit cannot be judged through.
+                FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips());
 
                 ViewElementDef view = unit.GetViewElementDef();
                 CharacterBuilderViewParametersDef p = view == null ? null : view.BuilderViewParamDef;
+                // The scale the GAME chose for this character, or - for a def that authored none - the
+                // one the bay was standing at when the bench opened. Taken FRESH every pose rather than
+                // read back off the transform, so the preview multiplier below can never compound.
+                Vector3 posed = sceneScale;
                 if (p != null && !Unset(p.ObjectWorldPosition) && !Unset(p.ObjectScale))
                 {
-                    if (bay.SceneRoot != null)
-                    {
-                        bay.SceneRoot.localPosition = p.ObjectWorldPosition;
-                        bay.SceneRoot.localScale = p.ObjectScale;
-                    }
+                    posed = p.ObjectScale;
+                    if (bay.SceneRoot != null) bay.SceneRoot.localPosition = p.ObjectWorldPosition;
                     if (bay.CharBuilderPlatform != null && !Unset(p.PlatformScale))
                         bay.CharBuilderPlatform.localScale = p.PlatformScale;
                 }
+                // ... and then the PREVIEW knob, last. See <see cref="viewScale"/>: this is a look, not
+                // a value - Close restores localScale from the same snapshot whatever it is left at.
+                if (bay.SceneRoot != null) bay.SceneRoot.localScale = posed * viewScale;
                 // LAST, and only here: the bounds we frame against are the bounds AFTER the scene root
                 // has been posed and scaled, and a unit three times a soldier's size is only three times
                 // his size once the two lines above have run.
@@ -820,10 +1082,10 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         private static void Handed(AddonsManager manager)
         {
+            held = null;
             if (animActions == null) return;
             try
             {
-                Equipment held = null;
                 if (weapon != null && manager != null && manager.RootAddon != null)
                     foreach (Addon a in manager.RootAddon)
                         if (a != null && a.AddonDef == weapon) { held = a as Equipment; break; }
@@ -913,6 +1175,13 @@ namespace Morgott.ContentTool.Dev
                                        ? (Func<WeaponDef, bool>)null
                                        : w => Fits(manager, worn, w);
             offered = BenchList.Offer(weapons, test, Mine, ref weapon, out refused);
+            // The RE-EQUIP memory is per-unit, and this is where the unit's answer is computed: a gun
+            // the previous soldier could hold may have nowhere to go on this one, and putting it back
+            // would rebuild the new unit with a weapon the slot test has just refused. Against the
+            // PREDICATE, not against 'offered' - BenchList.Offer keeps every weapon this mod built in
+            // the list even when the test refuses it, so a custom gun would survive a membership check.
+            // A null test is "we could not ask" or "the user asked for all", and neither refuses anything.
+            if (lastWeapon != null && test != null && !test(lastWeapon)) lastWeapon = null;
             mine = 0;
             foreach (WeaponDef w in weapons) if (Mine(w)) mine++;
 
@@ -957,6 +1226,20 @@ namespace Morgott.ContentTool.Dev
         /// window even the fixed part does not fit, and a control that is off the bottom of a dev panel
         /// may as well not exist - that was half of defect 2.</summary>
         private static Vector2 panelScroll;
+        /// <summary>The two filter fields' IMGUI control names - the only two controls in the bench that
+        /// are allowed to eat the fly keys. See <see cref="Fly"/>.</summary>
+        private const string UnitFilterName = "ct_bench_unit_filter";
+        private const string WeaponFilterName = "ct_bench_weapon_filter";
+        /// <summary>The model-scale field. Listed with the two filters for one reason only: it eats the
+        /// keyboard too, and a digit typed into it must not also fly the camera.</summary>
+        private const string ScaleFieldName = "ct_bench_model_scale";
+        /// <summary>A press landed on the 3D half, so whichever filter still holds the keyboard should
+        /// let go of it. Acted on in OnGUI, because that is where IMGUI's focus lives.</summary>
+        private static bool dropFocus;
+        /// <summary>Does one of the two filters hold the keyboard? Read in OnGUI and CACHED here,
+        /// because <see cref="Fly"/> runs from Update and the IMGUI focus API may only be called inside
+        /// OnGUI - out of context it throws, the Update guard swallows it, and flying never runs.</summary>
+        private static bool typing;
         /// <summary>The two def lists are pickers: used once, then in the way. Each folds itself shut
         /// the moment something is picked from it, and its header re-opens it.</summary>
         private static bool unitsOpen = true, weaponsOpen = true;
@@ -1048,8 +1331,35 @@ namespace Morgott.ContentTool.Dev
             // is a toggle here rather than a sign the author has to come back and change. Session only.
             GUILayout.BeginHorizontal();
             GUILayout.Label("drag", GUILayout.Width(40f));
-            BenchList.InvertX = GUILayout.Toggle(BenchList.InvertX, " invert X");
-            BenchList.InvertY = GUILayout.Toggle(BenchList.InvertY, " invert Y");
+            BenchList.InvertX = GUILayout.Toggle(BenchList.InvertX, " invert X", GUILayout.Width(78f));
+            BenchList.InvertY = GUILayout.Toggle(BenchList.InvertY, " invert Y", GUILayout.Width(78f));
+            // The one button that gets the model back after a fly-about, and it is NOT RESET VIEW: it
+            // drops the pan only, so the zoom, the lift and the orbit that were dialled in survive.
+            if (GUILayout.Button("RECENTRE", GUILayout.Width(96f))) Recentre();
+            GUILayout.EndHorizontal();
+
+            // ---- THE MODEL SCALE, and it is a PREVIEW knob ----
+            // A foreign model is either the right size next to a soldier or it is not, and that is an
+            // eyeball judgement like the framing: dial it here, then put the vanilla soldier on the
+            // platform and dial the same number against him. Nothing is written anywhere - see
+            // <see cref="viewScale"/> - so '1x' is not an undo of a save, it is simply the value 1.
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("model", GUILayout.Width(40f));
+            float dialled = GUILayout.HorizontalSlider(viewScale, BenchList.ModelScaleMin,
+                                                       BenchList.ModelScaleMax);
+            if (Mathf.Abs(dialled - viewScale) > 1e-4f) Rescale(dialled, true);
+            GUI.SetNextControlName(ScaleFieldName);
+            string typed = GUILayout.TextField(scaleText ?? "", GUILayout.Width(52f));
+            if (typed != scaleText)
+            {
+                // The typed text is NOT rewritten from the clamped value while it is being typed: doing
+                // that turns "0." into "0.10" under the cursor and the field cannot be used at all.
+                scaleText = typed;
+                float exact;
+                if (float.TryParse(typed, NumberStyles.Float, CultureInfo.InvariantCulture, out exact))
+                    Rescale(exact, false);
+            }
+            if (GUILayout.Button("1x", GUILayout.Width(34f))) Rescale(1f, true);
             GUILayout.EndHorizontal();
             // The handles get a CLAUSE in the line that already lists the other two mouse gestures, not
             // a Label of their own: the panel's height is budgeted ROW BY ROW (BenchList.Rows), so one
@@ -1058,13 +1368,24 @@ namespace Morgott.ContentTool.Dev
             GUILayout.Label(framed
                 ? (FitGizmo.Live ? "ARROWS on the gun = move it, RINGS = turn it about that axis (Esc " +
                                    "cancels; a dimmed handle is edge-on to the camera). " : "handles OFF. ") +
-                  "drag = orbit, wheel = zoom, right-drag = turn the model.  x" +
+                  "drag = orbit, wheel = zoom, right-drag = turn the model, MIDDLE-drag = pan, " +
+                  "WASD/QE (Shift = faster) = fly.  x" +
                   zoom.ToString("0.00", CultureInfo.InvariantCulture) +
                   " lift " + lift.ToString("0.00", CultureInfo.InvariantCulture) +
                   " yaw " + yaw.ToString("0", CultureInfo.InvariantCulture) +
                   " pitch " + pitch.ToString("0", CultureInfo.InvariantCulture) +
                   " r " + frameRadius.ToString("0.00", CultureInfo.InvariantCulture) + "m"
                 : "NOT FRAMED - nothing with a renderer is standing there yet. Try RESET VIEW.");
+        }
+
+        /// <summary>Set the preview scale and re-apply the pose through the SAME callback that poses
+        /// every rebuild (<see cref="Posed"/>), so the scale, the framing and the transport all land the
+        /// way they do for any other change - there is no second posing path to drift.</summary>
+        private static void Rescale(float v, bool retext)
+        {
+            viewScale = BenchList.Clamp(v, BenchList.ModelScaleMin, BenchList.ModelScaleMax);
+            if (retext) scaleText = viewScale.ToString("0.00", CultureInfo.InvariantCulture);
+            Posed();
         }
 
         /// <summary>The unit picker, which folds itself away once it has been used. A height of zero
@@ -1076,7 +1397,20 @@ namespace Morgott.ContentTool.Dev
             GUILayout.BeginHorizontal();
             if (GUILayout.Button((unitsOpen ? "v " : "> ") + "unit (" + units.Count + ")", GUILayout.Width(110f)))
                 unitsOpen = !unitsOpen;
-            if (unitsOpen) unitFilter = GUILayout.TextField(unitFilter ?? "");
+            if (unitsOpen)
+            {
+                GUI.SetNextControlName(UnitFilterName);
+                unitFilter = GUILayout.TextField(unitFilter ?? "");
+                // The catalogue is read once per open, so a content mod enabled or re-projected WHILE
+                // the bench is up is otherwise invisible until it is closed and re-opened. Re-reading it
+                // is one repository walk and touches nothing that is on screen.
+                if (GUILayout.Button("rescan", GUILayout.Width(58f)))
+                {
+                    Catalog();
+                    message = "ct_bench: catalogue re-read - " + units.Count + " unit(s), " +
+                              ourUnits.Count + " of them built by a content mod and listed FIRST.";
+                }
+            }
             else GUILayout.Label(BenchList.Elide(unit == null ? "-" : unit.name, 28));
             GUILayout.EndHorizontal();
             if (!unitsOpen || height <= 0f) return;
@@ -1085,7 +1419,11 @@ namespace Morgott.ContentTool.Dev
             foreach (TacCharacterDef d in units)
             {
                 if (!BenchList.Matches(d.name, unitFilter)) continue;
-                if (!GUILayout.Button(BenchList.Elide(d.name, BenchList.NameChars))) continue;
+                // Same mark, same reason, as the weapon list's: which of these several hundred templates
+                // came out of a content mod has to be readable without picking each one.
+                bool ours = ourUnits.Contains(d);
+                if (!GUILayout.Button(BenchList.Elide(d.name, BenchList.NameChars - (ours ? 4 : 0)) +
+                                      (ours ? "  *" : ""))) continue;
                 unit = d; Pick();
                 // Picked, so out of the way: the model and the dial are what he came for.
                 unitsOpen = false;
@@ -1103,15 +1441,27 @@ namespace Morgott.ContentTool.Dev
                 weaponsOpen = !weaponsOpen;
             if (weaponsOpen)
             {
+                GUI.SetNextControlName(WeaponFilterName);
                 weaponFilter = GUILayout.TextField(weaponFilter ?? "");
                 // The calibration knob. The slot test is the game's own, but it is being asked a
                 // question the game never asks it - about a bare template with no recruit behind it -
                 // so there is one switch that says "show me the catalogue anyway" instead of a dead end.
                 bool all = GUILayout.Toggle(offerAll, "all", GUILayout.Width(40f));
                 if (all != offerAll) { offerAll = all; Offer(); }
-                if (GUILayout.Button("none", GUILayout.Width(46f))) { weapon = null; Show(); }
             }
-            else GUILayout.Label(BenchList.Elide(weapon == null ? "-" : weapon.name, 28));
+            else GUILayout.Label(BenchList.Elide(weapon == null ? "-" : weapon.name, 20));
+            // OUT OF THE HAND AND BACK IN, and OUTSIDE the picker's fold so it is reachable with the
+            // list shut - which is how the panel is used once a weapon has been chosen. Both directions
+            // are the same rebuild the picker itself causes (Show -> RebuildCharacter), so the idle, the
+            // clip set and the transport all re-resolve exactly as they do for any other change.
+            GUI.enabled = weapon != null || lastWeapon != null;
+            if (GUILayout.Button(weapon == null ? "RE-EQUIP" : "UNEQUIP", GUILayout.Width(84f)))
+            {
+                if (weapon != null) { lastWeapon = weapon; weapon = null; }
+                else weapon = lastWeapon;
+                Show();
+            }
+            GUI.enabled = true;
             GUILayout.EndHorizontal();
             if (!weaponsOpen || height <= 0f) return;
 
@@ -1339,6 +1689,7 @@ namespace Morgott.ContentTool.Dev
                     }
                     if (!open || bay == null || bay.SceneRoot == null) return;
                     Mouse();
+                    Fly();
                 }
                 catch (Exception ex)
                 {
@@ -1373,7 +1724,11 @@ namespace Morgott.ContentTool.Dev
                 // slider that wanders a pixel below it must move the clip, never the camera.
                 bool over = BenchList.OverScene(Input.mousePosition.x, PanelWidth) &&
                             !BenchList.OverStrip(Input.mousePosition.x, Input.mousePosition.y,
-                                                 Screen.width, Screen.height, PanelWidth);
+                                                 Screen.width, Screen.height, PanelWidth) &&
+                            // A FIFTH REGION, and only while it exists: the clip list opens UPWARD out
+                            // of the strip and over the scene, so without this a click on a clip would
+                            // pick the clip AND start an orbit.
+                            !FitAnim.OverList(Input.mousePosition.x, Input.mousePosition.y);
 
                 float wheel = Input.mouseScrollDelta.y;
                 if (over && Mathf.Abs(wheel) > 0.01f)
@@ -1382,7 +1737,8 @@ namespace Morgott.ContentTool.Dev
                     Reframe();
                 }
 
-                if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1))
+                if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) ||
+                    Input.GetMouseButtonDown(2))
                 {
                     // THE GIZMO GETS FIRST REFUSAL ON A LEFT PRESS, and it has to be ASKED rather than
                     // consulted through FitGizmo.Owns: Unity runs every Update before any OnGUI, so on
@@ -1391,12 +1747,16 @@ namespace Morgott.ContentTool.Dev
                     // the model swung while the gun was being moved.
                     dragging = over && !(Input.GetMouseButtonDown(0) &&
                                          FitGizmo.WouldGrab(Input.mousePosition.x, Input.mousePosition.y));
+                    // Clicking the model is how a user says "I am done typing" - IMGUI will not work
+                    // that out on its own, and a filter that keeps the keyboard keeps the fly keys.
+                    if (over) dropFocus = true;
                     lastX = Input.mousePosition.x;
                     lastY = Input.mousePosition.y;
                 }
                 // And for every frame AFTER the press, the latched claim is the answer.
                 if (FitGizmo.Owns) { dragging = false; return; }
-                if (!Input.GetMouseButton(0) && !Input.GetMouseButton(1)) { dragging = false; return; }
+                if (!Input.GetMouseButton(0) && !Input.GetMouseButton(1) && !Input.GetMouseButton(2))
+                { dragging = false; return; }
                 // A drag that STARTED on the panel keeps its grip there even when the pointer wanders
                 // over the model - otherwise letting go of a scrollbar past the panel edge would snap
                 // the camera round.
@@ -1406,6 +1766,11 @@ namespace Morgott.ContentTool.Dev
                 lastX = Input.mousePosition.x;
                 lastY = Input.mousePosition.y;
                 if (Mathf.Abs(dx) < 0.01f && Mathf.Abs(dy) < 0.01f) return;
+
+                // MIDDLE-DRAG PANS, and it is asked before the other two: it moves the pivot with the
+                // camera, which is the only gesture that gets a zoomed-in view off the inside of the
+                // body and onto the gun.
+                if (Input.GetMouseButton(2)) { PanBy(dx, dy); return; }
 
                 if (Input.GetMouseButton(1))
                 {
@@ -1487,6 +1852,10 @@ namespace Morgott.ContentTool.Dev
                 if (!open) return;
                 try
                 {
+                    if (dropFocus) { GUI.FocusControl(null); dropFocus = false; }
+                    string focused = GUI.GetNameOfFocusedControl();
+                    typing = focused == UnitFilterName || focused == WeaponFilterName ||
+                             focused == ScaleFieldName;
                     // FIRST, and unconditionally: it allocates a control id from this pass's counter,
                     // and an id that is only sometimes allocated is a different id every frame.
                     FitGizmo.Gui(PanelWidth,

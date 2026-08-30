@@ -1,0 +1,5 @@
+# The model SHIPS (CC BY 4.0, named in SOURCES.md). What is excluded is the build output only:
+# the bundle is baked from the model on your machine by `ct_project ReplaceCharacterBody`.
+Dist/
+bin/
+obj/

@@ -31,5 +31,25 @@ Console.log
 **/__pycache__/
 *.pyc
 
+# Derived models: both are rewritten from tiffany_cox_idle_animation.glb by one command each
+# (tools\ppskel.py, then tools\ppretarget.py), so committing them would be a second source of truth
+# for 9 MB apiece.
+tiffany_cox_ppskel.glb
+tiffany_cox_ppfit.glb
+
+# Regenerable extracts of the GAME's own data, kept out of a public repo on purpose:
+#   pp-rest.tsv   - `python tools\ppskel.py --rest`      (the shipped rig's rest pose)
+#   pp-clips.json - `ClipCensus.exe --export ...`        (sampled curves out of a shipped bundle)
+# Both are inputs to tools\ppretarget.py and both are one command away, so neither is committed.
+tools/pp-rest.tsv
+tools/pp-clips.json
+# Written by the last local run of tools\ppretarget.py - a log of that machine's retarget, not a source.
+tools/ppretarget-report.json
+
+# Test content that must never ship - scratch models of unknown licence, bench subjects.
+# deploy.ps1 installs it like a demo; package.ps1 and sync-standalone.ps1 never look at it.
+local/
+
 # Secrets
 .env
+tiffany_cox_idle_animation.glb

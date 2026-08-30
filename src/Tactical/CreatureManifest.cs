@@ -22,7 +22,7 @@ namespace Morgott.ContentTool.Tactical
     ///                 "Spider_Attack": "attack", "Spider_Death": "death" },
     ///     "events": { "attack": "ActionDo 0.25, ShootShot 0.55, ActionEnd 0.90",
     ///                 "death":  "Ragdoll 0.90" },
-    ///     "name": "Spider", "donor": "Swarmer_TacCharacterDef",
+    ///     "name": "Spider", "donor": "Swarmer_TacCharacterDef", "startingRoster": true,
     ///     "up": "0,1,0", "lift": 32.8288,
     ///     "health": 40, "will": 10, "speed": 16, "volume": 1, "pace": 5.4284,
     ///     "colliders": "", "hitBones": "", "hitRadius": "", "aim": "",
@@ -87,8 +87,9 @@ namespace Morgott.ContentTool.Tactical
         /// ClipSequence (Start/Loop/Stop are three fields, and ClipSequence.cs:16-25 only tests them for
         /// non-null), so ONE role covers what the slot map actually consumes. Optional - unmapped, the
         /// bake synthesises the three parts out of the walk cycle instead.</summary>
-        internal static readonly string[] Roles = { "walk", "idle", "attack", "death", "jump", "reaction",
-                                                    "ranged", "climb" };
+        /// <summary>Every role there is, and which class each falls in, live in
+        /// <see cref="CreatureRoles"/> - the UnityEngine-free file the offline gate compiles, so the
+        /// rule that decides whether an unmapped role hangs the game is checked without a launch.</summary>
         internal static readonly string[] RequiredRoles = { "walk", "idle", "attack", "death" };
 
         /// <summary>Clip name AS SPELLED IN THE MODEL FILE -&gt; role. Insertion-ordered, so the
@@ -96,10 +97,23 @@ namespace Morgott.ContentTool.Tactical
         internal readonly List<KeyValuePair<string, string>> Clips = new List<KeyValuePair<string, string>>();
         /// <summary>role -&gt; the blocking animation events that clip must fire, in the order the
         /// ability waits for them. See <see cref="Event"/>.</summary>
-        internal readonly List<KeyValuePair<string, Event[]>> Events = new List<KeyValuePair<string, Event[]>>();
+        internal readonly List<KeyValuePair<string, CreatureRoles.Event[]>> Events =
+            new List<KeyValuePair<string, CreatureRoles.Event[]>>();
 
         /// <summary>What the unit is called in the roster. Empty leaves the donor's own name.</summary>
         internal string Name = "";
+        /// <summary>
+        /// ADD THIS CREATURE TO THE PLAYER'S CAMPAIGN START - the one thing a code-less creature mod
+        /// still had to ship a DLL for. <c>"startingRoster": true</c>, absent or false = unchanged.
+        ///
+        /// It is a BOOLEAN and not a difficulty/slot/aircraft block because the game gives no second
+        /// choice to make: Phoenix starts with exactly one aircraft (GeoFaction.cs:554-562 creates
+        /// Def.StartingVehicle) and GeoPhoenixFaction.cs:1966 puts the whole starting squad on
+        /// base.Vehicles.First(), so "in the campaign start" and "aboard the starting Manticore" are
+        /// the same sentence. See <see cref="CreatureBuild.JoinPlayerVehicle"/> for why this is not an
+        /// append to GameDifficultyLevelDef.StartingSquadTemplate.
+        /// </summary>
+        internal bool StartingRoster;
         /// <summary>Which <c>Content\Models\*.glb</c> is the creature, by file stem. Only needed when a
         /// project ships more than one model - with a single .glb the engine uses that one and this
         /// stays empty.</summary>
@@ -121,6 +135,34 @@ namespace Morgott.ContentTool.Tactical
         /// all, cannot give.
         /// </summary>
         internal string Donor = "Swarmer_TacCharacterDef";
+        /// <summary>
+        /// SAME PERSON, NEW BODY - the name of a SHIPPED <c>TacCharacterDef</c> whose visuals this
+        /// model replaces IN PLACE. Empty (the default) = the standing behaviour: a new def is minted
+        /// from <see cref="Donor"/> and nothing shipped is touched.
+        ///
+        /// It is the mirror of <see cref="Donor"/> and it REPLACES it: with this set, the named def is
+        /// both the structural template AND the def written back to, so the character keeps her own def
+        /// name, GUID, <c>Data.Name</c>, class tags and story role while <c>AddonsManagerDef.Rig</c>
+        /// becomes the mod's model.
+        ///
+        /// WHAT IT DOES NOT DO IS OVERRIDE THE OTHER KEYS. There is ONE build path, so a manifest that
+        /// also sets <see cref="Name"/>, <see cref="Health"/>, <see cref="Will"/> or <see cref="Speed"/>
+        /// still gets those values - a body swap that also renames and re-stats is a legitimate thing to
+        /// ask for. They are neither refused nor silently dropped: refusing forbids it, and dropping a
+        /// key the author typed is the silent failure this codebase spends its comments fighting. The
+        /// identity claim above is therefore about what this key does BY ITSELF, which is what the demo
+        /// and docs\guides\replace-character-body.md both spell out.
+        ///
+        /// Everything the engine rewrites is a CLONE hung off her own def
+        /// (component set, addons manager, chassis, anim actions), so no other unit that shares those
+        /// shipped defs is affected - which is exactly what a catalog/bundle repoint could NOT promise,
+        /// because PP's human body assets are shared by the whole roster.
+        ///
+        /// The honest cost is at <see cref="CreatureBuild"/>'s item strip: PP's human body IS its
+        /// bodypart items, so a body swap empties <c>BodypartItems</c>/<c>EquipmentItems</c> and the
+        /// character arrives with no gear. See docs\guides\replace-character-body.md.
+        /// </summary>
+        internal string ReplaceBody = "";
         /// <summary>The model's up axis AS IMPORTED. The rig rotation is DERIVED from it by
         /// Quaternion.FromToRotation, so the only thing that can be wrong is the measurement.</summary>
         internal float[] Up = { 0f, 1f, 0f };
@@ -173,20 +215,31 @@ namespace Morgott.ContentTool.Tactical
         /// </summary>
         internal float Accuracy;
 
+        /// <summary>
+        /// <c>"useGameAnimations": true</c> - play the GAME'S OWN clips on this model and ship none.
+        ///
+        /// A PP rig is Unity GENERIC, so a clip binds to the CRC-32 of a bone's relative transform
+        /// PATH; tools/ppskel.py already renames a foreign rig onto PP's exact paths, so the game's
+        /// installed clips bind to it with nothing shipped at all. That is worth 89.3 MB of the
+        /// 104.5 MB the humanoid demo weighed - MEASURED, 29,082 sampler accessors.
+        ///
+        /// The catch, and the whole reason this is a key and not the default: Unity's generic bake
+        /// writes a POSITION curve on every bone equal to PP's OWN rest offsets, so playing PP's
+        /// clips raw PINS PP's segment lengths onto whatever model plays them. On the humanoid demo
+        /// that is not subtle - tools/ppretarget-report.json measures her segments at 0.487x to
+        /// 2.143x PP's, so her head would come out at 47% of its size. <see cref="NativeBones"/> is
+        /// the other half of this key and undoes exactly that, per frame, for one vector add per
+        /// bone; without it this flag is a deformer.
+        ///
+        /// Absent or false leaves the shipped-clip route, which is the proven one, completely alone.
+        /// </summary>
+        internal bool UseGameAnimations;
+
         // ---- what CreatureFit already honoured, unchanged ---------------------------------------
         internal bool Off;
         internal string Aim = "";
         internal float HitRadius;
         internal string[] HitBones = new string[0];
-
-        /// <summary>One blocking animation event and WHERE in its clip it fires, as a fraction of the
-        /// clip's length. A fraction rather than a second so the number survives a re-export at a
-        /// different frame rate.</summary>
-        internal struct Event
-        {
-            internal string Name;
-            internal float At;
-        }
 
         /// <summary>The engine's defaults, for a project that declares no "creature" block at all.</summary>
         internal static readonly CreatureManifest None = new CreatureManifest();
@@ -199,11 +252,11 @@ namespace Morgott.ContentTool.Tactical
             return null;
         }
 
-        internal Event[] EventsFor(string role)
+        internal CreatureRoles.Event[] EventsFor(string role)
         {
-            foreach (KeyValuePair<string, Event[]> e in Events)
+            foreach (KeyValuePair<string, CreatureRoles.Event[]> e in Events)
                 if (string.Equals(e.Key, role, StringComparison.OrdinalIgnoreCase)) return e.Value;
-            return new Event[0];
+            return new CreatureRoles.Event[0];
         }
 
         /// <summary>
@@ -216,6 +269,11 @@ namespace Morgott.ContentTool.Tactical
         /// </summary>
         internal string Missing(IEnumerable<string> discovered)
         {
+            // Nothing to map when the creature plays the GAME'S clips: the donor's own controller
+            // already holds a state for every role, and the model ships no animation to name. The
+            // refusal below exists to stop a role landing on the WRONG shipped clip, and there are
+            // no shipped clips on this route.
+            if (UseGameAnimations) return null;
             string[] holes = RequiredRoles.Where(r => ClipFor(r) == null).ToArray();
             if (holes.Length == 0) return null;
             string[] free = discovered
@@ -230,7 +288,8 @@ namespace Morgott.ContentTool.Tactical
                    ". The engine will NOT guess: a walk cycle and a death animation are the same shape " +
                    "of data in a .glb, and a wrong guess puts an event-less clip in the Action state, " +
                    "which is a 10s stall per attack (AnimEventReceiver.cs:100,126). Roles: " +
-                   string.Join(", ", Roles) + " (" + string.Join(", ", RequiredRoles) + " required).";
+                   string.Join(", ", CreatureRoles.All) + " (" + string.Join(", ", RequiredRoles) +
+                   " required).";
         }
 
         // ------------------------------------------------------------------ reading
@@ -260,16 +319,29 @@ namespace Morgott.ContentTool.Tactical
             foreach (KeyValuePair<string, string> e in Pairs(Block(block, "clips")))
                 m.Clips.Add(new KeyValuePair<string, string>(e.Key, e.Value.Trim().ToLowerInvariant()));
             foreach (KeyValuePair<string, string> e in Pairs(Block(block, "events")))
-                m.Events.Add(new KeyValuePair<string, Event[]>(e.Key.Trim().ToLowerInvariant(),
-                                                               ParseEvents(e.Value)));
+                m.Events.Add(new KeyValuePair<string, CreatureRoles.Event[]>(
+                    e.Key.Trim().ToLowerInvariant(), ParseEvents(e.Value)));
 
             // Scalars are read off the block with its NESTED objects removed, so a key inside "clips"
             // can never be mistaken for a key of the creature itself.
             string flat = Flat(block);
             m.Name = Field(flat, "name");
             m.Model = Field(flat, "model");
+            // Only the literal "true" opts in. Anything else - absent, false, a typo - leaves the
+            // campaign start alone, which is the standing behaviour of every creature mod built
+            // before this key existed.
+            m.StartingRoster = Field(flat, "startingRoster")
+                .Equals("true", StringComparison.OrdinalIgnoreCase);
+            // Same "only the literal true opts in" rule, and for the same reason: this one changes
+            // where every animation on the creature comes from.
+            m.UseGameAnimations = Field(flat, "useGameAnimations")
+                .Equals("true", StringComparison.OrdinalIgnoreCase);
             string donor = Field(flat, "donor");
             if (donor.Length > 0) m.Donor = donor;
+            // Read off the FLATTENED block like every other scalar, so the top-level "replace" ARRAY
+            // (textures/materials/meshes) can never be mistaken for it - that one is not inside
+            // "creature" at all, and this one is spelled differently on purpose.
+            m.ReplaceBody = Field(flat, "replaceBody");
             float[] up = Vector(Field(flat, "up"));
             if (up != null) m.Up = up;
             m.Lift = Number(flat, "lift");
@@ -298,9 +370,9 @@ namespace Morgott.ContentTool.Tactical
         /// <summary>"ActionDo 0.25, ShootShot 0.55" -&gt; two events, in that order. The ORDER is
         /// load-bearing: each wait is registered only after the previous one returned, so two events
         /// sharing a timestamp are not two events - the second fires while nothing is listening.</summary>
-        private static Event[] ParseEvents(string spec)
+        private static CreatureRoles.Event[] ParseEvents(string spec)
         {
-            List<Event> list = new List<Event>();
+            List<CreatureRoles.Event> list = new List<CreatureRoles.Event>();
             foreach (string part in spec.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
             {
                 string[] bits = part.Trim().Split(new[] { ' ', '\t', ':', '@' },
@@ -314,7 +386,7 @@ namespace Morgott.ContentTool.Tactical
                         "Write \"<EventName> <fraction of the clip>\", e.g. \"ShootShot 0.55\" - the frame " +
                         "the animation actually connects. The engine will not guess it: a shot that " +
                         "fires before the leg lands reads as a bug in the GAME.");
-                list.Add(new Event { Name = bits[0], At = Mathf01(at) });
+                list.Add(new CreatureRoles.Event { Name = bits[0], At = Mathf01(at) });
             }
             return list.ToArray();
         }

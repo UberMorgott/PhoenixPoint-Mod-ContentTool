@@ -277,8 +277,10 @@ namespace Morgott.ContentTool.Dev
         /// "the unit is off screen" is judged by eye in game, one screenshot at a time, but "the
         /// computed pose puts the bounds inside the free region" is an assert that runs offline.
         /// </summary>
-        /// <param name="margin">The zoom knob, &gt;= 1. 1.0 = the unit exactly touches the edges of
-        /// the free region, which always looks too tight; the workbench's default leaves room.</param>
+        /// <param name="margin">The zoom knob, clamped to <see cref="ZoomMin"/>..<see cref="ZoomMax"/>.
+        /// 1.0 = the unit exactly touches the edges of the free region, which always looks too tight;
+        /// the workbench's default leaves room, and below 1 the camera moves INSIDE the bounding sphere
+        /// so a small weapon can be read.</param>
         internal static void Frame(float radius, float fovDeg, float screenW, float screenH,
                                    float panelW, float margin,
                                    out float distance, out float lateral)
@@ -311,7 +313,11 @@ namespace Morgott.ContentTool.Dev
             if (fovDeg < 1f) fovDeg = 1f;
             if (fovDeg > 175f) fovDeg = 175f;
             if (radius < 0.01f) radius = 0.01f;
-            if (margin < 1f) margin = 1f;
+            // THE FLOOR IS ZoomMin, NOT 1. Clamping to 1 here was the real minimum-distance stop: it
+            // meant the camera could never stand closer than "the whole unit fits the free region",
+            // which on a pistol is a gun four pixels wide. Below 1 the camera is inside the bounding
+            // sphere - which is exactly where a small weapon has to be looked at.
+            if (margin < ZoomMin) margin = ZoomMin;
             if (stripH < 0f || float.IsNaN(stripH)) stripH = 0f;
             if (stripH > screenH * 0.5f) stripH = screenH * 0.5f;
 
@@ -515,8 +521,8 @@ namespace Morgott.ContentTool.Dev
         /// <summary>One button/label row including IMGUI's own 2 px spacing.</summary>
         internal const float Row = 22f;
         /// <summary>Title, unit line, weapon line, saved/modified line, the view row, the drag-invert
-        /// row, and the view readout.</summary>
-        internal const float ChromeRows = 7f;
+        /// row, the MODEL SCALE row, and the view readout.</summary>
+        internal const float ChromeRows = 8f;
         /// <summary>The dial block: two readouts, the step row, move, turn, scale, the save row, its
         /// caption. THE PRIMARY WORKING SURFACE - everything else is a picker used once.</summary>
         internal const float DialRows = 9f;
@@ -586,17 +592,42 @@ namespace Morgott.ContentTool.Dev
         /// underfoot and a weapon in a hand is edge-on, which is never the thing being judged.</summary>
         internal const float PitchMin = -80f, PitchMax = 80f;
 
-        /// <summary>The framing margin's band. 1.0 would have the unit exactly touching the edges of
-        /// the free region; 8 is far enough out to see a vehicle whole.</summary>
-        internal const float ZoomMin = 1.02f, ZoomMax = 8f;
+        /// <summary>The framing margin's band. 1.0 has the unit exactly touching the edges of the free
+        /// region and 8 is far enough out to see a vehicle whole - but the floor is well BELOW 1 on
+        /// purpose: a pistol measured whole fills a hand's worth of screen and is unreadable, and the
+        /// only way to read it is to let the camera inside the unit's own bounding sphere. The floor is
+        /// non-zero so the pose can never collapse onto the aim point itself, and
+        /// <see cref="NearClip"/> is what keeps the geometry from being clipped away down there.</summary>
+        internal const float ZoomMin = 0.05f, ZoomMax = 8f;
         internal const float ZoomDefault = 1.35f;
         internal const float ZoomFactor = 0.12f;
+
+        /// <summary>The near plane the bench holds the camera at while it is open, and it exists for
+        /// exactly one reason: the geoscape camera ships a near plane authored for a planet, so zooming
+        /// a gun to arm's length clipped the gun away instead of showing it. Restored per camera by
+        /// <c>FitBench.ReleaseCamera</c> off the same ledger row as the brain and the pose.</summary>
+        internal const float NearClip = 0.02f;
+
+        /// <summary>WASD/QE fly speed, in RADII PER SECOND - the same reasoning as the lift knob: one
+        /// press has to mean the same thing on a soldier and on a vehicle three times his size.</summary>
+        internal const float FlyPerSecond = 1.5f;
+        /// <summary>How far the free-camera pan is allowed to walk from the measured centre, in radii.
+        /// Not a feel knob - it is the guard against flying to a place with no way back, and RECENTRE
+        /// is the way back from anywhere inside it.</summary>
+        internal const float PanMaxRadii = 40f;
 
         /// <summary>The lift knob, in RADII. BOUNDED, unlike the first version: an unbounded lift is
         /// exactly how a press of 'up' walks the aim point off the model with nothing on screen to say
         /// what happened and no way back - the "everything disappeared" of 2026-08-29.</summary>
         internal const float LiftMin = -2f, LiftMax = 2f;
         internal const float LiftStep = 0.12f;
+
+        /// <summary>The PREVIEW model-scale knob's range. It multiplies the pose the game itself chose
+        /// for the displayed character and is written NOWHERE - not into a def, not into a save - so
+        /// its only job is to let a foreign model be sized by eye against a vanilla soldier. Bounded
+        /// for the same reason the lift is: a scale of zero is a model that has vanished with nothing
+        /// on screen to say why.</summary>
+        internal const float ModelScaleMin = 0.1f, ModelScaleMax = 5f;
 
         internal static float Clamp(float v, float min, float max)
         {

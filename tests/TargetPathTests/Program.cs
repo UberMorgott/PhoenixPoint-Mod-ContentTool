@@ -3105,8 +3105,10 @@ internal static class Program
               BenchList.MessageHeight + 2f * BenchList.Row + u + w <= His,
               "and the whole panel - chrome, dial, message, both headers, both lists - fits the window");
 
-        BenchList.Rows(470f, true, true, true, out u, out w);
-        Check("S29-rows-collapse", u == 0f && w == 0f && BenchList.DialReachable(470f),
+        // 492 px, not 470: the chrome grew the MODEL SCALE row. The arm is the same assertion - squeezed
+        // to just above the dial block's own height, the pickers give way and the dial still fits.
+        BenchList.Rows(492f, true, true, true, out u, out w);
+        Check("S29-rows-collapse", u == 0f && w == 0f && BenchList.DialReachable(492f),
               "squeezed, the PICKERS give way and the dial block still fits: " + u + " / " + w);
 
         BenchList.Rows(His, true, false, true, out u, out w);

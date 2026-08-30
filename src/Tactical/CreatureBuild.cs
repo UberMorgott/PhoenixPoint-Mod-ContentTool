@@ -14,6 +14,8 @@ using PhoenixPoint.Common.Entities.GameTagsSharedData;
 using PhoenixPoint.Common.Entities.Items;
 using PhoenixPoint.Geoscape.Entities;
 using PhoenixPoint.Geoscape.Levels;
+using PhoenixPoint.Geoscape.Levels.Factions;
+using PhoenixPoint.Geoscape.View.DataObjects;
 using PhoenixPoint.Tactical.Entities;
 using PhoenixPoint.Tactical.Entities.Abilities;
 using PhoenixPoint.Tactical.Entities.Animations;
@@ -128,6 +130,36 @@ namespace Morgott.ContentTool.Tactical
             }
         }
 
+        /// <summary>
+        /// BUILD THE CREATURE OF EVERY ENABLED CONTENT MOD THAT DECLARES ONE, so a mod that ships a
+        /// model and a manifest and NO C# still becomes a unit. Until this existed, the only caller of
+        /// <see cref="Build"/> was a mod's own DLL, so a code-less creature mod loaded, served its media
+        /// and minted nothing - it never even reached the "run ct_project" line, because nothing asked.
+        ///
+        /// Same roster and same gate as every other route (<see cref="Project.ContentMods"/>), so a
+        /// folder on disk is still not a player's consent. A mod whose own C# already built its
+        /// creature is skipped by ID - it is enabled one frame before this pass runs.
+        /// </summary>
+        public static string BuildAll(string modDir)
+        {
+            System.Text.StringBuilder log = new System.Text.StringBuilder();
+            int skipped, made = 0;
+            List<string> enabled = Project.ContentMods.Enabled(
+                modDir, Project.ContentMods.Manifest, Project.ModRoster.Build(), log, out skipped);
+            foreach (string dir in enabled)
+            {
+                string json;
+                try { json = File.ReadAllText(Path.Combine(dir, Project.ContentMods.Manifest)); }
+                catch (Exception ex) { log.AppendLine("  " + dir + ": " + ex.Message); continue; }
+                // No "creature" block = not a creature mod. Silent: most content mods are not.
+                if (ReferenceEquals(CreatureManifest.Parse(json), CreatureManifest.None)) continue;
+                string id = Regexy(json, "id");
+                if (Built.Any(x => string.Equals(x.Id, id, StringComparison.Ordinal))) continue;
+                if (Build(dir, m => ContentToolMain.Say(m)) != null) made++;
+            }
+            return made == 0 ? null : "ct_creature: built " + made + " creature(s) from enabled content mods";
+        }
+
         private static TacCharacterDef BuildOrThrow(string modDir, Action<string> say)
         {
             string metaPath = Path.Combine(modDir, Project.ContentMods.Manifest);
@@ -185,7 +217,7 @@ namespace Morgott.ContentTool.Tactical
                 string.Join(", ", clips.Select(c => c.name).ToArray()));
             if (model == null) return null;
 
-            Creature c = new Creature { Man = man, Clips = clips, Say = say, Id = id };
+            Creature c = new Creature { Man = man, Clips = clips, Say = say, Id = id, Dir = modDir };
             // The rig-root scale is the BAKE's own "scale", never a second number to keep in step -
             // the root-motion ramp is measured in the game's units and reads the same key.
             c.Scale = Number(json, "scale");
@@ -206,24 +238,58 @@ namespace Morgott.ContentTool.Tactical
             // other family is identified by DEF NAME, so a tag-only key could only ever name a Mutog -
             // which is how a demo about a small spider ended up cloning a three-by-three vehicle.
             // The tag form still resolves first, so "MutogTag" keeps meaning what it always meant.
-            GameTagDef donorTag = TagNamed(shared, man.Donor);
+            // ...AND THE SAME LOOKUP SERVES THE REPLACE HALF. "replaceBody" names a SHIPPED character
+            // whose body this model takes over, and that character is BOTH the structural template and
+            // the def written back to - so there is one resolution here, not two. See the mint below.
+            bool inPlace = man.ReplaceBody.Length > 0;
+            string donorName = inPlace ? man.ReplaceBody : man.Donor;
+            // A TAG IS NOT A CHARACTER, so the tag spelling is only offered to "donor". "replaceBody"
+            // names ONE shipped character and writes to her, and TagNamed would hand a value like
+            // "MutogTag" the FIRST unit carrying that family tag - an arbitrary pick among many, which
+            // is a fine way to choose a structural template and no way at all to choose whose body to
+            // overwrite. Null here makes the lookup below fall through to the def-name match.
+            GameTagDef donorTag = inPlace ? null : TagNamed(shared, donorName);
             TacCharacterDef donor = repo.GetAllDefs<TacCharacterDef>()
                 .FirstOrDefault(d => d.Data != null && d.Data.ComponentSetTemplate != null &&
                                      d.TacticalActorBaseDef != null &&
                                      (donorTag != null
                                           ? d.TacticalActorBaseDef.GameTags.Contains(donorTag)
-                                          : string.Equals(d.name, man.Donor, StringComparison.OrdinalIgnoreCase)));
+                                          : string.Equals(d.name, donorName, StringComparison.OrdinalIgnoreCase)));
             if (donor == null)
             {
-                say("ct_creature FAIL ppcontent.json \"creature\": \"donor\" is '" + man.Donor +
-                    "', which is neither a GameTagDef field on SharedGameTags nor the name of a shipped " +
-                    "TacCharacterDef with a component set. It names the shipped unit whose COMPONENT " +
-                    "STRUCTURE is cloned - write a def name such as \"Swarmer_TacCharacterDef\". " +
-                    "Nothing was changed.");
+                say(inPlace
+                    ? "ct_creature FAIL ppcontent.json \"creature\": \"replaceBody\" is '" + donorName +
+                      "', which is not the name of a shipped TacCharacterDef with a component set. It " +
+                      "names the ONE character whose body this model replaces - write a def name such " +
+                      "as \"S_SY_Eileen_CharacterTemplateDef\". A DLC character is absent unless that " +
+                      "DLC is installed. Nothing was changed."
+                    : "ct_creature FAIL ppcontent.json \"creature\": \"donor\" is '" + donorName +
+                      "', which is neither a GameTagDef field on SharedGameTags nor the name of a " +
+                      "shipped TacCharacterDef with a component set. It names the shipped unit whose " +
+                      "COMPONENT STRUCTURE is cloned - write a def name such as " +
+                      "\"Swarmer_TacCharacterDef\". Nothing was changed.");
                 return null;
             }
-            say("ct_creature PASS cloning '" + donor.name + "' (" +
-                (donorTag != null ? "tagged " + donorTag.name : "by def name") + ")");
+            // ONE BODY PER CHARACTER, and refused BY NAME rather than resolved by load order. Two mods
+            // replacing the same def would leave two Creature entries pointing at ONE shipped def, and
+            // ByTemplate() answers with Built.FirstOrDefault - so the second mod's actors would be
+            // driven by the FIRST mod's runtime state (its controller remap, its rig scale), which is
+            // the shape of bug nobody would think to look for in either mod. The player is told which
+            // mod already has her and that this one changed nothing.
+            if (inPlace)
+            {
+                Creature prior = Built.FirstOrDefault(x => ReferenceEquals(x.Def, donor));
+                if (prior != null)
+                {
+                    say("ct_creature FAIL '" + donor.name + "' already wears the body of mod '" +
+                        prior.Id + "' - a character has one body, and two mods replacing the same one " +
+                        "would share ByTemplate() state. Disable one of them, or point this mod's " +
+                        "\"replaceBody\" at a different character. Nothing was changed.");
+                    return null;
+                }
+            }
+            say("ct_creature PASS " + (inPlace ? "replacing the body of '" : "cloning '") + donor.name +
+                "' (" + (donorTag != null ? "tagged " + donorTag.name : "by def name") + ")");
 
             AddonsComponentDef donorAddons = donor.ComponentSetDef.GetComponentDef<AddonsComponentDef>();
             TacActorAnimActionsDef donorAnims = donor.ComponentSetDef.GetComponentDef<TacActorAnimActionsDef>();
@@ -237,6 +303,7 @@ namespace Morgott.ContentTool.Tactical
 
             GameObject rig = BuildRig(c, model, donorAddons.AddonsManagerDef);
             if (rig == null) return null;
+            CharacterLights(c, rig, donorAddons.AddonsManagerDef.Rig, donor);
 
             // WHICH TRAVERSAL STATES THIS CREATURE'S ANIMATOR ACTUALLY HAS, asked here because it is the
             // gate on every traversal slot below and the donor def is not a substitute for it: the
@@ -300,8 +367,24 @@ namespace Morgott.ContentTool.Tactical
             // (TacCharacterDef.cs:194-197) and GeoscapeView.cs:429 calls that for EVERY faction
             // character - one null here stops the geoscape building, for the whole roster.
             // So it EXISTS and is EMPTY. SkinData == null makes Addon.AttachVisuals resolve a null
-            // prefab (Addon.cs:1024) and return at :1029-1032 BEFORE Instantiate. SubAddons go with it -
-            // each is a separate AddonDef with its OWN SkinData (Addon.Init:265-273).
+            // prefab (Addon.cs:1024) and return at :1029-1032 BEFORE Instantiate.
+            //
+            // ...BUT THE SUBADDONS ARE NOT GEOMETRY, THEY ARE THE SLOT TREE, and dropping them is what
+            // left a creature able to hold nine of the game's two hundred weapons. What a unit can
+            // equip is decided by CommonCharacterUtils.CanSwapItem:152 -> PopulateProvidedUsedSlots:215
+            // -> GetDefaultAddonSlotPairs:86, and that last one walks
+            //     foreach (AddonDef item in (IEnumerable<AddonDef>)managerDef.SkeletonChassisAddonDef)
+            // - the chassis AND its subaddon TREE. READ LIVE 2026-08-29 off the human donor:
+            // '_Human_Body_Chassis_ItemDef' provides exactly ONE slot (Human_Torso_SlotDef); every hand,
+            // gun point, head, leg and shield slot lives on its subaddon 'Human_Torso_BodyPartDef'
+            // (6 provided slots, 4 sub-subaddons of its own). Clearing SubAddons therefore cut the
+            // armoury down to whatever the bare chassis happened to provide - and on a human donor it
+            // would have been WORSE than on the Swarmer, not better.
+            // So the tree is KEPT and only its SKIN is taken off, at every depth: a skinless addon owns
+            // no transforms and instantiates nothing, while each slot's AttachmentPointName is resolved
+            // by NAME against the whole rig (Addon.GetAttachTransform:1194 ->
+            // AddonsManager.FindTransform(name, rigBonesOnly:false)), which a rig retargeted onto PP's
+            // own skeleton satisfies (gun_point_hand, EXT_BackShield, ... are all in it).
             AddonDef donorChassis = donorAddons.AddonsManagerDef.SkeletonChassisAddonDef;
             if (donorChassis == null)
             {
@@ -309,10 +392,13 @@ namespace Morgott.ContentTool.Tactical
                     "SkeletonChassisAddonDef to use as a structural template.");
                 return null;
             }
-            AddonDef chassis = Clone(repo, c, donorChassis, "ChassisAddonDef");
-            chassis.SkinData = null;
-            chassis.SubAddons = new AddonDef.SubaddonBind[0];
-            chassis.Tags = new GameTagsList();
+            List<string> deskinned = new List<string>();
+            AddonDef chassis = Skinless(repo, c, donorChassis, "ChassisAddonDef", deskinned);
+            say("ct_creature PASS chassis '" + donorChassis.name + "' cloned as a SLOT TREE: " +
+                deskinned.Count + " addon(s) kept and stripped of SkinData [" +
+                string.Join(", ", deskinned.Take(12).ToArray()) + "], " +
+                CountSlots(chassis) + " provided slot(s) survive - that count IS the armoury the game " +
+                "will offer (CommonCharacterUtils.GetDefaultAddonSlotPairs:86 walks the tree, not the root)");
             managerClone.SkeletonChassisAddonDef = chassis;
             managerClone.Tags = new GameTagsList();      // AddonsManager.Init:102 pours these into the actor
 
@@ -454,7 +540,12 @@ namespace Morgott.ContentTool.Tactical
             // and NO JumpUpOneLevel, while Crabman_NavigationDef and HumanoidGuardian_NavigationDef -
             // both AgentType 'Humanoid' - do carry it. Asking only the humans therefore REFUSED the
             // ascent as "no shipped unit on agent 'Humanoid' carries it" while two of them did.
-            if (navClone != null)
+            // ...but NOT on the "useGameAnimations" route, where the clone keeps the DONOR's own areas.
+            // NavAreas rebuilds the set from the REFERENCE character plus the families WireClips
+            // filled, and on that route WireClips fills none by design (see its own note): rebuilding
+            // would strip the donor's link areas and ground a creature that can perform every one of
+            // them. The donor navigates correctly with these clips and these areas; leave them paired.
+            if (navClone != null && !c.Man.UseGameAnimations)
                 NavAreas(navClone, reference, repo.GetAllDefs<TacCharacterDef>()
                     .Where(d => d.ComponentSetDef != null &&
                                 d.ComponentSetDef.GetComponentDef<TacticalNavigationComponentDef>() != null)
@@ -491,6 +582,29 @@ namespace Morgott.ContentTool.Tactical
                            : (navClone != null && x == donorNav) ? (ObjectDef)navClone
                            : (viewClone != null && x == donorView) ? (ObjectDef)viewClone : x).ToArray();
 
+            // SAME PERSON, NEW BODY - OR A NEW PERSON. Both halves build the SAME thing on a minted
+            // scratch def, and they differ only in what happens to it at the very end (see the publish
+            // below Install's guard): ADD keeps the new def, REPLACE copies its finished state onto the
+            // shipped character and hands that back.
+            //
+            // BUILDING ON A SCRATCH DEF IS THE WHOLE OF THE REPLACE PATH'S SAFETY. Everything from here
+            // to the audit mutates a def NOBODY is looking at, so a throw anywhere below leaves the
+            // shipped character exactly as the game loaded her - which is what Build()'s "nothing was
+            // wired" catch promises, and which writing straight onto her def would have made a lie:
+            // Melee, CreatureRanged and the audit all run after this point and all can throw.
+            //
+            // What a body swap then changes is TWO def members and no more, because they are the only
+            // two anything below writes: Data (whose one meaningful edit is ComponentSetTemplate,
+            // re-pointed at the set built above, whose AddonsManagerDef.Rig is this mod's model) and
+            // Volume. Her def name, GUID, Name, LocalizeName, class tags, GameTags, base stats, story
+            // role and every event or reward that names her come through TacCharacterData.Clone() -
+            // the game's own copy - with the same values she shipped with.
+            //
+            // NOTHING SHARED IS MUTATED. Every def on the way down is a clone (setClone, addonsClone,
+            // managerClone, chassis, animsClone, baseClone), and the shipped ComponentSetDef a named
+            // character shares with the rest of the human roster is only READ. That per-character
+            // isolation is the reason this is a def rebind and not a bundle/catalog repoint: PP's human
+            // body is assembled from assets EVERY human uses, so repointing one re-bodies all of them.
             TacCharacterDef unit = Clone(repo, c, donor, "CharacterTemplateDef");
             unit.Data = donor.Data.Clone();          // TacCharacterData.Clone(), the game's own copy
             unit.Data.ComponentSetTemplate = setClone;
@@ -499,12 +613,29 @@ namespace Morgott.ContentTool.Tactical
             // .UseAddonManager:162-166 feeds Data.BodypartItems and EquipmentItems[0] straight into the
             // addon list and each carries its own SkinData. The *Data lists go with them -
             // GenerateInstanceData:121-123 prefers them over the arrays when non-null.
+            //
+            // THIS IS THE PRICE OF A BODY SWAP AND IT IS PAID HERE, IN THE OPEN. On a HUMAN target the
+            // bodypart items are not an accessory to the body, they ARE the body PP draws - torso and
+            // legs armour, each with its own SkinData, attached BY NAME to points a retargeted rig also
+            // provides. Kept, they hang a Phoenix Point soldier over the mod's model; cleared, the model
+            // is the whole visible character and the replaced character arrives with no gear, to be
+            // re-equipped from stores. There is no third answer that costs no code: de-skinned CLONES of
+            // her items would keep the stats and drop the geometry, and the melee bodypart below shows
+            // exactly why that is not a free change - nulling SkinData leaves an addon owning no
+            // transforms at all, which is how a bash button ended up permanently grey.
+            // ponytail: strip, like the ADD half, and SAY so in the guide. Per-item de-skinned clones
+            // are the upgrade path once a real mod is bitten by the lost loadout.
             unit.Data.BodypartItems = new ItemDef[0];
             unit.Data.EquipmentItems = new ItemDef[0];
             unit.Data.BodypartItemsData = null;
             unit.Data.EquipmentItemsData = null;
-            unit.Data.GameTags = donor.Data.GameTags
-                .Where(t => t != null && t != donorTag && t != shared.VehicleTag).ToArray();
+            // The purge drops the donor FAMILY's tag and VehicleTag, which is what stops a clone reading
+            // as a Mutog or a vehicle. Under a body swap there is no donor family - the target IS the
+            // unit - so the filter is skipped and her class and story tags come through untouched. On a
+            // human it would be a no-op either way; skipping it says which of the two is intended.
+            if (!inPlace)
+                unit.Data.GameTags = donor.Data.GameTags
+                    .Where(t => t != null && t != donorTag && t != shared.VehicleTag).ToArray();
             c.Def = unit;
 
             // --- the STATS a bodypart-free unit has to carry itself ----------------------------
@@ -577,7 +708,31 @@ namespace Morgott.ContentTool.Tactical
                       " dropped from the donor's set)"
                     : string.Join("; ", leaks) + " <- THE DONOR IS STILL SHOWING THROUGH"));
 
+            // --- PUBLISH, and for a body swap this is the FIRST line the shipped character can feel ---
+            // Every step above ran against a scratch def, so up to here the game still has the character
+            // it loaded. Two assignments hand her the finished state, and they are two because Data and
+            // Volume are the only def members anything above writes (the rest goes through Data).
+            // After this the scratch def is a spent artifact: it stays in the repository, unreferenced,
+            // exactly like the def the ADD half mints.
+            //
+            // Install() GOES FIRST, and that ordering is the same promise as the scratch def itself: it
+            // applies Harmony patches on the first build of the session and can throw, and a throw after
+            // the publish would be the one remaining way to leave a half-swapped character behind while
+            // Build() reports that nothing was wired. Patching before anything is registered is safe -
+            // every patch below reads Built, which is still empty until Built.Add.
             Install();
+
+            if (inPlace)
+            {
+                donor.Data = unit.Data;
+                donor.Volume = unit.Volume;
+                c.Def = unit = donor;
+                say("ct_creature PASS '" + donor.name + "' now wears this mod's body and is otherwise " +
+                    "the character the game shipped: name '" + donor.Data.Name + "', " +
+                    donor.Data.GameTags.Length + " tag(s), Strength " + donor.Data.Strength +
+                    " - the def, its GUID and every event that names it are the game's own");
+            }
+
             Built.Add(c);
             say("ct_creature PASS '" + unit.name + "' is built: set='" + setClone.name + "' anims='" +
                 animsClone.name + "' base='" + baseClone.name + "' chassis='" + chassis.name + "'");
@@ -829,6 +984,114 @@ namespace Morgott.ContentTool.Tactical
         /// activeSelf is what Instantiate copies, not activeInHierarchy: the instance is active, its
         /// holder is not, so the template is invisible here and alive once instantiated.
         /// </summary>
+        /// <summary>
+        /// ============ A BONE CALLED "…Light" THAT IS NOT A LIGHT ============
+        ///
+        /// The engine looks up TWO rig nodes BY NAME and then dereferences a <c>Light</c> on the first
+        /// of them with no null check:
+        ///   TacticalActorViewBaseDef.cs:29,31   LineOfSightLightName = "Character_Radius_Point Light",
+        ///                                       UpperHighlighLightName = "Character_UpperHighlight_Light"
+        ///   CommonCharacterUtils.DisplayCharacter:32-36   the ROSTER / squad-bay path
+        ///   TacticalActorViewBase.cs:124-128              the TACTICAL path
+        ///     -&gt; FindTransform(name, rigBonesOnly:true).GetComponent&lt;Light&gt;().intensity = …
+        /// and FindTransform (AddonsManager.cs:360-369) is a case-insensitive SUBSTRING scan over every
+        /// transform under the rig root, so the node is found whether or not anyone meant it to be.
+        ///
+        /// A model exported off the game's OWN human skeleton carries those two nodes - MEASURED, they
+        /// are in tiffany_cox_ppfit.glb - while a downloaded creature does not, which is why one
+        /// creature displayed and the other threw. glTF has no lights, so the node arrives as a bare
+        /// transform: found, no Light, NullReferenceException, and the character never finishes
+        /// building. It cost a whole session because the only thing anyone saw was "NullReferenceException".
+        ///
+        /// So the node is given the component the engine is about to ask for - and it is given the
+        /// DONOR'S OWN, not a bare default one that is switched off.
+        ///
+        /// ============ AND A DISABLED LIGHT IS WHY THE HELD GUN LOOKED SEE-THROUGH ============
+        /// The first version added the component DISABLED, on the reasoning that the write would then
+        /// succeed and nothing else would change. It changes exactly one thing, and it is the thing the
+        /// player sees: these two nodes are how the game LIGHTS A CHARACTER in every preview, and a held
+        /// weapon is the part with nothing else to fall back on. MEASURED live 2026-08-29 in the squad
+        /// bay, same screen, same weapon, through PPCLI:
+        ///   PX_AssaultStarting rig:  Character_UpperHighlight_Light enabled TRUE, intensity 1.5
+        ///                            Character_Radius_Point Light   enabled TRUE, Point, range 10
+        ///   our rig (before this):   both enabled FALSE
+        /// The creature's own skin wears the material the BAKE wrote and the scene lights that, so she
+        /// looked right; the rifle wears the game's own '_PX_CHR/CHR_Character_shader' - opaque,
+        /// renderQueue 2000, measured, so it is not a transparent material and never was - which is
+        /// authored against that character-light rig. With no character light it renders washed out,
+        /// and on screen that reads as "the weapon is transparent".
+        ///
+        /// So the light is COPIED off the donor's own rig node of the same name and left in the state
+        /// the donor keeps it in. The names are read off the donor's view def, the match is the
+        /// engine's own substring rule, and now the VALUES are the donor's too - nothing here is typed.
+        /// ponytail: Unity has no runtime component copy, so the properties are listed. A donor whose
+        /// node carries no Light still yields the old behaviour - a disabled default - because there
+        /// is then nothing to copy and a null deref is still the thing being prevented.
+        /// </summary>
+        private static void CharacterLights(Creature c, GameObject rig, GameObject donorRig,
+                                            TacCharacterDef donor)
+        {
+            TacticalActorViewBaseDef view = donor.ComponentSetDef.GetComponentDef<TacticalActorViewBaseDef>();
+            if (view == null) return;
+            List<string> fixedUp = new List<string>();
+            foreach (string name in new[] { view.LineOfSightLightName, view.UpperHighlighLightName })
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                foreach (Transform t in rig.GetComponentsInChildren<Transform>(true))
+                {
+                    if (t.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    if (t.GetComponent<Light>() != null) break;
+                    Light theirs = DonorLight(donorRig, name);
+                    Light ours = t.gameObject.AddComponent<Light>();
+                    if (theirs == null)
+                    {
+                        ours.enabled = false;
+                        fixedUp.Add(t.name + " (default, OFF - the donor's rig has no light of that name)");
+                        break;
+                    }
+                    ours.type = theirs.type;
+                    ours.color = theirs.color;
+                    ours.colorTemperature = theirs.colorTemperature;
+                    ours.intensity = theirs.intensity;
+                    ours.bounceIntensity = theirs.bounceIntensity;
+                    ours.range = theirs.range;
+                    ours.spotAngle = theirs.spotAngle;
+                    ours.shadows = theirs.shadows;
+                    ours.shadowStrength = theirs.shadowStrength;
+                    ours.renderMode = theirs.renderMode;
+                    ours.cullingMask = theirs.cullingMask;
+                    ours.enabled = theirs.enabled;
+                    fixedUp.Add(t.name + " (" + theirs.type + ", intensity " +
+                                theirs.intensity.ToString("F2") + ", range " +
+                                theirs.range.ToString("F1") + ", enabled " + theirs.enabled + ")");
+                    break;
+                }
+            }
+            if (fixedUp.Count > 0)
+                c.Say("ct_creature PASS rig node(s) [" + string.Join(", ", fixedUp.ToArray()) + "] carry " +
+                      "the name the engine looks a Light up by (TacticalActorViewBaseDef.cs:29,31) but " +
+                      "came out of a .glb, which has no lights - the DONOR'S OWN Light was copied onto " +
+                      "each, because CommonCharacterUtils.DisplayCharacter:35 and " +
+                      "TacticalActorViewBase.cs:128 write .intensity through GetComponent<Light>() with " +
+                      "no null check, AND because those two lights are what light a character in every " +
+                      "preview: a held weapon wears the game's own character shader and has nothing " +
+                      "else lighting it, so a DISABLED light reads on screen as a see-through gun");
+        }
+
+        /// <summary>The donor rig's own light of that name, found by the engine's own substring rule so
+        /// the node we copy FROM is the node the engine would have looked up.</summary>
+        private static Light DonorLight(GameObject donorRig, string name)
+        {
+            if (donorRig == null) return null;
+            foreach (Transform t in donorRig.GetComponentsInChildren<Transform>(true))
+            {
+                if (t.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                Light l = t.GetComponent<Light>();
+                if (l != null) return l;
+            }
+            return null;
+        }
+
         private static GameObject BuildRig(Creature c, GameObject model, AddonsManagerDef donorManager)
         {
             GameObject holder = new GameObject("ct_creature_templates");
@@ -886,6 +1149,15 @@ namespace Morgott.ContentTool.Tactical
                    (skin.sharedMesh == null ? "NULL" : skin.sharedMesh.name)) +
                   ", controller " + had + " -> " + (ours.runtimeAnimatorController == null
                       ? "(null - the donor rig had none either)" : "'" + ours.runtimeAnimatorController.name + "'"));
+
+            // THE GAME'S OWN CLIPS, IF THE MANIFEST ASKED FOR THEM. The controller just assigned
+            // already names them, so this route wires nothing further: the clips play on HER Animator
+            // and carry their own animation EVENTS with them, which is why InheritEvents has no work
+            // to do here (it stays for the shipped-clip route, which still needs it). All that is
+            // left is undoing the proportions those clips would otherwise pin on - NativeBones.
+            // Measured here, off both live rigs, so no rest table is ever shipped or goes stale.
+            if (c.Man.UseGameAnimations)
+                NativeBones.Attach(inner, donorManager.Rig, c.Say);
 
             // NOT ORIENTED HERE, AND THAT IS NOT AN OVERSIGHT. Orienting this prefab looks like the fix
             // that covers every consumer at once, because actor, dummy, roster and geoscape all
@@ -1067,11 +1339,39 @@ namespace Morgott.ContentTool.Tactical
         /// (<see cref="NavAreas"/>).</returns>
         private static string[] WireClips(DefRepository repo, Creature c, TacActorAnimActionsDef anims)
         {
+            // NOTHING TO WIRE WHEN THE CREATURE PLAYS THE GAME'S OWN CLIPS, and running this anyway
+            // would take capability AWAY. Every rule below is about replacing a donor clip that names
+            // none of our bones with one of ours that does; on this route the donor's clip IS the one
+            // that drives our rig - that is the whole premise of "useGameAnimations" - so the honest
+            // answer for every slot is the one already in it.
+            //
+            // Falling through would be a REGRESSION, not a no-op. With no clips of ours, ClimbFor()
+            // returns null for every traversal family, and the branch below then CLEARS the donor's
+            // traversal slots - the exact "frozen half way through a window" failure the note above
+            // records.
+            //
+            // The traversal answer is NOT "every family": a donor that ships no ladder climb would
+            // then have the ClimbLadder area advertised for it and the path would wait forever on a
+            // controller state that does not exist, which is the same freeze from the other side. It
+            // is "ask nobody" - the caller leaves this creature's navmesh areas exactly as the donor
+            // has them. The donor is a real shipping unit that already navigates correctly with
+            // precisely these clips and precisely these areas, and this route changes neither, so
+            // recomputing the set can only disagree with a working answer. Hence the empty array.
+            if (c.Man.UseGameAnimations)
+            {
+                c.Say("ct_creature PASS clips: \"useGameAnimations\" - every anim action slot is LEFT AS " +
+                      "THE DONOR HAS IT, because the game's own clips already bind to this rig's bone " +
+                      "paths and carry their own animation events. Its navmesh areas are left alone " +
+                      "with them, so this creature traverses exactly what the donor traverses.");
+                return new string[0];
+            }
+
+            AutoFill(c);
             StampEvents(c);
 
             List<string> wired = new List<string>(), empty = new List<string>();
             List<string> climbing = new List<string>(), notFilled = new List<string>();
-            int noTurn = 0, fellBack = 0, climbed = 0;
+            int noTurn = 0, fellBack = 0, climbed = 0, byName = 0, inherited = 0;
             TacActorAnimActionBaseDef[] source = anims.AnimActions ?? new TacActorAnimActionBaseDef[0];
             anims.AnimActions = source.Select(a =>
             {
@@ -1170,8 +1470,21 @@ namespace Morgott.ContentTool.Tactical
                     // strictly worse: it names none of our bones, so the state plays and the creature
                     // FREEZES. Same rule RemapController already states for an unknown vanilla name -
                     // unknown gets the idle, never nothing. Only the optional roles can reach this.
+                    // IDENTITY FIRST: a model retargeted onto PP's own rig ships PP's own clips under
+                    // PP's own names, so the slot's true animation is simply ours of the same name.
+                    // Only when it is absent does the five-role squeeze below have to guess.
+                    AnimationClip mine = c.SameName(donorClip.name);
+                    if (mine != null)
+                    {
+                        // The clip is right and the EVENTS came with the one we displaced - see
+                        // InheritEvents. Unconditional, not only on a hit: the same clip object is
+                        // reached from several slots and the copy is idempotent.
+                        inherited += InheritEvents(donorClip, mine);
+                        if (SetSlot(clone, slot, mine)) { hits++; byName++; }
+                        continue;
+                    }
                     string role = RoleFor(a, donorClip, slot);
-                    AnimationClip mine = c.OurClip(role);
+                    mine = c.OurClip(role);
                     if (mine == null) { mine = c.OurClip("idle"); if (mine != null) fellBack++; }
                     if (mine == null || !SetSlot(clone, slot, mine)) continue;
                     hits++;
@@ -1189,6 +1502,11 @@ namespace Morgott.ContentTool.Tactical
             c.Say("ct_creature " + (wired.Count > 0 ? "PASS" : "FAIL") + " clips: " + wired.Count +
                   " non-default anim action(s) rewritten [" + string.Join(", ", wired.ToArray()) + "]; " +
                   source.Count(IsDefault) + " default action(s) left ALONE as the override keys; " +
+                  inherited + " animation event(s) INHERITED from the vanilla clips those same-named " +
+                  "clips replaced (a .glb carries curves and no events; the game BLOCKS on ShootShot/" +
+                  "ActionDo/ActionEnd - TacticalLevelController.cs:1814,1824); " +
+                  byName + " slot(s) took OUR CLIP OF THE SAME NAME (a rig retargeted onto PP's own " +
+                  "skeleton needs no role map - the slot's real animation is ours under its own name); " +
                   fellBack + " slot(s) took the IDLE because this creature maps no clip to their role " +
                   "(optional roles only - a required one is refused at bake time); " +
                   empty.Count + " slot(s) LEFT EMPTY because the donor's own were empty [" +
@@ -1326,6 +1644,81 @@ namespace Morgott.ContentTool.Tactical
         }
 
         /// <summary>
+        /// ============ THE SAFETY NET FOR A HALF-MAPPED CREATURE ============
+        ///
+        /// A mod will map some roles and forget others, and until this ran that was not a cosmetic
+        /// defect: an unmapped BLOCKING role left the donor's clip in the slot - an animation that
+        /// names none of our bones, so the state plays and the creature FREEZES (:1169-1172) - and an
+        /// event-less clip in the Action state costs a 10 s AnimEventReceiver timeout per blocking
+        /// event (AnimEventReceiver.cs:100,126). So every hole is filled here, LOUDLY, and none of it
+        /// is a refusal: an incomplete creature still loads and still plays, badly and legibly.
+        ///
+        /// The classification is <see cref="CreatureRoles"/>'s and not this method's: a role the ENGINE
+        /// degrades safely (the traversal families, the optional spit clip) stays EMPTY, because
+        /// filling one is the bug - see the note at the traversal branch of <see cref="WireClips"/>.
+        ///
+        /// It works by writing into the manifest OBJECT, before anything reads it, so there is exactly
+        /// one path from here on: <see cref="Creature.OurClip"/> answers an auto-filled role the same
+        /// way it answers a mapped one, and <see cref="StampEvents"/> - the one event stamper - puts
+        /// the blocking events on the stand-in clip.
+        /// ponytail: the stand-in is usually the IDLE, which the creature also plays while it stands
+        /// there, so its stamped ActionDo/ShootShot fire on every idle loop. Harmless - a handler is
+        /// registered only for the duration of the ability that waits (AnimEventReceiver.cs:113,122),
+        /// so an event nothing is waiting for is dropped at :82. Upgrade path: clone the clip per role
+        /// if a future gameplay event ever gets a PERSISTENT handler.
+        /// </summary>
+        private static void AutoFill(Creature c)
+        {
+            // Never the shared CreatureManifest.None: it is a static, and filling it would leak this
+            // creature's clip names into every other mod loaded in the same process.
+            if (c.Man == null || ReferenceEquals(c.Man, CreatureManifest.None)) return;
+            List<string> mapped = new List<string>(), filled = new List<string>();
+            List<string> empty = new List<string>(), lost = new List<string>();
+            string[] known = c.Man.Clips.Select(e => e.Key).ToArray();
+            foreach (string role in CreatureRoles.All)
+            {
+                if (c.Man.ClipFor(role) != null) { mapped.Add(role); continue; }
+                if (Array.IndexOf(CreatureRoles.Empty, role) >= 0) { empty.Add(role); continue; }
+                string sub = CreatureRoles.Substitute(c.Man.ClipFor, known);
+                if (sub == null)
+                {
+                    lost.Add(role + " (this model ships no animation at all)");
+                    continue;
+                }
+                c.Man.Clips.Add(new KeyValuePair<string, string>(sub, role));
+                // The manifest names a clip; the BUNDLE has to carry it. A name that resolves to
+                // nothing is worse than a hole, because everything downstream would read it as filled.
+                if (c.OurClip(role) == null)
+                {
+                    c.Man.Clips.RemoveAt(c.Man.Clips.Count - 1);
+                    lost.Add(role + " (ppcontent.json names '" + sub + "', which the bundle does not " +
+                             "carry - re-run `ct_project`)");
+                    continue;
+                }
+                string line = role + " = '" + sub + "'";
+                CreatureRoles.Event[] blocking = CreatureRoles.BlockingFor(role);
+                if (blocking.Length > 0 && c.Man.EventsFor(role).Length == 0)
+                {
+                    c.Man.Events.Add(new KeyValuePair<string, CreatureRoles.Event[]>(role, blocking));
+                    line += " + " + string.Join("/", blocking.Select(e => e.Name).ToArray()) +
+                            " at NOMINAL times";
+                }
+                filled.Add(line);
+            }
+            c.Say("ct_creature " + (lost.Count == 0 ? "PASS" : "WARN") + " roles: " + mapped.Count +
+                  " mapped by the mod [" + string.Join(", ", mapped.ToArray()) + "]; " + filled.Count +
+                  " AUTO-FILLED because the game blocks on them and an unmapped one is a freeze or a " +
+                  "10s stall per action [" + string.Join(", ", filled.ToArray()) + "]; " + empty.Count +
+                  " left EMPTY on purpose [" + string.Join(", ", empty.ToArray()) + "] - the engine's " +
+                  "own fallback covers those (ClimbPathProcessor.EmitClimb:107-110, " +
+                  "CreatureRanged.cs:411-417); " + lost.Count + " UNRESOLVED [" +
+                  string.Join(", ", lost.ToArray()) + "]" +
+                  (filled.Count == 0 ? "" : ". An auto-filled role plays a STAND-IN clip and fires its " +
+                   "events at nominal times - map it in ppcontent.json \"creature\": \"clips\" (and " +
+                   "\"events\") to make it right; only you know which frame connects."));
+        }
+
+        /// <summary>
         /// Puts the manifest's blocking animation events onto the mod's own clips, once.
         ///
         /// The shape is the game's, read off AnimEventReceiver.cs:49-52,54-88: ONE function name for all
@@ -1341,13 +1734,13 @@ namespace Morgott.ContentTool.Tactical
         private static void StampEvents(Creature c)
         {
             List<string> added = new List<string>(), silent = new List<string>();
-            foreach (string role in CreatureManifest.Roles)
+            foreach (string role in CreatureRoles.All)
             {
                 AnimationClip clip = c.OurClip(role);
                 if (clip == null) continue;
-                CreatureManifest.Event[] events = c.Man.EventsFor(role);
+                CreatureRoles.Event[] events = c.Man.EventsFor(role);
                 if (events.Length == 0) { silent.Add(role); continue; }
-                foreach (CreatureManifest.Event e in events)
+                foreach (CreatureRoles.Event e in events)
                 {
                     try
                     {
@@ -1400,6 +1793,67 @@ namespace Morgott.ContentTool.Tactical
                   "]" + (silent.Count == 0 ? "" : "; role(s) [" + string.Join(", ", silent.ToArray()) +
                   "] declare NO events in ppcontent.json \"creature\": \"events\" - each blocking event " +
                   "the game waits for and does not get costs 10s per action (AnimEventReceiver.cs:100,126)"));
+        }
+
+        /// <summary>
+        /// ============ AN EVENT IS PART OF THE CLIP, AND A SWAP LOSES IT ============
+        ///
+        /// A model retargeted onto PP's own skeleton ships PP's own clips under PP's own names, so both
+        /// substitution seams take OUR clip of the VANILLA CLIP'S OWN NAME (WireClips ~:1408,
+        /// <see cref="RemapController"/> :1828). That is the right animation - and it arrives with NO
+        /// ANIMATION EVENTS, because a .glb carries curves and nothing else. The vanilla clip we
+        /// displaced carried them, and the game blocks on them:
+        ///   TacticalLevelController.cs:1814,1824  AnimEventQueue("ShootShot").WaitEventPresent()
+        ///   BashAbility.cs:465,498                WaitForEvent("ShootShot"/"ActionEnd")
+        ///   TacticalAbility.cs:1206,1214          ActionDo then ActionEnd
+        /// MEASURED: 'Animation event ShootShot not found in clip tiffany_ppfit_ff_shotloop_p'
+        /// (Player.log 30.08.2026, 13560/13720 ms) - one line per shot, from
+        /// TacActorAnimActionBaseDef.GetClipEventTime, which at least falls back to clip.length/2.
+        /// The WAIT above has no such fallback and is a hang, not a stall.
+        ///
+        /// <see cref="StampEvents"/> cannot cover this: it only knows the FIVE roles the manifest maps,
+        /// and a soldier plays three hundred clips - every weapon family, every stance. Asking the
+        /// author to hand-time all of them is not a pipeline. So the clip we REPLACE is the source of
+        /// truth: it is the same animation, authored by the same studio, at the same frames.
+        ///
+        /// ONLY AT AN IDENTITY MATCH, never at a role fallback: a fallback points many donor clips at
+        /// one stand-in, and copying each one's events onto it would pile a hundred ShootShots on the
+        /// idle. Times are scaled by the length ratio, so a re-export at another frame rate still fires
+        /// where the animation actually connects.
+        ///
+        /// Idempotent by NAME, so the manifest still wins: a clip that already carries an event of that
+        /// name keeps the author's timing and takes none of the donor's.
+        /// </summary>
+        private static int InheritEvents(AnimationClip from, AnimationClip to)
+        {
+            if (from == null || to == null || from == to) return 0;
+            AnimationEvent[] theirs = from.events;
+            if (theirs == null || theirs.Length == 0) return 0;
+            AnimationEvent[] ours = to.events ?? new AnimationEvent[0];
+            float scale = from.length > 1e-4f ? to.length / from.length : 1f;
+            int added = 0;
+            foreach (AnimationEvent e in theirs)
+            {
+                if (ours.Any(x => x.functionName == e.functionName &&
+                                  x.stringParameter == e.stringParameter)) continue;
+                try
+                {
+                    to.AddEvent(new AnimationEvent
+                    {
+                        functionName = e.functionName,
+                        stringParameter = e.stringParameter,
+                        objectReferenceParameter = e.objectReferenceParameter,
+                        floatParameter = e.floatParameter,
+                        intParameter = e.intParameter,
+                        messageOptions = e.messageOptions,
+                        time = e.time * scale,
+                    });
+                    added++;
+                }
+                // A clip Unity refuses to edit still animates; it just stalls its own ability.
+                catch (Exception) { return added; }
+            }
+            return added;
         }
 
         private static bool IsDefault(TacActorAnimActionBaseDef a)
@@ -1491,8 +1945,12 @@ namespace Morgott.ContentTool.Tactical
                                              AnimationClip actionKey, string who)
         {
             if (overrides == null) return;
+            // Same reason WireClips returns early: this method swaps the controller's clips for OURS,
+            // and on the "useGameAnimations" route there are none - the clips already in the
+            // controller are the ones that drive this rig. Leaving it alone is the correct wiring.
+            if (c != null && c.Man != null && c.Man.UseGameAnimations) return;
             List<string> map = new List<string>();
-            int missed = 0;
+            int missed = 0, inherited = 0;
             foreach (AnimationClip key in overrides.GetOverridableClips().ToArray())
             {
                 if (key == null) { missed++; continue; }
@@ -1507,17 +1965,25 @@ namespace Morgott.ContentTool.Tactical
                 // cyborg_spider_ct_climb_start/loop/stop ... timed out. Current animation:
                 // cyborg_spider_spider_walk", 11,98s for a single one-tile drop.
                 string climbPart = c.ClimbFilled.Count == 0 ? null : ClimbPartOf(c, key.name);
+                // IDENTITY BEFORE ROLE, the same rule WireClips applies to the def slots and for the
+                // same reason: our clip of the controller key's own name is what that state really is.
+                AnimationClip twin = c.SameName(key.name);
                 AnimationClip mine = climbPart != null && c.ClimbClip(climbPart) != null
                     ? c.ClimbClip(climbPart)
-                    : c.OurClip(isAction ? "attack" : RoleForVanilla(key.name));
+                    : twin ?? c.OurClip(isAction ? "attack" : RoleForVanilla(key.name));
                 if (mine == null) { missed++; continue; }
+                // Only at the IDENTITY match, and this is the seam that matters most: the controller
+                // holds every clip the creature will ever play, so this is where a pistol's shot loop
+                // gets back the ShootShot the swap took off it. See InheritEvents.
+                if (mine == twin) inherited += InheritEvents(key, mine);
                 overrides[key] = mine;
                 map.Add(key.name + " -> " + mine.name + (isAction ? " (DefaultActionClip)" : ""));
             }
             overrides.ApplyOverrides();
             c.Say("ct_creature " + (map.Count > 0 && actionKey != null ? "PASS" : "FAIL") + " (" + who +
                   ") '" + overrides.Controller.name + "' had " + (map.Count + missed) +
-                  " overridable clip(s); " + map.Count + " now play OUR clips" +
+                  " overridable clip(s); " + map.Count + " now play OUR clips; " + inherited +
+                  " blocking animation event(s) INHERITED from the vanilla clips they replaced" +
                   (missed > 0 ? " (" + missed + " skipped: null key or no clip for that role)" : "") +
                   (actionKey == null ? "; the anim-actions def names NO DefaultActionClip, so the Action " +
                    "state cannot be reached and every ability will eat three 10s timeouts" : "") +
@@ -1570,10 +2036,42 @@ namespace Morgott.ContentTool.Tactical
 
         // ------------------------------------------------------------------ plumbing
 
+        /// <summary>
+        /// Every creature whose ppcontent.json said <c>"startingRoster": true</c> AND whose mod the
+        /// player still has switched ON - the mods that asked to be in the campaign start.
+        ///
+        /// The second half is not belt-and-braces. A def, once minted, lives in the repository for the
+        /// rest of the session and <see cref="Built"/> never shrinks, so a mod switched OFF in the mod
+        /// manager and a campaign started afterwards would otherwise still deliver its soldier - the
+        /// one thing a checkbox is supposed to prevent. So the roster is re-read HERE, at the moment
+        /// the squad is built, through the same <see cref="Project.ContentMods.Enabled"/> discovery
+        /// every other route uses. An unreadable roster yields nobody, which is
+        /// <see cref="Project.ModGate"/>'s own "a refusal, never a free pass".
+        ///
+        /// A snapshot, because the two squad postfixes below enumerate it while the game is mid-init.
+        /// </summary>
+        internal static TacCharacterDef[] StartingRoster()
+        {
+            int skipped;
+            HashSet<string> live = new HashSet<string>(
+                Project.ContentMods.Enabled(ContentToolMain.ModDir, Project.ContentMods.Manifest,
+                                            Project.ModRoster.Build(), null, out skipped)
+                       .Select(Project.ModGate.Key), StringComparer.Ordinal);
+            return Built.Where(x => x.Man != null && x.Man.StartingRoster && x.Def != null &&
+                                    live.Contains(Project.ModGate.Key(x.Dir)))
+                        .Select(x => x.Def).ToArray();
+        }
+
         /// <summary>The creature wearing <paramref name="def"/>'s anim actions, or null.</summary>
         internal static Creature ByAnims(TacActorAnimActionsDef def)
         {
             return def == null ? null : Built.FirstOrDefault(x => ReferenceEquals(x.Anims, def));
+        }
+
+        /// <summary>The creature this character template IS, or null. Same identity rule as the rest.</summary>
+        internal static Creature ByTemplate(TacCharacterDef def)
+        {
+            return def == null ? null : Built.FirstOrDefault(x => ReferenceEquals(x.Def, def));
         }
 
         /// <summary>The creature wearing <paramref name="def"/>, or null. Identity, never a name prefix:
@@ -1618,6 +2116,38 @@ namespace Morgott.ContentTool.Tactical
             T copy = (T)repo.CreateDef(guid, original);
             copy.name = full;
             return copy;
+        }
+
+        /// <summary>
+        /// The donor's addon tree with its GEOMETRY taken off and its SLOTS left standing - cloned at
+        /// every depth so nothing writes through into the shipped defs. SkinData null is the whole of
+        /// "invisible" (Addon.AttachVisuals:1029-1032 returns before Instantiate); the ProvidedSlots
+        /// and their AttachmentPointNames are the whole of "can hold a gun".
+        /// </summary>
+        private static AddonDef Skinless(DefRepository repo, Creature c, AddonDef donorAddon,
+                                         string name, List<string> stripped)
+        {
+            AddonDef clone = Clone(repo, c, donorAddon, name);
+            clone.SkinData = null;
+            clone.Tags = new GameTagsList();
+            stripped.Add(donorAddon.name);
+            clone.SubAddons = (donorAddon.SubAddons ?? new AddonDef.SubaddonBind[0])
+                .Where(b => b.SubAddon != null)
+                .Select(b => new AddonDef.SubaddonBind
+                {
+                    SubAddon = Skinless(repo, c, b.SubAddon, b.SubAddon.name, stripped),
+                    AttachmentPointName = b.AttachmentPointName
+                }).ToArray();
+            return clone;
+        }
+
+        /// <summary>Every slot the tree provides - the number CanSwapItem really answers against.</summary>
+        private static int CountSlots(AddonDef addon)
+        {
+            int n = addon.ProvidedSlots == null ? 0 : addon.ProvidedSlots.Length;
+            foreach (AddonDef.SubaddonBind b in addon.SubAddons ?? new AddonDef.SubaddonBind[0])
+                if (b.SubAddon != null) n += CountSlots(b.SubAddon);
+            return n;
         }
 
         /// <summary>A fresh tag list holding <paramref name="src"/> minus <paramref name="banned"/>. A NEW
@@ -1674,6 +2204,9 @@ namespace Morgott.ContentTool.Tactical
     internal sealed class Creature
     {
         internal string Id;
+        /// <summary>The mod folder this creature was built from, so the campaign-start roster can ask
+        /// the mod manager whether that mod is STILL switched on (CreatureBuild.StartingRoster).</summary>
+        internal string Dir;
         internal CreatureManifest Man;
         internal AnimationClip[] Clips;
         internal Action<string> Say;
@@ -1712,6 +2245,30 @@ namespace Morgott.ContentTool.Tactical
         }
 
         /// <summary>
+        /// OUR OWN COPY OF THE DONOR'S VERY CLIP, when the model carries one.
+        ///
+        /// The role map (idle/walk/attack/death/reaction) is what a DOWNLOADED creature has to be
+        /// squeezed into: five clips against a controller with two hundred states. A model retargeted
+        /// onto Phoenix Point's own skeleton is not in that position - its clips ARE the game's clips,
+        /// under the game's own names - so the honest wiring is IDENTITY: the slot that held
+        /// 'FF_EndShot_AR' gets our 'FF_EndShot_AR', and the whole soldier repertoire arrives with no
+        /// role table at all. Asked FIRST everywhere a slot or a controller key is resolved, and a miss
+        /// falls straight back to the role machinery, so a creature that ships four clips behaves
+        /// exactly as it did before.
+        ///
+        /// The bundle names a clip "&lt;model stem&gt;_&lt;clip name&gt;" lowercased, so the match is a
+        /// suffix - but on a '_' boundary, because a bare EndsWith would let a one-letter donor clip
+        /// name claim any clip that happens to end in that letter.
+        /// </summary>
+        internal AnimationClip SameName(string vanilla)
+        {
+            if (string.IsNullOrEmpty(vanilla)) return null;
+            return Clips.FirstOrDefault(x =>
+                x.name.EndsWith(vanilla, StringComparison.OrdinalIgnoreCase) &&
+                (x.name.Length == vanilla.Length || x.name[x.name.Length - vanilla.Length - 1] == '_'));
+        }
+
+        /// <summary>
         /// One part of the climb: the AUTHOR's clip when they mapped one to the "climb" role, and
         /// otherwise the part the bake synthesised out of the walk cycle. A mapped clip wins for all
         /// three parts at once, which is legal - ClipSequence.cs:16-25 only asks that Start, Loop and
@@ -1745,6 +2302,65 @@ namespace Morgott.ContentTool.Tactical
     /// <c>TacActorAnimActions.Setup</c>, reached from TacticalActor.PrepareEnterPlay (:724-726). Every
     /// actor passes through it; only a creature this engine built is touched.
     /// </summary>
+    /// <summary>
+    /// ============ A HUMAN-TAGGED CREATURE IS HANDED SOMEBODY ELSE'S ANIM ACTIONS ============
+    ///
+    /// Every character-preview screen the geoscape has - squad bay, roster, edit soldier, and the fit
+    /// workbench with them - describes its subject with a <see cref="UnitDisplayData"/>, and that
+    /// constructor does NOT always ask the template which anim actions it carries:
+    ///   UnitDisplayData.cs:69-73   if (sharedData != null &amp;&amp; template.CheckIsHuman())
+    ///                                  AnimActionDef = sharedData.SoldierEditAnimActions;
+    ///   UnitDisplayData.cs:78-81   ...only a NULL falls through to template.GetAnimActionDef()
+    /// CheckIsHuman is one tag (CharacterTemplateExtension.cs:24-27, HumanTag), and a creature cloned
+    /// from a human soldier donor legitimately carries it - MEASURED live 2026-08-29:
+    ///   CheckIsHuman(ct_creature_morgott.local.ppfit_CharacterTemplateDef) = TRUE
+    ///   CheckIsHuman(ct_creature_morgott.demo.customcreature_...)          = FALSE   (Swarmer donor)
+    ///
+    /// The consequences are all silent and all fatal to animation:
+    ///   * DisplayCharacter:40 only calls TacActorAnimActions.Setup when the def CHANGES, and the def
+    ///     it is handed is the SHARED soldier one - so for a creature it can be the def that is already
+    ///     mounted, and Setup never runs at all;
+    ///   * so <see cref="CreatureRemap"/>, which keys on ByAnims, never fires - MEASURED, zero remap
+    ///     lines in a whole session's log while the spider's line was there;
+    ///   * so the AnimatorOverrideController keeps the SHIPPED soldier's mapping. Read live off the
+    ///     live controller: key 'FF_EndShot_AR' -> 'FF_EndShot_P', instanceId 138636, a shipped asset -
+    ///     not one clip of ours anywhere in a 69-entry table.
+    /// A shipped clip binds Phoenix Point's own transform paths, which our rig does not answer to, so
+    /// the Animator plays a clip that poses nothing: the creature stands in her BIND POSE. That is the
+    /// T-pose, and it appeared the moment the donor became a human - nothing to do with the clips, the
+    /// export or the bundle.
+    ///
+    /// So the template's own answer is restored for a creature this engine built, at the one
+    /// constructor all four of the game's own overloads chain into (UnitDisplayData.cs:39,50,60).
+    /// ponytail: a postfix that writes one property for our defs only - not a CheckIsHuman patch, which
+    /// would change what the creature IS everywhere (proficiency, blood colour, slot compatibility -
+    /// the human tag is exactly what earns her the full armoury) to fix what one screen ASKS.
+    /// </summary>
+    [HarmonyPatch(typeof(UnitDisplayData), MethodType.Constructor,
+                  new[] { typeof(TacCharacterDef), typeof(SharedData) })]
+    internal static class CreatureKeepsItsAnimActions
+    {
+        private static void Postfix(UnitDisplayData __instance, TacCharacterDef template)
+        {
+            try
+            {
+                Creature c = CreatureBuild.ByTemplate(template);
+                if (c == null || c.Anims == null || ReferenceEquals(__instance.AnimActionDef, c.Anims))
+                    return;
+                TacActorAnimActionsDef was = __instance.AnimActionDef;
+                __instance.AnimActionDef = c.Anims;
+                c.Say("ct_creature PASS (display) '" + template.name + "' keeps its OWN anim actions '" +
+                      c.Anims.name + "' - UnitDisplayData.cs:69-73 had handed it '" +
+                      (was == null ? "(null)" : was.name) + "' because CheckIsHuman is true for a " +
+                      "creature cloned from a human donor. That def is what TacActorAnimActions.Setup " +
+                      "is compared against and keyed on, so with the shared one the controller keeps " +
+                      "the SHIPPED soldier's clips, which bind PP's own bone paths and not ours - the " +
+                      "creature then stands in her bind pose (a T-pose) with nothing playing.");
+            }
+            catch (Exception ex) { ContentToolMain.Say("ct_creature FAIL display-anims " + ex); }
+        }
+    }
+
     [HarmonyPatch(typeof(TacActorAnimActions), nameof(TacActorAnimActions.Setup))]
     internal static class CreatureRemap
     {
@@ -1873,4 +2489,56 @@ namespace Morgott.ContentTool.Tactical
     // duplicate on a method called once per tile per move, and whichever of the two ran first would
     // decide - so the better one could silently lose. CreatureFit is installed unconditionally by
     // ContentToolMain, before any content mod's OnModEnabled, so it is always in place first.
+
+    // ============ A CODE-LESS MOD'S CREATURE JOINS THE CAMPAIGN START ============
+    // This was the last thing a creature mod still needed a DLL for: CreatureBuild.BuildAll mints the
+    // def for a mod that ships no C#, and then nothing put it anywhere. The two postfixes below were
+    // COPIED OUT OF demos\CustomCreature\src\CustomCreatureMain.cs verbatim - they are the mechanism
+    // every creature mod would otherwise duplicate, which is the same reason the rest of this file
+    // exists - and the mod's own choice is now one manifest key (CreatureManifest.StartingRoster).
+    //
+    // WHY TWO. The game has TWO squad builders and which one runs depends on whether the player took
+    // the tutorial: GeoPhoenixFaction.CreateInitialSquad:1964-1976 walks
+    // GameDifficultyLevelDef.StartingSquadTemplate, and GeoscapeTutorial.InitSquad:289-330 quietly
+    // REPLACES it, reading that array for its LENGTH only (:313) before filling the gap with a FIXED
+    // human template. So the seam that looks like the data answer - append the def to
+    // StartingSquadTemplate on each GameDifficultyLevelDef, which is what TFTV does
+    // (refs\TFTV-src\TFTV\TFTVDefsInjectedOnlyOnce.cs:7213) - is an exact guarantee in a NORMAL start
+    // and silently produces one extra generic soldier and no creature in a TUTORIAL start.
+    // Adding to the aircraft AFTER whichever builder ran is the one route that is right in both.
+    //
+    // ponytail: no gate on "did the mod already do this itself" - JoinPlayerVehicle is idempotent by
+    // template identity (it only adds when no unit aboard carries the same TemplateDef), so a mod
+    // that ships the demo's own postfixes AND sets the key gets one soldier, not two.
+    // ponytail: the known ceiling is CAPACITY - GeoVehicle.AddCharacter:759-764 computes the space sum
+    // and throws it away, so N creatures asking for the start can overfill the starting Manticore.
+    // The roster read-back in JoinPlayerVehicle prints used/max every time, which is the warning; a
+    // refusal belongs here only once a real mod has been bitten by it.
+    internal static class StartingSquad
+    {
+        internal static void JoinAll(string who)
+        {
+            try
+            {
+                foreach (TacCharacterDef def in CreatureBuild.StartingRoster())
+                    CreatureBuild.JoinPlayerVehicle(def, who);
+            }
+            // Nothing here may throw into the game's own campaign init: a thrown postfix would take
+            // the squad builder with it and leave the player with no starting soldiers at all.
+            catch (Exception ex) { ContentToolMain.Say("ct_creature FAIL roster (" + who + ") " + ex); }
+        }
+    }
+
+    [HarmonyPatch(typeof(GeoPhoenixFaction), nameof(GeoPhoenixFaction.CreateInitialSquad))]
+    internal static class CreatureJoinsNewCampaign
+    {
+        private static void Postfix() { StartingSquad.JoinAll("CreateInitialSquad"); }
+    }
+
+    /// <summary>Private method, patched by name - GeoscapeTutorial.InitSquad:289-330.</summary>
+    [HarmonyPatch(typeof(GeoscapeTutorial), "InitSquad")]
+    internal static class CreatureJoinsTutorialSquad
+    {
+        private static void Postfix() { StartingSquad.JoinAll("Tutorial.InitSquad"); }
+    }
 }
