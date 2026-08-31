@@ -88,6 +88,7 @@ internal static class Program
         Console.WriteLine(PrefabRoundTrip.Run());
         Console.WriteLine(SkinRoundTrip.Run());
         Console.WriteLine(ModelRoundTrip.Run());
+        Console.WriteLine(SkinWidth.Run());
         Console.WriteLine(SkinAbove.Run());
         Console.WriteLine(SourceSkip.Run());
         Console.WriteLine(BoneNames.Run());

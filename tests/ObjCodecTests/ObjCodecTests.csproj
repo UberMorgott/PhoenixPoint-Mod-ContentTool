@@ -15,6 +15,7 @@
     <Compile Include="MeshRoundTrip.cs" />
     <Compile Include="PrefabRoundTrip.cs" />
     <Compile Include="SkinRoundTrip.cs" />
+    <Compile Include="SkinWidth.cs" />
     <Compile Include="ModelRoundTrip.cs" />
     <Compile Include="SkinAbove.cs" />
     <!-- The skip-one-source rule carries no UnityEngine type on purpose (SourceImport's own remark),

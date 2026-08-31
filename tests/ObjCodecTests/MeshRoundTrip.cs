@@ -55,8 +55,11 @@ internal static class MeshRoundTrip
         // same run, never spelled out - a constant here would only be asserting our own writer.
         string skeleton = Skeleton(skinBefore);
         Assert(skeleton != null, "the target '" + Target + "' is rigged: " + skinBefore);
-        string wantSkin = skeleton + " " + SkinFields.OurLayout + " skinBytes=" +
-                          baked.VertexCount * SkinFields.SkinStride;
+        // The width is the SHIPPED target's own, read in this same run - a replacement that narrowed
+        // it would read RED here.
+        int inf = Count(classData, shipped, Target);
+        string wantSkin = skeleton + " " + SkinFields.OurLayout(inf) + " skinBytes=" +
+                          baked.VertexCount * SkinFields.SkinStride(inf);
         Assert(skinAfter.StartsWith(wantSkin, StringComparison.Ordinal),
                "the copy keeps the shipped skeleton and carries our skin: " + skinAfter +
                " (wanted " + wantSkin + ")");
@@ -123,21 +126,29 @@ internal static class MeshRoundTrip
         string got = Influences(classData, copy, Target);
         File.Delete(copy);
 
+        int inf = Count(classData, shipped, Target);
+        int[] slots = new int[inf];
         string want = "", bySlot = "";
         for (int i = 0; i < 3; i++)
         {
-            int a, b;
-            SkinFields.Heaviest(file.Weights, i, out a, out b);
-            float wa = file.Weights[i * 4 + a], wb = b < 0 ? 0f : file.Weights[i * 4 + b];
-            int slot0 = file.Joints[i * 4 + a], slot1 = b < 0 ? slot0 : file.Joints[i * 4 + b];
-            int live0 = Array.IndexOf(bones, file.JointNames[slot0]);
-            int live1 = Array.IndexOf(bones, file.JointNames[slot1]);
-            Assert(live0 >= 0 && live1 >= 0, "vertex " + i + "'s bones are on the shipped skeleton");
-            Assert(live0 != slot0, "vertex " + i + " sits at file slot " + slot0 + " but live bone " +
-                   live0 + ", so a by-name binding and an index binding differ here");
-            string w = F(wa / (wa + wb)) + "/" + F(wb / (wa + wb));
-            want += (i == 0 ? "" : " ") + "v" + i + "=" + w + "->bone" + live0 + "+bone" + live1;
-            bySlot += (i == 0 ? "" : " ") + "v" + i + "=" + w + "->bone" + slot0 + "+bone" + slot1;
+            SkinFields.Heaviest(file.Weights, i, slots);
+            float sum = 0f;
+            for (int k = 0; k < inf; k++) if (slots[k] >= 0) sum += file.Weights[i * 4 + slots[k]];
+            string w = "", live = "", bySlotBones = "";
+            for (int k = 0; k < inf; k++)
+            {
+                int slot = file.Joints[i * 4 + (slots[k] >= 0 ? slots[k] : slots[0])];
+                int at = Array.IndexOf(bones, file.JointNames[slot]);
+                Assert(at >= 0, "vertex " + i + "'s bones are on the shipped skeleton");
+                if (k == 0)
+                    Assert(at != slot, "vertex " + i + " sits at file slot " + slot + " but live bone " +
+                           at + ", so a by-name binding and an index binding differ here");
+                w += (k == 0 ? "" : "/") + F(slots[k] < 0 ? 0f : file.Weights[i * 4 + slots[k]] / sum);
+                live += (k == 0 ? "->bone" : "+bone") + at;
+                bySlotBones += (k == 0 ? "->bone" : "+bone") + slot;
+            }
+            want += (i == 0 ? "" : " ") + "v" + i + "=" + w + live;
+            bySlot += (i == 0 ? "" : " ") + "v" + i + "=" + w + bySlotBones;
         }
 
         Assert(got == want, "the copy carries the FILE's own weights on the bones it NAMES: " +
@@ -215,6 +226,18 @@ internal static class MeshRoundTrip
         finally { m.UnloadAll(); }
     }
 
+    /// <summary>The influences per vertex a shipped Mesh declares - the width a replacement keeps.</summary>
+    private static int Count(string classData, string bundlePath, string meshName)
+    {
+        AssetsManager m = new AssetsManager();
+        m.LoadClassPackage(classData);
+        BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
+        AssetsFileInstance af = m.LoadAssetsFileFromBundle(bun, 0, false);
+        m.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
+        try { return SkinFields.InfluencesOf(m.GetBaseField(af, Find(m, af, meshName))); }
+        finally { m.UnloadAll(); }
+    }
+
     private static string Influences(string classData, string bundlePath, string meshName)
     {
         AssetsManager m = new AssetsManager();
@@ -243,9 +266,11 @@ internal static class MeshRoundTrip
         {
             AssetFileInfo info = Find(m, af, Target);
             AssetTypeValueField mesh = m.GetBaseField(af, info);
+            // Read BEFORE Fill clears it, exactly the way BundleBaker.ReplaceMesh does.
+            int inf = SkinFields.InfluencesOf(mesh);
             MeshFields.Fill(mesh, baked);
-            if (model == null) SkinFields.Rebind(mesh, baked);
-            else Assert(SkinFields.RebindByName(mesh, baked, model, SkinFields.BoneNames(m, af, info.PathId)),
+            if (model == null) SkinFields.Rebind(mesh, baked, inf);
+            else Assert(SkinFields.RebindByName(mesh, baked, model, SkinFields.BoneNames(m, af, info.PathId), inf),
                         "the target is rigged, so a by-name rebind has bind poses to work with");
             info.SetNewData(mesh);
 

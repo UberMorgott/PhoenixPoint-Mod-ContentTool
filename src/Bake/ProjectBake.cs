@@ -453,8 +453,8 @@ namespace Morgott.ContentTool.Bake
                     "hashes=" + hashes,
                     "rootHash=" + SkinFields.BoneHash(s.BonePath(0)),
                     "bonesAABB=" + bones,
-                    SkinFields.OurLayout,
-                    "bytes=" + (SkinFields.SkinOffset(verts) + verts * SkinFields.SkinStride),
+                    SkinFields.OurLayout(s.Influences),
+                    "bytes=" + (SkinFields.SkinOffset(verts) + verts * SkinFields.SkinStride(s.Influences)),
                     "vertex0=" + Influence(s, 0)
                 };
                 string got = BundleBaker.ReadSkinSummary(outPath, m.Name);
@@ -471,9 +471,10 @@ namespace Morgott.ContentTool.Bake
         /// <summary>One vertex's influences the way <c>SkinFields.Summary</c> prints them.</summary>
         private static string Influence(BakedSkin s, int vertex)
         {
-            int at = vertex * BakedSkin.Influences;
-            return ModelBuild.F(s.Weights[at]) + "/" + ModelBuild.F(s.Weights[at + 1]) +
-                   "->bone" + s.Bones[at];
+            int at = vertex * s.Influences;
+            string w = "";
+            for (int k = 0; k < s.Influences; k++) w += (k == 0 ? "" : "/") + ModelBuild.F(s.Weights[at + k]);
+            return w + "->bone" + s.Bones[at];
         }
 
         /// <summary>
@@ -1610,8 +1611,11 @@ namespace Morgott.ContentTool.Bake
                         log.AppendLine("P5 VOID '" + mesh.Key + "' is not rigged - " + skinShipped);
                     else
                     {
-                        string wantSkin = skeleton + " " + SkinFields.OurLayout + " skinBytes=" +
-                                          mesh.Value.Baked.VertexCount * SkinFields.SkinStride;
+                        // The width is the SHIPPED target's own, read in this same run: a replacement
+                        // that narrowed a dim4 body part reads RED here instead of quietly shipping.
+                        int inf = Math.Max(BundleBaker.ReadInfluenceCount(shipped, mesh.Key), 1);
+                        string wantSkin = skeleton + " " + SkinFields.OurLayout(inf) + " skinBytes=" +
+                                          mesh.Value.Baked.VertexCount * SkinFields.SkinStride(inf);
                         failures += Check(log, "P5",
                             skinCopy.StartsWith(wantSkin, StringComparison.Ordinal) &&
                             skinCopy.EndsWith(" inRange=yes", StringComparison.Ordinal),
@@ -1735,32 +1739,44 @@ namespace Morgott.ContentTool.Bake
                 return 0;
             }
 
+            // The TARGET's own width, read off the shipped file - the same number the bake keeps.
+            int inf = Math.Max(BundleBaker.ReadInfluenceCount(shipped, key), 1);
+            int[] slots = new int[inf];
             string want = "";
             int moved = 0, split = 0;
             for (int i = 0; i < n; i++)
             {
-                int a, b;
-                SkinFields.Heaviest(f.Weights, i, out a, out b);
-                float wa = a < 0 ? 0f : f.Weights[i * 4 + a];
-                float wb = b < 0 ? 0f : f.Weights[i * 4 + b];
-                float sum = wa + wb;
-                if (sum <= 0f) { a = 0; wa = 1f; wb = 0f; sum = 1f; b = -1; }
+                SkinFields.Heaviest(f.Weights, i, slots);
+                float sum = 0f;
+                for (int k = 0; k < inf; k++) if (slots[k] >= 0) sum += f.Weights[i * 4 + slots[k]];
+                // A vertex the file left unweighted goes whole to the bone its FIRST slot names -
+                // the same rule RebindByName writes.
+                bool unweighted = sum <= 0f;
 
-                int slot0 = f.Joints[i * 4 + a], slot1 = b < 0 ? slot0 : f.Joints[i * 4 + b];
-                int live0 = Live(bones, f.JointNames[slot0]);
-                int live1 = Live(bones, f.JointNames[slot1]);
-                if (live0 < 0 || live1 < 0)
+                string w = "", b = "";
+                bool off = false, shared = false;
+                for (int k = 0; k < inf; k++)
                 {
-                    log.AppendLine("P6 VOID '" + key + "' - the file's bone '" +
-                                   f.JointNames[live0 < 0 ? slot0 : slot1] +
-                                   "' is not on the shipped skeleton, so this replacement was refused " +
-                                   "by name and there is no by-name binding to measure");
-                    return 0;
+                    int at = unweighted || slots[k] < 0 ? (unweighted ? 0 : slots[0]) : slots[k];
+                    int slot = f.Joints[i * 4 + at];
+                    int live = Live(bones, f.JointNames[slot]);
+                    if (live < 0)
+                    {
+                        log.AppendLine("P6 VOID '" + key + "' - the file's bone '" + f.JointNames[slot] +
+                                       "' is not on the shipped skeleton, so this replacement was refused " +
+                                       "by name and there is no by-name binding to measure");
+                        return 0;
+                    }
+                    float weight = unweighted ? (k == 0 ? 1f : 0f)
+                                 : slots[k] < 0 ? 0f : f.Weights[i * 4 + slots[k]] / sum;
+                    if (live != slot) off = true;
+                    if (k > 0 && weight > 0f) shared = true;
+                    w += (k == 0 ? "" : "/") + ModelBuild.F(weight);
+                    b += (k == 0 ? "->bone" : "+bone") + live;
                 }
-                if (live0 != slot0 || live1 != slot1) moved++;
-                if (wb > 0f) split++;
-                want += (i == 0 ? "" : " ") + "v" + i + "=" + ModelBuild.F(wa / sum) + "/" +
-                        ModelBuild.F(wb / sum) + "->bone" + live0 + "+bone" + live1;
+                if (off) moved++;
+                if (shared) split++;
+                want += (i == 0 ? "" : " ") + "v" + i + "=" + w + b;
             }
 
             if (moved == 0)

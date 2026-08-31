@@ -159,8 +159,8 @@ internal static class ModelRoundTrip
                " mesh='" + SkinFields.MeshName(Root) + "' material='" + materialName + "'" +
                " | mesh verts=6 bindposes=3 bindpose1.e13=-4" +
                " hashes=3:" + h0 + ":" + h1 + ":" + h2 + " rootHash=" + h0 + " bonesAABB=3" +
-               " " + SkinFields.OurLayout +
-               " bytes=" + (SkinFields.SkinOffset(6) + 6 * SkinFields.SkinStride) +
+               " " + SkinFields.OurLayout(skin.Influences) +
+               " bytes=" + (SkinFields.SkinOffset(6) + 6 * SkinFields.SkinStride(skin.Influences)) +
                " vertex0=1/0->bone1 vertexLast=0.5/0.5->bone2" +
                " | tree '" + skin.BoneNames[0] + "'<'" + Root + "'#2,'" +
                skin.BoneNames[1] + "'<'" + skin.BoneNames[0] + "'#0,'" +

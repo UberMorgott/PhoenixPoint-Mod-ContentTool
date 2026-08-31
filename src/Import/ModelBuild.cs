@@ -15,15 +15,17 @@ namespace Morgott.ContentTool.Import
     /// every joint. A .glb states JOINTS_0 and WEIGHTS_0 per vertex, so a vertex can be shared between
     /// bones and a joint can actually bend.
     ///
-    /// ponytail: the two STRONGEST influences per vertex, renormalised. Not a judgement call - the
-    /// serialized layout every shipped 2019.4.31f1 mesh carries has room for exactly two
-    /// (<see cref="Morgott.ContentTool.Bake.SkinFields.Influences"/>, measured), so glTF's four have to
-    /// be reduced by something. Widening the stream to four is a layout change in SkinFields, not here.
+    /// This path ADDS a mesh rather than replacing one, so there is no target width to respect: it
+    /// carries exactly as many influences per vertex as the FILE actually uses, up to glTF's four.
     /// </summary>
     internal sealed class BakedSkin
     {
-        /// <summary>Influences kept per vertex - matches the serialized layout SkinFields writes.</summary>
-        internal const int Influences = 2;
+        /// <summary>
+        /// Influences kept per vertex - the most any one vertex of the FILE weights, 1..4, and the
+        /// width <c>SkinFields</c> then declares. Never a constant: a file that weights every vertex
+        /// to one bone gets a 1-wide stream, one that blends four gets four.
+        /// </summary>
+        internal int Influences = 1;
 
         internal string Name;
         internal BakedMesh Mesh;
@@ -241,42 +243,45 @@ namespace Morgott.ContentTool.Import
                     : LocalRest(skin.BindPoses[b], null, skin.BoneNames[b]);
             }
 
-            skin.Weights = new float[n * BakedSkin.Influences];
-            skin.Bones = new uint[n * BakedSkin.Influences];
+            // The width the FILE asks for: the most influences any one vertex actually uses.
+            skin.Influences = 1;
+            for (int v = 0; v < n; v++)
+            {
+                int used = 0;
+                for (int i = 0; i < 4; i++) if (model.Weights[v * 4 + i] > 0f) used++;
+                if (used > skin.Influences) skin.Influences = used;
+            }
+            skin.Weights = new float[n * skin.Influences];
+            skin.Bones = new uint[n * skin.Influences];
             for (int v = 0; v < n; v++) Strongest(model, v, skin);
             return skin;
         }
 
         /// <summary>
-        /// The two heaviest of glTF's four influences for one vertex, renormalised so they sum to 1.
-        /// A vertex the file leaves unweighted goes whole to bone 0 rather than vanishing to the origin,
-        /// which is what a zero weight sum makes the engine do.
+        /// The heaviest of glTF's four influences for one vertex, dominant first and renormalised so
+        /// they sum to 1 - as many as <see cref="BakedSkin.Influences"/> holds, which by construction
+        /// is enough for every vertex the file weights. A vertex the file leaves unweighted goes whole
+        /// to bone 0 rather than vanishing to the origin, which is what a zero weight sum makes the
+        /// engine do.
         /// </summary>
         private static void Strongest(SkinnedModel model, int v, BakedSkin skin)
         {
-            int firstAt = -1, secondAt = -1;
-            for (int i = 0; i < 4; i++)
-            {
-                float w = model.Weights[v * 4 + i];
-                if (w <= 0f) continue;
-                if (firstAt < 0 || w > model.Weights[v * 4 + firstAt]) { secondAt = firstAt; firstAt = i; }
-                else if (secondAt < 0 || w > model.Weights[v * 4 + secondAt]) secondAt = i;
-            }
+            int inf = skin.Influences, at = v * inf;
+            int[] slots = new int[inf];
+            Morgott.ContentTool.Bake.SkinFields.Heaviest(model.Weights, v, slots);
 
-            int at = v * BakedSkin.Influences;
-            if (firstAt < 0)
+            float sum = 0f;
+            for (int k = 0; k < inf; k++) if (slots[k] >= 0) sum += model.Weights[v * 4 + slots[k]];
+            if (sum <= 0f)
             {
-                skin.Weights[at] = 1f; skin.Weights[at + 1] = 0f;
-                skin.Bones[at] = 0; skin.Bones[at + 1] = 0;
-                return;
+                skin.Weights[at] = 1f;
+                return;                                  // bones already 0, later weights already 0
             }
-            float w0 = model.Weights[v * 4 + firstAt];
-            float w1 = secondAt < 0 ? 0f : model.Weights[v * 4 + secondAt];
-            float sum = w0 + w1;
-            skin.Weights[at] = w0 / sum;
-            skin.Weights[at + 1] = w1 / sum;
-            skin.Bones[at] = model.Joints[v * 4 + firstAt];
-            skin.Bones[at + 1] = secondAt < 0 ? model.Joints[v * 4 + firstAt] : model.Joints[v * 4 + secondAt];
+            for (int k = 0; k < inf; k++)
+            {
+                skin.Bones[at + k] = model.Joints[v * 4 + (slots[k] >= 0 ? slots[k] : slots[0])];
+                skin.Weights[at + k] = slots[k] >= 0 ? model.Weights[v * 4 + slots[k]] / sum : 0f;
+            }
         }
 
         /// <summary>

@@ -590,7 +590,8 @@ namespace Morgott.ContentTool.Bake
                    " | mesh verts=4 bindposes=2 bindpose1.e13=-" + (int)BoneY +
                    " hashes=2:" + h0 + ":" + h1 + " rootHash=" + h0 + " bonesAABB=2" +
                    " weightCh=stream1/off0/fmt0/dim2 indexCh=stream1/off8/fmt10/dim2" +
-                   " bytes=" + (SkinFields.SkinOffset(4) + 4 * SkinFields.SkinStride) +
+                   " bytes=" + (SkinFields.SkinOffset(4) +
+                                4 * SkinFields.SkinStride(SkinFields.FixtureInfluences)) +
                    " vertex0=1/0->bone0 vertexLast=1/0->bone" + (split ? 1 : 0) +
                    // bone1 hangs off bone0, which is what this bake has always written and what the
                    // author's imported rig now writes too - stated here so a rig that came apart shows

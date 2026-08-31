@@ -23,7 +23,9 @@ namespace Morgott.ContentTool.Bake
     ///    stream1 uv0, stream2 channel 12 (BlendWeight, float32 x2) at offset 0 and channel 13
     ///    (BlendIndices, format 10 = UInt32, x2) at offset 8. Each stream STARTS 16-byte aligned -
     ///    ALN_Siren_Arm_Slasher_Right's 1783 verts give 71320+8 | 14264+8 | 28528 = 114128 B, which
-    ///    is exactly its m_DataSize. Two influences per vertex, not four.
+    ///    is exactly its m_DataSize. Two influences per vertex THERE - the count is
+    ///    PER MESH, declared by the channel dimension, and the Phoenix Assault body parts ship four
+    ///    (<see cref="InfluencesOf"/>).
     ///  - the SkinnedMeshRenderer's own defaults differ from the MeshRenderer's:
     ///    m_RayTracingMode is 0 here and 2 there, and m_SkinnedMotionVectors is true.
     ///  - m_BoneNameHashes is CRC-32 (reflected 0xEDB88320, final xor) of the bone's transform PATH
@@ -40,9 +42,42 @@ namespace Morgott.ContentTool.Bake
         private const int ChannelBlendWeight = 12, ChannelBlendIndices = 13;
         private const int FormatFloat32 = 0, FormatUInt32 = 10;
 
-        /// <summary>Influences per vertex, as shipped. 2 float weights + 2 UInt32 indices.</summary>
-        internal const int Influences = 2;
-        internal const int SkinStride = Influences * 4 + Influences * 4;
+        /// <summary>glTF states exactly four influences per vertex, so nothing here can carry more.</summary>
+        internal const int MaxInfluences = 4;
+
+        /// <summary>
+        /// The two-bone FIXTURE's width (<see cref="Build"/>). Two is the shape of the fixture itself -
+        /// weight 1 on one of two bones, see the class remark - and not a limit imposed on data: every
+        /// path that has a file or a target to read takes its width from THAT
+        /// (<see cref="InfluencesOf"/>, <c>BakedSkin.Influences</c>).
+        /// </summary>
+        internal const int FixtureInfluences = 2;
+
+        /// <summary>
+        /// Influences per vertex a serialized Mesh DECLARES - the wider of its two skin channel
+        /// dimensions, capped at what a file can supply. 0 when the mesh has no skin channel slots.
+        ///
+        /// The count is PER MESH, not a property of the engine: mutoid and aln_fireworm ship dim2,
+        /// while every Phoenix Assault body part ships dim4 (measured, `CHR_PX_ASS_TS_M_V01_02`
+        /// weightCh=stream2/off0/fmt0/dim4 indexCh=stream2/off16/fmt10/dim4). So this is what a
+        /// REPLACEMENT has to keep - writing 2 over a dim4 target downgrades its skinning.
+        ///
+        /// The wider of the two and not the narrower because a rigid attachment ships an index
+        /// channel and NO weight one (`CHR_PX_ASS_HG_M_V01_02`, dim0/dim1): giving it a weight
+        /// channel is an upgrade, and taking its one influence away is not.
+        /// </summary>
+        internal static int InfluencesOf(AssetTypeValueField mesh)
+        {
+            AssetTypeValueField chs = mesh["m_VertexData"]["m_Channels"]["Array"];
+            if (chs.Children.Count <= ChannelBlendIndices) return 0;
+            int w = chs.Children[ChannelBlendWeight]["dimension"].AsByte;
+            int b = chs.Children[ChannelBlendIndices]["dimension"].AsByte;
+            return Math.Min(Math.Max(w, b), MaxInfluences);
+        }
+
+        /// <summary>Bytes one vertex of the skin stream takes: that many float weights, then that
+        /// many UInt32 bone indices.</summary>
+        internal static int SkinStride(int influences) { return influences * 4 + influences * 4; }
 
         /// <summary>Every vertex stream starts on this boundary - measured, see the class remark.</summary>
         private const int StreamAlignment = 16;
@@ -150,7 +185,9 @@ namespace Morgott.ContentTool.Bake
             PrefabFields.Create(afile, cldb, ids.Mesh, AssetClassID.Mesh, mesh =>
             {
                 FillMesh(mesh, MeshName(rootName), baked, weights, boneOfVertex, boneY, bone0, bone1);
-                if (rebind) Rebind(mesh, baked);
+                // FillMesh has just declared the fixture's own width, so the re-bind reads it back
+                // the same way a replacement reads its target's.
+                if (rebind) Rebind(mesh, baked, InfluencesOf(mesh));
             });
 
             PrefabFields.Create(afile, cldb, ids.Renderer, AssetClassID.SkinnedMeshRenderer, r =>
@@ -288,10 +325,11 @@ namespace Morgott.ContentTool.Bake
             if (afile == null) throw new ArgumentNullException(nameof(afile));
             if (skin == null) throw new ArgumentNullException(nameof(skin));
             if (!skin.Rigged) throw new ArgumentException("model '" + rootName + "' carries no armature", nameof(skin));
-            if (skin.Weights.Length != skin.Mesh.VertexCount * Influences)
+            if (skin.Influences < 1 || skin.Influences > MaxInfluences ||
+                skin.Weights.Length != skin.Mesh.VertexCount * skin.Influences)
                 throw new ArgumentException("model '" + rootName + "' has " + skin.Weights.Length +
-                    " weights for " + skin.Mesh.VertexCount + " vertices at " + Influences + " influences",
-                    nameof(skin));
+                    " weights for " + skin.Mesh.VertexCount + " vertices at " + skin.Influences +
+                    " influences", nameof(skin));
 
             int bones = skin.BoneNames.Length;
             if (skin.BoneParents == null || skin.BoneParents.Length != bones)
@@ -393,18 +431,19 @@ namespace Morgott.ContentTool.Bake
             mesh["m_Name"].AsString = MeshName(rootName);
             MeshFields.Fill(mesh, skin.Mesh);
 
-            int n = skin.Mesh.VertexCount;
-            byte[] stream = new byte[n * SkinStride];
+            // NOTHING is imposed here: the width is the one the FILE actually uses (BakedSkin.Influences).
+            int n = skin.Mesh.VertexCount, inf = skin.Influences;
+            byte[] stream = new byte[n * SkinStride(inf)];
             for (int v = 0; v < n; v++)
             {
-                int at = v * SkinStride;
-                for (int i = 0; i < Influences; i++)
+                int at = v * SkinStride(inf);
+                for (int i = 0; i < inf; i++)
                 {
-                    Write(stream, at + i * 4, skin.Weights[v * Influences + i]);
-                    WriteU32(stream, at + Influences * 4 + i * 4, skin.Bones[v * Influences + i]);
+                    Write(stream, at + i * 4, skin.Weights[v * inf + i]);
+                    WriteU32(stream, at + inf * 4 + i * 4, skin.Bones[v * inf + i]);
                 }
             }
-            SetSkinStream(mesh, skin.Mesh, stream);
+            SetSkinStream(mesh, skin.Mesh, stream, inf);
 
             int bones = skin.BoneNames.Length;
             AssetTypeValueField poses = mesh["m_BindPose"]["Array"];
@@ -532,8 +571,8 @@ namespace Morgott.ContentTool.Bake
                    " indexCh=stream" + indexCh["stream"].AsByte + "/off" + indexCh["offset"].AsByte +
                    "/fmt" + indexCh["format"].AsByte + "/dim" + indexCh["dimension"].AsByte +
                    " bytes=" + (data == null ? 0 : data.Length) +
-                   " vertex0=" + Influence(data, skinAt, 0) +
-                   " vertexLast=" + Influence(data, skinAt, verts - 1) +
+                   " vertex0=" + Influence(data, skinAt, 0, InfluencesOf(mesh)) +
+                   " vertexLast=" + Influence(data, skinAt, verts - 1, InfluencesOf(mesh)) +
                    " | tree " + Tree(m, af, bones);
         }
 
@@ -573,9 +612,11 @@ namespace Morgott.ContentTool.Bake
         /// and only the cheap one is measurable offline.
         ///
         /// ponytail: one full-weight influence per vertex, so a vertex follows exactly one bone and a
-        /// joint creases instead of bending. Real smooth weights need a skinned interchange format
-        /// (.fbx/.gltf) carrying its own m_BoneWeights - import those and write them here instead,
-        /// the stream this fills already has room for <see cref="Influences"/> of them.
+        /// joint creases instead of bending. That is not a stream limit and widening it would only
+        /// fabricate more - the weld is synthesised, and there is nothing to spread it over. Real
+        /// smooth weights need a skinned interchange format carrying its own weights, which is
+        /// <see cref="RebindByName"/>. The remaining slots are written at weight 0 so the TARGET's
+        /// declared width survives the replacement.
         /// </summary>
         /// <summary>Does the target deform with a skeleton? Its own bind poses are the answer, which is
         /// the same thing <see cref="Rebind"/> keys on - one fact, read one way.</summary>
@@ -610,7 +651,12 @@ namespace Morgott.ContentTool.Bake
                    "can only replace a STATIC object (one with a MeshFilter, like a weapon).";
         }
 
-        internal static bool Rebind(AssetTypeValueField mesh, BakedMesh baked)
+        /// <param name="influences">
+        /// the width the target itself declared, read with <see cref="InfluencesOf"/> BEFORE
+        /// <see cref="MeshFields.Fill"/> cleared it. Below 1 it is taken as 1 - a mesh has to carry
+        /// the one influence this synthesises somewhere.
+        /// </param>
+        internal static bool Rebind(AssetTypeValueField mesh, BakedMesh baked, int influences)
         {
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
             if (baked == null) throw new ArgumentNullException(nameof(baked));
@@ -619,9 +665,10 @@ namespace Morgott.ContentTool.Bake
             int bones = bind.Length;
             if (bones == 0) return false;
 
+            int inf = Math.Max(influences, 1);
             int n = baked.VertexCount;
-            uint[] i0 = new uint[n], i1 = new uint[n];
-            float[] w0 = new float[n], w1 = new float[n];
+            uint[] idx = new uint[n * inf];
+            float[] w = new float[n * inf];
             for (int i = 0; i < n; i++)
             {
                 int at = i * BakedMesh.Stride;
@@ -644,10 +691,11 @@ namespace Morgott.ContentTool.Bake
                     if (d >= bestD) continue;
                     bestD = d; best = b;
                 }
-                i0[i] = (uint)best; w0[i] = 1f;
+                // Slot 0 takes the whole vertex; the rest stay at weight 0 on bone 0.
+                idx[i * inf] = (uint)best; w[i * inf] = 1f;
             }
 
-            WriteSkin(mesh, baked, bind, i0, w0, i1, w1);
+            WriteSkin(mesh, baked, bind, idx, w, inf);
             return true;
         }
 
@@ -671,12 +719,16 @@ namespace Morgott.ContentTool.Bake
         /// then dropped in favour of the shipped ones - the author's model has to be posed on the
         /// skeleton it replaces, which is what "extract, edit, drop back in" already means. Upgrade
         /// path: write them into m_BindPose too, once something needs to re-pose a shipped skeleton.
-        /// ponytail: this stream carries <see cref="Influences"/> = 2 influences and glTF hands over
-        /// 4, so the two heaviest win and are renormalised. Upgrade path: widen the stream (the
-        /// dimension is written from that same constant) once a model needs 4.
+        /// The stream is as wide as the TARGET declared - that upgrade path is taken: a dim4 shipped
+        /// mesh keeps all four of the file's influences, and a dim2 one keeps the two heaviest,
+        /// renormalised, because two is what its own vertex layout carries.
         /// </summary>
+        /// <param name="influences">
+        /// the target's own width, read with <see cref="InfluencesOf"/> BEFORE
+        /// <see cref="MeshFields.Fill"/> cleared it. Below 1 it is taken as 1.
+        /// </param>
         internal static bool RebindByName(AssetTypeValueField mesh, BakedMesh baked,
-                                          SkinnedModel file, IList<string> boneNames)
+                                          SkinnedModel file, IList<string> boneNames, int influences)
         {
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
             if (baked == null) throw new ArgumentNullException(nameof(baked));
@@ -701,41 +753,59 @@ namespace Morgott.ContentTool.Bake
                     (file.Positions == null ? 0 : file.Positions.Length).ToString(CultureInfo.InvariantCulture) +
                     " vertices but the baked mesh has " + n.ToString(CultureInfo.InvariantCulture));
 
-            uint[] i0 = new uint[n], i1 = new uint[n];
-            float[] w0 = new float[n], w1 = new float[n];
+            int inf = Math.Max(influences, 1);
+            int[] slots = new int[inf];
+            uint[] idx = new uint[n * inf];
+            float[] w = new float[n * inf];
             for (int i = 0; i < n; i++)
             {
-                int a, b;
-                Heaviest(file.Weights, i, out a, out b);
-                float wa = a < 0 ? 0f : file.Weights[i * 4 + a];
-                float wb = b < 0 ? 0f : file.Weights[i * 4 + b];
-                float sum = wa + wb;
-                // A vertex the file left unweighted would otherwise render at the origin; it goes
-                // whole to the bone its first slot names, which is what the file itself says.
-                if (sum <= 0f) { a = 0; wa = 1f; wb = 0f; sum = 1f; b = -1; }
-                i0[i] = joints[i * 4 + a]; w0[i] = wa / sum;
-                i1[i] = b < 0 ? i0[i] : joints[i * 4 + b]; w1[i] = wb / sum;
+                Heaviest(file.Weights, i, slots);
+                float sum = 0f;
+                for (int k = 0; k < inf; k++) if (slots[k] >= 0) sum += file.Weights[i * 4 + slots[k]];
+
+                int at = i * inf;
+                if (sum <= 0f)
+                {
+                    // A vertex the file left unweighted would otherwise render at the origin; it goes
+                    // whole to the bone its first slot names, which is what the file itself says.
+                    idx[at] = joints[i * 4]; w[at] = 1f;
+                    for (int k = 1; k < inf; k++) idx[at + k] = idx[at];
+                    continue;
+                }
+                for (int k = 0; k < inf; k++)
+                {
+                    // An empty slot rides the dominant bone at weight 0 - a bone index the mesh has
+                    // no bind pose for is what the engine reads as a broken skin.
+                    idx[at + k] = joints[i * 4 + (slots[k] >= 0 ? slots[k] : slots[0])];
+                    w[at + k] = slots[k] >= 0 ? file.Weights[i * 4 + slots[k]] / sum : 0f;
+                }
             }
 
-            WriteSkin(mesh, baked, bind, i0, w0, i1, w1);
+            WriteSkin(mesh, baked, bind, idx, w, inf);
             return true;
         }
 
         /// <summary>
-        /// The two heaviest of a glTF vertex's four influences, dominant first; -1 for a slot the
-        /// file left at zero. Shared with the P6 arm so the gate and the bake cannot disagree about
-        /// WHICH two of the four survive this stream's <see cref="Influences"/> - the arm's own
-        /// question is which BONE they land on, and that it derives independently.
+        /// The heaviest of a glTF vertex's four influences, dominant first, one per slot of
+        /// <paramref name="slots"/>; -1 for a slot the file has no non-zero weight left for. Shared
+        /// with the P6 arm so the gate and the bake cannot disagree about WHICH of the four survive a
+        /// narrower target - the arm's own question is which BONE they land on, and that it derives
+        /// independently.
         /// </summary>
-        internal static void Heaviest(float[] weights, int vertex, out int a, out int b)
+        internal static void Heaviest(float[] weights, int vertex, int[] slots)
         {
-            a = -1; b = -1;
-            for (int k = 0; k < 4; k++)
+            for (int s = 0; s < slots.Length; s++)
             {
-                float w = weights[vertex * 4 + k];
-                if (w <= 0f) continue;
-                if (a < 0 || w > weights[vertex * 4 + a]) { b = a; a = k; }
-                else if (b < 0 || w > weights[vertex * 4 + b]) b = k;
+                int best = -1;
+                for (int k = 0; k < 4; k++)
+                {
+                    if (weights[vertex * 4 + k] <= 0f) continue;
+                    bool taken = false;
+                    for (int t = 0; t < s; t++) if (slots[t] == k) { taken = true; break; }
+                    if (taken) continue;
+                    if (best < 0 || weights[vertex * 4 + k] > weights[vertex * 4 + best]) best = k;
+                }
+                slots[s] = best;
             }
         }
 
@@ -759,11 +829,14 @@ namespace Morgott.ContentTool.Bake
         /// <see cref="Rebind"/> and <see cref="RebindByName"/> so the two cannot lay the same bytes
         /// out differently - only WHERE the influences come from separates them.
         /// </summary>
+        /// <param name="idx">bone index per influence per vertex - <paramref name="influences"/> wide.</param>
+        /// <param name="w">the matching weights, same width, summing to 1 per vertex.</param>
         private static void WriteSkin(AssetTypeValueField mesh, BakedMesh baked, float[][] bind,
-                                      uint[] i0, float[] w0, uint[] i1, float[] w1)
+                                      uint[] idx, float[] w, int influences)
         {
             int bones = bind.Length, n = baked.VertexCount;
-            byte[] skin = new byte[n * SkinStride];
+            int stride = SkinStride(influences);
+            byte[] skin = new byte[n * stride];
             float[] minX = new float[bones], minY = new float[bones], minZ = new float[bones];
             float[] maxX = new float[bones], maxY = new float[bones], maxZ = new float[bones];
             bool[] used = new bool[bones];
@@ -777,7 +850,7 @@ namespace Morgott.ContentTool.Bake
                 // The bounds follow the DOMINANT influence, in that bone's own space. Left describing
                 // the old geometry these cull the new mesh away wherever the old one was not - which
                 // reads exactly like "the replacement did not load".
-                int d = (int)i0[i];
+                int d = (int)idx[i * influences];
                 float[] m = bind[d];
                 float tx = m[0] * x + m[1] * y + m[2] * z + m[3];
                 float ty = m[4] * x + m[5] * y + m[6] * z + m[7];
@@ -794,14 +867,15 @@ namespace Morgott.ContentTool.Bake
                     if (tz < minZ[d]) minZ[d] = tz; if (tz > maxZ[d]) maxZ[d] = tz;
                 }
 
-                int sa = i * SkinStride;
-                Write(skin, sa, w0[i]);
-                Write(skin, sa + 4, w1[i]);
-                WriteU32(skin, sa + 8, i0[i]);
-                WriteU32(skin, sa + 12, i1[i]);
+                int sa = i * stride;
+                for (int k = 0; k < influences; k++)
+                {
+                    Write(skin, sa + k * 4, w[i * influences + k]);
+                    WriteU32(skin, sa + influences * 4 + k * 4, idx[i * influences + k]);
+                }
             }
 
-            SetSkinStream(mesh, baked, skin);
+            SetSkinStream(mesh, baked, skin, influences);
 
             AssetTypeValueField aabbs = mesh["m_BonesAABB"]["Array"];
             aabbs.Children.Clear();
@@ -814,7 +888,7 @@ namespace Morgott.ContentTool.Bake
             }
 
             // The per-vertex influence COUNT of the old geometry. Left behind it is read in preference
-            // to the fixed two this stream carries - the same trap MeshFields.Fill clears for the
+            // to the width this stream declares - the same trap MeshFields.Fill clears for the
             // compressed mesh and the blend shapes.
             AssetTypeValueField var = mesh["m_VariableBoneCountWeights"];
             if (!var.IsDummy && !var["m_Data"].IsDummy) var["m_Data"]["Array"].Children.Clear();
@@ -842,20 +916,22 @@ namespace Morgott.ContentTool.Bake
                             " indexCh=stream" + b["stream"].AsByte + "/off" + b["offset"].AsByte +
                             "/fmt" + b["format"].AsByte + "/dim" + b["dimension"].AsByte;
             head += " " + layout;
-            if (layout != OurLayout) return head + " skinBytes=(other layout) boneMax=(other layout) inRange=(other layout)";
+            int inf = InfluencesOf(mesh);
+            if (layout != OurLayout(inf)) return head + " skinBytes=(other layout) boneMax=(other layout) inRange=(other layout)";
 
             int verts = (int)vd["m_VertexCount"].AsUInt;
             byte[] data = vd["m_DataSize"].AsByteArray;
-            int at = SkinOffset(verts);
+            int at = SkinOffset(verts), stride = SkinStride(inf);
             int bytes = data == null ? 0 : data.Length - at;
-            if (bytes != verts * SkinStride) return head + " skinBytes=" + bytes + " boneMax=(unreadable) inRange=no";
+            if (bytes != verts * stride) return head + " skinBytes=" + bytes + " boneMax=(unreadable) inRange=no";
 
             long max = -1;
             for (int i = 0; i < verts; i++)
-            {
-                long index = BitConverter.ToUInt32(data, at + i * SkinStride + Influences * 4);
-                if (index > max) max = index;
-            }
+                for (int k = 0; k < inf; k++)
+                {
+                    long index = BitConverter.ToUInt32(data, at + i * stride + inf * 4 + k * 4);
+                    if (index > max) max = index;
+                }
             return head + " skinBytes=" + bytes + " boneMax=" + max +
                    " inRange=" + (poses > 0 && max >= 0 && max < poses ? "yes" : "no");
         }
@@ -914,26 +990,33 @@ namespace Morgott.ContentTool.Bake
                             "/fmt" + w["format"].AsByte + "/dim" + w["dimension"].AsByte +
                             " indexCh=stream" + b["stream"].AsByte + "/off" + b["offset"].AsByte +
                             "/fmt" + b["format"].AsByte + "/dim" + b["dimension"].AsByte;
-            if (layout != OurLayout) return "(other layout: " + layout + ")";
+            int inf = InfluencesOf(mesh);
+            if (layout != OurLayout(inf)) return "(other layout: " + layout + ")";
 
             int verts = (int)vd["m_VertexCount"].AsUInt;
             byte[] data = vd["m_DataSize"].AsByteArray;
-            int at = SkinOffset(verts);
-            if (data == null || at + verts * SkinStride > data.Length) return "(skin stream is short)";
+            int at = SkinOffset(verts), stride = SkinStride(inf);
+            if (data == null || at + verts * stride > data.Length) return "(skin stream is short)";
             string s = "";
             for (int i = 0; i < verts; i++)
             {
-                int v = at + i * SkinStride;
-                s += (i == 0 ? "" : " ") + "v" + i + "=" +
-                     F(BitConverter.ToSingle(data, v)) + "/" + F(BitConverter.ToSingle(data, v + 4)) +
-                     "->bone" + BitConverter.ToUInt32(data, v + 8) +
-                     "+bone" + BitConverter.ToUInt32(data, v + 12);
+                int v = at + i * stride;
+                s += (i == 0 ? "" : " ") + "v" + i + "=";
+                for (int k = 0; k < inf; k++)
+                    s += (k == 0 ? "" : "/") + F(BitConverter.ToSingle(data, v + k * 4));
+                for (int k = 0; k < inf; k++)
+                    s += (k == 0 ? "->bone" : "+bone") + BitConverter.ToUInt32(data, v + inf * 4 + k * 4);
             }
             return s;
         }
 
-        /// <summary>The channel layout <see cref="SetSkinStream"/> writes, as SkinSummary prints it.</summary>
-        internal const string OurLayout = "weightCh=stream1/off0/fmt0/dim2 indexCh=stream1/off8/fmt10/dim2";
+        /// <summary>The channel layout <see cref="SetSkinStream"/> writes at a given width, as
+        /// SkinSummary prints it.</summary>
+        internal static string OurLayout(int influences)
+        {
+            return "weightCh=stream1/off0/fmt0/dim" + influences +
+                   " indexCh=stream1/off" + influences * 4 + "/fmt10/dim" + influences;
+        }
 
         // ---------------------------------------------------------------- internals
 
@@ -942,16 +1025,17 @@ namespace Morgott.ContentTool.Bake
         /// stream 0. Shared by the from-scratch bake and by <see cref="Rebind"/> so the two cannot
         /// describe the same bytes differently.
         /// </summary>
-        private static void SetSkinStream(AssetTypeValueField mesh, BakedMesh baked, byte[] skin)
+        private static void SetSkinStream(AssetTypeValueField mesh, BakedMesh baked, byte[] skin,
+                                          int influences)
         {
             AssetTypeValueField vd = mesh["m_VertexData"];
             AssetTypeValueField channels = vd["m_Channels"]["Array"];
             AssetTypeValueField w = channels.Children[ChannelBlendWeight];
             w["stream"].AsInt = 1; w["offset"].AsInt = 0;
-            w["format"].AsInt = FormatFloat32; w["dimension"].AsInt = Influences;
+            w["format"].AsInt = FormatFloat32; w["dimension"].AsInt = influences;
             AssetTypeValueField b = channels.Children[ChannelBlendIndices];
-            b["stream"].AsInt = 1; b["offset"].AsInt = Influences * 4;
-            b["format"].AsInt = FormatUInt32; b["dimension"].AsInt = Influences;
+            b["stream"].AsInt = 1; b["offset"].AsInt = influences * 4;
+            b["format"].AsInt = FormatUInt32; b["dimension"].AsInt = influences;
 
             int skinAt = SkinOffset(baked.VertexCount);
             byte[] all = new byte[skinAt + skin.Length];
@@ -970,21 +1054,22 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>
-        /// The skin stream: for every vertex, <see cref="Influences"/> float weights then the same
-        /// number of UInt32 bone indices. One full-weight influence per vertex - see the class remark.
+        /// The skin stream of the two-bone FIXTURE: for every vertex, <see cref="FixtureInfluences"/>
+        /// float weights then the same number of UInt32 bone indices. One full-weight influence per
+        /// vertex - see the class remark.
         /// </summary>
         private static void SkinBuffer(BakedMesh baked, float boneY, bool splitWeights,
                                        out byte[] stream, out int[] boneOfVertex)
         {
             int n = baked.VertexCount;
             boneOfVertex = new int[n];
-            stream = new byte[n * SkinStride];
+            stream = new byte[n * SkinStride(FixtureInfluences)];
             for (int i = 0; i < n; i++)
             {
                 // Vertex Y out of stream 0 - position is channel 0, so it is the second float.
                 float y = BitConverter.ToSingle(baked.VertexData, i * BakedMesh.Stride + 4);
                 boneOfVertex[i] = splitWeights && y >= baked.CenterY ? 1 : 0;
-                int at = i * SkinStride;
+                int at = i * SkinStride(FixtureInfluences);
                 Write(stream, at, 1f);                                  // weight of influence 0
                 Write(stream, at + 4, 0f);                              // influence 1 unused
                 WriteU32(stream, at + 8, (uint)boneOfVertex[i]);
@@ -1001,7 +1086,7 @@ namespace Morgott.ContentTool.Bake
             // with the shipped-mesh replacement path so the two cannot drift.
             MeshFields.Fill(mesh, baked);
 
-            SetSkinStream(mesh, baked, skin);
+            SetSkinStream(mesh, baked, skin, FixtureInfluences);
 
             // bone0 sits on the root, bone1 boneY above it, so the bind pose (the INVERSE of the
             // bone's rest transform) is identity and a -boneY translation.
@@ -1083,13 +1168,17 @@ namespace Morgott.ContentTool.Bake
             Buffer.BlockCopy(BitConverter.GetBytes(value), 0, to, at, 4);
         }
 
-        /// <summary>"w0/w1->bone" for one vertex of the skin stream, read back out of the bytes.</summary>
-        private static string Influence(byte[] data, int skinAt, int vertex)
+        /// <summary>"w0/w1->bone" for one vertex of the skin stream, read back out of the bytes - as
+        /// many weights as the mesh declares, then the DOMINANT bone.</summary>
+        private static string Influence(byte[] data, int skinAt, int vertex, int influences)
         {
-            int at = skinAt + vertex * SkinStride;
-            if (data == null || vertex < 0 || at + SkinStride > data.Length) return "(out of range)";
-            return F(BitConverter.ToSingle(data, at)) + "/" + F(BitConverter.ToSingle(data, at + 4)) +
-                   "->bone" + BitConverter.ToUInt32(data, at + 8);
+            int stride = SkinStride(influences);
+            int at = skinAt + vertex * stride;
+            if (data == null || vertex < 0 || influences < 1 || at + stride > data.Length) return "(out of range)";
+            string s = "";
+            for (int k = 0; k < influences; k++)
+                s += (k == 0 ? "" : "/") + F(BitConverter.ToSingle(data, at + k * 4));
+            return s + "->bone" + BitConverter.ToUInt32(data, at + influences * 4);
         }
 
         private static string BoneName(AssetsManager m, AssetsFileInstance af, AssetTypeValueField bones, int index)

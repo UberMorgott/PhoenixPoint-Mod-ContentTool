@@ -201,6 +201,33 @@ skin data to import, so the weights are SYNTHESISED by a y-split); no blend shap
 meshes U5 measured carry — the count is per mesh, declared by the channel `dimension`, so writing 2
 over a 4 target is legal and the gate proves the engine reads it.
 
+**The 2 was OURS, and it is gone (2026-08-31).** Legal is not the same as right: writing 2 over a
+dim4 target DOWNGRADED it, and every Phoenix soldier body part is dim4. Re-measured off the shipped
+`px_assault_assets_all.bundle`, all 11 skinned meshes: `CHR_PX_ASS_TS_M_V01_02` (4962 verts, 10 bind
+poses) `weightCh=stream2/off0/fmt0/dim4 indexCh=stream2/off16/fmt10/dim4`, and
+`CHR_PX_ASS_HG_M_V01_02` a rigid attachment at `weight dim0 / index dim1`. Nothing in PP's C# ever
+sets `QualitySettings.skinWeights` or `SkinnedMeshRenderer.quality`, so the mesh's own dimension is
+the whole story. The width is now READ, never chosen:
+- **replacement** (`SkinFields.Rebind` / `RebindByName`) keeps the TARGET's own count,
+  `SkinFields.InfluencesOf` read in `BundleBaker.ReplaceMesh` *before* `MeshFields.Fill` clears every
+  channel dimension. dim4 stays dim4 and carries four of the file's influences; dim2 stays dim2 and
+  keeps the two heaviest, renormalised — correct there, not a truncation we chose.
+- **add** (`BuildModel`) takes `BakedSkin.Influences`, the most influences any one vertex of the
+  **file** actually weights, 1..4.
+- **nearest-bone fallback** still writes ONE full-weight influence — it is a synthesised weld and
+  widening it would only fabricate more — but declares the target's width, zeroes in the rest.
+- the only constant left is `SkinFields.FixtureInfluences = 2`, the shape of U5's own two-bone
+  fixture, which has no file and no target to read.
+
+Offline arm `tests\ObjCodecTests\SkinWidth.cs`, reading both shipped bundles in the same run.
+**FALSIFIED four ways** (each RED verbatim, then restored): narrowing `RebindByName` back to 2 →
+`a dim4 target STAYS dim4 through a by-name replacement: … weightCh=stream1/off0/fmt0/dim2 … skinBytes=48`;
+hard-coding 4 instead → `a dim2 target stays dim2 … dim4 … skinBytes=96`; pinning
+`BakedSkin.Influences = 2` → `the import keeps all four of the file's influences per vertex: 2` and,
+with that tripwire disabled, `a model ADDED from a .glb with four influences per vertex is written
+dim4: … weightCh=stream1/off0/fmt0/dim2`; spreading the weld over two slots →
+`and puts ONE full-weight influence in slot 0, the rest at zero: v0=0.5/0.5/0/0->bone0+…`.
+
 **FALSIFIED twice, build `07304eb1` and `6ed6d7c8`.** (A) `Rebind` returning early, doing nothing —
 this is EXACTLY the pre-U5b code — turned `U5b-wrote` RED, `U5b-deform` RED (`y=[0,2]`) and both `P5`
 arms RED (`weightCh=stream0/off0/fmt0/dim0`), while `P4`, `P4-ctl-shipped` and every U5 arm stayed

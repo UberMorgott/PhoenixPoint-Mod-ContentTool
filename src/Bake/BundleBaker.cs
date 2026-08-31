@@ -153,6 +153,11 @@ namespace Morgott.ContentTool.Bake
                 : null;
             if (refusal != null) return null;
 
+            // BEFORE Fill, which clears every channel dimension: this is the target's own influences
+            // per vertex, and writing fewer over it would DOWNGRADE its skinning (PP ships dim4 body
+            // parts as well as dim2 creatures - SkinFields.InfluencesOf).
+            int influences = SkinFields.InfluencesOf(mesh);
+
             MeshFields.Fill(mesh, baked);
 
             string how;
@@ -160,7 +165,7 @@ namespace Morgott.ContentTool.Bake
                 ? null : SkinFields.BoneNames(man, afileInst, info.PathId);
             if (names == null)
             {
-                how = SkinFields.Rebind(mesh, baked)
+                how = SkinFields.Rebind(mesh, baked, influences)
                     ? "nearest-bone, one full-weight influence per vertex (" +
                       (model == null ? "the source carries no armature"
                                      : "no SkinnedMeshRenderer in this bundle names the target's bones") + ")"
@@ -172,13 +177,14 @@ namespace Morgott.ContentTool.Bake
                 // the fallback below binds the very same geometry the strict path was handed.
                 try
                 {
-                    SkinFields.RebindByName(mesh, baked, model, names);
+                    SkinFields.RebindByName(mesh, baked, model, names, influences);
                     how = "BY NAME onto the target's own " + names.Length +
-                          " bones, carrying the file's own weights";
+                          " bones, carrying " + Math.Max(influences, 1) +
+                          " of the file's own influences per vertex";
                 }
                 catch (Exception ex)
                 {
-                    SkinFields.Rebind(mesh, baked);
+                    SkinFields.Rebind(mesh, baked, influences);
                     how = "nearest-bone - the file's own weights were NOT used: " + ex.Message;
                 }
             }
@@ -854,6 +860,26 @@ namespace Morgott.ContentTool.Bake
                 }
                 return "no Mesh named " + meshName + " in " + bundlePath;
             });
+        }
+
+        /// <summary>
+        /// The influences per vertex a Mesh in a bundle FILE declares
+        /// (<see cref="SkinFields.InfluencesOf"/>) - what a replacement of it must not narrow, and so
+        /// what the P5/P6 arms have to predict at. 0 when there is no such mesh.
+        /// </summary>
+        internal static int ReadInfluenceCount(string bundlePath, string meshName)
+        {
+            int found = 0;
+            Read(bundlePath, (m, afile) =>
+            {
+                foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Mesh))
+                {
+                    AssetTypeValueField mesh = m.GetBaseField(afile, i);
+                    if (mesh["m_Name"].AsString == meshName) found = SkinFields.InfluencesOf(mesh);
+                }
+                return "";
+            });
+            return found;
         }
 
         /// <summary>
