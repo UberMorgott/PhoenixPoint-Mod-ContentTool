@@ -1467,6 +1467,14 @@ namespace Morgott.ContentTool.Bake
                     new List<KeyValuePair<string, ShippedReplacement>>();
                 using (BundleBaker baker = new BundleBaker(shipped, p.Id))
                 {
+                    // EVERY REFUSAL BELOW IS `failures++; continue;`, NEVER A RETURN. Returning out of
+                    // here abandoned the remaining replacements in this bundle AND every bundle after
+                    // it, skipped baker.Write so the copy was never produced at all, and still reported
+                    // "1 FAILURE(S)" - one count for any number of replacements that silently did not
+                    // happen. Measured on a project whose first of four rows was a skinless mesh onto a
+                    // rigged target: the other two meshes were never patched and the texture refusal was
+                    // never printed. Same rule as the source importers (9a3747b, c74658f) - reported and
+                    // skipped, and the count says how many.
                     foreach (ShippedReplacement r in p.Replace)
                     {
                         if (!string.Equals(r.bundle, bundleFile, StringComparison.OrdinalIgnoreCase)) continue;
@@ -1479,7 +1487,7 @@ namespace Morgott.ContentTool.Bake
                                                                  CultureInfo.InvariantCulture, out v))
                             {
                                 log.AppendLine("P3 REFUSED \"material\": \"" + r.material + "\" is not <property>=<number>");
-                                return failures + 1;
+                                failures++; continue;
                             }
                             baker.ReplaceMaterialFloat(r.asset, kv[0], v);
                             mats.Add(new KeyValuePair<string, string>(r.asset, kv[0] + "=" +
@@ -1496,7 +1504,7 @@ namespace Morgott.ContentTool.Bake
                             if (why != null)
                             {
                                 log.AppendLine("P7 REFUSED \"clip\": \"" + r.clip + "\" " + why);
-                                return failures + 1;
+                                failures++; continue;
                             }
                             string walked = baker.ReplaceClipCurves(r.asset, attribute, k);
                             clips.Add(new KeyValuePair<string, ShippedReplacement>(r.asset, r));
@@ -1512,14 +1520,14 @@ namespace Morgott.ContentTool.Bake
                             {
                                 log.AppendLine("P4 REFUSED '" + r.mesh + "' is not a .obj or .glb under Content\\Meshes\\" +
                                                Elsewhere(p, r.mesh, "Meshes"));
-                                return failures + 1;
+                                failures++; continue;
                             }
                             string refusal;
                             string how = baker.ReplaceMesh(r.asset, im.Baked, im.Model, out refusal);
                             if (refusal != null)
                             {
                                 log.AppendLine("P4 REFUSED '" + im.Name + "' -> " + refusal);
-                                return failures + 1;
+                                failures++; continue;
                             }
                             meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));
                             log.AppendLine("patch " + bundleFile + ": mesh '" + r.asset + "' <- " + im.Name +
@@ -1532,7 +1540,7 @@ namespace Morgott.ContentTool.Bake
                         {
                             log.AppendLine("P1 REFUSED '" + r.texture + "' is not a .png/.jpg under Content\\Textures\\" +
                                            Elsewhere(p, r.texture, "Textures"));
-                            return failures + 1;
+                            failures++; continue;
                         }
                         baker.ReplaceTexture2D(r.asset, t.Width, t.Height, t.Rgba32);
                         want.Add(t);

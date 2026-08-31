@@ -241,7 +241,9 @@ namespace Morgott.ContentTool.Dev
             // Destroy before returning: no Mark owns `ours` yet, so a bare return leaks the native
             // mesh on every refused attempt - the same shape the texture refusal above already has.
             if (smr != null && (model == null || model.JointNames.Count == 0))
-            { UnityEngine.Object.Destroy(ours); return "ct_replace REFUSED: " + Bake.SkinFields.Skinless(p.Transform); }
+            // tr.name, not p.Transform: the target may be addressed in a form that leaves the path
+            // empty, and the refusal then named '' instead of the renderer the player is looking at.
+            { UnityEngine.Object.Destroy(ours); return "ct_replace REFUSED: " + Bake.SkinFields.Skinless(tr.name); }
 
             string skin = smr != null ? LiveMesh.Bind(ours, smr, model) : null;
             Mark m = new Mark
