@@ -899,11 +899,28 @@ namespace Morgott.ContentTool.Import
         /// <see cref="above"/> for why it exists at all. A joint whose <see cref="SkinNode.Parent"/> is
         /// -1 is a root of the imported rig; the matrix wanted is the world transform of the glTF NODE
         /// that carries it, which is the part of <c>globalTransformOfJointNode</c> the inverse bind
-        /// matrices alone cannot state.
+        /// matrices alone cannot state. That reading holds while the node carrying the roots is the
+        /// armature OBJECT, which is Blender's own shape and what u8_probe/u8_rootfold assert.
         ///
-        /// All root bones must share it, because <see cref="Carry"/> folds it into the vertex buffer
-        /// once. Two roots under differently-transformed objects would each need their own, and no
-        /// single vertex space satisfies both - so that is refused by name rather than half applied.
+        /// TWO ROOTS UNDER DIFFERENT TRANSFORMS ARE IMPORTED, NOT REFUSED, AND THE FOLD IS DROPPED.
+        /// A Phoenix Point BODY-PART mesh exported together with its rig is exactly that shape:
+        /// CHR_PX_HVY_TS_M_V01's ten joints hang one under each of Root, Spine_1..3, Chest, both
+        /// Shoulders, both Arms and Neck, so every one of them is a root with its own parent matrix.
+        /// Those parents are BONES, already inside the space the bind poses are written in - folding
+        /// one in would apply the spine chain twice - and there is no single fold to pick anyway:
+        /// <see cref="Carry"/> moves the ONE vertex buffer by <c>over</c> and every bind pose by its
+        /// inverse, so <c>boneWorld * bindPose</c> stays the identity - an undeformed rest - only while
+        /// one matrix answers for every root. Identity is the only matrix that does, and it is the
+        /// file's own statement: the bind poses stand exactly as written.
+        ///
+        /// It used to throw here instead, and the refusal told the author to run Blender's
+        /// Object > Apply > All Transforms. That REWRITES the skin (a 10-joint / 17561-vertex torso
+        /// came back 19 joints / 26059 vertices) and destroyed the weights it was supposed to fix, so
+        /// no refusal on this path may ever suggest it again.
+        ///
+        /// ponytail: no per-root fold - geometrically impossible with one vertex buffer, see above.
+        /// A body part under a SCALED armature object therefore imports at the armature's own scale;
+        /// if one ever turns up, the lever is glTF's own skins[].skeleton, not a second fold.
         /// </summary>
         private float[] Above(List<object> nodes, SkinnedModel model)
         {
@@ -916,10 +933,7 @@ namespace Morgott.ContentTool.Import
                 float[] one = over < 0 ? Identity() : World(nodes, over);
                 if (shared == null) { shared = one; continue; }
                 for (int i = 0; i < 16; i++)
-                    if (Math.Abs(shared[i] - one[i]) > 1e-6f)
-                        throw Bad("the file hangs the armature's root bones under objects with different " +
-                            "transforms, so no single orientation fits the whole skeleton; in Blender put every " +
-                            "root bone under ONE armature object and re-export");
+                    if (Math.Abs(shared[i] - one[i]) > 1e-6f) return Identity();
             }
             return shared ?? Identity();
         }

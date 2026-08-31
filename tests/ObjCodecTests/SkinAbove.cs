@@ -143,7 +143,95 @@ internal static class SkinAbove
         return "SKIN-ABOVE PASS, " + checks + " check(s) - u8_probe.glb imports Y-UP at the authored scale: " +
                "half-extents X " + F(half[0]) + " Y " + F(half[1]) + " Z " + F(half[2]) +
                ", feet coplanar on " + AxisName[flattest] + " at " + F(footMean) + " under the body at " + F(bodyMean) +
-               ", root bone scale " + F(column) + "\n  " + RootCurve() + "\n  " + Hard();
+               ", root bone scale " + F(column) + "\n  " + RootCurve() + "\n  " + Hard() + "\n  " + BodyPart();
+    }
+
+    /// <summary>
+    /// THE SHAPE OF A PHOENIX POINT BODY-PART MESH, which the importer used to REFUSE by name. A part
+    /// exported together with the rig it fits carries one joint per attachment point, and each of those
+    /// hangs under a DIFFERENT bone of the real skeleton - CHR_PX_HVY_TS_M_V01's ten joints hang under
+    /// Root, Spine_1..3, Chest, both Shoulders, both Arms and Neck. Every one of them is therefore a
+    /// root of the imported rig with its own parent transform, and reading those parents as if each
+    /// were an armature OBJECT would apply the spine chain twice.
+    ///
+    /// Nothing needs folding: those parents are BONES, already inside the space the bind poses are
+    /// written in, so the poses stand as written and <c>over</c> is the identity. Two joints reproduce
+    /// the case:
+    ///   node 0 'spine'        translate (0,1,0)                    - not a joint
+    ///   node 1 'arm'          translate (1,0,0), +90 deg about Z   - not a joint, child of 'spine'
+    ///   node 2 'spine_addon'  joint 0, under 'spine'   bind = inverse(T(0,1,0))
+    ///   node 3 'arm_addon'    joint 1, under 'arm'     bind = inverse(T(1,1,0)*Rz90)
+    /// so the two parents' world transforms DISAGREE - which is what the old rule refused on - while
+    /// the bind poses already state the whole thing. Every number below is derived from that JSON by
+    /// hand: Unity negates X, so the bones must rest at (0,1,0) and (-1,1,0) and the vertices must
+    /// arrive untouched apart from that flip.
+    /// </summary>
+    private static string BodyPart()
+    {
+        var b = new ClipImport.Bin();
+        int position = b.Vec(3, "VEC3", 0f, 1f, 0f, 1f, 1f, 0f, 0f, 2f, 0f);
+        int normal = b.Vec(3, "VEC3", 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f);
+        int joints = b.Joints(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0);
+        int weights = b.Vec(3, "VEC4", 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f);
+        int indices = b.Indices(0, 1, 2);
+        int bind = b.Vec(2, "MAT4",
+            1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,   0, -1, 0, 1,
+            0, -1, 0, 0, 1, 0, 0, 0,  0, 0, 1, 0,  -1,  1, 0, 1);
+
+        string json =
+            "{\"asset\":{\"version\":\"2.0\"}," +
+            "\"scenes\":[{\"nodes\":[0,4]}],\"scene\":0," +
+            "\"nodes\":[" +
+              "{\"name\":\"spine\",\"children\":[1,2],\"translation\":[0,1,0]}," +
+              "{\"name\":\"arm\",\"children\":[3],\"translation\":[1,0,0]," +
+                "\"rotation\":[0,0,0.70710678,0.70710678]}," +
+              "{\"name\":\"spine_addon\"}," +
+              "{\"name\":\"arm_addon\"}," +
+              "{\"name\":\"body\",\"mesh\":0,\"skin\":0}]," +
+            "\"skins\":[{\"joints\":[2,3],\"inverseBindMatrices\":" + bind + "}]," +
+            "\"meshes\":[{\"name\":\"bodypart\",\"primitives\":[{\"attributes\":{\"POSITION\":" + position +
+              ",\"NORMAL\":" + normal + ",\"JOINTS_0\":" + joints + ",\"WEIGHTS_0\":" + weights +
+              "},\"indices\":" + indices + "}]}]," +
+            b.Json() + "}";
+
+        SkinnedModel model = GlbReader.Read(ClipImport.Container(json, b.Bytes()));
+        int checks = Check(model.JointNames.Count == 2 && model.JointNames[0] == "spine_addon" &&
+                           model.JointNames[1] == "arm_addon",
+            "the file's two joints came back: " + string.Join(", ", model.JointNames.ToArray()));
+        checks += Check(model.Nodes[0].Parent < 0 && model.Nodes[1].Parent < 0,
+            "neither joint's ancestors are joints, so both are roots of the imported rig: parents " +
+            model.Nodes[0].Parent + " and " + model.Nodes[1].Parent);
+
+        // ---- the vertices arrive as the file states them, X-flipped and NOTHING else. A fold taken
+        // off either parent node would move them: 'spine' by +1 on Y, 'arm' by (-1,1,0) and a turn.
+        checks += Check(Vec(model.Positions[0], 0f, 1f, 0f) && Vec(model.Positions[1], -1f, 1f, 0f) &&
+                        Vec(model.Positions[2], 0f, 2f, 0f),
+            "the baked vertices are the file's own, X-flipped: " + V(model.Positions[0]) + " " +
+            V(model.Positions[1]) + " " + V(model.Positions[2]) +
+            " (want (0,1,0) (-1,1,0) (0,2,0)) - a transform is being folded in that the bind poses " +
+            "already carry");
+
+        // ---- the relation the whole importer rests on, per bone: an undeformed rest pose.
+        float[][] want = { new[] { 0f, 1f, 0f }, new[] { -1f, 1f, 0f } };
+        for (int j = 0; j < 2; j++)
+        {
+            float[] world = ModelBuild.Invert(model.InverseBindMatrices[j], model.JointNames[j]);
+            float[] round = ModelBuild.Multiply(world, model.InverseBindMatrices[j]);
+            for (int i = 0; i < 16; i++)
+                checks += Check(Math.Abs(round[i] - (i % 5 == 0 ? 1f : 0f)) < 1e-4f,
+                    "bone '" + model.JointNames[j] + "': boneWorld * bindPose is not the identity at [" +
+                    i + "] = " + F(round[i]) + ", so the rest pose is torn");
+            // ---- and each bone rests where ITS OWN parent chain puts it, not where the first
+            // joint's parent does: that is the difference a single global fold cannot state.
+            for (int a = 0; a < 3; a++)
+                checks += Check(Math.Abs(world[12 + a] - want[j][a]) < 1e-4f,
+                    "bone '" + model.JointNames[j] + "' rests at " + AxisName[a] + " = " + F(world[12 + a]) +
+                    ", and its own node's world transform states " + F(want[j][a]));
+        }
+
+        return "BODY-PART PASS, " + checks + " check(s) - two joints under DIFFERENTLY transformed " +
+               "parents import instead of refusing: verts " + V(model.Positions[0]) + " " +
+               V(model.Positions[1]) + " " + V(model.Positions[2]) + " | bones rest at (0,1,0) and (-1,1,0)";
     }
 
     /// <summary>
