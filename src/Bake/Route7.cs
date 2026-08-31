@@ -236,10 +236,20 @@ namespace Morgott.ContentTool.Bake
                     ? "the patched copies in " + patched + " were built from a different project, game " +
                       "build or ContentTool format - re-baking them"
                     : "no patched copies yet - baking them from YOUR installation");
-                pre.AppendLine(ProjectBake.Run(projectRoot));
-                // After the bake, and only after it: a key written ahead of a failed bake would make
-                // the broken output look current for the rest of this install's life.
-                Project.PatchCache.Write(patched, key);
+                // After the bake, and only after a bake that REPORTED NOTHING WRONG. "After it" was
+                // not enough: ProjectBake.Run states a failure in its own last line rather than
+                // throwing, so a project with one unusable source - a malformed mesh that is skipped,
+                // a replacement that refused - wrote the key anyway and last month's patched copy was
+                // served as current for the life of this install. Leaving the key unwritten costs one
+                // re-bake on the next enable, which is the right price for output nobody vouched for.
+                string report = ProjectBake.Run(projectRoot);
+                pre.AppendLine(report);
+                if (report.IndexOf("FAILURE", StringComparison.Ordinal) < 0)
+                    Project.PatchCache.Write(patched, key);
+                else
+                    pre.AppendLine("the bake above reported failures, so " + patched + " is NOT marked " +
+                                   "current - fix the source it names and enable the mod again, or the " +
+                                   "copies below are whatever the last good bake produced");
             }
             List<KeyValuePair<string, string>> copies = new List<KeyValuePair<string, string>>();
             if (Directory.Exists(patched))
