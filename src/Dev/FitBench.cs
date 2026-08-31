@@ -118,9 +118,44 @@ namespace Morgott.ContentTool.Dev
                 case "open":  return open ? "ct_bench: already open" : Open();
                 case "close": return entered ? Close() : "ct_bench: not open";
                 case "reset": return entered ? ResetView() : "ct_bench: not open";
-                default:      return "ct_bench: args are [open|close|reset], or none to toggle. Hotkey " +
-                                     HotkeyLabel;
+                case "unit":  return open ? Choose(args) : "ct_bench: not open";
+                default:      return "ct_bench: args are [open|close|reset|unit <name>], or none to " +
+                                     "toggle. Hotkey " + HotkeyLabel;
             }
+        }
+
+        /// <summary>ct_bench unit &lt;name&gt; - the unit picker's own answer typed instead of clicked, for
+        /// a script or a hand already on the console. Exact def name wins; otherwise a SINGLE substring
+        /// match, and an ambiguous name is refused WITH its candidates rather than guessed at. It ends
+        /// in <see cref="Pick"/> like the list row does, so there is one selection path and it cannot
+        /// drift from what the mouse does.</summary>
+        private static string Choose(string[] args)
+        {
+            string q = args != null && args.Length > 1
+                     ? string.Join(" ", args, 1, args.Length - 1).Trim() : "";
+            if (q.Length == 0)
+                return "ct_bench: 'unit <name>' needs a name - " + units.Count + " templates to match.";
+            List<TacCharacterDef> hits = new List<TacCharacterDef>();
+            foreach (TacCharacterDef d in units)
+            {
+                if (string.Equals(d.name, q, StringComparison.OrdinalIgnoreCase))
+                { hits.Clear(); hits.Add(d); break; }
+                if (BenchList.Matches(d.name, q)) hits.Add(d);
+            }
+            if (hits.Count == 0) return "ct_bench: no unit template matches '" + q + "'.";
+            if (hits.Count > 1)
+            {
+                List<string> names = new List<string>();
+                for (int i = 0; i < hits.Count && i < 8; i++) names.Add(hits[i].name);
+                return "ct_bench: '" + q + "' matches " + hits.Count + " templates, so nothing was " +
+                       "changed - name one of: " + string.Join(", ", names.ToArray()) +
+                       (hits.Count > names.Count ? ", ..." : "");
+            }
+            unit = hits[0];
+            // Picked, so out of the way - the same thing a click on the row does.
+            unitsOpen = false;
+            Pick();
+            return message;
         }
 
         // ---------------------------------------------------------------- what is on screen
@@ -1253,10 +1288,21 @@ namespace Morgott.ContentTool.Dev
         /// broken; it was simply unreachable, which for a button is the same thing.
         ///
         /// So the panel is now ordered by how often a thing is touched: escape hatch, what is selected,
-        /// the view, THE DIAL, the answer line - and only then the two pickers, which collapse
-        /// themselves once they have been used. <see cref="BenchList.DialReachable"/> asserts offline
-        /// that everything down to the answer line fits above the fold, and the outer scroll view is
-        /// the backstop for a window smaller than that.
+        /// THE PICKERS, the view, THE DIAL, the answer line. <see cref="BenchList.DialReachable"/>
+        /// asserts offline that everything down to the answer line fits above the fold, and the outer
+        /// scroll view is the backstop for a window smaller than that.
+        ///
+        /// ============ AND THE PICKERS ARE NOT LAST ============
+        /// They used to be, underneath the dial, and that is the defect the author hit: "one model, the
+        /// same guy all the time". <see cref="BenchList.Rows"/> budgets the panel by COUNTING ROWS, and
+        /// three of those rows are Labels that WRAP - the view readout, the dial's SAVE caption and the
+        /// answer block. Measured in a 1302x776 window: everything above the pickers really occupies
+        /// 671 px where the budget says 444, so the two lists were pushed clean off the bottom with
+        /// panelScroll still at zero. The panel looked complete and the unit list was simply not on
+        /// screen. Counting rows can never predict wrapped text, so the fix is not better arithmetic:
+        /// the pickers are drawn BEFORE the blocks that wrap, where nothing above them can grow.
+        /// Closed - which is how they sit the moment something has been picked - they cost two rows,
+        /// so the dial block is exactly where S29 left it.
         /// </summary>
         private static void Draw()
         {
@@ -1289,14 +1335,17 @@ namespace Morgott.ContentTool.Dev
             GUILayout.Label("weapon: " + BenchList.Elide(weapon == null ? "-" : weapon.name, BenchList.NameChars) +
                             (weapon == null ? "" : fitKey != null ? "  [tunable]" : "  [vanilla]"));
 
-            View();
-            Dial(fitKey);
-            Message();
-
+            // THE PICKERS COME BEFORE THE WRAPPING BLOCKS. See the note on Draw: closed they are two
+            // rows, so the dial stays where S29 put it; open they push the dial down, which is right,
+            // because while a unit is being chosen the dial is not what is being looked at.
             float unitH, weaponH;
             BenchList.Rows(viewportH, fitKey != null, unitsOpen, weaponsOpen, out unitH, out weaponH);
             Units(unitH);
             Weapons(fitKey, weaponH);
+
+            View();
+            Dial(fitKey);
+            Message();
 
             GUILayout.EndScrollView();
             GUILayout.EndArea();

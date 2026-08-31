@@ -602,7 +602,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_fit THREW " + ex); }
             }
 
-            [ConsoleCommand(Command = "ct_bench", Description = "ContentTool (dev workbench): the WEAPON FIT WORKBENCH - a full-screen view with a unit standing in the squad bay and lists to pick a unit template, pick a weapon, nudge its position/rotation/scale per axis and save. Same service ct_fit drives, with an eye on it. Needs a loaded geoscape campaign (the squad bay lives there); shipped weapons are viewable for comparison but have no manifest row to tune or save. Hotkey Ctrl+Alt+B (NOT F9 - that is the game's own quickload). Args: [open|close], none toggles.")]
+            [ConsoleCommand(Command = "ct_bench", Description = "ContentTool (dev workbench): the WEAPON FIT WORKBENCH - a full-screen view with a unit standing in the squad bay and lists to pick a unit template, pick a weapon, nudge its position/rotation/scale per axis and save. Same service ct_fit drives, with an eye on it. Needs a loaded geoscape campaign (the squad bay lives there); shipped weapons are viewable for comparison but have no manifest row to tune or save. Hotkey Ctrl+Alt+B (NOT F9 - that is the game's own quickload). Args: [open|close|reset|unit <name>], none toggles; 'unit' picks a template by name (exact, or a unique substring) instead of clicking the list.")]
             public static void CtBench(IConsole console, params string[] args)
             {
                 try { Out(console, Dev.FitBench.Run(args)); }
