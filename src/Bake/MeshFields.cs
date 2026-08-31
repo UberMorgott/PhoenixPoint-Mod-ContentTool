@@ -206,7 +206,7 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static string[] MaterialNames(AssetsManager m, AssetsFileInstance af, long meshPathId)
         {
-            string[] found = null;
+            var drawn = new List<string[]>();
             foreach (AssetClassID kind in new[] { AssetClassID.SkinnedMeshRenderer, AssetClassID.MeshRenderer })
                 foreach (AssetFileInfo i in af.file.Metadata.GetAssetsOfType(kind))
                 {
@@ -225,38 +225,41 @@ namespace Morgott.ContentTool.Bake
                                   ? "slot " + names.Count.ToString(CultureInfo.InvariantCulture)
                                   : mat["m_Name"].AsString);
                     }
-                    if (found == null) { found = names.ToArray(); continue; }
-                    // The variants DISAGREE - which is normal, a shipped mesh is drawn by its default,
-                    // Gold and Xmas renderers. Returning null here said "no materials at all" and the
-                    // report then called every part undrawn, which is false. Say WHICH names vary
-                    // instead; the slot COUNT is what the mapping needs and the variants share it.
-                    string[] merged = new string[Math.Max(found.Length, names.Count)];
-                    for (int b = 0; b < merged.Length; b++)
-                    {
-                        string a = b < found.Length ? found[b] : "none";
-                        string c = b < names.Count ? names[b] : "none";
-                        merged[b] = Alternatives(a, c);
-                    }
-                    found = merged;
+                    drawn.Add(names.ToArray());
                 }
-            // Said ONCE per slot, after every variant has been folded in - not per fold, which
-            // repeated it for the third renderer.
-            if (found != null)
-                for (int b = 0; b < found.Length; b++)
-                    if (found[b].Contains(" or ")) found[b] += " (varies by renderer variant)";
-            return found;
+            return Fold(drawn);
         }
 
         /// <summary>
-        /// One slot's alternative material names, folded. EXACT membership, not substring: shipped
-        /// ALN_Fireworm is drawn by one renderer with 'ALN_Fireworm_DMG' and another with
-        /// 'ALN_Fireworm', and a Contains test swallowed the second - reporting a mesh whose variants
-        /// genuinely differ as if they agreed, marker and all.
+        /// One display name per material slot, out of what each renderer that draws the mesh calls
+        /// that slot. The variants DISAGREEING is normal - a shipped mesh has its default, Gold and
+        /// Xmas renderers - so the alternatives are kept as NAMES and only joined into " or " text
+        /// here, at the one place that renders them. Parsing that text back into names is what let a
+        /// material legitimately called 'Red or Blue' fold into itself twice, and what let
+        /// 'ALN_Fireworm_DMG' swallow 'ALN_Fireworm' when the test was Contains. null when nothing
+        /// draws the mesh, which is a different answer from "the renderers disagree".
         /// </summary>
-        internal static string Alternatives(string have, string add)
+        internal static string[] Fold(IList<string[]> renderers)
         {
-            return Array.IndexOf(have.Split(new[] { " or " }, StringSplitOptions.None), add) >= 0
-                   ? have : have + " or " + add;
+            if (renderers == null || renderers.Count == 0) return null;
+            var slots = new List<List<string>>();
+            bool seen = false;
+            foreach (string[] names in renderers)
+            {
+                while (slots.Count < names.Length)
+                    slots.Add(seen ? new List<string> { "none" } : new List<string>());
+                for (int b = 0; b < slots.Count; b++)
+                {
+                    string n = b < names.Length ? names[b] : "none";
+                    if (!slots[b].Contains(n)) slots[b].Add(n);
+                }
+                seen = true;
+            }
+            string[] found = new string[slots.Count];
+            for (int b = 0; b < slots.Count; b++)
+                found[b] = string.Join(" or ", slots[b].ToArray()) +
+                           (slots[b].Count > 1 ? " (varies by renderer variant)" : "");
+            return found;
         }
 
         /// <summary>Does a MeshFilter on <paramref name="gameObject"/> carry this mesh?</summary>

@@ -85,14 +85,20 @@ internal static class SubmeshSlots
             // The fold behind the variant marker: a name that merely CONTAINS another is a different
             // material. Shipped case - ALN_Fireworm is drawn as 'ALN_Fireworm_DMG' by one renderer
             // and 'ALN_Fireworm' by another, and swallowing the second hid the variation entirely.
-            Ok(MeshFields.Alternatives("ALN_Fireworm_DMG", "ALN_Fireworm") ==
-               "ALN_Fireworm_DMG or ALN_Fireworm",
+            Ok(MeshFields.Fold(new[] { new[] { "ALN_Fireworm_DMG" }, new[] { "ALN_Fireworm" } })[0] ==
+               "ALN_Fireworm_DMG or ALN_Fireworm (varies by renderer variant)",
                "a name that is a prefix of another is a SEPARATE alternative, not a duplicate");
-            Ok(MeshFields.Alternatives("ALN_Fireworm", "ALN_Fireworm") == "ALN_Fireworm",
-               "an identical name is still folded away");
-            Ok(MeshFields.Alternatives("a or b", "b") == "a or b" &&
-               MeshFields.Alternatives("a or b", "c") == "a or b or c",
-               "an alternative already listed is not repeated, a new one is appended");
+            Ok(MeshFields.Fold(new[] { new[] { "ALN_Fireworm" }, new[] { "ALN_Fireworm" } })[0] == "ALN_Fireworm",
+               "an identical name is folded away, marker and all");
+            // The alternatives are NAMES, never re-parsed out of the joined text: a material actually
+            // called 'Red or Blue' would double if the fold ever split its own display string.
+            Ok(MeshFields.Fold(new[] { new[] { "Red or Blue" }, new[] { "Red or Blue" } })[0] == "Red or Blue",
+               "a material whose own name contains ' or ' is reported once, not doubled");
+            Ok(MeshFields.Fold(new[] { new[] { "a" }, new[] { "b" }, new[] { "a" } })[0] ==
+               "a or b (varies by renderer variant)",
+               "a third renderer repeating the first adds nothing and the marker is said once");
+            Ok(MeshFields.Fold(new string[0][]) == null && MeshFields.Fold(null) == null,
+               "a mesh nothing draws stays null");
 
             return Variants();
         }
