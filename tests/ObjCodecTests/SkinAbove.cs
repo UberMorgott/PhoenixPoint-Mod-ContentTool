@@ -219,7 +219,7 @@ internal static class SkinAbove
 
         // ---- the clip: the root bone's own curve, in the vertices' space.
         SampledTrack root = clips[0].Tracks[0];
-        checks += Check(clips[0].Tracks.Count == 1 && root.Node == 0 && clips[0].Times.Length == 2,
+        checks += Check(clips[0].Tracks.Count == 1 && root.Node == 0 && clips[0].Times.Length == 4,
             "the clip drives the root bone alone, on the 1 Hz grid its keys state: " +
             clips[0].Tracks.Count + " track(s) x " + clips[0].Times.Length + " frame(s)");
         checks += Check(Vec(root.Translations[0], model.Positions[1].X, model.Positions[1].Y, model.Positions[1].Z),
@@ -228,7 +228,7 @@ internal static class SkinAbove
             " - the armature's transform is not reaching the samples");
         checks += Check(Vec(root.Translations[1], -500f, 0f, 0f),
             "and glTF x = 5 under the same fold is -500: " + V(root.Translations[1]));
-        for (int f = 0; f < 2; f++)
+        for (int f = 0; f < 4; f++)
             checks += Check(Vec(root.Scales[f], 100f, 100f, 100f),
                 "a channel the file leaves out keeps the bone's OWN rest under the fold, so the scale " +
                 "is the armature's 100 at frame " + f + ": " + V(root.Scales[f]));
@@ -236,6 +236,26 @@ internal static class SkinAbove
             "frame 0 has no rotation of its own, so it is the armature's -90 about X: " + Q(root.Rotations[0]));
         checks += Check(Quat(root.Rotations[1], -0.5f, -0.5f, 0.5f, 0.5f),
             "and frame 1 is that composed with the curve's own +90 about glTF +Y: " + Q(root.Rotations[1]));
+
+        // ---- ONE HEMISPHERE ACROSS THE BRANCH BOUNDARY. Frames 2 and 3 turn the root -20 and -60 deg
+        // about X, which the fold's own -90 carries to -110 and -150 - either side of the -120 where
+        // Decompose stops reading the trace and starts reading the largest diagonal. That branch forces
+        // its pivot component non-negative, so frame 3 comes back as the NEGATED twin of the rotation
+        // the samples state: the same orientation, which |dot| below cannot tell apart and which the
+        // runtime ramps to the long way round. Only the sign-SENSITIVE dot here sees it.
+        checks += Check(Quat(root.Rotations[2], -0.8191520f, 0f, 0f, 0.5735764f),
+            "frame 2 is the fold's -90 plus the curve's -20, i.e. -110 about X: " + Q(root.Rotations[2]));
+        checks += Check(Quat(root.Rotations[3], -0.9659258f, 0f, 0f, 0.2588190f),
+            "frame 3 is -150 about X, the far side of the branch boundary: " + Q(root.Rotations[3]));
+        for (int f = 1; f < 4; f++)
+        {
+            ObjQuaternion a = root.Rotations[f - 1], b = root.Rotations[f];
+            checks += Check(a.X * b.X + a.Y * b.Y + a.Z * b.Z + a.W * b.W > 0f,
+                "frames " + (f - 1) + " and " + f + " state the same continuous turn but come back in " +
+                "OPPOSITE hemispheres, " + Q(a) + " then " + Q(b) + " - a dense bank has no way to say " +
+                "'same rotation', so the runtime ramps between them the long way round and the bone " +
+                "spins for one frame");
+        }
 
         return "ROOT-FOLD PASS, " + checks + " check(s) - u8_rootfold.glb (armature -90 about X, scale " +
                "100; root bone driven in translation AND rotation): verts " + V(model.Positions[1]) + " " +

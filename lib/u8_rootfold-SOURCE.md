@@ -29,8 +29,15 @@ Gate **U8**'s HARD case, read straight off disk by `tests\ObjCodecTests\SkinAbov
   JOINTS_0 `0 / 0 / 1`, WEIGHTS_0 `1` — so vertices 0 and 1 hang on `Root` and vertex 2 on `Child`.
 - **Inverse bind matrices**, armature-object-LOCAL (which is what Blender writes — see
   `SkinAbove`'s class remark): `Root` identity, `Child` translate `(0,-1,0)`.
-- **Animation** `RootDrive`, both samplers LINEAR on key times `0` and `1` s, both driving **node 1,
-  the root bone**: translation `(1,0,0) -> (5,0,0)`, rotation identity `-> (0,0.70710678,0,0.70710678)`
-  (+90° about glTF +Y).
+- **Animation** `RootDrive`, both samplers LINEAR on key times `0 1 2 3` s, both driving **node 1,
+  the root bone**:
+  - translation `(1,0,0) -> (5,0,0) -> (5,0,0) -> (5,0,0)`;
+  - rotation `identity -> (0,.70710678,0,.70710678)` (+90° about glTF +Y)
+    `-> (-.17364818,0,0,.98480775)` (−20° about X) `-> (-.5,0,0,.86602540)` (−60° about X).
+  The last two keys exist for the HEMISPHERE case: composed with the fold's own −90° about X they
+  read −110° and −150°, which straddle the −120° where `GlbCodec.Decompose` stops branching on the
+  trace and starts branching on the largest diagonal. That branch forces its pivot component
+  non-negative, so frame 3 decomposes to the NEGATED twin of the rotation the samples state unless
+  the fold keeps consecutive frames in one hemisphere. Exactly one such crossing is in the clip.
 - The first translation key is deliberately the file's **own vertex 1**, so the arm can assert that
   the sample and the baked vertex land on the SAME Unity coordinate rather than on two constants.

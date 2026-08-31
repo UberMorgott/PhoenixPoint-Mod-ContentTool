@@ -1355,6 +1355,16 @@ namespace Morgott.ContentTool.Import
                 ObjVector3 s = track.Scales == null ? new ObjVector3(s0[0], s0[1], s0[2]) : track.Scales[f];
                 float[] ft, fr, fs;
                 GlbCodec.Decompose(ModelBuild.Multiply(over, Trs(t, r, s)), bone, out ft, out fr, out fs);
+                // ONE HEMISPHERE, frame to frame. Decompose branches on the largest diagonal and each
+                // branch forces its own pivot component non-negative, so two frames that straddle a
+                // branch boundary come back as q and -q for rotations the samples state as continuous.
+                // A dense clip bank stores one quaternion per frame and no way to say "same rotation":
+                // the runtime ramps between the two stored values, takes the long way round, and the
+                // bone spins for one frame. q and -q ARE the same rotation, so picking the one that
+                // agrees with the previous frame costs nothing and removes the jump.
+                if (f > 0 && rotations[f - 1].X * fr[0] + rotations[f - 1].Y * fr[1] +
+                             rotations[f - 1].Z * fr[2] + rotations[f - 1].W * fr[3] < 0f)
+                    for (int i = 0; i < 4; i++) fr[i] = -fr[i];
                 translations[f] = new ObjVector3(ft[0], ft[1], ft[2]);
                 rotations[f] = new ObjQuaternion(fr[0], fr[1], fr[2], fr[3]);
                 scales[f] = new ObjVector3(fs[0], fs[1], fs[2]);
