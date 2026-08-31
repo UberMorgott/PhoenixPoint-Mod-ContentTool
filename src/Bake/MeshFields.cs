@@ -172,12 +172,16 @@ namespace Morgott.ContentTool.Bake
             suspect = true;
             int real = shard == 0 ? 1 : 0;
             for (int i = 0; i < parts; i++) if (triangleCounts[i] == biggest) real = i;
-            // ONLY a shard with parts BEHIND it displaces anything: material N follows part N, so a
-            // stray triangle at the end shifts nothing and saying otherwise would be a false claim.
-            string consequence = shard < parts - 1
+            // ONLY a shard with REAL geometry behind it displaces anything: material N follows part N,
+            // so trailing shards shift nothing and saying otherwise would be a false claim. "Real",
+            // not "any part": [900, 1, 1] has a part after the first shard, and still moves nothing.
+            bool realFollows = false;
+            for (int i = shard + 1; i < parts; i++) if (triangleCounts[i] > ShardTriangles) realFollows = true;
+            string consequence = realFollows
                 ? ", and every part after it takes the material meant for the part before - which is " +
                   "why your real geometry is painted wrongly. "
-                : ", and being last it displaces nothing - but it still claims a material slot of its own. ";
+                : ", and with no real geometry after it nothing is displaced - but it still claims a " +
+                  "material slot of its own. ";
             return fileName + " part " + (shard + 1).ToString(CultureInfo.InvariantCulture) + " of " +
                    parts.ToString(CultureInfo.InvariantCulture) + " has only " +
                    triangleCounts[shard].ToString(CultureInfo.InvariantCulture) +
@@ -231,7 +235,7 @@ namespace Morgott.ContentTool.Bake
                     {
                         string a = b < found.Length ? found[b] : "none";
                         string c = b < names.Count ? names[b] : "none";
-                        merged[b] = a == c || a.Contains(c) ? a : a + " or " + c;
+                        merged[b] = Alternatives(a, c);
                     }
                     found = merged;
                 }
@@ -241,6 +245,18 @@ namespace Morgott.ContentTool.Bake
                 for (int b = 0; b < found.Length; b++)
                     if (found[b].Contains(" or ")) found[b] += " (varies by renderer variant)";
             return found;
+        }
+
+        /// <summary>
+        /// One slot's alternative material names, folded. EXACT membership, not substring: shipped
+        /// ALN_Fireworm is drawn by one renderer with 'ALN_Fireworm_DMG' and another with
+        /// 'ALN_Fireworm', and a Contains test swallowed the second - reporting a mesh whose variants
+        /// genuinely differ as if they agreed, marker and all.
+        /// </summary>
+        internal static string Alternatives(string have, string add)
+        {
+            return Array.IndexOf(have.Split(new[] { " or " }, StringSplitOptions.None), add) >= 0
+                   ? have : have + " or " + add;
         }
 
         /// <summary>Does a MeshFilter on <paramref name="gameObject"/> carry this mesh?</summary>

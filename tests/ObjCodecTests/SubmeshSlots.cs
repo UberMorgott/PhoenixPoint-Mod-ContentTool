@@ -69,12 +69,30 @@ internal static class SubmeshSlots
             // A shard BEHIND the real geometry displaces nothing, and the warning must not claim it does.
             string last = MeshFields.SubmeshReport("x.glb", new[] { 900, 1 }, new[] { "a", "b" }, out suspect);
             Ok(suspect, "a trailing 1-triangle part is still flagged");
-            Ok(last.Contains("being last it displaces nothing") &&
+            Ok(last.Contains("no real geometry after it nothing is displaced") &&
                !last.Contains("painted wrongly"),
                "it does NOT claim the real geometry moved: " + last);
+
+            // ...and SEVERAL trailing shards displace nothing either, though a part does follow.
+            string two = MeshFields.SubmeshReport("x.glb", new[] { 900, 1, 1 }, new[] { "a", "b", "c" }, out suspect);
+            Ok(suspect && two.Contains("no real geometry after it nothing is displaced") &&
+               !two.Contains("painted wrongly"),
+               "two trailing shards displace nothing either: " + two);
             Ok(MeshFields.SubmeshReport("x.glb", new[] { 1, 900 }, new[] { "a", "b" }, out suspect)
                          .Contains("every part after it takes the material meant for the part before"),
                "while a LEADING shard still says what it displaces");
+
+            // The fold behind the variant marker: a name that merely CONTAINS another is a different
+            // material. Shipped case - ALN_Fireworm is drawn as 'ALN_Fireworm_DMG' by one renderer
+            // and 'ALN_Fireworm' by another, and swallowing the second hid the variation entirely.
+            Ok(MeshFields.Alternatives("ALN_Fireworm_DMG", "ALN_Fireworm") ==
+               "ALN_Fireworm_DMG or ALN_Fireworm",
+               "a name that is a prefix of another is a SEPARATE alternative, not a duplicate");
+            Ok(MeshFields.Alternatives("ALN_Fireworm", "ALN_Fireworm") == "ALN_Fireworm",
+               "an identical name is still folded away");
+            Ok(MeshFields.Alternatives("a or b", "b") == "a or b" &&
+               MeshFields.Alternatives("a or b", "c") == "a or b or c",
+               "an alternative already listed is not repeated, a new one is appended");
 
             return Variants();
         }
