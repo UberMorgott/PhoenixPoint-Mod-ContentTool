@@ -63,7 +63,8 @@ internal static class MeshRoundTrip
         Assert(skinAfter.EndsWith(" inRange=yes", StringComparison.Ordinal),
                "every bone index names a bind pose the mesh has: " + skinAfter);
 
-        return "MESH round trip PASS on " + Bundle + "\n  target  " + before + "\n       -> " + after +
+        return "MESH round trip PASS on " + Bundle + "\n  skinless " + Skinless(classData, shipped) +
+               "\n  target  " + before + "\n       -> " + after +
                "\n  skin    " + skinBefore + "\n       -> " + skinAfter +
                "\n  control " + controlAfter + "\n  byName  " + ByName(classData, shipped);
     }
@@ -154,6 +155,41 @@ internal static class MeshRoundTrip
         float[] f = new float[16];
         f[0] = f[5] = f[10] = f[15] = 1f;
         return f;
+    }
+
+    /// <summary>
+    /// THE PREDICATE THE SKINLESS REFUSAL KEYS ON, against real shipped meshes rather than a fixture:
+    /// a mesh with no armature may replace a STATIC object and may NOT replace a rigged one, and the
+    /// difference is the target's own bind poses. Both answers are asserted in the same bundle, so a
+    /// Rigged() that had been stubbed either way turns this red.
+    ///
+    /// Asserted here and not through BundleBaker.ReplaceMesh because that needs a live Unity; the guard
+    /// there is one call to this predicate.
+    /// </summary>
+    private static string Skinless(string classData, string bundlePath)
+    {
+        AssetsManager m = new AssetsManager();
+        m.LoadClassPackage(classData);
+        BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
+        AssetsFileInstance af = m.LoadAssetsFileFromBundle(bun, 0, false);
+        m.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
+        try
+        {
+            Assert(SkinFields.Rigged(m.GetBaseField(af, Find(m, af, Target))),
+                   "'" + Target + "' is rigged, so a file with no armature is refused for it");
+
+            // The STATIC half, made out of the same shipped mesh rather than looked for: this bundle
+            // ships no unrigged mesh at all, and a target with its bind poses taken away IS the static
+            // case as far as the rule is concerned - one fact, read one way (SkinFields.Rigged).
+            AssetTypeValueField statik = m.GetBaseField(af, Find(m, af, Target));
+            statik["m_BindPose"]["Array"].Children.Clear();
+            Assert(!SkinFields.Rigged(statik),
+                   "the same mesh with no bind poses is NOT rigged, so a file with no armature still " +
+                   "replaces a static object - which is what demos\\WeaponMesh does");
+            return "rigged '" + Target + "' refuses a file with no armature; the same mesh stripped of " +
+                   "its bind poses still accepts one";
+        }
+        finally { m.UnloadAll(); }
     }
 
     /// <summary>bindposes/hashes/rootHash/bonesAABB out of a skin summary; null when not rigged.</summary>

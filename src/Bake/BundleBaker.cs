@@ -139,10 +139,20 @@ namespace Morgott.ContentTool.Bake
         /// (<see cref="SkinFields.Rebind"/>) and SAYS why.
         /// </summary>
         /// <param name="model">the .glb this geometry came out of, or null for an .obj.</param>
-        internal string ReplaceMesh(string assetName, BakedMesh baked, SkinnedModel model = null)
+        internal string ReplaceMesh(string assetName, BakedMesh baked, SkinnedModel model, out string refusal)
         {
             AssetFileInfo info = FindUnique(AssetClassID.Mesh, assetName);
             AssetTypeValueField mesh = man.GetBaseField(afileInst, info);
+
+            // A SKINLESS SOURCE CANNOT SKIN A RIGGED TARGET, and saying so beats welding it. Checked
+            // before MeshFields.Fill and long before SetNewData, so a refusal writes nothing at all and
+            // the player keeps the model they had. Static targets are untouched - they have no bind
+            // poses, so Rigged is false and the whole guard is skipped.
+            refusal = model == null || model.JointNames.Count == 0
+                ? SkinFields.Rigged(mesh) ? SkinFields.Skinless(assetName) : null
+                : null;
+            if (refusal != null) return null;
+
             MeshFields.Fill(mesh, baked);
 
             string how;

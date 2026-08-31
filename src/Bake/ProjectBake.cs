@@ -29,7 +29,7 @@ namespace Morgott.ContentTool.Bake
         /// older copy on disk cannot silently skip the new arm. Guarding on the presence of a field
         /// instead let the material entry go unwritten and P3 never ran (ct_project 14:28).
         /// </summary>
-        internal const string SampleStamp = "\"sample\": 18";
+        internal const string SampleStamp = "\"sample\": 19";
 
         /// <summary>
         /// How far past its declared length an .mp3 may decode.
@@ -1507,7 +1507,13 @@ namespace Morgott.ContentTool.Bake
                                                Elsewhere(p, r.mesh, "Meshes"));
                                 return failures + 1;
                             }
-                            string how = baker.ReplaceMesh(r.asset, im.Baked, im.Model);
+                            string refusal;
+                            string how = baker.ReplaceMesh(r.asset, im.Baked, im.Model, out refusal);
+                            if (refusal != null)
+                            {
+                                log.AppendLine("P4 REFUSED '" + im.Name + "' -> " + refusal);
+                                return failures + 1;
+                            }
                             meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));
                             log.AppendLine("patch " + bundleFile + ": mesh '" + r.asset + "' <- " + im.Name +
                                            " " + im.Baked.Describe() + " - skinned " + how);
@@ -2090,7 +2096,6 @@ namespace Morgott.ContentTool.Bake
   ""replace"": [
     { ""bundle"": ""aln_fireworm_assets_all.bundle"", ""asset"": ""fireworm_low_emissive"", ""texture"": ""swatch"" },
     { ""bundle"": ""aln_fireworm_assets_all.bundle"", ""asset"": ""ALN_Fireworm_DMG"", ""material"": ""_Glossiness=0.875"" },
-    { ""bundle"": ""px_assault_assets_all.bundle"", ""asset"": ""CHR_PX_ASS_TS_M_V01_02"", ""mesh"": ""blade"" },
     { ""bundle"": ""px_assault_assets_all.bundle"", ""asset"": ""CHR_PX_ASS_TS_F_V01"", ""mesh"": ""rigfix"" },
     { ""bundle"": ""px_assault_assets_all.bundle"", ""asset"": ""CHR_PX_ASS_RL_F_V01"", ""mesh"": ""foreign"" },
     { ""bundle"": ""aln_fireworm_assets_all.bundle"", ""asset"": ""Fireworm_unfurl"", ""clip"": ""position*3"" },
@@ -2141,12 +2146,12 @@ namespace Morgott.ContentTool.Bake
             // 'ALN_Siren_Arm_Slasher_Right' because a Siren is a late-campaign enemy nobody can
             // eyeball - the starting squad wears this armour on the very first roster screen, and
             // both genders are declared so it shows whoever the campaign rolled.
-            // A quad, so the gate's numbers are readable by eye: 4 verts, 6 indices, extent 0.5,0.5,0.
-            File.WriteAllText(Path.Combine(msh, "blade.obj"),
-                "v -0.5 -0.5 0\nv 0.5 -0.5 0\nv 0.5 0.5 0\nv -0.5 0.5 0\n" +
-                "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n" +
-                "vn 0 0 -1\n" +
-                "f 1/1/1 2/2/1 3/3/1\nf 1/1/1 3/3/1 4/4/1\n");
+            // The 4-vertex 'blade.obj' quad that used to sit here, and its row onto the MALE torso, are
+            // GONE: a skinless source onto a rigged target is refused now (SkinFields.Skinless), so the
+            // sample cannot declare one without baking red. What it proved - nearest-bone synthesis on
+            // a rigged target - is still exercised by the 'foreign' row below, whose .glb has an
+            // armature the target does not know, and the static case it never covered is
+            // demos\WeaponMesh.
 
             // The .glb half of the same target: the FEMALE torso, replaced by a file that carries its
             // own armature. Generated from the SHIPPED skeleton in this same folder, because that is

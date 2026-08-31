@@ -301,10 +301,11 @@ The TARGET PATH names the slot, so there is one command and no new verbs:
   `MeshBuild`), so the preview is the mesh that would ship, not a look-alike.
 - **A rigged target keeps the shipped skeleton, and a `.glb` keeps its OWN WEIGHTS.** A `.glb`
   carrying an armature binds with its own `WEIGHTS_0` onto that shipped skeleton, bones matched BY
-  NAME (so the file's joint ORDER is free) — see §17. An `.obj`, or a `.glb` whose armature is
-  foreign to the target, falls back to `SkinFields.Rebind`'s nearest-bind-pose synthesis — one
-  full-weight influence per vertex, a joint creases instead of bending — and the bake log SAYS SO,
-  so the downgrade is never silent. `localBounds` moves with the mesh, or the new geometry is culled
+  NAME (so the file's joint ORDER is free) — see §17. A `.glb` whose armature is foreign to the
+  target falls back to `SkinFields.Rebind`'s nearest-bind-pose synthesis — one full-weight influence
+  per vertex, a joint creases instead of bending — and the bake log SAYS SO, so the downgrade is
+  never silent. A file with NO armature at all (an `.obj`, an unweighted `.glb`) is REFUSED for a
+  rigged target and replaces static objects only. `localBounds` moves with the mesh, or the new geometry is culled
   wherever the old one was not.
 - The game's Mesh/Material/Texture objects are NEVER written — a clone is assigned — so `ct_revert`
   puts back the origin OBJECTS by reference, not by value.
@@ -376,9 +377,12 @@ MyMod\Content\Meshes\torso.glb        # armature + WEIGHTS_0, exported from Blen
   SHIPPED skeleton spells them.
 - The file's own `WEIGHTS_0` is what gets written, so a vertex may be shared between bones and a
   joint BENDS. This is the ceiling U5b/R5 used to state, and it is retired.
-- **`.obj`, or a `.glb` whose armature is foreign to the target, falls back** to nearest-bone
-  synthesis (one full-weight influence per vertex, rigid) — and the bake log says which one you got.
-  Read it; there is no silent downgrade, but there is also no error.
+- **A `.glb` whose armature is foreign to the target falls back** to nearest-bone synthesis (one
+  full-weight influence per vertex, rigid) — and the bake log says which one you got. Read it; there
+  is no silent downgrade, but there is also no error.
+- **A file with no armature is REFUSED for a rigged target**, by name, and nothing is written: there
+  are no weights to follow the skeleton with, so every vertex would weld to one bone. Weight the mesh
+  to the target's own bones in Blender and export `.glb`. Static objects still take a bare mesh.
 - Same path live in the dev workbench, no restart: `ct_replace <target>@SkinnedMeshRenderer.mesh
   <file.glb>` (§15).
 

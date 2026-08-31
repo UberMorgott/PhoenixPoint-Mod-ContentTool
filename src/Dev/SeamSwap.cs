@@ -235,6 +235,11 @@ namespace Morgott.ContentTool.Dev
             Morgott.ContentTool.Import.SkinnedModel model;
             Mesh ours = LiveMesh.Load(file, out why, out model);
             if (ours == null) return "ct_replace REFUSED: " + why;
+            // The live twin of BundleBaker.ReplaceMesh's guard, and it has to be here rather than in
+            // LiveMesh.Bind: nothing may be assigned on a refusal, or the player watches their
+            // character weld itself to a hip mid-animation. A MeshFilter target never reaches this.
+            if (smr != null && (model == null || model.JointNames.Count == 0))
+                return "ct_replace REFUSED: " + Bake.SkinFields.Skinless(p.Transform);
 
             string skin = smr != null ? LiveMesh.Bind(ours, smr, model) : null;
             Mark m = new Mark

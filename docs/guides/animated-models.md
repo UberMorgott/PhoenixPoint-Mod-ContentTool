@@ -53,8 +53,13 @@ ct_route7 apply RiggedHead
 Missing, added or duplicate bones are named in the refusal. Do not “fix” one by renaming the target
 in the manifest; the mismatch is inside the GLB armature.
 
-An OBJ, or a GLB without a compatible skin, uses the geometry/nearest-bone fallback. That is useful
-for a rigid accessory. It is not a way to make an unrelated humanoid deform correctly.
+A GLB whose armature is foreign to the target uses the geometry/nearest-bone fallback. It is not a
+way to make an unrelated humanoid deform correctly.
+
+A file with no armature at all — an OBJ, or an unweighted GLB — is REFUSED for a rigged target and
+nothing is written: there are no weights to follow the skeleton with, so every vertex would weld to
+one bone and the model would collapse onto it as soon as the character moves. Weight the mesh to the
+target's own bones and export a GLB. Static objects (a weapon, a prop) still take a bare mesh.
 
 ## Bring the model's own skeleton and clips
 

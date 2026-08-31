@@ -577,6 +577,39 @@ namespace Morgott.ContentTool.Bake
         /// (.fbx/.gltf) carrying its own m_BoneWeights - import those and write them here instead,
         /// the stream this fills already has room for <see cref="Influences"/> of them.
         /// </summary>
+        /// <summary>Does the target deform with a skeleton? Its own bind poses are the answer, which is
+        /// the same thing <see cref="Rebind"/> keys on - one fact, read one way.</summary>
+        internal static bool Rigged(AssetTypeValueField mesh)
+        {
+            return mesh != null && BindPoses(mesh).Length > 0;
+        }
+
+        /// <summary>
+        /// Why a mesh with no armature cannot replace a RIGGED one. Both replacement paths - the bake
+        /// (BundleBaker.ReplaceMesh) and the live swap (SeamSwap) - refuse with this exact sentence,
+        /// because a refusal in only one of them is worse than none.
+        ///
+        /// The nearest-bone synthesis below still exists and still runs: it is what a .glb whose
+        /// armature is somebody ELSE's falls back to. What is refused is the case with no weights to
+        /// fall back FROM, where every vertex was welded to one bone and the author saw their model
+        /// collapse onto a hip mid-animation without being told why.
+        ///
+        /// ponytail: no opt-in flag. Nothing shipped depends on skinless-onto-rigged - the one demo
+        /// that replaces a mesh with a skinless source (demos\WeaponMesh) targets a STATIC
+        /// MeshFilter, which this does not touch. Add a manifest key if a real rigid attachment ever
+        /// turns up.
+        /// </summary>
+        internal static string Skinless(string target)
+        {
+            return "'" + target + "' is a rigged model - it bends with the character's skeleton - and " +
+                   "the replacement file carries no armature, so there are no weights to follow that " +
+                   "skeleton with. Every vertex would be welded to whichever bone it happens to sit " +
+                   "nearest, and the model would collapse onto that one bone as soon as the character " +
+                   "moves. In Blender, give the mesh an Armature modifier with vertex groups, weight it " +
+                   "to the bones the target already has, and export it as .glb. A file with no armature " +
+                   "can only replace a STATIC object (one with a MeshFilter, like a weapon).";
+        }
+
         internal static bool Rebind(AssetTypeValueField mesh, BakedMesh baked)
         {
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
