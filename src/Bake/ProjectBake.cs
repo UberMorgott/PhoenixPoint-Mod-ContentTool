@@ -66,6 +66,9 @@ namespace Morgott.ContentTool.Bake
             // the clip path). Printed ahead of the "nothing to bake" return, or a project holding
             // only a bad sound would say nothing about it.
             foreach (string refusal in p.SourceRefusals) log.AppendLine("SOURCE SKIPPED: " + refusal);
+            // An importer that THREW is a failure of this run even though the rest of the project still
+            // bakes: skipping it must not turn into "ALL PASS" over a model that never made it in.
+            failures += p.ImportFailures;
             // PATCHING SHIPPED BUNDLES IS ITS OWN WORK, and it comes FIRST. The guard below used to
             // stand ahead of it, so a project whose only declaration is a "material" or a "clip" row
             // - no .png, no .glb, no .wav of its own - returned "nothing to bake" and produced no
@@ -80,11 +83,14 @@ namespace Morgott.ContentTool.Bake
             // had written none, and route vii then refused it for holding no .bundle.
             int patchedBundles = Bundles(p).Count;
             if (p.Textures.Count == 0 && p.Audio.Count == 0 && p.Models.Count == 0)
-                return log.Append(p.Replace.Count == 0
-                    ? "nothing to bake - put .png/.jpg under Content\\Textures\\, " +
-                      ".glb under Content\\Models\\ or .wav under Content\\Audio\\"
-                    : failures != 0
-                        ? "ct_project: " + failures + " FAILURE(S)"
+                // FAILURES FIRST. A project whose only model refused to import has nothing left to bake,
+                // and saying "nothing to bake" for it reports the symptom as if it were the state of
+                // an empty folder - the run has to end on the count.
+                return log.Append(failures != 0
+                    ? "ct_project: " + failures + " FAILURE(S)"
+                    : p.Replace.Count == 0
+                        ? "nothing to bake - put .png/.jpg under Content\\Textures\\, " +
+                          ".glb under Content\\Models\\ or .wav under Content\\Audio\\"
                         : patchedBundles > 0
                             ? "ct_project: ALL PASS - this project has no bundle of its own; the patched " +
                               "copy(ies) above are the whole output"

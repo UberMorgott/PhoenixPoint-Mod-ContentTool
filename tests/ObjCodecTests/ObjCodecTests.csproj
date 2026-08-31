@@ -17,6 +17,11 @@
     <Compile Include="SkinRoundTrip.cs" />
     <Compile Include="ModelRoundTrip.cs" />
     <Compile Include="SkinAbove.cs" />
+    <!-- The skip-one-source rule carries no UnityEngine type on purpose (SourceImport's own remark),
+         so "a bad mesh does not cost the project its bundle" is proven here rather than by watching a
+         mod fail to activate. -->
+    <Compile Include="..\..\src\Project\SourceImport.cs" Link="SourceImport.cs" />
+    <Compile Include="SourceSkip.cs" />
     <Compile Include="MaterialBake.cs" />
     <Compile Include="MaterialTweakFixture.cs" />
     <Compile Include="ClipRoundTrip.cs" />

@@ -241,6 +241,11 @@ namespace Morgott.ContentTool.Project
         /// The bake reports each line out loud - a skipped source is never a silent one.
         /// </summary>
         internal readonly List<string> SourceRefusals = new List<string>();
+        /// <summary>How many of those refusals were an importer THROWING on a file it should have been
+        /// able to read - a bug or a broken source, as opposed to a format the tool never accepts.
+        /// The bake adds it to its failure count, so skipping a source stays non-fatal to the OTHER
+        /// sources without the run reporting ALL PASS over a model that never made it in.</summary>
+        internal int ImportFailures;
 
         /// <summary>What ppcontent.json DECLARES, with nothing imported.</summary>
         internal sealed class Declared
@@ -296,9 +301,17 @@ namespace Morgott.ContentTool.Project
             if (m.scale < 0f)
                 throw new InvalidDataException("ppcontent.json \"scale\" is negative; it is the uniform " +
                     "scale the mod puts on the rig root, so it has to be a positive number");
-            foreach (string f in Sources(root, "Textures", "*.png", "*.jpg", "*.jpeg")) p.Textures.Add(ImportTexture(f));
-            foreach (string f in Sources(root, "Meshes", "*.obj", "*.glb")) p.Meshes.Add(ImportMesh(f));
-            foreach (string f in Sources(root, "Models", "*.glb")) p.Models.Add(ImportModel(f));
+            // ONE SOURCE FILE CANNOT TAKE THE PROJECT DOWN WITH IT: every importer below throws by
+            // design - that is how a .glb states what is wrong with it - and an escaping throw used to
+            // abort this whole method, so a single unusable mesh produced no bundle at all and the
+            // author saw only "the mod does not activate". SourceImport.Each is the audio path's
+            // arrangement (9a3747b) applied to the other three folders.
+            p.ImportFailures += SourceImport.Each(Sources(root, "Textures", "*.png", "*.jpg", "*.jpeg"),
+                                                  p.Textures, p.SourceRefusals, ImportTexture);
+            p.ImportFailures += SourceImport.Each(Sources(root, "Meshes", "*.obj", "*.glb"),
+                                                  p.Meshes, p.SourceRefusals, ImportMesh);
+            p.ImportFailures += SourceImport.Each(Sources(root, "Models", "*.glb"),
+                                                  p.Models, p.SourceRefusals, ImportModel);
             p.Videos.AddRange(ImportVideos(root));
             p.Replace.AddRange(ParseReplace(File.ReadAllText(metaPath)));
             p.Publish.AddRange(ParsePublish(File.ReadAllText(metaPath)));
