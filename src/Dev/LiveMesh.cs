@@ -116,36 +116,14 @@ namespace Morgott.ContentTool.Dev
             Transform[] bones = smr == null ? null : smr.bones;
             if (bones == null || bones.Length == 0) return null;
 
+            string source;
+            Matrix4x4[] poses = Poses(smr, bones, out source);
+
             string refused = null;
             if (file != null && file.JointNames.Count > 0)
             {
-                string byName = ByName(ours, bones, file, out refused);
+                string byName = ByName(ours, bones, file, poses, source, out refused);
                 if (byName != null) return byName;
-            }
-
-            string source = "the shipped mesh";
-            Matrix4x4[] poses = null;
-            try
-            {
-                Mesh shipped = smr.sharedMesh;
-                Matrix4x4[] p = shipped == null ? null : shipped.bindposes;
-                if (p != null && p.Length == bones.Length) poses = p;
-            }
-            catch (Exception) { poses = null; }
-
-            if (poses == null)
-            {
-                // The shipped mesh would not hand its bind poses over (most shipped meshes are not
-                // read/write enabled). The skeleton itself still states them: a bind pose IS the
-                // renderer-space -> bone-space transform.
-                // ponytail: taken at the pose the skeleton is in RIGHT NOW, so a swap made while a
-                // character is mid-animation binds to that pose. Upgrade path: read the bind poses off
-                // the shipped file through the bake-side reader instead of off the live skeleton.
-                source = "the live skeleton";
-                poses = new Matrix4x4[bones.Length];
-                Matrix4x4 root = smr.transform.localToWorldMatrix;
-                for (int b = 0; b < bones.Length; b++)
-                    poses[b] = bones[b] == null ? Matrix4x4.identity : bones[b].worldToLocalMatrix * root;
             }
 
             Vector3[] verts = ours.vertices;
@@ -173,21 +151,57 @@ namespace Morgott.ContentTool.Dev
         }
 
         /// <summary>
+        /// The TARGET's own bind poses, and where they were read from - the shipped mesh when it will
+        /// hand them over, the live skeleton otherwise (a bind pose IS the renderer-space -&gt; bone-space
+        /// transform). BOTH binding paths bind against these, so neither can move the skeleton.
+        ///
+        /// ponytail: the skeleton fallback is taken at the pose the rig is in RIGHT NOW, so a swap made
+        /// while a character is mid-animation binds to that pose. Upgrade path: read the bind poses off
+        /// the shipped file through the bake-side reader instead of off the live skeleton.
+        /// </summary>
+        private static Matrix4x4[] Poses(SkinnedMeshRenderer smr, Transform[] bones, out string source)
+        {
+            source = "the shipped mesh";
+            try
+            {
+                Mesh shipped = smr.sharedMesh;
+                Matrix4x4[] p = shipped == null ? null : shipped.bindposes;
+                if (p != null && p.Length == bones.Length) return p;
+            }
+            catch (Exception) { }
+
+            source = "the live skeleton";
+            var poses = new Matrix4x4[bones.Length];
+            Matrix4x4 root = smr.transform.localToWorldMatrix;
+            for (int b = 0; b < bones.Length; b++)
+                poses[b] = bones[b] == null ? Matrix4x4.identity : bones[b].worldToLocalMatrix * root;
+            return poses;
+        }
+
+        /// <summary>
         /// The file's OWN skin, onto the live rig, matched BY BONE NAME - ported from Resource
         /// Replacer (ResourceReplacer\pp-native\src\GlbReader.cs:1119-1201, whose SkinBinder is
         /// already in this tree at <see cref="SkinBinder"/> and until now had no caller).
         ///
         /// The skeleton is never touched: <see cref="SkinBinder.Bind"/> is a strict bijection between
         /// the file's joint names and <c>smr.bones[i].name</c>, so joint ORDER is free while
-        /// membership is not, and it hands back both the vertex joints and the bind poses already in
-        /// the live rig's order. That is the whole difference from nearest-bone - a vertex the file
-        /// splits between two bones stays split, so a joint bends instead of creasing.
+        /// membership is not, and it hands back the vertex joints already in the live rig's order.
+        /// That is the whole difference from nearest-bone - a vertex the file splits between two bones
+        /// stays split, so a joint bends instead of creasing.
+        ///
+        /// The bind poses are the TARGET's, exactly as the packaged path does it
+        /// (<see cref="Morgott.ContentTool.Bake.SkinFields.RebindByName"/>, which reads the shipped
+        /// m_BindPose and drops the file's): they have to stay in step with the m_Bones list this never
+        /// touches. Binding the FILE's inverse bind matrices onto the game's own untouched skeleton is
+        /// what made a preview stretch and throw a hand to the centre while the shipped bake of the very
+        /// same file was right.
         ///
         /// Returns null (and a sentence in <paramref name="refused"/>) when the file and the rig do
         /// not correspond, which is the normal case for a model that was never retargeted onto this
         /// skeleton; the caller then falls back and SAYS SO rather than silently binding badly.
         /// </summary>
-        private static string ByName(Mesh ours, Transform[] bones, SkinnedModel file, out string refused)
+        private static string ByName(Mesh ours, Transform[] bones, SkinnedModel file, Matrix4x4[] poses,
+                                     string source, out string refused)
         {
             refused = null;
             try
@@ -196,11 +210,11 @@ namespace Morgott.ContentTool.Dev
                 for (int b = 0; b < bones.Length; b++) names[b] = bones[b] == null ? "" : bones[b].name;
 
                 ushort[] joints;
-                float[][] bind;
+                float[][] unused;
                 // 0 material slots and no blend shapes: this preview merges every glTF primitive into
                 // one submesh (ToMesh) and reads no morphs, so those two checks would be asking about
                 // something the preview does not build.
-                SkinBinder.Bind(file, names, 0, null, out joints, out bind);
+                SkinBinder.Bind(file, names, 0, null, out joints, out unused);
 
                 // SkinBinder checks the file against ITSELF and against the rig; this is the one
                 // thing only the caller can check - that the mesh built out of the file still has a
@@ -212,9 +226,6 @@ namespace Morgott.ContentTool.Dev
                     throw new FormatException("the file's skin covers " +
                         (file.Positions == null ? 0 : file.Positions.Length) + " vertices but the " +
                         "imported mesh has " + n);
-
-                Matrix4x4[] poses = new Matrix4x4[bones.Length];
-                for (int b = 0; b < bones.Length; b++) poses[b] = ToMatrix(bind[b]);
 
                 BoneWeight[] weights = new BoneWeight[n];
                 float split = 0f; int splitAt = -1;
@@ -237,8 +248,8 @@ namespace Morgott.ContentTool.Dev
                 ours.bindposes = poses;
                 ours.boneWeights = weights;
                 return "skinned BY NAME onto the target's own " + bones.Length +
-                       " bones, carrying the file's own weights (" + file.JointNames.Count +
-                       " joints matched, order remapped" +
+                       " bones, carrying the file's own weights (bind poses from " + source + ", " +
+                       file.JointNames.Count + " joints matched, order remapped" +
                        (splitAt < 0 ? ", no shared vertex in this file"
                                     : "; vertex " + splitAt + " is shared, weight0=" + ModelBuild.F(split)) + ")";
             }
@@ -247,15 +258,6 @@ namespace Morgott.ContentTool.Dev
                 refused = ex.Message;
                 return null;
             }
-        }
-
-        /// <summary>A glTF column-major float[16] (index = col*4 + row) as Unity states it.</summary>
-        private static Matrix4x4 ToMatrix(float[] m)
-        {
-            Matrix4x4 r = new Matrix4x4();
-            for (int col = 0; col < 4; col++)
-                for (int row = 0; row < 4; row++) r[row, col] = m[col * 4 + row];
-            return r;
         }
 
         // ------------------------------------------------------------------------------- gate R5

@@ -143,7 +143,85 @@ internal static class SkinAbove
         return "SKIN-ABOVE PASS, " + checks + " check(s) - u8_probe.glb imports Y-UP at the authored scale: " +
                "half-extents X " + F(half[0]) + " Y " + F(half[1]) + " Z " + F(half[2]) +
                ", feet coplanar on " + AxisName[flattest] + " at " + F(footMean) + " under the body at " + F(bodyMean) +
-               ", root bone scale " + F(column);
+               ", root bone scale " + F(column) + "\n  " + RootCurve();
+    }
+
+    /// <summary>
+    /// AND THE SAME TRANSFORM REACHES THE ANIMATION. A clip that drives the armature's ROOT bone
+    /// replaces the very rest transform <c>Carry</c> folded node 1 into, so the fold has to be applied
+    /// to every SAMPLE as well - it used to be REFUSED instead, which sent the author to Blender to
+    /// apply all transforms and broke the rig they applied them to.
+    ///
+    /// The fixture is hand-built glTF bytes: a rig node scaled 2, one root joint 'hip' rest 1 up, and
+    /// ONE channel driving the hip's translation from glTF x = 1 to x = 5. So the three numbers are:
+    ///   translation  glTF x 1..5 -> Unity x -1..-5, times node 0's scale 2 -> -2 .. -10
+    ///   scale        no channel  -> the hip's own rest scale 1, times 2    -> (2, 2, 2)
+    ///   rotation     no channel  -> the hip's own rest rotation           -> identity
+    /// Dropping the fold reads -1 and 1; applying it twice reads -4 and 4.
+    /// </summary>
+    private static string RootCurve()
+    {
+        var clips = new List<SampledClip>();
+        GlbReader.Read(Fixture(), clips);
+        SampledClip clip = clips[0];
+        int checks = Check(clip.Tracks.Count == 1 && clip.Times.Length == 2,
+            "the clip drives the one bone the file names, on the grid its keys state: " +
+            clip.Tracks.Count + " track(s) x " + clip.Times.Length + " frame(s)");
+
+        SampledTrack hip = clip.Tracks[0];
+        checks += Check(Math.Abs(hip.Translations[0].X + 2f) < 1e-4f && Math.Abs(hip.Translations[1].X + 10f) < 1e-4f,
+            "the root bone's own curve comes back x " + F(hip.Translations[0].X) + " .. " + F(hip.Translations[1].X) +
+            ", and the file's glTF x 1..5 under node 0's scale 2 states -2 .. -10 - the transform above the " +
+            "armature is not reaching the samples");
+        checks += Check(hip.Scales != null && Math.Abs(hip.Scales[1].X - 2f) < 1e-4f &&
+                        Math.Abs(hip.Scales[1].Y - 2f) < 1e-4f && Math.Abs(hip.Scales[1].Z - 2f) < 1e-4f,
+            "a channel the file leaves out keeps the bone's OWN rest under the same fold, so the scale is " +
+            "(2,2,2): " + (hip.Scales == null ? "no scale at all" :
+                "(" + F(hip.Scales[1].X) + "," + F(hip.Scales[1].Y) + "," + F(hip.Scales[1].Z) + ")"));
+        checks += Check(hip.Rotations != null && Math.Abs(hip.Rotations[1].W - 1f) < 1e-4f,
+            "and the rotation it leaves out is the rest one, w = " +
+            (hip.Rotations == null ? "no rotation at all" : F(hip.Rotations[1].W)));
+
+        return "ROOT-CURVE PASS, " + checks + " check(s) - a curve on the armature's root bone carries the " +
+               "object above it: x " + F(hip.Translations[0].X) + " .. " + F(hip.Translations[1].X) +
+               ", scale (" + F(hip.Scales[1].X) + "," + F(hip.Scales[1].Y) + "," + F(hip.Scales[1].Z) + ")";
+    }
+
+    /// <summary>
+    /// The fixture, assembled out of <see cref="ClipImport"/>'s own container and accessor writers -
+    /// glTF-space bytes with no line of our writer in the loop, same as the arms there.
+    /// </summary>
+    private static byte[] Fixture()
+    {
+        var b = new ClipImport.Bin();
+        int position = b.Vec(3, "VEC3", 0f, 0f, 0f, 1f, 0f, 0f, 0f, 2f, 0f);
+        int normal = b.Vec(3, "VEC3", 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f);
+        int joints = b.Joints(0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0);
+        int weights = b.Vec(3, "VEC4", 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f);
+        int indices = b.Indices(0, 1, 2);
+        int bind = b.Vec(2, "MAT4",
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1, 0, 1,
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -4, 0, 1);
+        int times = b.Vec(2, "SCALAR", 0f, 1f);
+        int move = b.Vec(2, "VEC3", 1f, 0f, 0f, 5f, 0f, 0f);
+
+        string json =
+            "{\"asset\":{\"version\":\"2.0\"}," +
+            "\"scenes\":[{\"nodes\":[0,3]}],\"scene\":0," +
+            "\"nodes\":[" +
+              "{\"name\":\"rig\",\"children\":[1],\"scale\":[2,2,2]}," +
+              "{\"name\":\"hip\",\"children\":[2],\"translation\":[0,1,0]}," +
+              "{\"name\":\"head\",\"translation\":[0,3,0]}," +
+              "{\"name\":\"body\",\"mesh\":0,\"skin\":0}]," +
+            "\"skins\":[{\"joints\":[1,2],\"inverseBindMatrices\":" + bind + "}]," +
+            "\"meshes\":[{\"name\":\"rootmesh\",\"primitives\":[{\"attributes\":{\"POSITION\":" + position +
+              ",\"NORMAL\":" + normal + ",\"JOINTS_0\":" + joints + ",\"WEIGHTS_0\":" + weights +
+              "},\"indices\":" + indices + "}]}]," +
+            "\"animations\":[{\"name\":\"root\",\"samplers\":[" +
+              ClipImport.Sampler(times, move, "LINEAR") + "]," +
+            "\"channels\":[{\"sampler\":0,\"target\":{\"node\":1,\"path\":\"translation\"}}]}]," +
+            b.Json() + "}";
+        return ClipImport.Container(json, b.Bytes());
     }
 
     private static int Check(bool condition, string what)

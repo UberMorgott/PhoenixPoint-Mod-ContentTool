@@ -918,8 +918,8 @@ namespace Morgott.ContentTool.Import
                 for (int i = 0; i < 16; i++)
                     if (Math.Abs(shared[i] - one[i]) > 1e-6f)
                         throw Bad("the file hangs the armature's root bones under objects with different " +
-                            "transforms, so no single orientation fits the whole skeleton; in Blender parent " +
-                            "every root bone to one armature, use Object > Apply > All Transforms, and re-export");
+                            "transforms, so no single orientation fits the whole skeleton; in Blender put every " +
+                            "root bone under ONE armature object and re-export");
             }
             return shared ?? Identity();
         }
@@ -1030,16 +1030,6 @@ namespace Morgott.ContentTool.Import
                     throw Bad("the file's animation " + index.ToString(CultureInfo.InvariantCulture) + " drives '" +
                         path + "', which glTF 2.0 does not define; re-export the file rather than editing it by hand");
                 if (slotOfNode[node] < 0) { droppedNodes++; continue; }
-                // A curve on a ROOT bone states that bone's local TRS relative to the object the
-                // armature hangs under - the very transform Carry() folded into the root bone's rest.
-                // Playing the curve would overwrite the rest and throw the correction away mid-clip, so
-                // this is refused by name rather than imported subtly wrong. No file met it yet: the
-                // demo spider animates 39 bones and none of its 180 channels touches its root.
-                if (above != null && !IsIdentity(above) && model.Nodes[slotOfNode[node]].Parent < 0)
-                    throw Bad("the file's animation '" + ClipName(animation, index) + "' drives the armature's " +
-                        "root bone '" + model.Nodes[slotOfNode[node]].Name + "' while the object the armature " +
-                        "hangs under carries a transform of its own, and the two cannot both be honoured; in " +
-                        "Blender select the armature, use Object > Apply > All Transforms, and re-export");
                 int sampler = Int(Get(channel, "sampler"), at + ".sampler");
                 if (sampler < 0 || sampler >= samplers.Count)
                     throw Bad("the file's animation " + index.ToString(CultureInfo.InvariantCulture) +
@@ -1115,6 +1105,14 @@ namespace Morgott.ContentTool.Import
             for (int c = 0; c < channelSampler.Count; c++)
                 Channel(samplers, channelSampler[c], channelPath[c], channelSlot[c], what, clip.Name,
                         keyTimes, sampleAt, byslot);
+
+            if (above != null && !IsIdentity(above))
+            {
+                float[] over = GlbCodec.ConvertMatrix(above);
+                for (int slot = 0; slot < byslot.Length; slot++)
+                    if (byslot[slot] != null && model.Nodes[slot].Parent < 0)
+                        Root(model, slot, byslot[slot], over, frames);
+            }
 
             foreach (SampledTrack track in byslot) if (track != null) clip.Tracks.Add(track);
             clip.Times = times;
@@ -1329,6 +1327,62 @@ namespace Morgott.ContentTool.Import
             }
         }
 
+        /// <summary>
+        /// A curve on a ROOT bone states that bone's local TRS relative to the object the armature hangs
+        /// under - the very transform <see cref="Carry"/> folded into the root bone's REST. Playing the
+        /// samples as they stand would overwrite that rest and throw the correction away mid-clip, so
+        /// <paramref name="over"/> is folded into every sample instead: the frame's matrix is composed,
+        /// multiplied by it and decomposed back, exactly as the rest was.
+        ///
+        /// A channel the file left out keeps the bone's OWN rest value for every frame, which is the
+        /// stored rest with the same fold taken back off - so a clip that drives only the root's
+        /// rotation still translates and scales where the rest pose says.
+        /// </summary>
+        private static void Root(SkinnedModel model, int slot, SampledTrack track, float[] over, int frames)
+        {
+            string bone = model.Nodes[slot].Name;
+            float[] t0, r0, s0;
+            GlbCodec.Decompose(ModelBuild.Multiply(ModelBuild.Invert(over, bone), model.Nodes[slot].Local),
+                               bone, out t0, out r0, out s0);
+
+            var translations = new ObjVector3[frames];
+            var rotations = new ObjQuaternion[frames];
+            var scales = new ObjVector3[frames];
+            for (int f = 0; f < frames; f++)
+            {
+                ObjVector3 t = track.Translations == null ? new ObjVector3(t0[0], t0[1], t0[2]) : track.Translations[f];
+                ObjQuaternion r = track.Rotations == null ? new ObjQuaternion(r0[0], r0[1], r0[2], r0[3]) : track.Rotations[f];
+                ObjVector3 s = track.Scales == null ? new ObjVector3(s0[0], s0[1], s0[2]) : track.Scales[f];
+                float[] ft, fr, fs;
+                GlbCodec.Decompose(ModelBuild.Multiply(over, Trs(t, r, s)), bone, out ft, out fr, out fs);
+                translations[f] = new ObjVector3(ft[0], ft[1], ft[2]);
+                rotations[f] = new ObjQuaternion(fr[0], fr[1], fr[2], fr[3]);
+                scales[f] = new ObjVector3(fs[0], fs[1], fs[2]);
+            }
+            track.Translations = translations;
+            track.Rotations = rotations;
+            track.Scales = scales;
+        }
+
+        /// <summary>TRS as one column-major 4x4 (index = col*4 + row) - <see cref="GlbCodec.Decompose"/>
+        /// read backwards, so composing and decomposing a frame is a round trip.</summary>
+        private static float[] Trs(ObjVector3 t, ObjQuaternion r, ObjVector3 s)
+        {
+            float x = r.X, y = r.Y, z = r.Z, w = r.W;
+            float[] basis =
+            {
+                1f - 2f * (y * y + z * z), 2f * (x * y + z * w),      2f * (x * z - y * w),
+                2f * (x * y - z * w),      1f - 2f * (x * x + z * z), 2f * (y * z + x * w),
+                2f * (x * z + y * w),      2f * (y * z - x * w),      1f - 2f * (x * x + y * y)
+            };
+            float[] scale = { s.X, s.Y, s.Z };
+            var m = new float[16];
+            for (int col = 0; col < 3; col++)
+                for (int row = 0; row < 3; row++) m[col * 4 + row] = basis[col * 3 + row] * scale[col];
+            m[12] = t.X; m[13] = t.Y; m[14] = t.Z; m[15] = 1f;
+            return m;
+        }
+
         private static FormatException Duplicate(string clipName, string path) =>
             Bad("the clip '" + clipName + "' drives the same bone's " + path +
                 " twice, which glTF forbids; re-export the file rather than editing it by hand");
@@ -1413,8 +1467,10 @@ namespace Morgott.ContentTool.Import
                         " is not at a real position; the file is corrupt, so re-export it");
                 if (Math.Abs(p.X) > MaxCoordinate || Math.Abs(p.Y) > MaxCoordinate || Math.Abs(p.Z) > MaxCoordinate)
                     throw Bad("vertex " + i.ToString(CultureInfo.InvariantCulture) + " sits more than " +
-                        MaxCoordinate.ToString(CultureInfo.InvariantCulture) + " units from the model's origin; " +
-                        "in Blender select all and use Object > Set Origin, then Apply > All Transforms, and re-export");
+                        MaxCoordinate.ToString(CultureInfo.InvariantCulture) + " units from the model's origin, " +
+                        "once the transforms the file states have been applied; in Blender move the model onto " +
+                        "the world origin (Object > Set Origin > Origin to Geometry), scale it to the size the " +
+                        "model it replaces is, and re-export");
                 model.Positions[i] = p;
             }
             if (model.Normals != null)
@@ -1468,7 +1524,8 @@ namespace Morgott.ContentTool.Import
             // sent the author to Blender to fix a file that was never wrong.
             if (determinant == 0.0)
                 throw Bad("the mesh object is flattened onto a plane by its own scale, so it carries no " +
-                    "thickness to bake; in Blender use Object > Apply > All Transforms and re-export");
+                    "thickness to bake; in Blender give the object a non-zero scale on all three axes " +
+                    "and re-export");
             if (determinant < 0.0)
                 for (int s = 0; s < model.Submeshes.Count; s++)
                 {
