@@ -847,21 +847,26 @@ namespace Morgott.ContentTool.Bake
                 float y = BitConverter.ToSingle(baked.VertexData, at + 4);
                 float z = BitConverter.ToSingle(baked.VertexData, at + 8);
 
-                // The bounds follow the DOMINANT influence, in that bone's own space. Left describing
-                // the old geometry these cull the new mesh away wherever the old one was not - which
-                // reads exactly like "the replacement did not load".
-                int d = (int)idx[i * influences];
-                float[] m = bind[d];
-                float tx = m[0] * x + m[1] * y + m[2] * z + m[3];
-                float ty = m[4] * x + m[5] * y + m[6] * z + m[7];
-                float tz = m[8] * x + m[9] * y + m[10] * z + m[11];
-                if (!used[d])
+                // The vertex goes into the box of EVERY bone that moves it, in that bone's own space -
+                // the same rule FillModelMesh keeps. The dominant influence alone leaves any bone used
+                // only in a lower slot with NO box at all, and the engine culls what a box does not
+                // cover, which reads exactly like "the replacement did not load". A zero-weight slot
+                // does not move the vertex, so it must not stretch that bone's box either - which is
+                // what keeps the nearest-bone weld (one full weight, the rest at zero) honest.
+                for (int k = 0; k < influences; k++)
                 {
-                    used[d] = true;
-                    minX[d] = maxX[d] = tx; minY[d] = maxY[d] = ty; minZ[d] = maxZ[d] = tz;
-                }
-                else
-                {
+                    if (w[i * influences + k] <= 0f) continue;
+                    int d = (int)idx[i * influences + k];
+                    float[] m = bind[d];
+                    float tx = m[0] * x + m[1] * y + m[2] * z + m[3];
+                    float ty = m[4] * x + m[5] * y + m[6] * z + m[7];
+                    float tz = m[8] * x + m[9] * y + m[10] * z + m[11];
+                    if (!used[d])
+                    {
+                        used[d] = true;
+                        minX[d] = maxX[d] = tx; minY[d] = maxY[d] = ty; minZ[d] = maxZ[d] = tz;
+                        continue;
+                    }
                     if (tx < minX[d]) minX[d] = tx; if (tx > maxX[d]) maxX[d] = tx;
                     if (ty < minY[d]) minY[d] = ty; if (ty > maxY[d]) maxY[d] = ty;
                     if (tz < minZ[d]) minZ[d] = tz; if (tz > maxZ[d]) maxZ[d] = tz;

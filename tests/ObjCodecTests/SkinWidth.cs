@@ -71,6 +71,19 @@ internal static class SkinWidth
         Assert(weldedInf.StartsWith("v0=1/0/0/0->bone", StringComparison.Ordinal),
                "and puts ONE full-weight influence in slot 0, the rest at zero: " + weldedInf);
 
+        // THE PER-BONE BOUNDS follow every influence, not just the dominant one. m_BonesAABB is
+        // rewritten whole, and the engine culls what a bone's box does not cover - so a bone the
+        // widening now uses only in slot 2 or 3 would get NO box and its geometry would pop out
+        // mid-animation. Asserted against the weights of the very mesh that was written.
+        string boxes = Boxes(classData, wide, WideMesh);
+        Assert(boxes.StartsWith("weighted=4 boxed=4 mismatched=none ", StringComparison.Ordinal) &&
+               !boxes.EndsWith("(none)", StringComparison.Ordinal),
+               "every bone the dim4 replacement weights gets a real box and no bone without weight " +
+               "does, including one used ONLY in the last slot: " + boxes);
+        string weldBoxes = WeldBoxes(classData, wide, WideMesh);
+        Assert(weldBoxes.StartsWith("weighted=1 boxed=1 mismatched=none", StringComparison.Ordinal),
+               "and the weld's ZERO-weight slots feed no bounds at all - one bone, one box: " + weldBoxes);
+
         // THE ADD PATH has no target to respect, so it carries what the FILE has: four. The width is
         // BakedSkin.Influences, derived from the file's own weights and nothing else, and the model
         // this bakes declares it.
@@ -82,7 +95,8 @@ internal static class SkinWidth
 
         return "SKIN width PASS - shipped dim" + shippedWide + " '" + WideMesh + "' and dim" +
                shippedNarrow + " '" + NarrowMesh + "'\n  wide   " + wideInf +
-               "\n  narrow " + narrowInf + "\n  weld   " + weldedInf + "\n  added  " + added;
+               "\n  narrow " + narrowInf + "\n  weld   " + weldedInf + "\n  added  " + added +
+               "\n  boxes  " + boxes + " | weld " + weldBoxes;
     }
 
     /// <summary>
@@ -209,6 +223,64 @@ internal static class SkinWidth
         Assert(SkinFields.RebindByName(mesh, skin.Mesh, file, bones, inf),
                "'" + meshName + "' is rigged, so a by-name rebind has bind poses to work with");
         return mesh;
+    }
+
+    private static string Boxes(string classData, string bundlePath, string meshName)
+    {
+        return Open(classData, bundlePath, (m, af) => BoneBoxes(Bind(m, af, meshName)));
+    }
+
+    private static string WeldBoxes(string classData, string bundlePath, string meshName)
+    {
+        return Open(classData, bundlePath, (m, af) => BoneBoxes(Welded(m, af, meshName)));
+    }
+
+    /// <summary>
+    /// The per-bone bounds against the per-bone WEIGHTS, both read back out of the mesh that was just
+    /// written: a bone the skin gives weight to must have a box that describes something, and a bone
+    /// with no weight must have none. `lastSlotOnly` names a bone that appears ONLY in the final
+    /// influence slot - the one a dominant-only accumulation silently loses.
+    /// </summary>
+    private static string BoneBoxes(AssetTypeValueField mesh)
+    {
+        int inf = SkinFields.InfluencesOf(mesh);
+        AssetTypeValueField vd = mesh["m_VertexData"];
+        int verts = (int)vd["m_VertexCount"].AsUInt;
+        byte[] data = vd["m_DataSize"].AsByteArray;
+        int at = SkinFields.SkinOffset(verts), stride = SkinFields.SkinStride(inf);
+
+        AssetTypeValueField aabbs = mesh["m_BonesAABB"]["Array"];
+        int bones = aabbs.Children.Count;
+        bool[] weighted = new bool[bones];
+        int[] first = new int[bones];
+        for (int b = 0; b < bones; b++) first[b] = int.MaxValue;
+        for (int i = 0; i < verts; i++)
+            for (int k = 0; k < inf; k++)
+            {
+                if (BitConverter.ToSingle(data, at + i * stride + k * 4) <= 0f) continue;
+                int b = (int)BitConverter.ToUInt32(data, at + i * stride + inf * 4 + k * 4);
+                weighted[b] = true;
+                if (k < first[b]) first[b] = k;
+            }
+
+        string bad = "";
+        int nWeighted = 0, nBoxed = 0, lastOnly = -1;
+        for (int b = 0; b < bones; b++)
+        {
+            AssetTypeValueField e = aabbs.Children[b];
+            bool box = e["m_Max"]["x"].AsFloat > e["m_Min"]["x"].AsFloat ||
+                       e["m_Max"]["y"].AsFloat > e["m_Min"]["y"].AsFloat ||
+                       e["m_Max"]["z"].AsFloat > e["m_Min"]["z"].AsFloat;
+            if (weighted[b]) nWeighted++;
+            if (box) nBoxed++;
+            if (weighted[b] != box)
+                bad += (bad.Length == 0 ? "" : ",") + "bone" + b +
+                       (weighted[b] ? "(weighted, NO box)" : "(box, NO weight)");
+            if (weighted[b] && first[b] == inf - 1) lastOnly = b;
+        }
+        return "weighted=" + nWeighted + " boxed=" + nBoxed +
+               " mismatched=" + (bad.Length == 0 ? "none" : bad) +
+               " lastSlotOnly=" + (lastOnly < 0 ? "(none)" : "bone" + lastOnly);
     }
 
     /// <summary>The nearest-bone fallback - the branch an .obj (no armature at all) takes.</summary>
