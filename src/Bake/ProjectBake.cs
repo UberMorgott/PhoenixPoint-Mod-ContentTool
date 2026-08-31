@@ -1486,7 +1486,8 @@ namespace Morgott.ContentTool.Bake
                             ImportedMesh im = FindMesh(p, r.mesh);
                             if (im == null)
                             {
-                                log.AppendLine("P4 REFUSED '" + r.mesh + "' is not a .obj or .glb under Content\\Meshes\\");
+                                log.AppendLine("P4 REFUSED '" + r.mesh + "' is not a .obj or .glb under Content\\Meshes\\" +
+                                               Elsewhere(p, r.mesh, "Meshes"));
                                 return failures + 1;
                             }
                             string how = baker.ReplaceMesh(r.asset, im.Baked, im.Model);
@@ -1499,7 +1500,8 @@ namespace Morgott.ContentTool.Bake
                         ImportedTexture t = Find(p, r.texture);
                         if (t == null)
                         {
-                            log.AppendLine("P1 REFUSED '" + r.texture + "' is not a .png/.jpg under Content\\Textures\\");
+                            log.AppendLine("P1 REFUSED '" + r.texture + "' is not a .png/.jpg under Content\\Textures\\" +
+                                           Elsewhere(p, r.texture, "Textures"));
                             return failures + 1;
                         }
                         baker.ReplaceTexture2D(r.asset, t.Width, t.Height, t.Rgba32);
@@ -1947,6 +1949,35 @@ namespace Morgott.ContentTool.Bake
                 if (!names.Contains(r.bundle)) names.Add(r.bundle);
             }
             return names;
+        }
+
+        /// <summary>
+        /// " - the file IS in Content\Meshes\materials\; move it into Content\Textures\", or "" when
+        /// the project really does not have it. There is ONE search root per kind and that is settled;
+        /// what was missing is the sentence that turns "not found" into an instruction, because a
+        /// Resource Replacer project keeps its textures beside the mesh and the author reads the old
+        /// refusal as "the tool cannot see my file" rather than "it is in the wrong folder".
+        ///
+        /// ponytail: matches on the file STEM, the same thing a replacement names - so a project with
+        /// the same stem in two places names the first one found, which is still a better answer than
+        /// silence.
+        /// </summary>
+        private static string Elsewhere(ContentProject p, string name, string folder)
+        {
+            string content = Path.Combine(p.Root, "Content");
+            if (string.IsNullOrEmpty(name) || !Directory.Exists(content)) return "";
+            string want = Path.Combine(content, folder);
+            foreach (string f in Directory.GetFiles(content, "*", SearchOption.AllDirectories))
+            {
+                string dir = Path.GetDirectoryName(f);
+                if (string.Equals(dir, want, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(Path.GetFileNameWithoutExtension(f), name, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                return " - the file IS in the project, at Content\\" +
+                       dir.Substring(content.Length).Trim('\\', '/') + "\\" + Path.GetFileName(f) +
+                       "; move it into Content\\" + folder + "\\ and bake again";
+            }
+            return "";
         }
 
         private static ImportedTexture Find(ContentProject p, string name)
