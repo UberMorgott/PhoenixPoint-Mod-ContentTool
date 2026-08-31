@@ -259,28 +259,24 @@ namespace Morgott.ContentTool.Bake
                 // Read BEFORE anything is mounted, because a PPtr is resolved when the Material is
                 // deserialized, which is now.
                 // Its PRECONDITION - that nobody ELSE has the archive open - only holds when ct_bake
-                // runs at mod-init (autogate, t~1.85 s). Typed at the main menu or in a live campaign
-                // the game has long since pulled the builtin shaders in through Addressables, the
-                // forged external resolves for real, and the arm would read RED for something that is
-                // not a defect. 'Standard' BEFORE any mount of ours is precisely the measurement that
-                // the archive is already open, so the arm SKIPs on that one value and names why. Any
-                // OTHER reading still has to be the error shader, so it cannot pass vacuously.
-                string preName = ShaderNameOf(bundle.LoadAsset<Material>(extMatKey));
-                bool preMounted = preName == StandardShaderName;
+                // runs before the game pulls the builtin shaders in through Addressables. It is
+                // MEASURED by AlreadyOpen, never inferred from the value under test: skipping on
+                // "the reading was 'Standard'" would silence the arm for any real defect that also
+                // produces 'Standard'. When the precondition holds the assertion is unchanged -
+                // the error shader by name or FAIL, with no value-shaped escape hatch.
+                bool preMounted = AlreadyOpen(BuiltinShaderBundle);
+                // Same measurement for U3e's archive: if it is already open our mount returns null
+                // and U3e would report VOID - measuring nothing - on a run where it resolves fine.
+                bool pxPreMounted = AlreadyOpen(ShadersBundle);
                 if (preMounted)
                     log.AppendLine("U3d-premount SKIP precondition not met: '" + BuiltinShaderBundle +
-                                   "' is ALREADY mounted (the game loaded it through Addressables), so " +
-                                   "'not loaded' cannot be measured in this run - the forged external " +
-                                   "reports '" + preName + "'");
+                                   "' cannot be opened by us, so it is already mounted (the game loaded " +
+                                   "it through Addressables) and 'not loaded' is not a state this run has");
                 else
-                    failures += Check(log, "U3d-premount", preName == ErrorShaderName,
+                    failures += Check(log, "U3d-premount",
+                        ShaderNameOf(bundle.LoadAsset<Material>(extMatKey)) == ErrorShaderName,
                         "with '" + BuiltinShaderBundle + "' NOT loaded the forged external reports '" +
-                        preName + "' (expected '" + ErrorShaderName + "')");
-
-                // Same reading for U3e's archive, and for the same reason: if '_shaders_assets_all'
-                // is already open our mount of it returns null and U3e would report VOID - measuring
-                // nothing - on a run where its externals resolve perfectly well.
-                bool pxPreMounted = ShaderNameOf(bundle.LoadAsset<Material>(newExtKey)) == PxShaderName;
+                        ShaderNameOf(bundle.LoadAsset<Material>(extMatKey)) + "' (expected '" + ErrorShaderName + "')");
 
                 // Mount the two archives the externals name, then RE-open our bundle so the materials
                 // deserialize against them. Nothing else in the game does this at mod-init time; the
@@ -815,6 +811,20 @@ namespace Morgott.ContentTool.Bake
             min = max = v[0].y;
             foreach (Vector3 p in v) { if (p.y < min) min = p.y; if (p.y > max) max = p.y; }
             return true;
+        }
+
+        /// <summary>
+        /// Does somebody else hold this shipped archive open? Unity refuses to open a file twice, so
+        /// a load that SUCCEEDS proves nobody did - and it is closed again immediately, leaving the
+        /// caller in the same state it was in. A file that is missing or broken also reads as "open"
+        /// here; the mount that follows fails too, so those runs report VOID rather than a verdict.
+        /// </summary>
+        private static bool AlreadyOpen(string bundleFileName)
+        {
+            AssetBundle probe = AssetBundle.LoadFromFile(ShippedBundlePath(bundleFileName));
+            if (probe == null) return true;
+            probe.Unload(false);
+            return false;
         }
 
         private static int Check(StringBuilder log, string gate, bool ok, string detail)
