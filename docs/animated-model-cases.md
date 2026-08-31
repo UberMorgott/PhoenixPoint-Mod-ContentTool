@@ -115,6 +115,22 @@ instead of by what the artist painted.
   welding fabricated a skin that collapsed on animation.
 - **Bake resilience** (`89fcbcf`): a single refused replacement no longer aborts the rest of the
   bundle or every bundle after it.
+- **Skin width preserved, not forced to 2** (`0bd7363`): ContentTool used to keep only the two
+  heaviest bone influences per vertex (from its own constant `Influences = 2`) on BOTH bake paths
+  and overwrite the target's channel dimension with 2. This was never a PP or Unity requirement —
+  the count is per mesh (`CHR_PX_ASS_TS_M_V01_02` is dim4, `ALN_Siren_Arm_Slasher_Right` is dim2).
+  Replacement now preserves the TARGET's own channel dimension (`SkinFields.InfluencesOf`, read at
+  `BundleBaker.ReplaceMesh:155` before `MeshFields.Fill` clears it); add carries what the file
+  actually has (`BakedSkin.Influences`, 1..4). Of 17561 vertices in one real modder's torso, 13244
+  were being truncated (8152 with 3 influences, 5092 with 4). More than four is refused by name
+  (Blender's "Include All" emits a second joint set the tool rejects). If a mesh still looks
+  two-bone: check Blender's "Bone Influences" exporter setting and PP's "Very Low" graphics tier
+  (renders at 2 regardless of mesh data).
+- **Per-bone bounds accumulate all weighted influences** (`527de06`): `m_BonesAABB` now boxes every
+  positively weighted influence, not just the dominant bone. Without it, a bone used only in slot 3
+  or 4 got a zero or undersized box and animation could push skinned vertices outside it, culling
+  or popping body parts. Zero-weight slots are excluded, so the weld path still boxes exactly one
+  bone. Offline arm: `bounds … weighted=4 boxed=4 mismatched=none lastSlotOnly=bone6`.
 
 ## What this run did NOT measure
 

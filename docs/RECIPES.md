@@ -268,7 +268,9 @@ code ships with it.
   clips (U12/U13). A clip that drives no bone of the rig is skipped with its own line, never silently.
 - Natural loop: `ct_extract` a shipped model to `.glb` → edit in Blender → drop it back.
 
-Ceilings: two influences per vertex, one submesh, and the Material's shading is ungated. ~~Nothing yet
+Ceilings: four influences per vertex (more than four is refused by name — Blender's "Include All"
+emits a second joint set that the tool rejects rather than silently dropping weights), one submesh,
+and the Material's shading is ungated. ~~Nothing yet
 plays a CLIP over an imported rig~~ — **closed, U7/U9**. ONE clip per model plays: a state machine
 that switches Idle/Walk needs a `ControllerConstant`, which this route does not serialize. A SHIPPED
 clip's own curves are editable in place (§18).

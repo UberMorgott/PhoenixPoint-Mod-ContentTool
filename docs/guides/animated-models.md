@@ -24,8 +24,12 @@ The replacement GLB must satisfy all of these conditions:
 
 A bind pose is the skeleton's reference transform set that attaches mesh vertices to bones before
 animation. ContentTool reads the GLB inverse bind matrices but deliberately uses the shipped bind
-poses. It reduces four glTF influences to the two strongest per vertex and renormalizes them.
-Inspect joints that depended on the discarded weights.
+poses. It preserves the TARGET mesh's own skin-channel dimension: a dim4 target keeps up to four
+influences per vertex; a dim2 target keeps the two heaviest, renormalised. The count is declared per
+mesh by the channel dimension, not chosen by the tool — see PROVEN-FOUNDATIONS.md (U5b, 2026-08-31
+correction). If a mesh still looks two-bone after a replacement, check two other places: Blender's
+glTF exporter has a "Bone Influences" setting that can truncate before export, and Phoenix Point's
+"Very Low" graphics tier renders at two influences regardless of mesh data.
 
 This complete manifest uses the strict rigged replacement path:
 

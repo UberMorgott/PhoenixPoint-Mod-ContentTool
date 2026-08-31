@@ -169,7 +169,8 @@ None of it is a remembered Unity layout:
 - **Skin data lives in its OWN vertex stream.** Shipped: stream 0 position/normal/tangent, stream 1
   uv0, stream 2 channel **12** `BlendWeight` (format 0 = float32, dimension **2**) at offset 0 and
   channel **13** `BlendIndices` (format **10** = UInt32, dimension 2) at offset 8. **Two** influences
-  per vertex, not four.
+  per vertex on THESE meshes — but the count is per mesh, not universal: `CHR_PX_ASS_TS_M_V01_02`
+  and all 11 skinned meshes in `px_assault_assets_all` are dim**4** (see U5b correction below).
 - **Every stream starts 16-byte aligned.** `ALN_Siren_Arm_Slasher_Right`, 1783 verts:
   71320+8 \| 14264+8 \| 28528 = **114128 B**, which is exactly its `m_DataSize`. That padding is the
   only reason the arithmetic closes.
@@ -816,7 +817,9 @@ Harness: `Project\ModGate.cs` (pure decision, offline arm in `tests\TargetPathTe
 > vertices at y=0 belong to the HIGH bone), so no nearest-bone or split-at-the-centre synthesis can
 > imitate it.
 >
-> Ceilings, deliberate: two influences per vertex (the shipped layout's room), one submesh, and the
+> Ceilings, deliberate: ~~two influences per vertex (the shipped layout's room)~~ **up to four
+> influences per vertex** (the target's own channel dimension, read not chosen — see U5b 2026-08-31
+> correction), one submesh, and the
 > model's Material — builtin `Standard` through an external PPtr, with a same-named
 > `Content\Textures\` file in `_MainTex` — is UNGATED: shading needs the builtin shader bundle
 > mounted (U4's note) and deformation does not depend on it. The flat-bone ceiling this row shipped
