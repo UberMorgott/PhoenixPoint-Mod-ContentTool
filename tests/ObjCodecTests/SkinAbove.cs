@@ -143,8 +143,119 @@ internal static class SkinAbove
         return "SKIN-ABOVE PASS, " + checks + " check(s) - u8_probe.glb imports Y-UP at the authored scale: " +
                "half-extents X " + F(half[0]) + " Y " + F(half[1]) + " Z " + F(half[2]) +
                ", feet coplanar on " + AxisName[flattest] + " at " + F(footMean) + " under the body at " + F(bodyMean) +
-               ", root bone scale " + F(column) + "\n  " + RootCurve();
+               ", root bone scale " + F(column) + "\n  " + RootCurve() + "\n  " + Hard();
     }
+
+    /// <summary>
+    /// THE HARD CASE AS A REAL FILE ON DISK, read through <see cref="GlbReader.Read(byte[],List{SampledClip})"/>
+    /// end to end: <c>lib\u8_rootfold.glb</c> is Blender's own shape - an armature OBJECT carrying
+    /// -90 deg about X AND a scale of 100, a ROOT bone driven by translation AND rotation curves, one
+    /// child bone, and a skinned mesh weighted to both. <see cref="RootCurve"/> proves the fold on a
+    /// scale-only rig with one translation channel; nothing proved it where the transform ROTATES and
+    /// the curve turns the bone as well, which is exactly the file a user sends.
+    ///
+    /// Every number below is derived by hand from the file's own JSON, not measured off a run:
+    ///   the fold      -90 about X maps glTF (x,y,z) -> (x,z,-y), and Unity's S = diag(-1,1,1)
+    ///                  leaves that untouched (X is the mirror axis), so <c>over</c> is the
+    ///                  SAME matrix in both spaces: Unity (x,y,z) -> 100*(x,z,-y).
+    ///   vertices      glTF (1,0,0) -> Unity (-1,0,0) -> folded (-100,0,0)
+    ///                 glTF (0,2,0) -> Unity  (0,2,0) -> folded (0,0,-200)
+    ///   Root rest     inverse(bindPose) = over: scale 100, translation 0
+    ///   Child rest    bind(parent)*inverse(bind(child)) cancels the fold -> translate(0,1,0), untouched
+    ///   frame 0       t glTF (1,0,0) -> (-100,0,0), r rest -> (-0.7071,0,0,0.7071), s (100,100,100)
+    ///   frame 1       t glTF (5,0,0) -> (-500,0,0), r over*(0,-0.7071,0,0.7071) -> (-0.5,-0.5,0.5,0.5)
+    ///
+    /// The first key is the vertex's OWN glTF position, so "the samples land in the same space as the
+    /// baked vertices" is asserted as an identity between two numbers the importer produced down two
+    /// different paths rather than against a constant. Falsified by folding the frame the other way
+    /// round (<c>Trs * over</c> instead of <c>over * Trs</c>): the translation reads -1 and -5.
+    /// </summary>
+    private static string Hard()
+    {
+        // Unity-space transform of the armature object, hand-derived above: columns are the images of
+        // X, Y and Z, each 100 long.
+        float[] over = { 100, 0, 0, 0,  0, 0, -100, 0,  0, 100, 0, 0,  0, 0, 0, 1 };
+
+        string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+            @"..\..\..\..\..\lib\u8_rootfold.glb");
+        if (!File.Exists(path))
+            throw new Exception("ROOT-FOLD FAILURE: the fixture is gone - no " + Path.GetFullPath(path));
+
+        var clips = new List<SampledClip>();
+        SkinnedModel model = GlbReader.Read(File.ReadAllBytes(path), clips);
+        int checks = Check(model.JointNames.Count == 2 && model.JointNames[0] == "Root" &&
+                           model.JointNames[1] == "Child" && clips.Count == 1,
+            "the file's two bones and one clip came back: " + model.JointNames.Count + " bone(s), " +
+            clips.Count + " clip(s)");
+
+        // ---- the vertices, folded by the armature object.
+        checks += Check(Vec(model.Positions[1], -100f, 0f, 0f) && Vec(model.Positions[2], 0f, 0f, -200f),
+            "the baked vertices carry the armature's -90 about X and its scale 100: v1 " +
+            V(model.Positions[1]) + " (want -100,0,0), v2 " + V(model.Positions[2]) + " (want 0,0,-200)");
+
+        // ---- the bind poses, and the relation the whole importer rests on.
+        for (int j = 0; j < 2; j++)
+        {
+            float[] world = ModelBuild.Invert(model.InverseBindMatrices[j], model.JointNames[j]);
+            float[] round = ModelBuild.Multiply(world, model.InverseBindMatrices[j]);
+            for (int i = 0; i < 16; i++)
+                checks += Check(Math.Abs(round[i] - (i % 5 == 0 ? 1f : 0f)) < 1e-3f,
+                    "bone '" + model.JointNames[j] + "': boneWorld * bindPose is not the identity at [" +
+                    i + "] = " + F(round[i]));
+            if (j != 0) continue;
+            for (int i = 0; i < 16; i++)
+                checks += Check(Math.Abs(world[i] - over[i]) < 1e-2f,
+                    "the ROOT bone's world rest is the armature object's own transform: [" + i + "] = " +
+                    F(world[i]) + ", want " + F(over[i]));
+        }
+
+        // ---- the CHILD's rest, which the fold must leave completely alone: bind(parent) *
+        // inverse(bind(child)) cancels it, so a fold applied one level too low shows up here first.
+        float[] child = model.Nodes[1].Local;
+        for (int i = 0; i < 16; i++)
+            checks += Check(Math.Abs(child[i] - (i == 13 ? 1f : i % 5 == 0 ? 1f : 0f)) < 1e-4f,
+                "the child bone's rest is translate(0,1,0), untouched by the armature's transform: [" +
+                i + "] = " + F(child[i]));
+
+        // ---- the clip: the root bone's own curve, in the vertices' space.
+        SampledTrack root = clips[0].Tracks[0];
+        checks += Check(clips[0].Tracks.Count == 1 && root.Node == 0 && clips[0].Times.Length == 2,
+            "the clip drives the root bone alone, on the 1 Hz grid its keys state: " +
+            clips[0].Tracks.Count + " track(s) x " + clips[0].Times.Length + " frame(s)");
+        checks += Check(Vec(root.Translations[0], model.Positions[1].X, model.Positions[1].Y, model.Positions[1].Z),
+            "the first key is the file's own vertex 1, so the sample must land ON it: sample " +
+            V(root.Translations[0]) + " vs vertex " + V(model.Positions[1]) +
+            " - the armature's transform is not reaching the samples");
+        checks += Check(Vec(root.Translations[1], -500f, 0f, 0f),
+            "and glTF x = 5 under the same fold is -500: " + V(root.Translations[1]));
+        for (int f = 0; f < 2; f++)
+            checks += Check(Vec(root.Scales[f], 100f, 100f, 100f),
+                "a channel the file leaves out keeps the bone's OWN rest under the fold, so the scale " +
+                "is the armature's 100 at frame " + f + ": " + V(root.Scales[f]));
+        checks += Check(Quat(root.Rotations[0], -0.7071068f, 0f, 0f, 0.7071068f),
+            "frame 0 has no rotation of its own, so it is the armature's -90 about X: " + Q(root.Rotations[0]));
+        checks += Check(Quat(root.Rotations[1], -0.5f, -0.5f, 0.5f, 0.5f),
+            "and frame 1 is that composed with the curve's own +90 about glTF +Y: " + Q(root.Rotations[1]));
+
+        return "ROOT-FOLD PASS, " + checks + " check(s) - u8_rootfold.glb (armature -90 about X, scale " +
+               "100; root bone driven in translation AND rotation): verts " + V(model.Positions[1]) + " " +
+               V(model.Positions[2]) + " | root samples " + V(root.Translations[0]) + " .. " +
+               V(root.Translations[1]) + " scale " + V(root.Scales[0]) + " rot " + Q(root.Rotations[1]) +
+               " | child rest untouched at (0,1,0)";
+    }
+
+    private static bool Vec(ObjVector3 v, float x, float y, float z) =>
+        Math.Abs(v.X - x) < 1e-2f && Math.Abs(v.Y - y) < 1e-2f && Math.Abs(v.Z - z) < 1e-2f;
+
+    /// <summary>A quaternion and its negation are the SAME rotation, so the sign the decomposer
+    /// happens to pick must not decide whether this arm is green.</summary>
+    private static bool Quat(ObjQuaternion q, float x, float y, float z, float w) =>
+        Math.Abs(q.X * x + q.Y * y + q.Z * z + q.W * w) > 0.9999f;
+
+    private static string V(ObjVector3 v) => "(" + F(v.X) + "," + F(v.Y) + "," + F(v.Z) + ")";
+
+    private static string Q(ObjQuaternion q) =>
+        "(" + F(q.X) + "," + F(q.Y) + "," + F(q.Z) + "," + F(q.W) + ")";
 
     /// <summary>
     /// AND THE SAME TRANSFORM REACHES THE ANIMATION. A clip that drives the armature's ROOT bone

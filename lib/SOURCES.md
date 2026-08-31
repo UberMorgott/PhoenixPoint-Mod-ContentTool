@@ -33,6 +33,9 @@ in a file of their own. Read those before touching them:
   is the untouched download; `u8_probe.glb` is a dequantized copy kept as an independent oracle.
 - `u12_probe-SOURCE.md`, `u12_norm-SOURCE.md`, `u12_uv-SOURCE.md` — the normal/UV variants and the
   `_plain` files derived from them.
+- `u8_rootfold-SOURCE.md` — `u8_rootfold.glb` is **generated here**, not downloaded: hand-written
+  glTF bytes for the one rig shape no download in this list has (an armature object carrying −90°
+  about X and a scale of 100, with its ROOT bone animated). Nothing to licence.
 
 ## Test fixtures — audio and video, generated here
 
