@@ -1638,6 +1638,15 @@ namespace Morgott.ContentTool.Bake
         /// avoid, and the sample's fixture is written with its joints REVERSED precisely so the
         /// question can be asked at all.
         /// </summary>
+        /// <summary>The shipped bone a file joint names, read the SAME way SkinBinder.Bind reads it -
+        /// exact first, then with the game's own '#&lt;bone&gt;_Addon =&gt; &lt;part&gt;' decoration
+        /// removed - or this gate would report VOID for exactly the files that now bind.</summary>
+        private static int Live(string[] bones, string joint)
+        {
+            int at = Array.IndexOf(bones, joint);
+            return at >= 0 ? at : Array.IndexOf(bones, SkinBinder.Plain(joint));
+        }
+
         private static int ByName(StringBuilder log, string key, ImportedMesh im, string shipped, string copy)
         {
             SkinnedModel f = im.Model;
@@ -1677,8 +1686,8 @@ namespace Morgott.ContentTool.Bake
                 if (sum <= 0f) { a = 0; wa = 1f; wb = 0f; sum = 1f; b = -1; }
 
                 int slot0 = f.Joints[i * 4 + a], slot1 = b < 0 ? slot0 : f.Joints[i * 4 + b];
-                int live0 = Array.IndexOf(bones, f.JointNames[slot0]);
-                int live1 = Array.IndexOf(bones, f.JointNames[slot1]);
+                int live0 = Live(bones, f.JointNames[slot0]);
+                int live1 = Live(bones, f.JointNames[slot1]);
                 if (live0 < 0 || live1 < 0)
                 {
                     log.AppendLine("P6 VOID '" + key + "' - the file's bone '" +

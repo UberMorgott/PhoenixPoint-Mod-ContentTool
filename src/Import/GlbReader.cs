@@ -2464,12 +2464,29 @@ namespace Morgott.ContentTool.Import
                         "'; rename one of them in Blender so every bone name is unique, then re-export");
                 seen[file.JointNames[j]] = j;
             }
+            // A rig taken from a LIVE scene carries the game's own decoration on every attachment
+            // point instead of the plain bone name, so the intersection with the shipped skeleton is
+            // empty and every such file used to fall back to nearest-bone - which is exactly what
+            // loses the author's weights. Undecorate them, EXACT NAMES FIRST so a plainly-named file
+            // behaves byte-identically.
+            var plain = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int j = 0; j < file.JointNames.Count; j++)
+            {
+                string bare = Plain(file.JointNames[j]);
+                if (bare == file.JointNames[j] || seen.ContainsKey(bare)) continue;
+                if (plain.ContainsKey(bare))
+                    throw new FormatException("the file's bones '" + file.JointNames[plain[bare]] + "' and '" +
+                        file.JointNames[j] + "' both name the bone '" + bare + "' once the game's own " +
+                        "'#<bone>_Addon => <part>' decoration is removed, so neither can be matched to it; " +
+                        "keep the one that belongs to this model and re-export");
+                plain[bare] = j;
+            }
 
             // Every live bone must be in the file. This is the one that breaks deformation, so it is
             // reported first and by name.
             for (int i = 0; i < boneNames.Count; i++)
             {
-                if (!seen.TryGetValue(boneNames[i], out int j))
+                if (!seen.TryGetValue(boneNames[i], out int j) && !plain.TryGetValue(boneNames[i], out j))
                     throw new FormatException("the file does not contain the bone '" + boneNames[i] +
                         "', which this model's skeleton has; the skeleton is never replaced, so in Blender keep the imported " +
                         "armature exactly as it came, with every bone and its name unchanged, and re-export");
@@ -2504,6 +2521,22 @@ namespace Morgott.ContentTool.Import
             }
             bindposes = new float[boneNames.Count][];
             for (int i = 0; i < boneNames.Count; i++) bindposes[i] = file.InverseBindMatrices[fileOf[i]];
+        }
+
+        /// <summary>
+        /// The plain bone name inside a name the GAME decorated, or <paramref name="name"/> itself
+        /// when it is not one. The format is the engine's own, not a guess:
+        /// <c>Addon.MovedBoneNameFormat = "#{0}_Addon => {1}"</c>
+        /// (decompiled\AssemblyCSharp\Assembly-CSharp\src\PhoenixPoint.Common.Entities.Addons\Addon.cs:143,
+        /// written onto the transform at :1250), so a body part ripped from a live scene names its
+        /// joints '#Root_Addon =&gt; PX_Heavy_Torso_BodyPartDef' where the shipped mesh says 'Root' -
+        /// and the Siren shows the same shape with '#LowerArm_Slasher_R_Addon =&gt; ...WeaponDef'.
+        /// </summary>
+        internal static string Plain(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name[0] != '#') return name;
+            int at = name.IndexOf("_Addon => ", StringComparison.Ordinal);
+            return at > 1 ? name.Substring(1, at - 1) : name;
         }
 
         /// <summary>The static half: no rig, so only the parts that do not mention bones are checked.</summary>

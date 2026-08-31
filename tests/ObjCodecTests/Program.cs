@@ -90,6 +90,7 @@ internal static class Program
         Console.WriteLine(ModelRoundTrip.Run());
         Console.WriteLine(SkinAbove.Run());
         Console.WriteLine(SourceSkip.Run());
+        Console.WriteLine(BoneNames.Run());
         Console.WriteLine(MaterialBake.Run());
         Console.WriteLine(MaterialTweakFixture.Run());
         Console.WriteLine(ClipRoundTrip.Run());
