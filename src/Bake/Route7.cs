@@ -242,12 +242,16 @@ namespace Morgott.ContentTool.Bake
                 // a replacement that refused - wrote the key anyway and last month's patched copy was
                 // served as current for the life of this install. Leaving the key unwritten costs one
                 // re-bake on the next enable, which is the right price for output nobody vouched for.
-                string report = ProjectBake.Run(projectRoot);
-                pre.AppendLine(report);
-                if (report.IndexOf("FAILURE", StringComparison.Ordinal) < 0)
+                //
+                // The COUNT, never the text: reading it out of the log made this branch depend on the
+                // wording of a sentence, and a reworded sentence would have failed the one way this
+                // project keeps being bitten - silently, with a stale copy looking current.
+                int failed;
+                pre.AppendLine(ProjectBake.Run(projectRoot, out failed));
+                if (failed == 0)
                     Project.PatchCache.Write(patched, key);
                 else
-                    pre.AppendLine("the bake above reported failures, so " + patched + " is NOT marked " +
+                    pre.AppendLine("the bake above reported " + failed + " failure(s), so " + patched + " is NOT marked " +
                                    "current - fix the source it names and enable the mod again, or the " +
                                    "copies below are whatever the last good bake produced");
             }

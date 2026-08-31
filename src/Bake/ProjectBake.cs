@@ -49,8 +49,21 @@ namespace Morgott.ContentTool.Bake
 
         internal static string Run(string projectRoot)
         {
+            int ignored;
+            return Run(projectRoot, out ignored);
+        }
+
+        /// <summary>
+        /// The same run, with its failure count as a VALUE. Route7 keys cache freshness on it: reading
+        /// the count out of the log text made a correctness-critical branch depend on the wording of a
+        /// sentence, and the failure mode of a reworded sentence is exactly the one this project keeps
+        /// being bitten by - a wrong result presented as fresh, silently.
+        /// </summary>
+        internal static string Run(string projectRoot, out int failed)
+        {
             StringBuilder log = new StringBuilder();
             int failures = 0;
+            failed = 0;
 
             ContentProject p = ContentProject.Load(projectRoot);
             // The replacement count is ALWAYS printed, including 0. A declared "replace" that parses
@@ -83,9 +96,11 @@ namespace Morgott.ContentTool.Bake
             // had written none, and route vii then refused it for holding no .bundle.
             int patchedBundles = Bundles(p).Count;
             if (p.Textures.Count == 0 && p.Audio.Count == 0 && p.Models.Count == 0)
+            {
                 // FAILURES FIRST. A project whose only model refused to import has nothing left to bake,
                 // and saying "nothing to bake" for it reports the symptom as if it were the state of
                 // an empty folder - the run has to end on the count.
+                failed = failures;
                 return log.Append(failures != 0
                     ? "ct_project: " + failures + " FAILURE(S)"
                     : p.Replace.Count == 0
@@ -97,6 +112,7 @@ namespace Morgott.ContentTool.Bake
                             : "ct_project: ALL PASS - nothing needed patching: none of this project's " +
                               p.Replace.Count + " replacement(s) names a shipped bundle, so no copy was " +
                               "written - the video row(s) above are served live by ct_video").ToString();
+            }
             failures += ClipNamesDeclared(p, log);
             failures += CreatureScaffold(p, log);
 
@@ -348,6 +364,7 @@ namespace Morgott.ContentTool.Bake
                 if (common != null) common.Unload(false);
             }
 
+            failed = failures;
             return log.Append(failures == 0
                 ? "ct_project: ALL PASS - " + outPath
                 : "ct_project: " + failures + " FAILURE(S)").ToString();
