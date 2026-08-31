@@ -49,6 +49,14 @@ internal static class BoneNames
         checks += Refuses(Model("#Root_Addon => A", "#Root_Addon => B"), new[] { "Root", "Neck" },
             "both name the bone 'Root'", "two joints decorating one bone are refused");
 
+        // ---- THE APPLIED-TRANSFORM SET, which is what made the P6 gate lie. Blender's Apply rewrote
+        // the skin so the file carries BOTH naming forms at once plus bones the skeleton does not
+        // have; Bind refuses it, the bake falls back to nearest-bone, and P6 now asks this same binder
+        // before predicting a by-name result it would never see.
+        checks += Refuses(Model("Root", "#Root_Addon => " + Def, "#L.UpLeg_Roll_1_Addon => " + Def),
+            new[] { "Root" }, "the file adds the bone",
+            "a file carrying both naming forms plus a bone the skeleton lacks is refused");
+
         // ---- and a name that only LOOKS decorated is left alone, or a real bone called '#weird' would
         // silently become something else.
         checks += Check(SkinBinder.Plain("#Root") == "#Root" && SkinBinder.Plain("Root") == "Root" &&

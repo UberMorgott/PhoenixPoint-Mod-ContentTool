@@ -1699,6 +1699,27 @@ namespace Morgott.ContentTool.Bake
                 return 0;
             }
 
+            // DID THE BY-NAME BINDING ACTUALLY HAPPEN? Everything below PREDICTS one from the file's
+            // own weights and asserts the copy matches - but BundleBaker.ReplaceMesh only binds by name
+            // when this same binder accepts, and falls back to nearest-bone when it does not. Without
+            // asking, the gate reported FAIL against a copy that was correctly bound nearest-bone,
+            // contradicting the patch line in its own run (measured on an applied-transform body part
+            // carrying 19 joints - both naming forms at once, plus bones the skeleton does not have).
+            // The patch line was right; this arm was the liar. A refused bind is a VOID: there is no
+            // by-name binding to measure, which is exactly what a skinless source already reports.
+            try
+            {
+                ushort[] unusedJoints;
+                float[][] unusedPoses;
+                SkinBinder.Bind(f, bones, 0, null, out unusedJoints, out unusedPoses);
+            }
+            catch (Exception e)
+            {
+                log.AppendLine("P6 VOID '" + key + "' <- " + im.Name + " was bound nearest-bone, not by " +
+                               "name, so there is no by-name binding to measure: " + e.Message);
+                return 0;
+            }
+
             string want = "";
             int moved = 0, split = 0;
             for (int i = 0; i < n; i++)
