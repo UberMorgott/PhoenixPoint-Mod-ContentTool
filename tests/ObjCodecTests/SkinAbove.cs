@@ -168,6 +168,11 @@ internal static class SkinAbove
     /// </summary>
     private static string BodyPart()
     {
+        return BodyPart(false) + "\n  " + BodyPart(true);
+    }
+
+    private static string BodyPart(bool animated)
+    {
         var b = new ClipImport.Bin();
         int position = b.Vec(3, "VEC3", 0f, 1f, 0f, 1f, 1f, 0f, 0f, 2f, 0f);
         int normal = b.Vec(3, "VEC3", 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f);
@@ -177,6 +182,11 @@ internal static class SkinAbove
         int bind = b.Vec(2, "MAT4",
             1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,   0, -1, 0, 1,
             0, -1, 0, 0, 1, 0, 0, 0,  0, 0, 1, 0,  -1,  1, 0, 1);
+        // The animated twin drives 'arm_addon' - a ROOT of the imported rig whose parent is NOT a
+        // joint. Its samples are stated against that parent, which the dropped fold leaves in neither
+        // the hierarchy nor `above`, so there is no space left to play them in.
+        int times = animated ? b.Vec(2, "SCALAR", 0f, 1f) : -1;
+        int move = animated ? b.Vec(2, "VEC3", 1f, 0f, 0f, 5f, 0f, 0f) : -1;
 
         string json =
             "{\"asset\":{\"version\":\"2.0\"}," +
@@ -192,8 +202,14 @@ internal static class SkinAbove
             "\"meshes\":[{\"name\":\"bodypart\",\"primitives\":[{\"attributes\":{\"POSITION\":" + position +
               ",\"NORMAL\":" + normal + ",\"JOINTS_0\":" + joints + ",\"WEIGHTS_0\":" + weights +
               "},\"indices\":" + indices + "}]}]," +
+            (animated
+                ? "\"animations\":[{\"name\":\"wave\",\"samplers\":[" +
+                  ClipImport.Sampler(times, move, "LINEAR") + "]," +
+                  "\"channels\":[{\"sampler\":0,\"target\":{\"node\":3,\"path\":\"translation\"}}]}],"
+                : "") +
             b.Json() + "}";
 
+        if (animated) return Animated(ClipImport.Container(json, b.Bytes()));
         SkinnedModel model = GlbReader.Read(ClipImport.Container(json, b.Bytes()));
         int checks = Check(model.JointNames.Count == 2 && model.JointNames[0] == "spine_addon" &&
                            model.JointNames[1] == "arm_addon",
@@ -350,6 +366,35 @@ internal static class SkinAbove
                V(model.Positions[2]) + " | root samples " + V(root.Translations[0]) + " .. " +
                V(root.Translations[1]) + " scale " + V(root.Scales[0]) + " rot " + Q(root.Rotations[1]) +
                " | child rest untouched at (0,1,0)";
+    }
+
+    /// <summary>
+    /// THE SHAPE THE DROPPED FOLD CANNOT CARRY. Dropping the fold is right for a body part, whose
+    /// roots hang under BONES that the bind poses already account for. It is NOT right once a clip
+    /// drives one of those roots and the parents are ordinary transformed objects: the samples are
+    /// stated against a parent that is now in neither the hierarchy nor <c>above</c>, so the bone would
+    /// snap on frame 0. Refused by name - a wrong import is worse than a refusal - and the refusal
+    /// must never send the author to Object > Apply > All Transforms, which is what destroyed a real
+    /// modder's weights.
+    /// </summary>
+    private static string Animated(byte[] file)
+    {
+        try
+        {
+            GlbReader.Read(file, new List<SampledClip>());
+        }
+        catch (FormatException e)
+        {
+            int checks = Check(e.Message.IndexOf("animates the bone 'arm_addon'", StringComparison.Ordinal) >= 0,
+                "the refusal names the animated root bone: " + e.Message);
+            checks += Check(e.Message.IndexOf("Apply", StringComparison.Ordinal) < 0,
+                "and it does not send the author to Blender's Apply All Transforms: " + e.Message);
+            return "BODY-PART-ANIMATED PASS, " + checks + " check(s) - a curve on a root bone under a " +
+                   "differently transformed parent is refused, not imported crooked";
+        }
+        throw new Exception("SKIN-ABOVE FAILURE: a clip driving a root bone whose parent is dropped was " +
+                            "IMPORTED - its samples are parent-local and would play model-root-local, so " +
+                            "the bone snaps on the first frame");
     }
 
     private static bool Vec(ObjVector3 v, float x, float y, float z) =>

@@ -115,6 +115,16 @@ namespace Morgott.ContentTool.Import
         /// </summary>
         private float[] above;
 
+        /// <summary>
+        /// Set when <see cref="Above"/> found the root bones under DIFFERENTLY transformed objects and
+        /// dropped the fold to identity. Harmless for a rest-pose mesh - a body part's roots hang under
+        /// BONES, already inside the space the bind poses are written in - but it means those parents
+        /// are in neither the imported hierarchy nor <c>above</c>, so a CURVE on one of those roots
+        /// would be sampled parent-local and played model-root-local. <see cref="Animation"/> refuses
+        /// exactly that pair; nothing else changes.
+        /// </summary>
+        private bool rootsDiffer;
+
         private GlbReader(Dictionary<string, object> root, byte[] bin)
         {
             this.root = root;
@@ -933,7 +943,7 @@ namespace Morgott.ContentTool.Import
                 float[] one = over < 0 ? Identity() : World(nodes, over);
                 if (shared == null) { shared = one; continue; }
                 for (int i = 0; i < 16; i++)
-                    if (Math.Abs(shared[i] - one[i]) > 1e-6f) return Identity();
+                    if (Math.Abs(shared[i] - one[i]) > 1e-6f) { rootsDiffer = true; return Identity(); }
             }
             return shared ?? Identity();
         }
@@ -1119,6 +1129,21 @@ namespace Morgott.ContentTool.Import
             for (int c = 0; c < channelSampler.Count; c++)
                 Channel(samplers, channelSampler[c], channelPath[c], channelSlot[c], what, clip.Name,
                         keyTimes, sampleAt, byslot);
+
+            // THE ONE PAIR THE DROPPED FOLD CANNOT CARRY, refused rather than imported crooked: a
+            // sample states the bone's transform in its PARENT's space, and when the roots disagree
+            // that parent is in neither the hierarchy nor `above`, so the curve would play as if it
+            // were model-root-local and the bone would snap on the first frame. A single fold cannot
+            // serve differing roots (Above's remark), so there is nothing honest to apply here.
+            if (rootsDiffer)
+                for (int slot = 0; slot < byslot.Length; slot++)
+                    if (byslot[slot] != null && model.Nodes[slot].Parent < 0)
+                        throw Bad("the file animates the bone '" + model.Nodes[slot].Name +
+                            "', which is one of several root bones hanging under objects with DIFFERENT " +
+                            "transforms; the clip states that bone against its own parent, and no single " +
+                            "orientation fits the whole skeleton, so it would play in the wrong space. " +
+                            "Export the animated rig on its own, with every root bone under ONE armature " +
+                            "object; a mesh with no clips in it imports as it is");
 
             if (above != null && !IsIdentity(above))
             {
