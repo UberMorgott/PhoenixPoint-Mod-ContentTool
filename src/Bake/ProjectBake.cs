@@ -1523,8 +1523,10 @@ namespace Morgott.ContentTool.Bake
                                                Elsewhere(p, r.mesh, "Meshes"));
                                 failures++; continue;
                             }
-                            string refusal;
-                            string how = baker.ReplaceMesh(r.asset, im.Baked, im.Model, out refusal);
+                            string refusal, mapping;
+                            bool suspect;
+                            string how = baker.ReplaceMesh(r.asset, im.Name, im.Baked, im.Model,
+                                                           out refusal, out mapping, out suspect);
                             if (refusal != null)
                             {
                                 log.AppendLine("P4 REFUSED '" + im.Name + "' -> " + refusal);
@@ -1533,6 +1535,10 @@ namespace Morgott.ContentTool.Bake
                             meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));
                             log.AppendLine("patch " + bundleFile + ": mesh '" + r.asset + "' <- " + im.Name +
                                            " " + im.Baked.Describe() + " - skinned " + how);
+                            // Reported and counted, never fatal - the file is legal, just probably not
+                            // what its author meant, so the bake stands and the run does not say ALL PASS.
+                            if (mapping != null) log.AppendLine((suspect ? "P4 WARN " : "P4 materials ") + mapping);
+                            if (suspect) failures++;
                             continue;
                         }
 

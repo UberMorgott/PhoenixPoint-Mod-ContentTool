@@ -84,6 +84,7 @@ internal static class Program
 
         Console.WriteLine("OBJ: ALL PASS, " + checks + " check(s)");
         Console.WriteLine(MeshMergeTests.Run());
+        Console.WriteLine(SubmeshSlots.Run());
         Console.WriteLine(MeshRoundTrip.Run());
         Console.WriteLine(PrefabRoundTrip.Run());
         Console.WriteLine(SkinRoundTrip.Run());

@@ -139,10 +139,12 @@ namespace Morgott.ContentTool.Bake
         /// (<see cref="SkinFields.Rebind"/>) and SAYS why.
         /// </summary>
         /// <param name="model">the .glb this geometry came out of, or null for an .obj.</param>
-        internal string ReplaceMesh(string assetName, BakedMesh baked, SkinnedModel model, out string refusal)
+        internal string ReplaceMesh(string assetName, string sourceName, BakedMesh baked, SkinnedModel model,
+                                    out string refusal, out string mapping, out bool suspect)
         {
             AssetFileInfo info = FindUnique(AssetClassID.Mesh, assetName);
             AssetTypeValueField mesh = man.GetBaseField(afileInst, info);
+            mapping = null; suspect = false;
 
             // A SKINLESS SOURCE CANNOT SKIN A RIGGED TARGET, and saying so beats welding it. Checked
             // before MeshFields.Fill and long before SetNewData, so a refusal writes nothing at all and
@@ -152,6 +154,16 @@ namespace Morgott.ContentTool.Bake
                 ? SkinFields.Rigged(mesh) ? SkinFields.Skinless(assetName) : null
                 : null;
             if (refusal != null) return null;
+
+            // WHICH part lands on WHICH material, said out loud: the bake preserves the file's
+            // primitive order and Unity paints submesh i with m_Materials[i], so a stray part at the
+            // front silently repaints everything behind it (MeshFields.SubmeshReport).
+            int[] counts = baked.SubmeshIndexCounts == null || baked.SubmeshIndexCounts.Length == 0
+                ? new[] { baked.IndexCount } : baked.SubmeshIndexCounts;
+            var triangles = new int[counts.Length];
+            for (int i = 0; i < counts.Length; i++) triangles[i] = counts[i] / 3;
+            mapping = MeshFields.SubmeshReport(sourceName ?? assetName, triangles,
+                                               MeshFields.MaterialNames(man, afileInst, info.PathId), out suspect);
 
             // BEFORE Fill, which clears every channel dimension: this is the target's own influences
             // per vertex, and writing fewer over it would DOWNGRADE its skinning (PP ships dim4 body

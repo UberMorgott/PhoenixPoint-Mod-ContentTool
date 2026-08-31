@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using Morgott.ContentTool.Import;
@@ -118,6 +120,117 @@ namespace Morgott.ContentTool.Bake
                 SetVector3(sub["localAABB"]["m_Extent"], baked.ExtentX, baked.ExtentY, baked.ExtentZ);
                 firstByte += (uint)(counts[i] * stride);
             }
+        }
+
+        /// <summary>
+        /// A submesh drawn by this many triangles or fewer is a leftover shard, not a material part.
+        /// Absolute rather than a share of the mesh, because the share a real part takes varies wildly
+        /// (a visor is a fraction of a percent of a body) while NOTHING anybody meant to paint
+        /// separately is drawn by eight triangles - a cube is twelve. Measured on the case that
+        /// prompted this: an author's torso arrived as primitive 0 = 1 triangle plus primitive 1 =
+        /// 15647, and the 15647 silently took the target's SECOND material.
+        /// </summary>
+        private const int ShardTriangles = 8;
+
+        /// <summary>
+        /// WHICH source part landed on WHICH of the target's materials, and whether that mapping looks
+        /// like an accident. Unity draws submesh i with m_Materials[i] and the bake preserves the
+        /// file's primitive order, so a stray one-triangle primitive at slot 0 pushes every real
+        /// triangle onto the material after it - which reaches the author as a mangled model and no
+        /// reason. null when there is nothing to say (one part onto one slot).
+        /// </summary>
+        /// <param name="suspect">true when a part is small enough to be a shard
+        /// (<see cref="ShardTriangles"/>) while another is not - the caller reports it as a problem
+        /// and bakes anyway, because the file is legal, just probably not what was meant.</param>
+        internal static string SubmeshReport(string fileName, IList<int> triangleCounts,
+                                             IList<string> materialSlots, out bool suspect)
+        {
+            suspect = false;
+            int parts = triangleCounts == null ? 0 : triangleCounts.Count;
+            int slots = materialSlots == null ? 0 : materialSlots.Count;
+            if (parts <= 1 && slots <= 1) return null;
+
+            int biggest = 0;
+            for (int i = 0; i < parts; i++) if (triangleCounts[i] > biggest) biggest = triangleCounts[i];
+            int shard = -1;
+            for (int i = 0; i < parts && shard < 0; i++)
+                if (triangleCounts[i] <= ShardTriangles && biggest > ShardTriangles) shard = i;
+
+            var map = new StringBuilder();
+            for (int i = 0; i < parts; i++)
+            {
+                if (i > 0) map.Append(", ");
+                map.Append("part ").Append((i + 1).ToString(CultureInfo.InvariantCulture))
+                   .Append(" (").Append(triangleCounts[i].ToString(CultureInfo.InvariantCulture))
+                   .Append(triangleCounts[i] == 1 ? " triangle) -> " : " triangles) -> ")
+                   .Append(i < slots ? "material '" + materialSlots[i] + "'" : "NO material (not drawn)");
+            }
+            if (shard < 0) return fileName + ": " + map;
+
+            suspect = true;
+            int real = shard == 0 ? 1 : 0;
+            for (int i = 0; i < parts; i++) if (triangleCounts[i] == biggest) real = i;
+            return fileName + " part " + (shard + 1).ToString(CultureInfo.InvariantCulture) + " of " +
+                   parts.ToString(CultureInfo.InvariantCulture) + " has only " +
+                   triangleCounts[shard].ToString(CultureInfo.InvariantCulture) +
+                   (triangleCounts[shard] == 1 ? " triangle" : " triangles") + " while part " +
+                   (real + 1).ToString(CultureInfo.InvariantCulture) + " has " +
+                   biggest.ToString(CultureInfo.InvariantCulture) +
+                   ". The game paints part N with the target's material N, so " + map +
+                   ". A part that small is almost always a leftover shard, and it pushes your real " +
+                   "geometry onto the wrong material. In Blender select the mesh, Edit Mode, select " +
+                   "all (A) and Mesh > Merge > By Distance, or assign every face to ONE material slot, " +
+                   "then re-export - or order the parts to match the target's materials. Baked anyway; " +
+                   "nothing was skipped.";
+        }
+
+        /// <summary>
+        /// The names of the materials a Mesh is drawn with, in submesh order - the other half of what
+        /// <see cref="SubmeshReport"/> needs. Read off the renderer that USES the mesh, the same walk
+        /// <see cref="SkinFields.BoneNames"/> makes for bones: skinned renderers point at the mesh
+        /// themselves, static ones do it through a MeshFilter on the same GameObject. null when
+        /// nothing in this file draws the mesh, or when two renderers draw it and DISAGREE about the
+        /// materials - an ambiguity is refused and never guessed.
+        /// </summary>
+        internal static string[] MaterialNames(AssetsManager m, AssetsFileInstance af, long meshPathId)
+        {
+            string[] found = null;
+            foreach (AssetClassID kind in new[] { AssetClassID.SkinnedMeshRenderer, AssetClassID.MeshRenderer })
+                foreach (AssetFileInfo i in af.file.Metadata.GetAssetsOfType(kind))
+                {
+                    AssetTypeValueField r = m.GetBaseField(af, i);
+                    if (kind == AssetClassID.SkinnedMeshRenderer)
+                    {
+                        if (r["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
+                    }
+                    else if (!DrawsFiltered(m, af, r["m_GameObject"]["m_PathID"].AsLong, meshPathId)) continue;
+
+                    var names = new List<string>();
+                    foreach (AssetTypeValueField p in r["m_Materials"]["Array"].Children)
+                    {
+                        AssetTypeValueField mat = PrefabFields.Get(m, af, p["m_PathID"].AsLong);
+                        names.Add(mat == null || mat["m_Name"].IsDummy || string.IsNullOrEmpty(mat["m_Name"].AsString)
+                                  ? "slot " + names.Count.ToString(CultureInfo.InvariantCulture)
+                                  : mat["m_Name"].AsString);
+                    }
+                    if (found == null) { found = names.ToArray(); continue; }
+                    if (found.Length != names.Count) return null;
+                    for (int b = 0; b < found.Length; b++) if (found[b] != names[b]) return null;
+                }
+            return found;
+        }
+
+        /// <summary>Does a MeshFilter on <paramref name="gameObject"/> carry this mesh?</summary>
+        private static bool DrawsFiltered(AssetsManager m, AssetsFileInstance af, long gameObject, long meshPathId)
+        {
+            if (gameObject == 0) return false;
+            foreach (AssetFileInfo i in af.file.Metadata.GetAssetsOfType(AssetClassID.MeshFilter))
+            {
+                AssetTypeValueField f = m.GetBaseField(af, i);
+                if (f["m_GameObject"]["m_PathID"].AsLong == gameObject &&
+                    f["m_Mesh"]["m_PathID"].AsLong == meshPathId) return true;
+            }
+            return false;
         }
 
         /// <summary>

@@ -12,6 +12,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="MeshMergeTests.cs" />
+    <Compile Include="SubmeshSlots.cs" />
     <Compile Include="MeshRoundTrip.cs" />
     <Compile Include="PrefabRoundTrip.cs" />
     <Compile Include="SkinRoundTrip.cs" />
