@@ -429,20 +429,28 @@ measured on `D:\PP-Instance2` it no longer holds at mod-init either: the autorun
 `mounted defaultlocalgroup_unitybuiltinshaders.bundle=False (already open, mounted by the game)`.
 So `ct_bake: 1 FAILURE(S) — U3d-premount FAIL … reports 'Standard' (expected 'Hidden/InternalErrorShader')`
 was the gate's own precondition failing, not our forging. The skip is decided by MEASURED STATE, never
-by the value under test: `AlreadyOpen` opens the archive itself and closes it again — Unity refuses a
-file that is already open, so a load that succeeds proves nobody held it. Skipping on "the reading was
-`Standard`" would have been the silent-swallow shape (any real defect that also produces `Standard`
-would go unreported); with the precondition MET the assertion is unchanged, `Hidden/InternalErrorShader`
-or FAIL. Falsified 2026-08-31 in both directions: precondition forced to read MET while the game held
-the archive →
-`U3d-premount FAIL with '…' NOT loaded the forged external reports 'Standard' (expected 'Hidden/InternalErrorShader')`,
-`ct_bake: 1 FAILURE(S)`; precondition genuinely absent →
-`U3d-premount SKIP precondition not met: '…' cannot be opened by us, so it is already mounted …`,
-`ct_bake: ALL PASS`.
-The same measurement now feeds `U3d`/`U3e`: our mount returning null while `AlreadyOpen` says the game
-holds the archive is not a failed mount, so a run whose externals resolve perfectly well no longer
-reports **VOID** — `U3e`, `U3e-ctl-badid` and `U3e-ctl-wrongfile` had been VOID, measuring nothing, on
-every autogate run and are green again.
+by the value under test: `ProbeArchive` opens the archive itself and closes it again with
+`Unload(false)`. Skipping on "the reading was `Standard`" would have been the silent-swallow shape —
+any real defect that also produces `Standard` would go unreported.
+
+`LoadFromFile` returning null is **three** states, not one, and the probe keeps them apart. The
+discriminator is Unity's own error text, captured off `Application.logMessageReceived` during the probe
+(`File.Exists` first, for the missing file it never gets to complain about):
+
+- opened it ourselves → `free`: precondition holds, and the assertion is unchanged — `Hidden/InternalErrorShader` or FAIL, no value-shaped escape hatch;
+- `"… already loaded"` → `held by another loader`: precondition absent → **SKIP** with that reason. This is the only null that leaves the archive MOUNTED, so it is also the only one that lets `U3d`/`U3e` answer without our own mount;
+- anything else (missing, truncated, wrong build target) → Unity's complaint verbatim → **VOID**. Folding this into "mounted" would have run the resolution arms against an archive that is not there and reported misleading FAILURES.
+
+Falsified 2026-08-31, all three states, on `D:\PP-Instance2`:
+
+1. precondition forced to read MET while the game held the archive → `U3d-premount FAIL with 'defaultlocalgroup_unitybuiltinshaders.bundle' NOT loaded the forged external reports 'Standard' (expected 'Hidden/InternalErrorShader')`, `ct_bake: 1 FAILURE(S)` — the assertion still bites;
+2. archive genuinely held by the game → `U3d-premount SKIP precondition not met: '…' cannot be opened by us, so it is already mounted (the game loaded it through Addressables) and 'not loaded' is not a state this run has`, `ct_bake: ALL PASS`;
+3. the bundle truncated to 1 KB (backed up, restored, SHA-256 re-verified) → `U3d-premount VOID 'defaultlocalgroup_unitybuiltinshaders.bundle' could not be read: Unable to read header from archive file: …` plus `U3d VOID …` — no skip, no false failure.
+
+The same probe now feeds `U3d`/`U3e`: our mount returning null while the probe says `held` is not a
+failed mount, so a run whose externals resolve perfectly well no longer reports **VOID** — `U3e`,
+`U3e-ctl-badid` and `U3e-ctl-wrongfile` had been VOID, measuring nothing, on every autogate run and are
+green again.
 
 **Same-shape risk elsewhere:** any row proven by a HUMAN at the main menu whose subject is an
 EXTERNAL reference or an Addressables-loaded asset carries this precondition. U0a/U0b/U1/U3a/U3a-refs

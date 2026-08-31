@@ -260,18 +260,23 @@ namespace Morgott.ContentTool.Bake
                 // deserialized, which is now.
                 // Its PRECONDITION - that nobody ELSE has the archive open - only holds when ct_bake
                 // runs before the game pulls the builtin shaders in through Addressables. It is
-                // MEASURED by AlreadyOpen, never inferred from the value under test: skipping on
+                // MEASURED by ProbeArchive, never inferred from the value under test: skipping on
                 // "the reading was 'Standard'" would silence the arm for any real defect that also
                 // produces 'Standard'. When the precondition holds the assertion is unchanged -
                 // the error shader by name or FAIL, with no value-shaped escape hatch.
-                bool preMounted = AlreadyOpen(BuiltinShaderBundle);
+                string builtinProbe = ProbeArchive(BuiltinShaderBundle);
                 // Same measurement for U3e's archive: if it is already open our mount returns null
                 // and U3e would report VOID - measuring nothing - on a run where it resolves fine.
-                bool pxPreMounted = AlreadyOpen(ShadersBundle);
-                if (preMounted)
+                string shadersProbe = ProbeArchive(ShadersBundle);
+                if (builtinProbe == Held)
                     log.AppendLine("U3d-premount SKIP precondition not met: '" + BuiltinShaderBundle +
                                    "' cannot be opened by us, so it is already mounted (the game loaded " +
                                    "it through Addressables) and 'not loaded' is not a state this run has");
+                else if (builtinProbe != Free)
+                    // Not "already open" and not openable either: the file itself is the problem, and
+                    // nothing below can measure anything against an archive that is not there.
+                    log.AppendLine("U3d-premount VOID '" + BuiltinShaderBundle + "' could not be read: " +
+                                   builtinProbe);
                 else
                     failures += Check(log, "U3d-premount",
                         ShaderNameOf(bundle.LoadAsset<Material>(extMatKey)) == ErrorShaderName,
@@ -288,15 +293,15 @@ namespace Morgott.ContentTool.Bake
                 // has to be mounted for the same reason and at the same moment.
                 common = AssetBundle.LoadFromFile(ShippedBundlePath(CommonBundle));
                 // Unity refuses to open a file that is already open, so builtin==null means EITHER the
-                // mount failed OR the game had it mounted all along - and preMounted is the evidence
-                // that tells those two apart. In the second case the externals resolve anyway, so U3d
-                // is answerable and must not be reported VOID.
-                bool builtinReady = builtin != null || preMounted;
-                bool shadersReady = shaders != null || pxPreMounted;
+                // mount failed OR the game had it mounted all along - and the probe is the evidence
+                // that tells those two apart. Only 'Held' makes the arms answerable without our own
+                // mount; a probe that failed for any other reason leaves them VOID, as it should.
+                bool builtinReady = builtin != null || builtinProbe == Held;
+                bool shadersReady = shaders != null || shadersProbe == Held;
                 log.AppendLine("mounted " + BuiltinShaderBundle + "=" + (builtin != null) +
-                               (preMounted ? " (already open, mounted by the game)" : "") +
+                               " (probe: " + builtinProbe + ")" +
                                " " + ShadersBundle + "=" + (shaders != null) +
-                               (pxPreMounted ? " (already open, mounted by the game)" : "") +
+                               " (probe: " + shadersProbe + ")" +
                                " " + CommonBundle + "=" + (common != null));
                 bundle.Unload(true);
                 bundle = AssetBundle.LoadFromFile(outPath);
@@ -813,18 +818,34 @@ namespace Morgott.ContentTool.Bake
             return true;
         }
 
+        internal const string Free = "free", Held = "held by another loader";
+
         /// <summary>
-        /// Does somebody else hold this shipped archive open? Unity refuses to open a file twice, so
-        /// a load that SUCCEEDS proves nobody did - and it is closed again immediately, leaving the
-        /// caller in the same state it was in. A file that is missing or broken also reads as "open"
-        /// here; the mount that follows fails too, so those runs report VOID rather than a verdict.
+        /// What state is this shipped archive in? <see cref="Free"/> - we opened it ourselves, so
+        /// nobody else holds it and it is closed again at once, leaving the caller's state untouched.
+        /// <see cref="Held"/> - Unity refused because the same files are already loaded, which is the
+        /// only null that means "someone else has it". Anything else is Unity's own complaint (or a
+        /// missing file) verbatim: a probe that failed for THAT reason must not read as "mounted", or
+        /// the arms below would assert against an archive that is not there.
         /// </summary>
-        private static bool AlreadyOpen(string bundleFileName)
+        private static string ProbeArchive(string bundleFileName)
         {
-            AssetBundle probe = AssetBundle.LoadFromFile(ShippedBundlePath(bundleFileName));
-            if (probe == null) return true;
-            probe.Unload(false);
-            return false;
+            string path = ShippedBundlePath(bundleFileName);
+            if (!File.Exists(path)) return "no such file: " + path;
+            string said = null;
+            Application.LogCallback tap = (msg, stack, type) =>
+            {
+                if (said == null && (type == LogType.Error || type == LogType.Exception)) said = msg;
+            };
+            Application.logMessageReceived += tap;
+            AssetBundle probe;
+            try { probe = AssetBundle.LoadFromFile(path); }
+            finally { Application.logMessageReceived -= tap; }
+            if (probe != null) { probe.Unload(false); return Free; }
+            // Unity names this one case in so many words, and it is the only failure that leaves the
+            // archive MOUNTED and every external in it resolvable.
+            if (said != null && said.Contains("already loaded")) return Held;
+            return said == null ? "LoadFromFile returned null and Unity logged nothing" : said;
         }
 
         private static int Check(StringBuilder log, string gate, bool ok, string detail)
