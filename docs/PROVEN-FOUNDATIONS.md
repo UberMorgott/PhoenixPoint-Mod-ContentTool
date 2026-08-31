@@ -212,12 +212,15 @@ round trip, with `U5-deform` and `U5-ctl-flat` still green.
 character screen, Phoenix Assault soldier, torso `CHR_PX_ASS_TS_M_V01_02` replaced by the sample's
 4-vertex `blade.obj` quad:
 - the quad sits DOWN at LEG height, not at the torso — the character mesh's local origin is at the feet,
-  so nearest-bindpose bound the whole quad to the PELVIS bone. Expected, not a defect.
+  so nearest-bindpose bound the whole quad to the PELVIS bone.
 - the quad MOVES with the idle animation, riding that one bone. That is the deformation proof at
   RENDER level, matching the `U5b-deform` gate arm — a static replacement could not move at all.
 - the armour TEXTURE stretches over the 4 vertices — expected: only the mesh was replaced, the material
   is still the shipped one.
-This is the declared ceiling behaving exactly as documented (one bone per vertex, rigid), nothing more.
+This was the U5b ceiling — one bone per vertex, rigid. It is superseded by P6/R6 (smooth weights from
+a `.glb`), and **a skinless source onto a rigged target is now REFUSED** (`cd9f867`): nearest-bone
+welding fabricates a skin that collapses the moment the character animates. Skinless onto a STATIC
+target still works and is unchanged (the shipped `WeaponMesh` demo depends on it).
 
 ~~Ceiling of U5b, deliberate: ONE full-weight influence per vertex, so a vertex follows exactly one
 bone and a joint creases instead of bending. … Smooth weights need a skinned interchange format
@@ -1431,3 +1434,27 @@ All of these are "how many fields", not "does it work".
   (`QuitCutsceneMain.cs:270-291`) exits too. Missing measurement: a `Player.log` containing
   `Q1-exit the cutscene finished or was skipped; quitting for real now` and NOT
   `Q1-watchdog … are up`.
+
+## Bake resilience — closed 2026-08-31
+
+| # | Closed fact | Evidence |
+|---|---|---|
+| BR1 | **A single bad manifest line no longer aborts the entire bake.** Five sites in `ProjectBake.Patch`'s per-replacement loop did `return`, abandoning that bundle AND every bundle after it, skipping `baker.Write` so no copy was produced at all. All now `failures++; continue;` | `89fcbcf` — P3 material `:1490`, P7 clip `:1507`, P4 mesh-not-found `:1523`, P4 skinless `:1530`, P1 texture-not-found `:1543` |
+| BR2 | **An unusable source is reported and skipped, not fatal.** A truncated/corrupt source used to abort the entire bake; it is now skipped with a message, and `ProjectBake.Run(root, out failed)` returns the failure count through all three exits (the compiler proves it) | `c74658f`, `0bd7ebc`, `1f3f25a`, `d019fc7` |
+| BR3 | **A failed bake can no longer mark a stale bundle as current.** `Route7` keys on the count, not on log text | Same commits as BR2 |
+| BR4 | **Skinless source onto a RIGGED target is refused in both the bake and live-swap paths.** Nearest-bone welding fabricates a skin that collapses the moment the character animates. Skinless onto a STATIC target still works (the `WeaponMesh` demo depends on it) | `cd9f867` |
+| BR5 | **Decorated bone names normalise to plain names.** PP decorates attachment-point bones at runtime as `#<Bone>_Addon => <BodyPartDef>` (`Addon.cs:143`, applied at `:1250`). A model ripped from a live scene carries those names, so by-name binding found zero matches and silently fell back to nearest-bone. `SkinBinder.Plain()` strips the decoration; exact matches still win; a normalisation collision is refused | `cc9bef1` |
+| BR6 | **`GlbReader.Above()` accepts multi-parent root joints.** The normal PP body-part mesh shape (each addon joint under a different real bone) was refused with an incorrect message telling the user to run `Apply All Transforms` in Blender. `Above()` now returns identity for that shape (the parents are bones inside bind-pose space). The ONE shape that genuinely cannot be folded (an animated root joint whose differing parents are NOT bones) is refused with a clear message, no mention of Apply | `109a338`, `f30e499` |
+| BR7 | **The P6 gate asks the binder, not a prediction.** The old gate predicted a by-name result without asking whether the binder had accepted, producing a FAIL that contradicted the patch line. It now runs `SkinBinder` and VOIDs with the binder's own words | `110f771` |
+| BR8 | **Texture refusals name the actual file location.** The message now says where the file actually is (e.g. `Content\Meshes\materials\`, the Resource Replacer layout) and that moving it into `Content\Textures\` is the fix | `40dd99c` |
+
+**Verified in a live game** (build `4b3a763e`, `D:\PP-Instance2`, `stale:false`): the modder's
+not-applied set bakes all three meshes `skinned BY NAME onto the target's own 10 bones, carrying the
+file's own weights`; his applied set refuses the skinless torso yet patches the other two meshes,
+prints the texture refusal, writes both bundles and reports `2 FAILURE(S)`.
+Offline suite: `BODY-PART 41`, `BODY-PART-ANIMATED 2`, `SOURCE-SKIP 4`, `BONE-NAMES 6`,
+`SKIN-ABOVE 7`, `ROOT-CURVE 4`, `ROOT-FOLD 80`, `MESH round trip PASS`,
+`TargetPathTests R0: ALL PASS`.
+
+**Known limitation:** a model with a folded armature AND a root-bone rotation crossing the decompose
+branch boundary has offline coverage only — no in-game asset exercises it.

@@ -101,6 +101,21 @@ Falling back to nearest-bone is a degradation, not a crash: one full-weight infl
 so the mesh still animates with the shipped clips — it just deforms by whichever bone was closest
 instead of by what the artist painted.
 
+## Fixes shipped after this measurement (2026-08-31)
+
+- **Decorated bone names** (`cc9bef1`): a model ripped from a live scene carries
+  `#<Bone>_Addon => <BodyPartDef>` names (`Addon.cs:143`). By-name binding found zero matches
+  (intersection 0 of 10) and silently fell back to nearest-bone — this was the real root cause of
+  "lost weights and positions" reported by a modder. `SkinBinder.Plain()` now normalises to the
+  plain bone name.
+- **Multi-parent root joints** (`109a338`): `GlbReader.Above()` refused normal PP body-part meshes
+  whose addon joints hang under different parent bones. The old refusal told the modder to run
+  `Apply All Transforms` — that advice was WRONG and damaged real rigs.
+- **Skinless onto rigged** (`cd9f867`): now refused in both bake and live-swap paths. Nearest-bone
+  welding fabricated a skin that collapsed on animation.
+- **Bake resilience** (`89fcbcf`): a single refused replacement no longer aborts the rest of the
+  bundle or every bundle after it.
+
 ## What this run did NOT measure
 
 - **A soldier wearing the replaced skinned mesh, in a mission.** The evidence above that the shipped

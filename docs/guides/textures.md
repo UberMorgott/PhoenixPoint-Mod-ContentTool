@@ -82,6 +82,10 @@ The refusal text names only `.png/.jpg`, but the importer accepts `.png`, `.jpg`
 Replace `acid_skin.tga` with one of those extensions in that exact folder and rerun `ct_project`;
 do not continue to packaging after a `FAILURE(S)` summary.
 
+If your texture is under `Content\Meshes\materials\` (the Resource Replacer layout), the refusal
+now names that location and tells you to move it into `Content\Textures\`. The search root stays
+`Content\Textures\` only — a deliberate product decision, not an oversight.
+
 Put the asset on screen and inspect it at the angles and distances players will use. A successful
 bake proves the file was encoded and the patched copy was formed; it does not prove that your UVs,
 alpha, color space or intended renderer are correct.

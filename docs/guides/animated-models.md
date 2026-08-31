@@ -61,6 +61,27 @@ nothing is written: there are no weights to follow the skeleton with, so every v
 one bone and the model would collapse onto it as soon as the character moves. Weight the mesh to the
 target's own bones and export a GLB. Static objects (a weapon, a prop) still take a bare mesh.
 
+### Bone names ripped from a live scene
+
+Phoenix Point decorates attachment-point bone names at runtime as `#<Bone>_Addon => <BodyPartDef>`
+(engine source: `Addon.cs:143`, applied at `:1250`). Any model ripped from a running game carries
+those names, so a by-name match against the shipped skeleton would find zero bones and silently fall
+back to nearest-bone synthesis. ContentTool normalises decorated names to the plain bone name in
+`SkinBinder.Plain()` — exact matches still win, and a normalisation collision is refused rather than
+guessed. **You do not need to strip the decoration yourself.**
+
+### Do NOT run Apply All Transforms
+
+Older advice (including earlier versions of this guide) told modders to run
+`Object > Apply > All Transforms` in Blender before exporting. **That advice was wrong and can
+damage a rig.** Apply rewrites the skin: on one real model a torso went from 10 joints / 17 561
+verts to 19 joints / 26 059 verts, destroying weights that had been painted by hand.
+
+The normal shape of a Phoenix Point body-part mesh exported with its rig has each addon joint
+hanging under a different real bone — different parents per root joint. ContentTool handles this
+correctly (`GlbReader.Above()` returns identity for that shape, because those parents are bones
+already inside bind-pose space). No transform application is needed.
+
 ## Bring the model's own skeleton and clips
 
 The creature route ships the complete rig below `Content\Models`. Bone names, order and count are

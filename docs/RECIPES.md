@@ -383,6 +383,12 @@ MyMod\Content\Meshes\torso.glb        # armature + WEIGHTS_0, exported from Blen
 - **A file with no armature is REFUSED for a rigged target**, by name, and nothing is written: there
   are no weights to follow the skeleton with, so every vertex would weld to one bone. Weight the mesh
   to the target's own bones in Blender and export `.glb`. Static objects still take a bare mesh.
+- **Bone names ripped from a live scene** carry a `#<Bone>_Addon => <BodyPartDef>` decoration
+  (engine `Addon.cs:143`). ContentTool normalises them in `SkinBinder.Plain()`, so by-name binding
+  works without manual cleanup.
+- **Do NOT run `Apply All Transforms` in Blender** — it rewrites the skin and can destroy hand-
+  painted weights. ContentTool handles the normal PP body-part shape (each addon joint under a
+  different parent bone) without any transform application.
 - Same path live in the dev workbench, no restart: `ct_replace <target>@SkinnedMeshRenderer.mesh
   <file.glb>` (§15).
 
