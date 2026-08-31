@@ -238,8 +238,10 @@ namespace Morgott.ContentTool.Dev
             // The live twin of BundleBaker.ReplaceMesh's guard, and it has to be here rather than in
             // LiveMesh.Bind: nothing may be assigned on a refusal, or the player watches their
             // character weld itself to a hip mid-animation. A MeshFilter target never reaches this.
+            // Destroy before returning: no Mark owns `ours` yet, so a bare return leaks the native
+            // mesh on every refused attempt - the same shape the texture refusal above already has.
             if (smr != null && (model == null || model.JointNames.Count == 0))
-                return "ct_replace REFUSED: " + Bake.SkinFields.Skinless(p.Transform);
+            { UnityEngine.Object.Destroy(ours); return "ct_replace REFUSED: " + Bake.SkinFields.Skinless(p.Transform); }
 
             string skin = smr != null ? LiveMesh.Bind(ours, smr, model) : null;
             Mark m = new Mark

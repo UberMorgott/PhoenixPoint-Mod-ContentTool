@@ -62,8 +62,12 @@ namespace Morgott.ContentTool.Bake
         internal static string Run(string projectRoot, out int failed)
         {
             StringBuilder log = new StringBuilder();
+            // NOT initialised here on purpose. `failed = 0` up front is what let the
+            // LoadFromFile-returned-null exit report a failed bake as a success: C# only demands an
+            // out parameter be assigned on every path that RETURNS, and a default at the top satisfies
+            // that for all of them at once. Left unassigned, the compiler proves what a reviewer
+            // otherwise has to - every exit states its own count.
             int failures = 0;
-            failed = 0;
 
             ContentProject p = ContentProject.Load(projectRoot);
             // The replacement count is ALWAYS printed, including 0. A declared "replace" that parses
@@ -319,6 +323,9 @@ namespace Morgott.ContentTool.Bake
             if (bundle == null)
             {
                 if (common != null) common.Unload(false);
+                // A bake that cannot read its own output is a FAILED bake, and `failed` says so or
+                // Route7 marks this run's copies current (the hole the count was added to close).
+                failed = failures + 1;
                 return log.Append("FAIL AssetBundle.LoadFromFile returned null - something still holds " +
                                   "a bundle named '" + BundleResidency.Identity(p.Id) + "'. Restart, or " +
                                   "switch that mod off in the mod manager, then bake again.").ToString();
