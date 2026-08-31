@@ -22,13 +22,15 @@ Start here, in this order:
 
 1. [How a mod is made](SHIPPING-A-CONTENT-MOD.md) — create the folder, preview changes, bake,
    package, reinstall as a player, and ship.
-2. [Open the developer console](SHIPPING-A-CONTENT-MOD.md#open-the-developer-console) — the
+2. [Replace vs Add](guides/replace-vs-add.md) — which route you want and why Replace bakes on the
+   player's machine.
+3. [Open the developer console](SHIPPING-A-CONTENT-MOD.md#open-the-developer-console) — the
    physical backquote-key position opens it; nothing needs enabling when the game launched with mods.
-3. [Discover game content](guides/discovery.md) — find the bundle, asset, def, media ID, video row,
+4. [Discover game content](guides/discovery.md) — find the bundle, asset, def, media ID, video row,
    bone names, material properties and clip data you need.
-4. [Pick a recipe](guides/index.md) — texture, material, mesh, animated model, sound, video,
+5. [Pick a recipe](guides/index.md) — texture, material, mesh, animated model, sound, video,
    creature, weapon, or a [foreign humanoid soldier](guides/humanoid-soldier.md).
-5. [Manifest and command reference](guides/reference.md) — every supported field and author-facing
+6. [Manifest and command reference](guides/reference.md) — every supported field and author-facing
    console command.
 
 One project can use several routes at once. The

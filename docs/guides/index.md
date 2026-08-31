@@ -1,5 +1,8 @@
 # Recipes
 
+Read [Replace vs Add](replace-vs-add.md) first if you are unsure which route you need and why
+Replace mods bake on the player's machine.
+
 Use [How a mod is made](../SHIPPING-A-CONTENT-MOD.md) for the lifecycle and
 [Discover game content](discovery.md) for target names. A recipe begins where those shared steps
 leave off: the route-specific folder, complete manifests, bake command, test and limits.
