@@ -1,4 +1,5 @@
 using System;
+using AssetsTools.NET.Extra;
 using Morgott.ContentTool.Bake;
 
 /// <summary>
@@ -58,9 +59,68 @@ internal static class SubmeshSlots
             string over = MeshFields.SubmeshReport("x.glb", new[] { 900, 900 }, new[] { "a" }, out suspect);
             Ok(over.Contains("part 2 (900 triangles) -> NO material (not drawn)"),
                "a part with no material slot is named as undrawn: " + over);
+
+            // ...but a mesh NO renderer draws is a different answer from a part with no slot.
+            string none = MeshFields.SubmeshReport("x.glb", new[] { 900, 900 }, null, out suspect);
+            Ok(none.Contains("material unknown (no renderer in this bundle draws this mesh)") &&
+               !none.Contains("not drawn"),
+               "a mesh nothing draws says so instead of calling its parts undrawn: " + none);
+
+            // A shard BEHIND the real geometry displaces nothing, and the warning must not claim it does.
+            string last = MeshFields.SubmeshReport("x.glb", new[] { 900, 1 }, new[] { "a", "b" }, out suspect);
+            Ok(suspect, "a trailing 1-triangle part is still flagged");
+            Ok(last.Contains("being last it displaces nothing") &&
+               !last.Contains("painted wrongly"),
+               "it does NOT claim the real geometry moved: " + last);
+            Ok(MeshFields.SubmeshReport("x.glb", new[] { 1, 900 }, new[] { "a", "b" }, out suspect)
+                         .Contains("every part after it takes the material meant for the part before"),
+               "while a LEADING shard still says what it displaces");
+
+            return Variants();
         }
         catch (Exception ex) { return "SUBMESH-SLOTS FAIL " + ex.Message; }
-        return "SUBMESH-SLOTS: ALL PASS, " + checks + " check(s)";
+    }
+
+    /// <summary>
+    /// The REAL mesh the feature was written for: CHR_PX_HVY_TS_M_V01 is drawn by three renderers
+    /// (default, GOLD, XMAS) whose material arrays DIFFER. That used to read back as null - "no
+    /// materials" - and the report then called every part undrawn. The game install is
+    /// machine-specific, so a missing bundle is VOID, never PASS.
+    /// </summary>
+    private static string Variants()
+    {
+        const string Mesh = "CHR_PX_HVY_TS_M_V01";
+        string root = Environment.GetEnvironmentVariable("PPRoot") ?? @"D:\Steam\steamapps\common\Phoenix Point";
+        string bundle = System.IO.Path.Combine(root,
+            @"PhoenixPointWin64_Data\StreamingAssets\aa\StandaloneWindows64\px_heavy_assets_all.bundle");
+        string classData = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+            @"..\..\..\..\..\lib\classdata.tpk");
+        if (!System.IO.File.Exists(bundle) || !System.IO.File.Exists(classData))
+            return "SUBMESH-SLOTS: " + checks + " check(s) PASS, variant arm VOID - no " + bundle;
+
+        string[] slots = null;
+        AssetsManager man = new AssetsManager();
+        man.LoadClassPackage(classData);
+        BundleFileInstance bun = man.LoadBundleFile(bundle, true);
+        AssetsFileInstance afile = man.LoadAssetsFileFromBundle(bun, 0, false);
+        man.LoadClassDatabaseFromPackage(afile.file.Metadata.UnityVersion);
+        try
+        {
+            slots = MeshFields.MaterialNames(man, afile,
+                AssetIndex.FindUnique(man, afile, AssetClassID.Mesh, Mesh, bundle).PathId);
+        }
+        finally { man.UnloadAll(); }
+        Ok(slots != null, Mesh + " is drawn by renderers whose materials disagree, and that is not null");
+        Ok(slots.Length == 2, Mesh + " keeps its 2 material slots across the variants, got " +
+                              (slots == null ? 0 : slots.Length));
+        Ok(Array.Exists(slots, s => s.Contains("varies by renderer variant")),
+           "the disagreement is named rather than hidden: [" + string.Join(" | ", slots) + "]");
+
+        bool suspect;
+        string warn = MeshFields.SubmeshReport("torso.glb", new[] { 1, 15647 }, slots, out suspect);
+        Ok(suspect && !warn.Contains("not drawn") && !warn.Contains("material unknown"),
+           "and the shard warning on it names materials instead of calling parts undrawn: " + warn);
+        return "SUBMESH-SLOTS: ALL PASS, " + checks + " check(s) (variants: [" + string.Join(" | ", slots) + "])";
     }
 
     private static void Ok(bool cond, string what)

@@ -163,13 +163,21 @@ namespace Morgott.ContentTool.Bake
                 map.Append("part ").Append((i + 1).ToString(CultureInfo.InvariantCulture))
                    .Append(" (").Append(triangleCounts[i].ToString(CultureInfo.InvariantCulture))
                    .Append(triangleCounts[i] == 1 ? " triangle) -> " : " triangles) -> ")
-                   .Append(i < slots ? "material '" + materialSlots[i] + "'" : "NO material (not drawn)");
+                   .Append(i < slots ? "material '" + materialSlots[i] + "'"
+                           : slots == 0 ? "material unknown (no renderer in this bundle draws this mesh)"
+                                        : "NO material (not drawn)");
             }
             if (shard < 0) return fileName + ": " + map;
 
             suspect = true;
             int real = shard == 0 ? 1 : 0;
             for (int i = 0; i < parts; i++) if (triangleCounts[i] == biggest) real = i;
+            // ONLY a shard with parts BEHIND it displaces anything: material N follows part N, so a
+            // stray triangle at the end shifts nothing and saying otherwise would be a false claim.
+            string consequence = shard < parts - 1
+                ? ", and every part after it takes the material meant for the part before - which is " +
+                  "why your real geometry is painted wrongly. "
+                : ", and being last it displaces nothing - but it still claims a material slot of its own. ";
             return fileName + " part " + (shard + 1).ToString(CultureInfo.InvariantCulture) + " of " +
                    parts.ToString(CultureInfo.InvariantCulture) + " has only " +
                    triangleCounts[shard].ToString(CultureInfo.InvariantCulture) +
@@ -177,20 +185,20 @@ namespace Morgott.ContentTool.Bake
                    (real + 1).ToString(CultureInfo.InvariantCulture) + " has " +
                    biggest.ToString(CultureInfo.InvariantCulture) +
                    ". The game paints part N with the target's material N, so " + map +
-                   ". A part that small is almost always a leftover shard, and it pushes your real " +
-                   "geometry onto the wrong material. In Blender select the mesh, Edit Mode, select " +
-                   "all (A) and Mesh > Merge > By Distance, or assign every face to ONE material slot, " +
-                   "then re-export - or order the parts to match the target's materials. Baked anyway; " +
-                   "nothing was skipped.";
+                   ". A part that small is almost always a leftover shard" + consequence +
+                   "In Blender select the mesh, Edit Mode, select all (A) and Mesh > Merge > By " +
+                   "Distance, or assign every face to ONE material slot, then re-export - or order " +
+                   "the parts to match the target's materials. Baked anyway; nothing was skipped.";
         }
 
         /// <summary>
         /// The names of the materials a Mesh is drawn with, in submesh order - the other half of what
         /// <see cref="SubmeshReport"/> needs. Read off the renderer that USES the mesh, the same walk
         /// <see cref="SkinFields.BoneNames"/> makes for bones: skinned renderers point at the mesh
-        /// themselves, static ones do it through a MeshFilter on the same GameObject. null when
-        /// nothing in this file draws the mesh, or when two renderers draw it and DISAGREE about the
-        /// materials - an ambiguity is refused and never guessed.
+        /// themselves, static ones do it through a MeshFilter on the same GameObject. null ONLY when
+        /// nothing in this file draws the mesh - renderer variants that disagree (default/Gold/Xmas
+        /// all draw CHR_PX_HVY_TS_M_V01) keep their shared slot count and name the difference, because
+        /// "several renderers disagree" and "there are no materials" are not the same answer.
         /// </summary>
         internal static string[] MaterialNames(AssetsManager m, AssetsFileInstance af, long meshPathId)
         {
@@ -214,9 +222,24 @@ namespace Morgott.ContentTool.Bake
                                   : mat["m_Name"].AsString);
                     }
                     if (found == null) { found = names.ToArray(); continue; }
-                    if (found.Length != names.Count) return null;
-                    for (int b = 0; b < found.Length; b++) if (found[b] != names[b]) return null;
+                    // The variants DISAGREE - which is normal, a shipped mesh is drawn by its default,
+                    // Gold and Xmas renderers. Returning null here said "no materials at all" and the
+                    // report then called every part undrawn, which is false. Say WHICH names vary
+                    // instead; the slot COUNT is what the mapping needs and the variants share it.
+                    string[] merged = new string[Math.Max(found.Length, names.Count)];
+                    for (int b = 0; b < merged.Length; b++)
+                    {
+                        string a = b < found.Length ? found[b] : "none";
+                        string c = b < names.Count ? names[b] : "none";
+                        merged[b] = a == c || a.Contains(c) ? a : a + " or " + c;
+                    }
+                    found = merged;
                 }
+            // Said ONCE per slot, after every variant has been folded in - not per fold, which
+            // repeated it for the third renderer.
+            if (found != null)
+                for (int b = 0; b < found.Length; b++)
+                    if (found[b].Contains(" or ")) found[b] += " (varies by renderer variant)";
             return found;
         }
 
