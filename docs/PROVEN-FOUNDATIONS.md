@@ -422,6 +422,22 @@ Falsified 2026-08-12, build `eb991ea2`, by pointing both mounts at `aln_egg_expl
 same file twice — the VOID rule working) · `ct_bake: 1 FAILURE(S)`. The mount is load-bearing, and the
 controls no longer pass on a run that measures nothing.
 
+**`U3d-premount` now SKIPs, and why that is not a weakening** (2026-08-31). The arm's precondition —
+that NOBODY has `defaultlocalgroup_unitybuiltinshaders.bundle` open — stopped holding. Typed at the
+main menu or in a live campaign it never held (Addressables pulled the archive in long before), and
+measured on `D:\PP-Instance2` it no longer holds at mod-init either: the autorun run reports
+`mounted defaultlocalgroup_unitybuiltinshaders.bundle=False (already open, mounted by the game)`.
+So `ct_bake: 1 FAILURE(S) — U3d-premount FAIL … reports 'Standard' (expected 'Hidden/InternalErrorShader')`
+was the gate's own precondition failing, not our forging. `'Standard' before any mount of ours` IS the
+measurement that the archive is already open, so the arm now SKIPs **on that one value** and names the
+missing precondition; every other reading is still asserted against `Hidden/InternalErrorShader`.
+Falsified 2026-08-31 by forcing the skip condition to a name that never occurs: the arm went RED with
+the verbatim line above, and back to `ct_bake: ALL PASS` on restore.
+The same two-fact deduction (our `LoadFromFile` returned null AND the external already resolved ⇒ the
+game holds the archive) now feeds `U3d`/`U3e` too, so a run in which the game had the archives open no
+longer reports **VOID** while its externals resolve perfectly well: `U3e`, `U3e-ctl-badid` and
+`U3e-ctl-wrongfile` had been VOID — measuring nothing — on every autogate run and are green again.
+
 **Same-shape risk elsewhere:** any row proven by a HUMAN at the main menu whose subject is an
 EXTERNAL reference or an Addressables-loaded asset carries this precondition. U0a/U0b/U1/U3a/U3a-refs
 and all of U4 are internal-PPtr or file-read gates and are unaffected — confirmed green in the same

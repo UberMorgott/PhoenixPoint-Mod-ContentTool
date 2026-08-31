@@ -258,10 +258,29 @@ namespace Morgott.ContentTool.Bake
                 // target bundle open, this line goes RED and the rest of the U3d story is wrong.
                 // Read BEFORE anything is mounted, because a PPtr is resolved when the Material is
                 // deserialized, which is now.
-                failures += Check(log, "U3d-premount",
-                    ShaderNameOf(bundle.LoadAsset<Material>(extMatKey)) == ErrorShaderName,
-                    "with '" + BuiltinShaderBundle + "' NOT loaded the forged external reports '" +
-                    ShaderNameOf(bundle.LoadAsset<Material>(extMatKey)) + "' (expected '" + ErrorShaderName + "')");
+                // Its PRECONDITION - that nobody ELSE has the archive open - only holds when ct_bake
+                // runs at mod-init (autogate, t~1.85 s). Typed at the main menu or in a live campaign
+                // the game has long since pulled the builtin shaders in through Addressables, the
+                // forged external resolves for real, and the arm would read RED for something that is
+                // not a defect. 'Standard' BEFORE any mount of ours is precisely the measurement that
+                // the archive is already open, so the arm SKIPs on that one value and names why. Any
+                // OTHER reading still has to be the error shader, so it cannot pass vacuously.
+                string preName = ShaderNameOf(bundle.LoadAsset<Material>(extMatKey));
+                bool preMounted = preName == StandardShaderName;
+                if (preMounted)
+                    log.AppendLine("U3d-premount SKIP precondition not met: '" + BuiltinShaderBundle +
+                                   "' is ALREADY mounted (the game loaded it through Addressables), so " +
+                                   "'not loaded' cannot be measured in this run - the forged external " +
+                                   "reports '" + preName + "'");
+                else
+                    failures += Check(log, "U3d-premount", preName == ErrorShaderName,
+                        "with '" + BuiltinShaderBundle + "' NOT loaded the forged external reports '" +
+                        preName + "' (expected '" + ErrorShaderName + "')");
+
+                // Same reading for U3e's archive, and for the same reason: if '_shaders_assets_all'
+                // is already open our mount of it returns null and U3e would report VOID - measuring
+                // nothing - on a run where its externals resolve perfectly well.
+                bool pxPreMounted = ShaderNameOf(bundle.LoadAsset<Material>(newExtKey)) == PxShaderName;
 
                 // Mount the two archives the externals name, then RE-open our bundle so the materials
                 // deserialize against them. Nothing else in the game does this at mod-init time; the
@@ -272,8 +291,16 @@ namespace Morgott.ContentTool.Bake
                 // U6's base AnimatorController is an external PPtr like U3d's shader, so its archive
                 // has to be mounted for the same reason and at the same moment.
                 common = AssetBundle.LoadFromFile(ShippedBundlePath(CommonBundle));
+                // Unity refuses to open a file that is already open, so builtin==null means EITHER the
+                // mount failed OR the game had it mounted all along - and preMounted is the evidence
+                // that tells those two apart. In the second case the externals resolve anyway, so U3d
+                // is answerable and must not be reported VOID.
+                bool builtinReady = builtin != null || preMounted;
+                bool shadersReady = shaders != null || pxPreMounted;
                 log.AppendLine("mounted " + BuiltinShaderBundle + "=" + (builtin != null) +
+                               (preMounted ? " (already open, mounted by the game)" : "") +
                                " " + ShadersBundle + "=" + (shaders != null) +
+                               (pxPreMounted ? " (already open, mounted by the game)" : "") +
                                " " + CommonBundle + "=" + (common != null));
                 bundle.Unload(true);
                 bundle = AssetBundle.LoadFromFile(outPath);
@@ -301,7 +328,7 @@ namespace Morgott.ContentTool.Bake
                 string extName = ShaderNameOf(bundle.LoadAsset<Material>(extMatKey));
                 string badName = ShaderNameOf(bundle.LoadAsset<Material>(badMatKey));
 
-                if (builtin == null)
+                if (!builtinReady)
                     log.AppendLine("U3d VOID '" + BuiltinShaderBundle + "' did not load, so no U3d arm can resolve");
                 else
                 {
@@ -328,7 +355,7 @@ namespace Morgott.ContentTool.Bake
                 string pxBadName = ShaderNameOf(bundle.LoadAsset<Material>(newExtBadKey));
                 string pxWrongName = ShaderNameOf(bundle.LoadAsset<Material>(wrongFileKey));
 
-                if (shaders == null)
+                if (!shadersReady)
                     log.AppendLine("U3e VOID '" + ShadersBundle + "' did not load, so no U3e arm can resolve");
                 else
                 {
