@@ -21,6 +21,13 @@ namespace Morgott.ContentTool.Bake
         private const string DefaultSource = "mutoid_assets_all.bundle";
         private const string BundleName = "ct_selfcheck";
 
+        /// <summary>
+        /// The hand-built fixture for U8-grid / U8-step / U9-plan, beside the DLL (the csproj puts it
+        /// there). ponytail: gate scaffolding, like u8_probe/u10_probe - drop it with those rows.
+        /// </summary>
+        private const string U9Probe = "u9_probe.glb";
+        private const string U9ModelName = "u9_probe";
+
         /// <summary>The exact payload proven byte-exact through the engine (FINAL-PLAN 1.3).</summary>
         private static readonly byte[] Payload =
             { 0x00, 0xFF, 0xC3, 0x28, 0x00, 0x00, 0x41, 0x42, 0x80, 0xFE, 0x00, 0x7F };
@@ -114,6 +121,11 @@ namespace Morgott.ContentTool.Bake
             string animKey, animFlatKey, animOtherKey;
             long texPathId;
             int shaderExtId, pxExtId, commonExtId;
+            // U8-grid / U8-step / U9-plan, all read off ONE hand-built fixture (lib\u9_probe.glb,
+            // written by `dotnet run --project tests\ObjCodecTests -- --u9probe`). Filled inside the
+            // bake below, asserted against the engine after it.
+            string u9Plan = null, u9Skip = null, u9Grid = null, u9Hold = null, u9Missing = null;
+            string gridClipKey = null, holdClipKey = null;
             try
             {
                 using (BundleBaker baker = new BundleBaker(source, "contenttool"))
@@ -182,6 +194,58 @@ namespace Morgott.ContentTool.Bake
                     animFlatKey = baker.AddAnimatedPrefab("prefabs/u6_flatroot", ClipBone, RestY, flatAocKey);
                     // Same ramp controller, a bone the clip's binding PATH does not name.
                     animOtherKey = baker.AddAnimatedPrefab("prefabs/u6_otherroot", OtherBone, RestY, rampAocKey);
+
+                    // U8-grid / U8-step / U9-plan. Three paths NO shipped file and no demo reaches:
+                    // all five clips of the spider probe snap onto a whole rate, none of them is a
+                    // STEP curve, and all five are uniquely named and drive bones. Each was proven
+                    // offline and had nowhere to run in the game, which is why the rows sat
+                    // PENDING-INGAME. The fixture is the same one the offline arms are built out of,
+                    // written to a real .glb so the game can read it with the shipped assembly, and
+                    // its two interesting clips are BAKED here so the engine has to accept the grids
+                    // the resampler chose rather than only this mod's own reader agreeing with itself.
+                    string probePath = Path.Combine(ContentToolMain.ModDir ?? ".", U9Probe);
+                    if (!File.Exists(probePath)) u9Missing = probePath;
+                    else
+                    {
+                        var u9Clips = new List<SampledClip>();
+                        SkinnedModel u9Model = GlbReader.Read(File.ReadAllBytes(probePath), u9Clips);
+                        BakedSkin u9Skin = ModelBuild.From(u9Model, U9ModelName);
+                        var u9Skipped = new List<string>();
+                        List<KeyValuePair<string, SampledClip>> u9 =
+                            ClipFields.Bakeable(U9ModelName, u9Clips, u9Skipped);
+                        var keys = new List<string>();
+                        foreach (KeyValuePair<string, SampledClip> e in u9) keys.Add(e.Key);
+                        u9Plan = string.Join(", ", keys.ToArray());
+                        u9Skip = string.Join(" ", u9Skipped.ToArray());
+                        foreach (KeyValuePair<string, SampledClip> e in u9)
+                        {
+                            SampledClip c = e.Value;
+                            string key = baker.AddAnimationClip("clips/" + e.Key,
+                                ClipFields.Bindings(c, u9Skin), c.Times.Length, c.SampleRate, false);
+                            float last = c.Times[c.Times.Length - 1];
+                            if (c.Name == "Walk")
+                            {
+                                gridClipKey = key;
+                                u9Grid = ModelBuild.F(c.SampleRate) + " Hz x " + c.Times.Length +
+                                         " frame(s), last frame " + ModelBuild.F(last) + " s";
+                            }
+                            else if (c.Name == "Hold")
+                            {
+                                holdClipKey = key;
+                                // WHEN the last held frame sits is the whole measurement: a dense bank
+                                // cannot store a discontinuity, so the ramp the runtime is forced into
+                                // is the gap between that frame and the next.
+                                int hold = 0;
+                                ObjVector3[] xs = c.Tracks[0].Translations;
+                                for (int f = 0; f < xs.Length; f++)
+                                    if (Near(xs[f].X, xs[0].X)) hold = f;
+                                float ramp = (c.Times[hold + 1] - c.Times[hold]) * 1000f;
+                                u9Hold = ModelBuild.F(c.SampleRate) + " Hz x " + c.Times.Length +
+                                         " frame(s), holds to frame " + hold + ", ramp " +
+                                         ModelBuild.F(ramp) + " ms; " + c.LossyReason;
+                            }
+                        }
+                    }
 
                     baker.Write(outPath, BundleName);
                     log.AppendLine("WROTE " + outPath + " " + new FileInfo(outPath).Length +
@@ -590,6 +654,48 @@ namespace Morgott.ContentTool.Bake
                 failures += Mecanim(log, "U6-mecanim-ctl-flat", bundle.LoadAsset<GameObject>(animFlatKey), ClipBone, 0f);
                 // Same controller and same clip as U6-mecanim; only the bone's NAME differs.
                 failures += Mecanim(log, "U6-mecanim-ctl-path", bundle.LoadAsset<GameObject>(animOtherKey), OtherBone, RestY);
+
+                // U8-grid / U8-step / U9-plan, the game's own answer. Two readings per row, and they
+                // fail apart: what THIS MOD's resampler and plan made of the fixture, and what the
+                // ENGINE then made of the clip that was baked from it. A missing fixture is said out
+                // loud - a silent skip is how the SKIN-ABOVE arm spent weeks reporting a green VOID.
+                if (u9Missing != null)
+                    log.AppendLine("U9-plan VOID the fixture is gone: no " + u9Missing +
+                                   " - U8-grid and U8-step cannot answer either");
+                else
+                {
+                    failures += Check(log, "U9-plan",
+                        u9Plan == "u9_probe_walk, u9_probe_walk_1, u9_probe_hold" &&
+                        u9Skip.Contains("'Morphs'") && u9Skip.Contains("SKIPPED"),
+                        "a .glb whose animations are neither all bakeable nor all uniquely named still " +
+                        "bakes: planned " + u9Plan + " | " + u9Skip +
+                        " (expected u9_probe_walk, u9_probe_walk_1, u9_probe_hold and 'Morphs' SKIPPED)");
+
+                    AnimationClip grid = gridClipKey == null ? null : bundle.LoadAsset<AnimationClip>(gridClipKey);
+                    AnimationClip hold = holdClipKey == null ? null : bundle.LoadAsset<AnimationClip>(holdClipKey);
+                    // 17 frames at 30 Hz ends at 16/30 = 0.5333 s, PAST the file's last key at 0.511;
+                    // the Round() this fixed ended the clip at 0.5 and threw the last 11 ms away.
+                    failures += Check(log, "U8-grid",
+                        u9Grid == "30 Hz x 17 frame(s), last frame 0.533 s" &&
+                        grid != null && Near(grid.frameRate, 30f) && Near(grid.length, 16f / 30f),
+                        "key times 0 / 0.1 / 0.511 s fit no whole rate, so the fallback grid must REACH " +
+                        "the last key: reader says " + u9Grid + ", and the engine reads the baked clip " +
+                        "back as " + (grid == null ? "(null)" : ModelBuild.F(grid.frameRate) + " Hz, " +
+                        ModelBuild.F(grid.length) + " s") + " (expected 30 Hz x 17, last frame 0.533 s, " +
+                        "engine 30 Hz and 0.533 s; rounding would end at 0.5)");
+                    // 121 frames at 120 Hz: the STEP hold survives to one frame before the file's own
+                    // 0.5 s jump, and the ramp the dense bank forces is 8.333 ms rather than the 250 ms
+                    // the same clip's own 2 Hz LINEAR grid would give.
+                    failures += Check(log, "U8-step",
+                        u9Hold != null && u9Hold.StartsWith("120 Hz x 121 frame(s), holds to frame 59, ramp 8.333 ms") &&
+                        u9Hold.Contains("ONE frame wide (8.333 ms)") &&
+                        hold != null && Near(hold.frameRate, 120f) && Near(hold.length, 1f),
+                        "a STEP curve is resampled on the highest whole multiple of its own snapped rate " +
+                        "the mod allows: reader says " + u9Hold + ", and the engine reads the baked clip " +
+                        "back as " + (hold == null ? "(null)" : ModelBuild.F(hold.frameRate) + " Hz, " +
+                        ModelBuild.F(hold.length) + " s") + " (expected 120 Hz x 121, hold to frame 59, " +
+                        "ramp 8.333 ms, engine 120 Hz and 1 s; the 2 Hz LINEAR grid would ramp 250 ms)");
+                }
 
                 if (unity.Count > 0) log.AppendLine("Unity also said: " + string.Join(" | ", unity.ToArray()));
             }

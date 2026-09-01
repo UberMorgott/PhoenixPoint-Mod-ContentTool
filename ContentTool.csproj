@@ -55,6 +55,7 @@
          in numbers what a foreign armature does to a by-name rebind. See docs\animated-model-cases.md.
          ponytail: gate scaffolding, same as u8_probe above - drop both lines when their rows leave
          PENDING-INGAME for good. -->
+    <None Include="lib\u9_probe.glb" Link="u9_probe.glb" CopyToOutputDirectory="PreserveNewest" />
     <None Include="lib\u10_probe.glb" Link="u10_probe.glb" CopyToOutputDirectory="PreserveNewest" />
     <!-- Gate A6's sound probes are deliberately NOT embedded. They would cost 8,8 KB of shipped
          assembly to serve one gate, and the tool's size is a hard constraint - the .ogg/.mp3 import

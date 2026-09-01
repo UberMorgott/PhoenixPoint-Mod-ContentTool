@@ -329,6 +329,66 @@ internal static class ClipPlan
         return ClipImport.Container(json, b.Bytes());
     }
 
+    /// <summary>
+    /// The SAME three animations as <see cref="Hand"/> plus the two grids no shipped file reaches,
+    /// written to disk as <c>lib\u9_probe.glb</c> so the IN-GAME arm can read the identical shapes
+    /// (<c>Program --u9probe</c>). It is deliberately not <see cref="Hand"/> itself: the plan arms
+    /// above count clips, and a fixture that grew under them would move their numbers.
+    ///
+    ///   "Walk"   head translation, LINEAR, keys 0 / 0.1 / 0.511 s -> no whole rate up to 120 Hz
+    ///            serves both 0.1 and 0.511, so the clip falls back to 30 Hz and the grid has to
+    ///            CEIL to reach the last key: 17 frames, last at 0.5333 s   (U8-grid)
+    ///   "walk"   the same curve on the hip - same name once lowercased     (U9-plan, dedup)
+    ///   "Morphs" head weights + a node the armature does not list          (U9-plan, skip)
+    ///   "Hold"   head translation, STEP, keys 0 / 0.5 / 1 s -> 2 Hz as LINEAR, raised to the
+    ///            highest whole multiple the mod allows: 120 Hz x 121 frames (U8-step)
+    /// </summary>
+    internal static byte[] Probe()
+    {
+        var b = new ClipImport.Bin();
+        int position = b.Vec(3, "VEC3", 0f, 0f, 0f, 1f, 0f, 0f, 0f, 2f, 0f);
+        int normal = b.Vec(3, "VEC3", 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f);
+        int joints = b.Joints(0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0);
+        int weights = b.Vec(3, "VEC4", 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f);
+        int indices = b.Indices(0, 1, 2);
+        int bind = b.Vec(2, "MAT4",
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1, 0, 1,
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -4, 0, 1);
+        int gridTimes = b.Vec(3, "SCALAR", 0f, 0.1f, 0.511f);
+        int stepTimes = b.Vec(3, "SCALAR", 0f, 0.5f, 1f);
+        int ramp = b.Vec(3, "VEC3", 1f, 0f, 0f, 3f, 0f, 0f, 5f, 0f, 0f);
+        int morph = b.Vec(2, "SCALAR", 0f, 1f);
+        int propTimes = b.Vec(2, "SCALAR", 0f, 1f);
+        int propMove = b.Vec(2, "VEC3", 0f, 0f, 0f, 1f, 0f, 0f);
+
+        string json =
+            "{\"asset\":{\"version\":\"2.0\"}," +
+            "\"scenes\":[{\"nodes\":[0,3,4]}],\"scene\":0," +
+            "\"nodes\":[" +
+              "{\"name\":\"rig\",\"children\":[1]}," +
+              "{\"name\":\"hip\",\"children\":[2],\"translation\":[0,1,0]}," +
+              "{\"name\":\"head\",\"translation\":[0,3,0]}," +
+              "{\"name\":\"body\",\"mesh\":0,\"skin\":0}," +
+              "{\"name\":\"prop\"}]," +
+            "\"skins\":[{\"joints\":[1,2],\"inverseBindMatrices\":" + bind + "}]," +
+            "\"meshes\":[{\"name\":\"u9mesh\",\"primitives\":[{\"attributes\":{\"POSITION\":" + position +
+              ",\"NORMAL\":" + normal + ",\"JOINTS_0\":" + joints + ",\"WEIGHTS_0\":" + weights +
+              "},\"indices\":" + indices + "}]}]," +
+            "\"animations\":[" +
+              "{\"name\":\"Walk\",\"samplers\":[" + ClipImport.Sampler(gridTimes, ramp, "LINEAR") + "]," +
+                "\"channels\":[{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"translation\"}}]}," +
+              "{\"name\":\"walk\",\"samplers\":[" + ClipImport.Sampler(gridTimes, ramp, "LINEAR") + "]," +
+                "\"channels\":[{\"sampler\":0,\"target\":{\"node\":1,\"path\":\"translation\"}}]}," +
+              "{\"name\":\"Morphs\",\"samplers\":[" + ClipImport.Sampler(propTimes, morph, "LINEAR") + "," +
+                ClipImport.Sampler(propTimes, propMove, "LINEAR") + "]," +
+                "\"channels\":[{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"weights\"}}," +
+                             "{\"sampler\":1,\"target\":{\"node\":4,\"path\":\"translation\"}}]}," +
+              "{\"name\":\"Hold\",\"samplers\":[" + ClipImport.Sampler(stepTimes, ramp, "STEP") + "]," +
+                "\"channels\":[{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"translation\"}}]}]," +
+            b.Json() + "}";
+        return ClipImport.Container(json, b.Bytes());
+    }
+
     private static void Assert(bool ok, string what)
     {
         if (!ok) throw new Exception("CLIP plan FAILED: " + what);

@@ -38,9 +38,29 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// `--u9probe &lt;out.glb&gt;`: write the hand-built fixture the IN-GAME U8-grid/U8-step/U9-plan arm
+    /// reads. The file is committed (lib\u9_probe.glb) because the game cannot run this project; it
+    /// prints what the reader makes of what it just wrote, so a fixture that drifted from the builder
+    /// is visible here rather than three minutes later in a game launch.
+    /// </summary>
+    private static int U9Probe(string[] a)
+    {
+        byte[] glb = ClipPlan.Probe();
+        File.WriteAllBytes(a[1], glb);
+        var clips = new System.Collections.Generic.List<Morgott.ContentTool.Import.SampledClip>();
+        Morgott.ContentTool.Import.GlbReader.Read(glb, clips);
+        Console.WriteLine("WROTE " + a[1] + " " + glb.Length + " B");
+        foreach (Morgott.ContentTool.Import.SampledClip c in clips)
+            Console.WriteLine("  '" + c.Name + "' " + c.Tracks.Count + " track(s) @ " + c.SampleRate +
+                              " Hz x " + c.Times.Length + " frame(s) | " + c.LossyReason);
+        return 0;
+    }
+
     private static int Main(string[] args)
     {
         if (args.Length == 5 && args[0] == "--bake") return Bake(args);
+        if (args.Length == 2 && args[0] == "--u9probe") return U9Probe(args);
         ObjDocument quad = ObjCodec.Parse("v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1 4/4/1\n");
         Check(quad.Positions.Count == 4, "positions");
         Check(quad.TextureCoordinates.Count == 4 && quad.Normals.Count == 1, "uv and normals");
