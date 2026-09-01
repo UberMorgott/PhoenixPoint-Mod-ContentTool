@@ -153,7 +153,7 @@ namespace Morgott.ContentTool.Import
             if (file == null || file.Length < 12)
                 throw Bad("the file is shorter than a glTF header, so it holds no model; re-export it from Blender as glTF Binary (.glb)");
             if (file.Length > MaxFileBytes)
-                throw Bad("the file is " + Mb(file.Length) + ", past the " + Mb(MaxFileBytes) +
+                throw Bad(ImportCode.Oversize, "the file is " + Mb(file.Length) + ", past the " + Mb(MaxFileBytes) +
                     " limit this mod will read; decimate the mesh or drop its blend shapes and re-export");
             if (U32(file, 0) != Gltf.Magic)
                 throw Bad("the file does not start with the glTF magic, so it is not a .glb; in Blender export with Format set to 'glTF Binary (.glb)'");
@@ -237,7 +237,7 @@ namespace Morgott.ContentTool.Import
             Dictionary<string, object> buffer = Obj(buffers[0], "buffers[0]");
             object uri = Opt(buffer, "uri");
             if (uri != null)
-                throw Bad("the file's geometry lives in a separate file '" + Str(uri, "buffers[0].uri") +
+                throw Bad(ImportCode.ExternalBuffer, "the file's geometry lives in a separate file '" + Str(uri, "buffers[0].uri") +
                     "'; in Blender set Format to 'glTF Binary (.glb)' so the geometry travels inside the one file you copy");
             int bufferLength = Int(Get(buffer, "byteLength"), "buffers[0].byteLength");
             if (bufferLength > bin.Length)
@@ -246,7 +246,7 @@ namespace Morgott.ContentTool.Import
 
             List<object> meshes = Array_(Opt(root, "meshes"), "meshes");
             if (meshes.Count == 0)
-                throw Bad("the file contains no mesh; export the edited body mesh itself, not an empty or armature-only scene");
+                throw Bad(ImportCode.NoMesh, "the file contains no mesh; export the edited body mesh itself, not an empty or armature-only scene");
             List<object> nodes = Array_(Opt(root, "nodes"), "nodes");
             if (nodes.Count > MaxCollection)
                 throw Bad("the file declares " + nodes.Count.ToString(CultureInfo.InvariantCulture) + " nodes, past the " +
@@ -609,12 +609,12 @@ namespace Morgott.ContentTool.Import
                 }
                 object mode = Opt(primitive, "mode");
                 if (mode != null && Int(mode, what + ".mode") != 4)
-                    throw Bad(what + " is not made of triangles (glTF mode " + Int(mode, what + ".mode").ToString(CultureInfo.InvariantCulture) +
+                    throw Bad(ImportCode.NonTriangle, what + " is not made of triangles (glTF mode " + Int(mode, what + ".mode").ToString(CultureInfo.InvariantCulture) +
                         "); in Blender apply a Triangulate modifier or tick 'Triangulate' on export");
 
                 Dictionary<string, object> attributes = Obj(Get(primitive, "attributes"), what + ".attributes");
                 if (attributes.ContainsKey("JOINTS_1") || attributes.ContainsKey("WEIGHTS_1"))
-                    throw Bad(what + " weights some vertices to more than four bones, and Unity's skinning stores four; " +
+                    throw Bad(ImportCode.TooManyInfluences, what + " weights some vertices to more than four bones, and Unity's skinning stores four; " +
                         "in Blender use Weight Paint > Weights > Limit Total with a limit of 4, then re-export");
 
                 var block = new Block
@@ -668,7 +668,7 @@ namespace Morgott.ContentTool.Import
 
                 object indexAccessor = Opt(primitive, "indices");
                 if (indexAccessor == null)
-                    throw Bad(what + " has no index buffer, and this mod only reads indexed triangles; re-export from Blender, whose exporter always writes indices");
+                    throw Bad(ImportCode.NotIndexed, what + " has no index buffer, and this mod only reads indexed triangles; re-export from Blender, whose exporter always writes indices");
                 int[] triangles = Integers(Int(indexAccessor, what + ".indices"), what + " indices", "SCALAR", -1, true);
                 if (triangles.Length % 3 != 0)
                     throw Bad(what + " has " + triangles.Length.ToString(CultureInfo.InvariantCulture) +
@@ -2271,7 +2271,7 @@ namespace Morgott.ContentTool.Import
         private static FormatException Unreadable(string name)
         {
             if (name == Draco.Extension)
-                return Bad("the file's geometry is packed with Draco compression ('" + Draco.Extension +
+                return Bad(ImportCode.UnsupportedGlb, "the file's geometry is packed with Draco compression ('" + Draco.Extension +
                     "'), a codec this mod does not carry - its decoder is far larger than everything else the " +
                     "importer does. Open the file in Blender (File > Import > glTF 2.0, which reads Draco) and " +
                     "export it again with File > Export > glTF 2.0, Format 'glTF Binary (.glb)' and the " +
@@ -2279,19 +2279,28 @@ namespace Morgott.ContentTool.Import
                     "attributes (KHR_mesh_quantization), which most model sites ship, are read directly and " +
                     "need no such step");
             if (name == TextureTransform)
-                return Bad("the file needs '" + TextureTransform + "' to make sense of its texture coordinates, " +
+                return Bad(ImportCode.UnsupportedGlb, "the file needs '" + TextureTransform + "' to make sense of its texture coordinates, " +
                     "which means its UVs are stored as whole numbers that only its own material knows how to " +
                     "scale back. This mod paints a model from Meshes\\materials\\<name>.mat.json instead of the " +
                     "file's materials, so it has nowhere to read that scale from. In Blender import the file, " +
                     "then export it again with Geometry > 'Export Original PBR Specular Glossiness'/compression " +
                     "options left off, so the UVs come out as plain numbers");
-            return Bad("the file requires the glTF extension '" + name +
+            return Bad(ImportCode.UnsupportedGlb, "the file requires the glTF extension '" + name +
                 "', which this mod does not read. Import it into Blender and export it again with File > " +
                 "Export > glTF 2.0, Format 'glTF Binary (.glb)', with the Compression box unticked and any " +
                 "extension add-on turned off; that writes a plain file this mod reads");
         }
 
-        private static FormatException Bad(string message) => new FormatException(message);
+        private static FormatException Bad(string message)
+        {
+            return new ImportRefusedException(ImportCode.MalformedGlb, message);
+        }
+
+        /// <summary>The catalogued refusals - the ones the Model Doctor turns into a Blender action.</summary>
+        private static FormatException Bad(ImportCode code, string message)
+        {
+            return new ImportRefusedException(code, message);
+        }
     }
 
     /// <summary>

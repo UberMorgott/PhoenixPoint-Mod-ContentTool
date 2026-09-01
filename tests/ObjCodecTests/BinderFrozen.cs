@@ -96,6 +96,13 @@ internal static class BinderFrozen
         checks += Check(SkinCompatibility.Analyze(Model(new[] { "Root" }), new[] { "Root" }).Count == 0,
                         "a file that binds produces no issue at all");
 
+        // ---- every refusal now carries a CODE, and the ones nobody catalogued still carry one.
+        checks += Code(ImportCode.MalformedGlb, new byte[] { 1, 2, 3 }, "a stub is malformed");
+        byte[] notGlb = new byte[16];
+        checks += Code(ImportCode.MalformedGlb, notGlb, "the wrong magic is malformed");
+        checks += Check(new ImportRefusedException(ImportCode.NoNormals, "x") is FormatException,
+                        "a refusal is still a FormatException, so every existing catch keeps working");
+
         return "BINDER-FROZEN PASS, " + checks + " check(s) - the pre-refactor record of SkinBinder.Bind";
     }
 
@@ -174,6 +181,16 @@ internal static class BinderFrozen
         };
         m.Submeshes.Add(new[] { 0, 0, 0 });
         return m;
+    }
+
+    private static int Code(ImportCode want, byte[] bytes, string what)
+    {
+        try { GlbReader.Read(bytes); }
+        catch (ImportRefusedException e)
+        {
+            return Check(e.Code == want, what + " - got code " + e.Code + ": " + e.Message);
+        }
+        throw new Exception("BINDER-FROZEN FAILURE: " + what + " - it did not refuse at all");
     }
 
     private static int Check(bool condition, string what)

@@ -149,9 +149,11 @@ namespace Morgott.ContentTool.Import
         {
             if (model == null) throw new ArgumentNullException(nameof(model));
             if (model.Positions == null || model.Positions.Length == 0)
-                throw new InvalidDataException(name + ".glb carries no vertices; export a mesh with geometry");
+                throw new ImportRefusedException(ImportCode.NoVertices,
+                    name + ".glb carries no vertices; export a mesh with geometry");
             if (model.Normals == null || model.Normals.Length != model.Positions.Length)
-                throw new InvalidDataException(name + ".glb carries no per-vertex normals; in Blender's " +
+                throw new ImportRefusedException(ImportCode.NoNormals,
+                    name + ".glb carries no per-vertex normals; in Blender's " +
                     "glTF export panel leave Geometry > Normals on and re-export");
 
             int n = model.Positions.Length;

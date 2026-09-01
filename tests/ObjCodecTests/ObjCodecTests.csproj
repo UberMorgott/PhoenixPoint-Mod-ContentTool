@@ -124,6 +124,9 @@
     <Compile Include="..\..\src\Import\GlbCodec.cs" Link="GlbCodec.cs" />
     <!-- The binding CHECKS, lifted out of SkinBinder.Bind so the Doctor can list them instead of
          reading one thrown sentence. UnityEngine-free like the binder it came from. -->
+    <!-- The stable CODE every refusal now carries, so a gate can assert the identity of a refusal
+         instead of matching its sentence. -->
+    <Compile Include="..\..\src\Import\ImportRefused.cs" Link="ImportRefused.cs" />
     <Compile Include="..\..\src\Import\SkinCompatibility.cs" Link="SkinCompatibility.cs" />
     <!-- The VERDICT itself, the one function both the bake and the Doctor ask, so its truth table is
          proven offline instead of by baking four bundles. -->
