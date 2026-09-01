@@ -16,7 +16,6 @@ namespace Morgott.ContentTool.Import
         /// whenever the sidecar did not apply, and the Doctor re-derives every alias edit from its
         /// joint names so edits are order-independent.</summary>
         internal SkinnedModel Original;
-        internal string Path;
         internal string Sha256;
         internal long Bytes;
         /// <summary>The sidecar that WAS applied, or null.</summary>
@@ -49,7 +48,6 @@ namespace Morgott.ContentTool.Import
 
             var source = new ReplacementSource
             {
-                Path = path,
                 Bytes = bytes.Length,
                 Sha256 = AliasMap.Sha256(bytes),
                 Original = GlbReader.Read(bytes)

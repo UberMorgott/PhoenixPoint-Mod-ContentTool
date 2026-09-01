@@ -98,7 +98,18 @@ namespace Morgott.ContentTool.Doctor
             // The OUTCOME is computed from the model the BAKE would see. When a sidecar did not apply,
             // that is the unaliased one - which is exactly what the bake will read from the same
             // sidecar a moment later.
-            SkinnedModel effective = source.Aliases == null ? source.Original : source.Model;
+            return Judge(result, source.Aliases == null ? source.Original : source.Model, target);
+        }
+
+        /// <summary>
+        /// The verdict over a model that is ALREADY the effective one, and every row that explains it.
+        /// Split out because the Doctor recomputes both after an unsaved alias edit: a second copy of
+        /// these three arms is a second place for "REFUSED (0 reason(s))" to appear - a header with no
+        /// row under it, which is exactly what a hand-rolled rebuild produced.
+        /// </summary>
+        internal static ReplacementPreflightResult Judge(ReplacementPreflightResult result,
+                                                        SkinnedModel effective, RigTarget target)
+        {
             bool armature = effective.JointNames.Count > 0;
             bool names = target.BoneNames != null && target.BoneNames.Length > 0;
 

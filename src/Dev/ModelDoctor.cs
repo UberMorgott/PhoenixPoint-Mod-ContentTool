@@ -42,7 +42,10 @@ namespace Morgott.ContentTool.Dev
         private readonly Dictionary<string, string> seeded = new Dictionary<string, string>(StringComparer.Ordinal);
         private string seededFor;
         private bool canSave;
-        private readonly List<int> ourMeshes = new List<int>();
+        /// <summary>The Meshes this Doctor built, held by REFERENCE rather than by instance id: Unity
+        /// 2019's runtime Resources has no InstanceIDToObject, and the owner keeping what it must give
+        /// back is the plainer arrangement anyway.</summary>
+        private readonly List<Mesh> ourMeshes = new List<Mesh>();
 
         private sealed class Job
         {
@@ -67,11 +70,21 @@ namespace Morgott.ContentTool.Dev
 
         internal bool Busy => running;
         internal bool HasPreview => preview != null;
-        internal IDictionary<string, string> Aliases => aliases;
 
-        /// <summary>Instance ids of every Mesh this Doctor ever built, so the bench's leak gate can
-        /// name what is still alive and blame the right owner rather than the scene at large.</summary>
-        internal IList<int> OurMeshes => ourMeshes;
+        /// <summary>How many Meshes this Doctor has built and not yet given back. Zero after a Revert
+        /// or a Dispose; anything else in the bench's leak count belongs to someone other than us.</summary>
+        internal int OurMeshCount => ourMeshes.Count;
+
+        /// <summary>
+        /// Destroy every Mesh this Doctor made that is still alive. A native mesh is not garbage
+        /// collected with its C# wrapper: a preview candidate the author replaced, or one refused after
+        /// it was built, stays in memory until the process ends unless it is destroyed by hand.
+        /// </summary>
+        private void Sweep()
+        {
+            foreach (Mesh m in ourMeshes) if (m != null) UnityEngine.Object.Destroy(m);
+            ourMeshes.Clear();
+        }
 
         // ------------------------------------------------------------------ picking
 
@@ -226,24 +239,18 @@ namespace Morgott.ContentTool.Dev
             SkinnedModel model = GlbReader.Read(bytes);
             IList<string> unused;
             live.Apply(model, out unused);
-            IList<BindingIssue> issues = SkinCompatibility.Analyze(model, target.BoneNames);
-            Outcome outcome = ReplacementDecision.Decide(model.JointNames.Count > 0, target.Rigged,
-                                                         target.BoneNames != null && target.BoneNames.Length > 0,
-                                                         issues.Count == 0 ? null : issues[0]);
-            result.Model = model;
-            result.Outcome = outcome;
-            var report = new DiagnosticReport { Outcome = outcome };
+            var report = new DiagnosticReport();
             // The sidecar's own verdict SURVIVES the rebuild. It is a fact about the file on disk, not
             // about the map being typed, and an author whose sidecar is stale has to keep seeing that
             // while they edit - otherwise the warning vanishes the moment they start fixing it.
             foreach (Diagnostic d in result.Report.Rows)
                 if (d.Code == "SidecarStale" || d.Code == "SidecarInvalid")
                     report.Add(d.Code, d.Severity, d.Side, d.Message, d.Remedy, d.Subject);
-            foreach (BindingIssue issue in issues)
-                report.Add(issue.Code.ToString(),
-                           issue.Code == BindCode.NoArmature ? Severity.Blocking : Severity.Downgrade,
-                           issue.Side == BindSide.Target ? DiagnosticSide.Target : DiagnosticSide.File,
-                           issue.Message, Remedy.For(issue.Code), issue.Subject);
+            result.Model = model;
+            result.Report = report;
+            // The SAME three arms the first pass took. Rebuilding them here is how a refusal ends up
+            // with a header and no reason under it.
+            ReplacementPreflight.Judge(result, model, target);
             foreach (string key in unused)
                 report.Add("AliasUnused", Severity.Warning, DiagnosticSide.Sidecar,
                            "the alias for '" + key + "' was ignored: this file has no bone of that name",
@@ -252,7 +259,6 @@ namespace Morgott.ContentTool.Dev
                 report.Add("AliasNotATargetBone", Severity.Warning, DiagnosticSide.Sidecar,
                            "the alias for '" + key + "' names a bone this model's skeleton does not have",
                            "Pick the target bone from the list instead of typing it.", key);
-            result.Report = report;
         }
 
         // ------------------------------------------------------------------ the main thread
@@ -284,6 +290,12 @@ namespace Morgott.ContentTool.Dev
                     continue;
                 }
                 Ready = job.Result;
+                // §7: the REPORT says what happened in the author's words, and the exception behind it
+                // goes to the log - the one place a stack trace helps and the only place it belongs.
+                if (Ready.Failure != null)
+                    Debug.LogError("[ContentTool] Model Doctor: '" + Path + "' - " +
+                                   Ready.Failure.GetType().Name + ": " + Ready.Failure.Message + "\n" +
+                                   Ready.Failure.StackTrace);
                 Seed();
             }
             if (!running && Ready == null && Path != null && Target != null) Start(gen);
@@ -310,7 +322,7 @@ namespace Morgott.ContentTool.Dev
             if (!now.SameAs(Target)) { Target = now; Restart(); return "the target changed - reading it again"; }
 
             Mesh candidate = LiveMesh.Build(Ready.Model, System.IO.Path.GetFileName(Path));
-            ourMeshes.Add(candidate.GetInstanceID());
+            ourMeshes.Add(candidate);
             LiveMesh.BindMode mode;
             string how = LiveMesh.Bind(candidate, Renderer, Ready.Model, out mode);
             Outcome got = mode == LiveMesh.BindMode.ByName ? Outcome.ByName
@@ -344,15 +356,17 @@ namespace Morgott.ContentTool.Dev
 
         internal string Revert()
         {
-            if (preview == null) return "no preview is live";
-            if (Renderer != null)
+            bool had = preview != null;
+            if (had && Renderer != null)
             {
                 Renderer.sharedMesh = origin;
                 Renderer.localBounds = originBounds;
             }
-            UnityEngine.Object.Destroy(preview);
+            // The renderer is given its own mesh back FIRST, then everything we built is destroyed -
+            // including candidates that were refused and never reached a renderer at all.
             preview = null;
-            return "preview reverted - the game's own mesh is back, by reference";
+            Sweep();
+            return had ? "preview reverted - the game's own mesh is back, by reference" : "no preview is live";
         }
 
         private string DoSave()
