@@ -68,6 +68,19 @@ internal static class BinderFrozen
         checks += Refuses("blend shape wins over a bone name", morph, new[] { "Root" },
                           "the file has 1 blend shapes but this model has 0");
 
+        // A caller that DOES drive blend shapes is the other half of Shapes(file, names): the count
+        // is compared against that caller's list, not against zero, so a matching shape key binds.
+        SkinnedModel keyed = Model(new[] { "Root" });
+        keyed.Morphs.Add(new SkinMorph { Name = "smile" });
+        ushort[] keyedJoints;
+        float[][] keyedPoses;
+        SkinBinder.Bind(keyed, new[] { "Root" }, 0, new[] { "smile" }, out keyedJoints, out keyedPoses);
+        checks += Check(keyedJoints.Length == 4 && keyedPoses.Length == 1,
+                        "a file whose one shape key matches the model's binds instead of refusing");
+        checks += RefusesShapes("blend shape count against a real list", keyed, new[] { "Root" },
+                                new[] { "smile", "frown" },
+                                "the file has 1 blend shapes but this model has 2");
+
         // ---- the extraction itself: Analyze must list EVERY reason, in Bind's own throw order,
         // where Bind stops at the first. One file that is wrong three ways over.
         SkinnedModel many = Model(new[] { "Root", "Hand" });
@@ -106,11 +119,17 @@ internal static class BinderFrozen
 
     private static int Refuses(string what, SkinnedModel file, string[] boneNames, string cause)
     {
+        return RefusesShapes(what, file, boneNames, null, cause);
+    }
+
+    private static int RefusesShapes(string what, SkinnedModel file, string[] boneNames,
+                                     string[] blendShapeNames, string cause)
+    {
         try
         {
             ushort[] joints;
             float[][] bindposes;
-            SkinBinder.Bind(file, boneNames, 0, null, out joints, out bindposes);
+            SkinBinder.Bind(file, boneNames, 0, blendShapeNames, out joints, out bindposes);
         }
         catch (FormatException e)
         {

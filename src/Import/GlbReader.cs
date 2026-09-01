@@ -2457,7 +2457,8 @@ namespace Morgott.ContentTool.Import
             // (which the replacement path calls with 0/null but a MATERIAL replacement does not),
             // then the bone checks.
             int[] liveOf, fileOf;
-            IList<BindingIssue> issues = SkinCompatibility.Analyze(file, boneNames, out liveOf, out fileOf);
+            IList<BindingIssue> issues = SkinCompatibility.Analyze(file, boneNames,
+                blendShapeNames == null ? 0 : blendShapeNames.Count, out liveOf, out fileOf);
             BindingIssue first = SkinCompatibility.First(issues, BindStage.Skin);
             if (first != null) throw new FormatException(first.Message);
 

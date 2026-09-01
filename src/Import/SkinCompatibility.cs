@@ -44,6 +44,9 @@ namespace Morgott.ContentTool.Import
     /// A plain snapshot of the live target, taken on the main thread so the worker never touches a
     /// UnityEngine object. The last five fields are the FINGERPRINT: a SkinnedMeshRenderer keeps its
     /// instance id while its mesh, its bind poses and its bones are replaced under it.
+    ///
+    /// Nothing WRITES these yet - the Doctor preflight fills them from the renderer (task 7), which
+    /// is why the compiler reports them as never assigned until then.
     /// </summary>
     internal sealed class RigTarget
     {
@@ -88,12 +91,15 @@ namespace Morgott.ContentTool.Import
         internal static IList<BindingIssue> Analyze(SkinnedModel file, IList<string> boneNames)
         {
             int[] liveOf, fileOf;
-            return Analyze(file, boneNames, out liveOf, out fileOf);
+            return Analyze(file, boneNames, 0, out liveOf, out fileOf);
         }
 
+        /// <param name="expectedShapes">How many blend shapes the target model has - what Bind hands
+        /// Shapes as a NAME list. The replacement path passes 0, so a file with any shape key is
+        /// refused there; a caller that does drive shapes gets the same count check Shapes performs.</param>
         /// <param name="liveOf">file joint -&gt; live bone index, or null when the file cannot be bound.</param>
         /// <param name="fileOf">live bone -&gt; file joint index, or null when the file cannot be bound.</param>
-        internal static IList<BindingIssue> Analyze(SkinnedModel file, IList<string> boneNames,
+        internal static IList<BindingIssue> Analyze(SkinnedModel file, IList<string> boneNames, int expectedShapes,
                                                     out int[] liveOf, out int[] fileOf)
         {
             if (file == null) throw new ArgumentNullException(nameof(file));
@@ -133,10 +139,11 @@ namespace Morgott.ContentTool.Import
                     }
                 if (issues.Count > 0) break;
             }
-            if (file.Morphs.Count != 0)
+            if (file.Morphs.Count != expectedShapes)
                 Add(issues, BindCode.BlendShapeCount, BindStage.Mesh, BindSide.File, null,
                     "the file has " + file.Morphs.Count.ToString(CultureInfo.InvariantCulture) +
-                    " blend shapes but this model has 0, and the game drives them by position; " +
+                    " blend shapes but this model has " + expectedShapes.ToString(CultureInfo.InvariantCulture) +
+                    ", and the game drives them by position; " +
                     "in Blender keep every shape key that came with the model, in the same order, and re-export");
             if (issues.Count > 0) return issues;
 
