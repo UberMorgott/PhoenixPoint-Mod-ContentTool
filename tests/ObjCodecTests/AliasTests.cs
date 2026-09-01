@@ -154,6 +154,15 @@ internal static class AliasTests
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
 
+        // ---- an alias onto a bone the LIVE rig spells with the game's decoration is NOT a bad output:
+        // SkinCompatibility matches '#Root_Addon => X' to 'Root', so warning about it puts a row under a
+        // BY NAME verdict telling the author to fix what already binds.
+        AliasMap live = AliasMap.Of(new Dictionary<string, string> { { "hip", "Root" } });
+        checks += Check(live.OutputsNotIn(new[] { "#Root_Addon => SY_Sniper_Torso_BodyPartDef" }).Count == 0,
+                        "an alias onto the plain name of a DECORATED live bone is not reported as missing");
+        checks += Check(live.OutputsNotIn(new[] { "Elbow" }).Count == 1,
+                        "and an alias onto a bone the target really lacks still is");
+
         return "ALIAS PASS, " + checks + " check(s) - simultaneous rename, untouched index tables, sidecar policy";
     }
 

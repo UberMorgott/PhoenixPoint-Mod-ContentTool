@@ -93,7 +93,13 @@ namespace Morgott.ContentTool.Import
         {
             var bad = new List<string>();
             if (targetBoneNames == null) return bad;
+            // The DECORATED spelling counts too. A target read off a live renderer names its bones
+            // '#L.Arm_Addon => SY_Sniper_Torso_BodyPartDef' where the shipped asset says 'L.Arm', and
+            // SkinCompatibility matches those two, so an alias onto 'L.Arm' binds - while this check,
+            // comparing raw strings, called it a bone the skeleton does not have and put a warning row
+            // under a BY NAME verdict telling the author to fix what was already right.
             var have = new HashSet<string>(targetBoneNames, StringComparer.Ordinal);
+            foreach (string name in targetBoneNames) have.Add(SkinBinder.Plain(name));
             foreach (KeyValuePair<string, string> e in bones) if (!have.Contains(e.Value)) bad.Add(e.Key);
             return bad;
         }
