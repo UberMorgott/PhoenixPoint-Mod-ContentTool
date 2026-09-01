@@ -2878,7 +2878,7 @@ the dump was renamed through the repo's own `GlbCodec.Write` to the 13 names `ct
   bake for every body part: measured `NEAREST-BONE … (26 reason(s))` = 13 `MissingBone` + 13
   `ExtraBone` for a file whose bones ARE that rig's. BY NAME was unreachable in game. Both sides are
   now looked up exact-first, then undecorated.
-- `87f95cf` `fix(doctor): let go of a target the bench rebuilt under us`. `FitBench.Posed` assigns
+- `38acd14` `fix(doctor): let go of a target the bench rebuilt under us`. `FitBench.Posed` assigns
   `bay.CharacterBuilder.transform` on every rebuild — always the SAME Transform, because the rig is
   rebuilt underneath the builder — so `Root`'s `ReferenceEquals` early-out was taken on every unit
   swap and its reset never ran: measured `HasPreview` true and `OurMeshCount` 1 for a body part the
