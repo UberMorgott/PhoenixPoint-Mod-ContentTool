@@ -477,7 +477,13 @@ namespace Morgott.ContentTool.Bake
         {
             // The runtime toggle reaches here for ANY content mod, including a sound-only one.
             if (!File.Exists(Path.Combine(modDir, Project.ContentMods.Manifest))) return null;
-            return Project.ContentState.Claim(modDir, Route) ? LiveAt(modDir) : null;
+            if (!Project.ContentState.Claim(modDir, Route)) return null;
+            // A claim standing over NOTHING is worse than no claim: it makes the summary count this
+            // mod as serving and it makes the next scan or toggle a no-op, so a run that installed no
+            // row - or threw halfway - can never be retried. Hand the route back in both cases.
+            int served = 0;
+            try { return LiveAt(modDir, out served); }
+            finally { if (served == 0) Project.ContentState.Release(modDir, Route); }
         }
 
         /// <summary>
@@ -506,6 +512,15 @@ namespace Morgott.ContentTool.Bake
 
         internal static string LiveAt(string root)
         {
+            int served;
+            return LiveAt(root, out served);
+        }
+
+        /// <summary><paramref name="served"/> = rows that ACTUALLY reached the live catalog, so the
+        /// caller holding a claim knows whether it has anything to hand back.</summary>
+        internal static string LiveAt(string root, out int served)
+        {
+            served = 0;
             if (!File.Exists(Path.Combine(root, Project.ContentMods.Manifest)))
                 return "REFUSED: no ppcontent.json in " + root;
             ContentProject.Declared p = ContentProject.LoadDeclared(root);
@@ -513,12 +528,12 @@ namespace Morgott.ContentTool.Bake
             string name = new DirectoryInfo(root).Name;
 
             StringBuilder log = new StringBuilder();
-            int n = 0;
+            int n = 0, refused = 0;
             foreach (ShippedReplacement r in p.Replace)
             {
                 if (string.IsNullOrEmpty(r.video)) continue;
                 ImportedVideo v = FindVideo(p, r.video);
-                if (v == null) { log.AppendLine("SKIP '" + r.video + "' is not a .webm/.mp4/.mov under Content\\Videos\\"); continue; }
+                if (v == null) { log.AppendLine("SKIP '" + r.video + "' is not a .webm/.mp4/.mov under Content\\Videos\\"); refused++; continue; }
 
                 // Same rule as the declaration: naming a shipped clip REPLACES that row, naming none ADDS.
                 string key;
@@ -527,10 +542,18 @@ namespace Morgott.ContentTool.Bake
                 {
                     string why;
                     key = FindKey(json, r.asset, out why);
-                    if (key == null) { log.AppendLine("SKIP " + why); continue; }
+                    if (key == null) { log.AppendLine("SKIP " + why); refused++; continue; }
                 }
                 string before = LiveResolve(key);
                 string note = CatalogLive.Register(key, v.Path);
+                // Register REFUSES rather than throws (it runs as a Harmony postfix), so its refusal
+                // has to be read: recording a row it did not install made the summary say "serving"
+                // over a clip the game never sees, and made the undo hand back a row nobody replaced.
+                if (note != null && note.StartsWith("REFUSED", StringComparison.Ordinal))
+                {
+                    log.AppendLine("  " + key + "\n    " + note);
+                    refused++; continue;
+                }
                 // A no-op unless this mod is CLAIMED (the shipped path); the console verb records
                 // nothing, because nothing claimed it and there is nothing to hand back.
                 Project.ContentState.Served(root, Route, key);
@@ -540,8 +563,11 @@ namespace Morgott.ContentTool.Bake
             }
             // ONE line per mod, first and unconditional, so a modder reads at a glance that enabling
             // the mod was enough - and reads the reason on the same line when it was not.
+            served = n;
             StringBuilder head = new StringBuilder("  " + name + ": " + n +
-                " clip(s) served in memory from " + root + "; nothing in the install was written");
+                " clip(s) served in memory from " + root +
+                (refused > 0 ? ", " + refused + " refused/skipped" : "") +
+                "; nothing in the install was written");
             if (log.Length > 0) head.Append(Environment.NewLine).Append(log.ToString().TrimEnd());
             return head.ToString();
         }

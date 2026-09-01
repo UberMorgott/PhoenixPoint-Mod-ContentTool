@@ -287,17 +287,28 @@ namespace Morgott.ContentTool.Bake
             List<Rep> reps = Replacements(root, log);
             if (reps.Count == 0) return log.Append("ct_sound bake: nothing declared").ToString();
 
+            // ONE BAD ROW IS NOT THE END OF THE BAKE. Returning here left every later replacement
+            // unbaked AND skipped the sweep below, so banks already written stayed beside stale ones
+            // the project no longer declares - and the next startup loaded both.
             List<uint> baked = new List<uint>();
+            int failures = 0;
             foreach (Rep r in reps)
             {
                 if (!IdIndex.IsPpMedia(r.Media))
-                    return log.Append("bake REFUSED " + r.Media + " is not one of the " + IdIndex.MediaCount +
-                                      " media IDs Phoenix Point owns - nothing would ever play it").ToString();
+                {
+                    log.AppendLine("bake REFUSED " + r.Media + " is not one of the " + IdIndex.MediaCount +
+                                   " media IDs Phoenix Point owns - nothing would ever play it");
+                    failures++; continue;
+                }
 
                 int channels, rate;
                 byte[] pcm16;
                 string reason = ReadPcm(r.File, out pcm16, out channels, out rate);
-                if (reason != null) return log.Append("bake REFUSED " + Path.GetFileName(r.File) + " " + reason).ToString();
+                if (reason != null)
+                {
+                    log.AppendLine("bake REFUSED " + Path.GetFileName(r.File) + " " + reason);
+                    failures++; continue;
+                }
 
                 // The target's own loop declaration, read from the SHIPPED file when there is one.
                 string ignored;
@@ -324,8 +335,9 @@ namespace Morgott.ContentTool.Bake
             // removed (BankPrune's name-and-BKHD rule) - never a file the modder put there.
             string swept = BankPrune.Sweep(outDir, modId, baked);
             if (swept != null) log.AppendLine(swept);
-            log.Append("ct_sound bake: " + reps.Count + " bank(s) in " + outDir +
-                       " - NO game file was opened for writing. ContentTool loads these at init.");
+            log.Append("ct_sound bake: " + baked.Count + "/" + reps.Count + " bank(s) in " + outDir +
+                       ", " + failures + " refused - NO game file was opened for writing. " +
+                       "ContentTool loads these at init.");
             return log.ToString();
         }
 

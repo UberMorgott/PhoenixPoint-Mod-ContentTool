@@ -116,7 +116,10 @@ namespace Morgott.ContentTool.Bake
 
             Compose();
             log.Append("redirected " + bundleFile + " -> " + patchedPath + " for '" + modId + "'" +
-                       (claim.CrcSuppressed ? ", crc " + claim.Crc + " -> 0 (in memory)" : ", no crc to suppress"));
+                       (claim.CrcSuppressed ? ", crc " + claim.Crc + " -> 0 (in memory)" : ", no crc to suppress") +
+                       "; this takes effect on the NEXT AssetBundle.LoadFromFile of it (measured) - " +
+                       "anything the game has already loaded from the shipped bundle keeps the shipped " +
+                       "asset until you restart");
             return log.ToString();
         }
 

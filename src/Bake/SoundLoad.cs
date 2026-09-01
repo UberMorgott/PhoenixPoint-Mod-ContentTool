@@ -86,7 +86,9 @@ namespace Morgott.ContentTool.Bake
                 string owner = Project.ContentState.Owner(Route, media);
                 string refusal = BundleClaims.MediaRefusal(
                     owner == null ? null : Path.GetFileName(owner), name, media, Path.GetFileName(path));
-                if (refusal != null) { log.AppendLine("  " + refusal); continue; }
+                // COUNTED, like the unreadable bank below: a refused bank is a declared replacement
+                // that is not playing, and a summary saying "0 failed" over it reads as success.
+                if (refusal != null) { log.AppendLine("  " + refusal); failed++; continue; }
 
                 byte[] bytes;
                 try { bytes = File.ReadAllBytes(path); }
