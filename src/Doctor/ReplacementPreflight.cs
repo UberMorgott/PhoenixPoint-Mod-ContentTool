@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Morgott.ContentTool.Import;
 
 namespace Morgott.ContentTool.Doctor
@@ -117,6 +118,23 @@ namespace Morgott.ContentTool.Doctor
             // (SkinCompatibility.cs:111), in the binder's own words, so the row cannot drift from a
             // second copy of the same sentence written here.
             IList<BindingIssue> issues = SkinCompatibility.Analyze(effective, target.BoneNames);
+
+            // THE ONE CHECK ANALYZE CANNOT MAKE. It is handed bone NAMES; the bind pose count lives on
+            // the target snapshot. SkinFields.RebindByName (SkinFields.cs:738-741) refuses the two
+            // disagreeing and the bake falls back to nearest-bone, so a Doctor that did not ask would
+            // promise BY NAME for a model the bake downgrades. First in the list, because Decide reads
+            // issues[0] and this refusal happens before any name is compared.
+            if (names && target.BindPoseCount != target.BoneNames.Length)
+                issues.Insert(0, new BindingIssue
+                {
+                    Code = BindCode.TargetBindPoseMismatch,
+                    Stage = BindStage.Bones,
+                    Side = BindSide.Target,
+                    Message = "the target has " + target.BindPoseCount.ToString(CultureInfo.InvariantCulture) +
+                              " bind pose(s) but " + target.BoneNames.Length.ToString(CultureInfo.InvariantCulture) +
+                              " named bone(s), so a bone in the file cannot be matched to one of them"
+                });
+
             BindingIssue first = issues.Count == 0 ? null : issues[0];
             Outcome outcome = ReplacementDecision.Decide(armature, target.Rigged, names, first);
 
@@ -178,6 +196,7 @@ namespace Morgott.ContentTool.Doctor
                 case BindCode.BlendShapeCount: return "Remove the shape keys, or replace a model that has them - a replacement cannot add shapes.";
                 case BindCode.TargetBoneEmpty: return "This is the game's own model. Re-pick the target.";
                 case BindCode.TargetBoneDuplicate: return "This is the game's own model; it cannot be replaced by name.";
+                case BindCode.TargetBindPoseMismatch: return "This is the game's own model - nothing in your file causes it. Pick a different target, or accept nearest-bone.";
                 case BindCode.DuplicateFileBone: return "Two of your bones share a name - rename one in Blender and re-export.";
                 case BindCode.PlainCollision: return "Keep the one bone that belongs to this model, delete the other, and re-export.";
                 case BindCode.MissingBone: return "Rename your bone to this name - or map it in the table above.";

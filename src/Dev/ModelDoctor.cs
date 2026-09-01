@@ -100,6 +100,10 @@ namespace Morgott.ContentTool.Dev
 
         internal void PickTarget(SkinnedMeshRenderer smr, string transformPath)
         {
+            // BEFORE the renderer moves. preview/origin/originBounds all belong to the renderer being
+            // left behind; changing it first strands them - the next preview destroys a mesh still
+            // assigned to the old renderer, and a later Revert puts the old model's mesh on the new one.
+            Revert();
             Renderer = smr;
             Target = Snapshot(smr, transformPath);
             Restart();
@@ -117,33 +121,59 @@ namespace Morgott.ContentTool.Dev
         /// two collections, and a button that asks it twice a frame allocates for the whole session.</summary>
         private void Rethink()
         {
-            bool differs = aliases.Count != seeded.Count;
-            if (!differs)
-                foreach (KeyValuePair<string, string> e in aliases)
-                {
-                    string was;
-                    if (seeded.TryGetValue(e.Key, out was) && was == e.Value) continue;
-                    differs = true;
-                    break;
-                }
-            canSave = differs && aliases.Count > 0 && AliasMap.Of(aliases) != null;
+            // An EMPTY map that used to have entries is still a change - it means "take the sidecar
+            // away", which Save does by deleting the file. Without this arm the last alias cannot be
+            // removed: the button greys out and the sidecar the author just emptied keeps binding.
+            canSave = !Same(aliases, seeded) &&
+                      (aliases.Count > 0 ? AliasMap.Of(aliases) != null : SidecarExists());
         }
 
-        /// <summary>The sidecar's own mappings become the editor's starting rows, once per file. Without
+        private bool SidecarExists()
+        {
+            try { return Path != null && File.Exists(AliasMap.SidecarPathOf(Path)); }
+            catch (Exception) { return false; }
+        }
+
+        private static bool Same(Dictionary<string, string> a, Dictionary<string, string> b)
+        {
+            if (a.Count != b.Count) return false;
+            foreach (KeyValuePair<string, string> e in a)
+            {
+                string was;
+                if (!b.TryGetValue(e.Key, out was) || was != e.Value) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// The sidecar's own mappings become the editor's starting rows, once per FILE CONTENT. Without
         /// this the table shows nothing while the sidecar holds three names, and the first Save writes a
-        /// map of one - the two the author could not see are gone, silently.</summary>
+        /// map of one - the two the author could not see are gone, silently.
+        ///
+        /// Keyed on the hash and not the path, because the interesting case is a re-export over the same
+        /// name: the sidecar goes stale, the preflight stops applying it, and a Doctor still holding the
+        /// old map in memory would keep promising an outcome the bake will not produce.
+        /// </summary>
         private void Seed()
         {
-            if (seededFor == Path || Ready == null) return;
-            seededFor = Path;
+            if (Ready == null) return;
+            string key = Path + "|" + (Ready.Sha256 ?? "");
+            if (seededFor == key) return;
+            seededFor = key;
+
+            var was = new Dictionary<string, string>(aliases, StringComparer.Ordinal);
+            aliases.Clear();
             seeded.Clear();
             if (Ready.Source != null && Ready.Source.Aliases != null)
                 foreach (KeyValuePair<string, string> e in Ready.Source.Aliases.Pairs)
                 {
                     seeded[e.Key] = e.Value;
-                    if (!aliases.ContainsKey(e.Key)) aliases[e.Key] = e.Value;
+                    aliases[e.Key] = e.Value;
                 }
             Rethink();
+            // The report that just landed was computed with the map we held a moment ago. If seeding
+            // changed it, that verdict is about a file that is no longer on disk - ask again.
+            if (!Same(was, aliases)) Restart();
         }
 
         internal void Enqueue(string what)
@@ -372,9 +402,12 @@ namespace Morgott.ContentTool.Dev
         private string DoSave()
         {
             if (Path == null || Ready == null) return "nothing to save";
-            if (aliases.Count == 0) return "no aliases to save";
             string stale = Stale();
             if (stale != null) { Restart(); return stale; }
+            // EMPTYING the map removes the sidecar. Writing "{}" would leave a file the loader still
+            // reads and the author still has to reason about; the absence of a sidecar is the state
+            // they asked for by clearing the last row.
+            if (aliases.Count == 0) return DropSidecar();
             try
             {
                 byte[] bytes = File.ReadAllBytes(Path);
@@ -389,6 +422,24 @@ namespace Morgott.ContentTool.Dev
                 return "saved " + aliases.Count + " alias(es) to " + AliasMap.SidecarPathOf(Path);
             }
             catch (Exception ex) { return "could not save: " + ex.Message; }
+        }
+
+        private string DropSidecar()
+        {
+            string sidecar = AliasMap.SidecarPathOf(Path);
+            if (!SidecarExists()) { seeded.Clear(); Rethink(); return "there is no sidecar to remove"; }
+            try
+            {
+                File.Delete(sidecar);
+                Debug.Log("[ContentTool] Model Doctor: removed the bone map '" + sidecar + "'");
+                seeded.Clear();
+                Rethink();
+                Say(Ready.Report, "AliasesSaved", Severity.Info, DiagnosticSide.Sidecar,
+                    "the sidecar was removed - this file now binds on its own names", "");
+                Restart();                                 // the verdict without the map is a new one
+                return "sidecar removed: " + sidecar;
+            }
+            catch (Exception ex) { return "could not remove the sidecar: " + ex.Message; }
         }
 
         /// <summary>
@@ -517,7 +568,11 @@ namespace Morgott.ContentTool.Dev
             GUILayout.Label(Ready.Report.Header());
             GUILayout.Space(2f);
 
-            if (Ready.Outcome == Outcome.NearestBone && Ready.Model != null && Target.BoneNames != null)
+            // Shown whenever there is a map OR a reason to make one. Keying it on NearestBone alone hid
+            // the table the moment an alias worked, which is exactly when the author wants to look at
+            // what they mapped - and left no way to change or remove it.
+            if (Ready.Model != null && Target.BoneNames != null &&
+                (aliases.Count > 0 || Ready.Outcome == Outcome.NearestBone))
                 BoneMap(col);
 
             rowScroll = GUILayout.BeginScrollView(rowScroll, GUILayout.Height(200f));
@@ -530,9 +585,14 @@ namespace Morgott.ContentTool.Dev
             GUILayout.BeginHorizontal();
             // A Blocking row is a refusal even when the VERDICT was reached before it - a live bind that
             // disagreed, a rig that moved. Preview follows the rows, not the outcome it was born with.
+            // A target with bind poses but no bone list previews as NotRigged whatever the report said
+            // (LiveMesh.Bind takes the empty-bones arm), so every press would be a mismatch. The button
+            // says so rather than inviting one.
+            bool blind = Target.BoneNames == null;
             GUI.enabled = (Ready.Outcome == Outcome.ByName || Ready.Outcome == Outcome.NearestBone) &&
-                          Ready.Report.Count(Severity.Blocking) == 0;
-            if (GUILayout.Button("Preview", GUILayout.Width(80f))) Enqueue("preview");
+                          Ready.Report.Count(Severity.Blocking) == 0 && !blind;
+            if (GUILayout.Button(blind ? "Preview - no live bones to bind onto" : "Preview",
+                                 GUILayout.Width(blind ? 230f : 80f))) Enqueue("preview");
             GUI.enabled = HasPreview;
             if (GUILayout.Button("Revert preview", GUILayout.Width(110f))) Enqueue("revert");
             // Changed AND valid, decided in Rethink: an unchanged map rewrites the sidecar for nothing,
@@ -601,10 +661,17 @@ namespace Morgott.ContentTool.Dev
             foreach (Diagnostic d in Ready.Report.Rows)
                 if (d.Code == "MissingBone" && d.Subject != null) free.Add(d.Subject);
 
+            // THE ROWS ARE THE UNION: what is mapped now, plus what is still unmapped. Deriving them
+            // from ExtraBone alone made a row disappear the moment its alias worked - the author could
+            // see a mapping only while it was wrong, and could never take one back.
+            var rows = new List<string>();
+            foreach (KeyValuePair<string, string> e in aliases) rows.Add(e.Key);
             foreach (Diagnostic d in Ready.Report.Rows)
+                if (d.Code == "ExtraBone" && d.Subject != null && !aliases.ContainsKey(d.Subject))
+                    rows.Add(d.Subject);
+
+            foreach (string fileBone in rows)
             {
-                if (d.Code != "ExtraBone" || d.Subject == null) continue;
-                string fileBone = d.Subject;
                 string current;
                 aliases.TryGetValue(fileBone, out current);
 
@@ -616,15 +683,17 @@ namespace Morgott.ContentTool.Dev
                                      BenchList.Elide(current ?? (suggestion == null ? "(pick a bone)" : suggestion + "?"), 30),
                                      GUILayout.Width(col)))
                     boneOpen = boneOpen == fileBone ? null : fileBone;
+                // The one-press way back out of a mapping, on the row itself: a mapping the author can
+                // make but not unmake is a trap, and hiding the undo inside the dropdown is nearly one.
+                if (current != null && GUILayout.Button("x", GUILayout.Width(22f)))
+                {
+                    string clear = fileBone;
+                    edits.Enqueue(delegate { SetAlias(clear, null); });
+                    boneOpen = null;
+                }
                 GUILayout.EndHorizontal();
                 if (boneOpen != fileBone) continue;
 
-                if (current != null && GUILayout.Button("      (none)"))
-                {
-                    string k = fileBone;
-                    edits.Enqueue(delegate { SetAlias(k, null); });
-                    boneOpen = null;
-                }
                 foreach (string bone in free)
                 {
                     if (Claimed(bone, fileBone)) continue;

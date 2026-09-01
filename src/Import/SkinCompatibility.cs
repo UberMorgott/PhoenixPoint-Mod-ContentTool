@@ -19,7 +19,7 @@ namespace Morgott.ContentTool.Import
     {
         TargetBonesUnavailable, NoArmature, JointsWeightsMismatch,
         TriangleOutOfRange, BlendShapeCount,
-        TargetBoneEmpty, TargetBoneDuplicate, DuplicateFileBone, PlainCollision,
+        TargetBoneEmpty, TargetBoneDuplicate, TargetBindPoseMismatch, DuplicateFileBone, PlainCollision,
         MissingBone, ExtraBone, NotBijective, InverseBindCount, BoneIndexOutOfRange
     }
 

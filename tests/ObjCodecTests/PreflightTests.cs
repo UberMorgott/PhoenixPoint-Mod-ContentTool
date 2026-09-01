@@ -93,6 +93,21 @@ internal static class PreflightTests
             checks += Check(ReplacementPreflight.Run(bytes, glb, flat).Outcome == Outcome.NotRigged,
                             "a target with no bind poses is NOT RIGGED");
 
+            // ---- bind poses and named bones DISAGREE. Analyze cannot see this - it is handed names
+            // only - but SkinFields.RebindByName throws on it (SkinFields.cs:738-741) and the bake
+            // falls back, so a Doctor that answered ByName here would promise weights the bake drops.
+            RigTarget lopsided = Rig(own);
+            lopsided.BindPoseCount = own.Length + 1;
+            ReplacementPreflightResult skew = ReplacementPreflight.Run(bytes, glb, lopsided);
+            checks += Check(skew.Outcome == Outcome.NearestBone,
+                            "more bind poses than named bones is NEAREST-BONE, as the bake makes it: " + skew.Outcome);
+            checks += Check(Message(skew, "TargetBindPoseMismatch") ==
+                            "the target has " + (own.Length + 1) + " bind pose(s) but " + own.Length +
+                            " named bone(s), so a bone in the file cannot be matched to one of them",
+                            "in RebindByName's own words: " + Codes(skew));
+            checks += Check(Severity(skew, "TargetBindPoseMismatch") == Morgott.ContentTool.Doctor.Severity.Downgrade,
+                            "and it costs the weights rather than refusing the import");
+
             // ---- a skinless source onto a rigged target: the one case that writes nothing.
             byte[] skinlessBytes = GlbCodec.Write(Skinless(GlbReader.Read(bytes)));
             string skinlessPath = Path.Combine(dir, "skinless.glb");
