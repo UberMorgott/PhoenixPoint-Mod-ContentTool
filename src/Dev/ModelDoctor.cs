@@ -260,10 +260,11 @@ namespace Morgott.ContentTool.Dev
         /// <summary>Called every frame from the bench's Update. Drains results, then intents.</summary>
         internal void Tick()
         {
-            // An edit queued before the bench dropped its actor would otherwise revive the Doctor onto
-            // a stand that is no longer there; with no Root there is nothing to preview against anyway.
+            // Every edit runs. The ONE that cannot outlive its actor - picking a renderer off the stand -
+            // carries its own check at the point it was queued, because only that edit knows which actor
+            // it was chosen from. Picking a FILE with no actor is fine: the report waits for a target.
             Action edit;
-            while (edits.TryDequeue(out edit)) if (Root != null) edit();
+            while (edits.TryDequeue(out edit)) edit();
 
             Job job;
             while (done.TryDequeue(out job))
@@ -320,12 +321,11 @@ namespace Morgott.ContentTool.Dev
                 // that disagreed with the prediction is destroyed rather than shown. A wrong skinning
                 // shown confidently is worse than none.
                 UnityEngine.Object.Destroy(candidate);
-                string said = "preview REFUSED: the live bind disagreed with the report (" +
-                              got + " vs " + Ready.Outcome + ")";
-                Say(Ready.Report, "PreviewDisagreed", Severity.Blocking, DiagnosticSide.Target,
-                    "the live bind came out " + got + " where the report predicted " + Ready.Outcome +
-                    ", so the preview was not applied",
-                    "The model changed under the report. Press Change and pick the target again.");
+                // No row is added: Restart throws this report away, and a row on a discarded report is
+                // one nobody can read. The sentence goes to Message, which the panel draws above the
+                // "reading..." the restart puts on screen.
+                string said = "preview REFUSED: the live bind came out " + got + " where the report said " +
+                              Ready.Outcome + " - the model changed under it, reading it again";
                 Restart();                                  // ask again against whatever the rig is NOW
                 return said;
             }
@@ -431,7 +431,10 @@ namespace Morgott.ContentTool.Dev
             get { return root; }
             set
             {
-                if (root == value) return;
+                // ReferenceEquals, not ==: Unity's operator calls a DESTROYED object equal to null, so a
+                // bench that drops a dead actor with Root = null would compare equal and skip the reset -
+                // leaving a report and a preview belonging to a renderer that no longer exists.
+                if (ReferenceEquals(root, value)) return;
                 Revert();                                  // the preview belongs to the OLD renderer
                 root = value;
                 Renderer = null;
@@ -475,6 +478,10 @@ namespace Morgott.ContentTool.Dev
                                 Ready.Baked.Influences + " influence(s)/vertex");
 
             Targets();
+            // ABOVE the early returns. What the last press did is most worth reading exactly when the
+            // panel has nothing else to show - a refused preview restarts the report, and a message
+            // drawn under a verdict that is not there yet is a message nobody ever sees.
+            if (Message.Length > 0) GUILayout.Label(Message);
 
             if (Path == null || Target == null)
             {
@@ -513,7 +520,6 @@ namespace Morgott.ContentTool.Dev
             if (GUILayout.Button("Copy report", GUILayout.Width(100f)))
                 GUIUtility.systemCopyBuffer = PlainTextOf(Ready, Path, Target);
             GUILayout.EndHorizontal();
-            if (Message.Length > 0) GUILayout.Label(Message);
         }
 
         /// <summary>The target block: what is picked, and the renderers on the stand to pick from. The
@@ -545,7 +551,11 @@ namespace Morgott.ContentTool.Dev
                                       "  (" + (r.bones == null ? 0 : r.bones.Length) + " bones)")) continue;
                 SkinnedMeshRenderer chosen = r;
                 string chosenPath = path;
-                edits.Enqueue(delegate { PickTarget(chosen, chosenPath); });
+                Transform from = root;                     // the actor this renderer was chosen off
+                edits.Enqueue(delegate
+                {
+                    if (ReferenceEquals(root, from)) PickTarget(chosen, chosenPath);
+                });
                 targetsOpen = false;
             }
         }
