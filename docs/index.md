@@ -1,78 +1,66 @@
-# ContentTool
+# Start here
 
-ContentTool is an engine for Phoenix Point content mods. It lets those mods replace or add textures,
-materials, models, animations, sounds, videos, creatures and weapons. It changes nothing by itself.
+ContentTool is an engine for Phoenix Point content mods. It changes nothing by itself. A content mod
+tells it what to replace or add.
 
 ## Players
 
 1. Download `ContentTool-*.zip` from the [latest release](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/releases/latest).
-2. Copy the `ContentTool` folder into
-   `<Steam library>\steamapps\common\Phoenix Point\Mods\`.
-3. Start the game, open **Mods**, and tick **Content Tool**.
+2. Extract the `ContentTool` folder into `<Phoenix Point>\Mods\`.
+3. Check that this file exists:
 
-That is all. You do not run author commands or build another mod's files. A content mod that declares
-ContentTool as a dependency makes the mod manager enable it automatically.
+```text
+Phoenix Point\
+  Mods\
+    ContentTool\
+      meta.json              <- the mod manager finds ContentTool here
+```
 
-If ContentTool does not appear, the folder is probably nested one level too deeply. The file must be
-at `<Steam library>\steamapps\common\Phoenix Point\Mods\ContentTool\meta.json`.
+4. Start the game, open **Mods**, and tick **Content Tool**.
+
+If another mod declares ContentTool as a dependency, the mod manager can enable ContentTool for it.
+You do not need the authoring commands below just to play with a mod.
 
 ## Modders
 
-Start here, in this order:
+Follow this route once before you pick a specialised recipe:
 
-1. [How a mod is made](SHIPPING-A-CONTENT-MOD.md) — create the folder, preview changes, bake,
-   package, reinstall as a player, and ship.
-2. [Replace vs Add](guides/replace-vs-add.md) — which route you want and why Replace bakes on the
-   player's machine.
-3. [Open the developer console](SHIPPING-A-CONTENT-MOD.md#open-the-developer-console) — the
-   physical backquote-key position opens it; nothing needs enabling when the game launched with mods.
-4. [Discover game content](guides/discovery.md) — find the bundle, asset, def, media ID, video row,
-   bone names, material properties and clip data you need.
-5. [Pick a recipe](guides/index.md) — texture, material, mesh, animated model, sound, video,
-   creature, weapon, or a [foreign humanoid soldier](guides/humanoid-soldier.md).
-6. [Manifest and command reference](guides/reference.md) — every supported field and author-facing
-   console command.
+1. [Make your first green bake](getting-started/first-mod.md). This proves that your folder, manifests,
+   console and installation agree.
+2. [Choose Replace or Add](getting-started/choose-a-route.md).
+3. [Learn the project layout and file rules](reference/project-files.md).
+4. [Find the bundle, asset or media you need](find-content/index.md).
+5. [Bake, test and package](getting-started/lifecycle.md).
+6. [Read a failed bake](troubleshooting/bake-errors.md) before moving files at random.
+7. [Pick a recipe](recipes/index.md).
 
-One project can use several routes at once. The
-[combined example](guides/combined-example.md) replaces a texture, adds a sound, replaces another
-sound and publishes a model from one `ppcontent.json`.
+The first five pages are the golden path. They use one vocabulary throughout:
 
-### The DLL answer
+- **source**: a file you made, such as a PNG, GLB or WAV;
+- **target**: shipped content named by a replacement row;
+- **bake**: `ct_project` imports sources and produces or checks game-ready output;
+- **package**: `ct_package` stages the folder you may distribute. It does not bake.
 
-A content-only mod needs no DLL and no stub DLL. Use `"AssemblyName": ""` in `meta.json`, or omit
-that field. Add a real DLL only when your mod needs behaviour: a hotkey, a trigger, a def change, or
-the call that builds a declared creature or weapon — with one exception, `"startingRoster": true`,
-which boards a declared creature at campaign start with no code of your own. ContentTool supplies an in-memory loader shim so
-the mod-manager checkbox works for a code-less content mod; there is no fake file on disk to hit,
-protect, rename or delete.
+## The texture rule
 
-When behaviour is required, use the complete [DLL project and `ModMain` skeleton](guides/behavior-dll.md).
-
-### Supported and tested versions
-
-ContentTool `1.0.0.0` is verified with Phoenix Point **1.30.2.75117**
-(`ReleaseCandidate2025`), Unity **2019.4.31f1**, on Windows. A `meta.json` dependency carries only the
-ContentTool ID and no minimum version, so an author must test version skew and a game update against
-the exact package they ship.
-
-## If something fails
-
-[Open Phoenix Point's developer console](SHIPPING-A-CONTENT-MOD.md#open-the-developer-console) and
-run:
+Put texture sources directly under `Content\Textures\`.
 
 ```text
-ct_version
+MyMod\
+  meta.json
+  ppcontent.json
+  Content\
+    Textures\              <- .png, .jpg and .jpeg are scanned here
+      soldier_albedo.png   <- the manifest names this as "soldier_albedo"
+    Meshes\
+      materials\           <- old Resource Replacer layout; ContentTool does not scan textures here
 ```
 
-Then search this file for your mod ID and `ct_`:
+`Content\Meshes\materials\` is not a ContentTool texture folder. A texture left there may still be
+copied by the packager, but `ct_project` will not import it. See
+[Textures versus materials](troubleshooting/bake-errors.md#textures-versus-materials).
 
-```text
-%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\Player.log
-```
+## Documentation status
 
-Long console reports are written there in full. Start with the first refusal, not the last symptom.
-
-## License
-
-[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) — Morgott. Content mods built with
-ContentTool remain their authors' work.
+The setup, discovery, recipe and troubleshooting pages are complete through Phase 2. Worked demo
+explanations are still deferred to Phase 3 and remain marked as such.

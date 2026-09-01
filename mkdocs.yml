@@ -1,18 +1,5 @@
-# The documentation site. Built with MkDocs Material because it is the generator this machine can
-# actually BUILD: ruby/gem/bundle/jekyll are all absent here, python is not, so a Jekyll site would
-# have shipped unbuilt and unverified. `mkdocs build --strict` below is the check.
-#
-#   python -m venv .venv
-#   .venv\Scripts\pip install -r requirements-docs.txt
-#   .venv\Scripts\mkdocs build --strict          # writes site\, fails on a broken link
-#   .venv\Scripts\mkdocs serve                   # http://127.0.0.1:8000 while writing
-#
-# site_url/nav assume ContentTool is its OWN repository, where this file sits at the root. In the
-# author's monorepo it is one folder down; nothing here reads the parent, so both work.
 site_name: ContentTool
-site_description: >-
-  Replace or add any content in Phoenix Point - textures, models, materials, sounds, videos,
-  whole creatures and weapons - from a mod folder, in memory, without ever writing to your game.
+site_description: Documentation for building Phoenix Point content mods with ContentTool.
 site_url: https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/
 repo_url: https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool
 repo_name: UberMorgott/PhoenixPoint-Mod-ContentTool
@@ -21,38 +8,14 @@ copyright: CC BY-NC 4.0 - Morgott
 docs_dir: docs
 site_dir: site
 
-# The docs\ folder is ALSO the author's working tree: architecture, research and dated handoffs live
-# beside the pages a reader wants. Excluding them here means the BUILD drops them, so a stale
-# handoff can never be published, and the source-blind agent test cannot read one by accident.
-# That test is the reason this is an exclusion in the build and not a convention about linking.
-# RECIPES / PROVEN-FOUNDATIONS / RELEASE are ENGINE-AUTHOR material, not content-mod-author
-# material: AssetsTools.NET call sequences, gate evidence, and the release runbook. Publishing them
-# was a first draft's reflex. The seal check caught what that costs - PROVEN-FOUNDATIONS links to
-# FINAL-PLAN, which is not published, and RELEASE prints the author's own machine path - so they
-# leave the public build and the per-rung guides carry the evidence a modder actually needs.
-exclude_docs: |
-  README.md
-  FINAL-PLAN.md
-  METHODOLOGY.md
-  RECIPES.md
-  PROVEN-FOUNDATIONS.md
-  RELEASE.md
-  HANDOFF-*.md
-  research-*.md
-  design-*.md
-  animated-model-cases.md
-  VERIFIED-DEMOS.md
-  blind-test/
-
 theme:
   name: material
   features:
     - navigation.sections
     - navigation.top
-    - content.code.copy      # every console line on this site is meant to be pasted
+    - content.code.copy
     - search.highlight
   palette:
-    # Phoenix Point is a dark game; default to dark and let the reader switch.
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: teal
@@ -85,23 +48,26 @@ markdown_extensions:
       alternate_style: true
 
 nav:
-  - Home: index.md
-  - Shipping a content mod: SHIPPING-A-CONTENT-MOD.md
-  - Discover game content: guides/discovery.md
-  - Manifest and commands: guides/reference.md
-  - Behaviour DLL: guides/behavior-dll.md
-  - Animation contract: guides/animation-reference.md
-  - One mod, several routes: guides/combined-example.md
-  - Working demos: demos.md
+  - Start here: index.md
+  - Your first working mod:
+      - First green bake: getting-started/first-mod.md
+      - Choose a route: getting-started/choose-a-route.md
+      - Bake, test, package: getting-started/lifecycle.md
+  - Project files: reference/project-files.md
+  - Find game content: find-content/index.md
+  - Read bake failures: troubleshooting/bake-errors.md
   - Recipes:
-      - Pick your rung: guides/index.md
-      - Textures, sprites and icons: guides/textures.md
-      - Materials: guides/materials.md
-      - Meshes - replace and add: guides/meshes.md
-      - Animated models: guides/animated-models.md
-      - Sounds - replace and add: guides/sounds.md
-      - Videos - replace and add: guides/videos.md
-      - A new creature: guides/creature.md
-      - A humanoid soldier: guides/humanoid-soldier.md
-      - A shipped character's new body: guides/replace-character-body.md
-      - A new weapon and fit workbench: guides/weapon.md
+      - Recipe index: recipes/index.md
+      - Textures and icons: recipes/textures.md
+      - Material property values: recipes/material-properties.md
+      - Meshes: recipes/meshes.md
+      - Animated models: recipes/animated-models.md
+      - Sounds: recipes/sounds.md
+      - Videos: recipes/videos.md
+      - Creatures: recipes/creature.md
+      - Humanoid soldiers: recipes/humanoid-soldier.md
+      - Replace a character body: recipes/replace-character-body.md
+      - Weapons: recipes/weapon.md
+      - Behaviour DLL: recipes/behavior-dll.md
+      - Animation contract: recipes/animation-contract.md
+  - Worked examples: examples/index.md
