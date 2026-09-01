@@ -448,7 +448,16 @@ namespace Morgott.ContentTool.Dev
                 // ReferenceEquals, not ==: Unity's operator calls a DESTROYED object equal to null, so a
                 // bench that drops a dead actor with Root = null would compare equal and skip the reset -
                 // leaving a report and a preview belonging to a renderer that no longer exists.
-                if (ReferenceEquals(root, value)) return;
+                //
+                // The root ALONE is not the signal, though. The bench hands us the same Transform every
+                // time (FitBench.Posed: bay.CharacterBuilder.transform is the builder, and the rig is
+                // rebuilt UNDERNEATH it), so a unit swap left this early-out taken and the Doctor holding
+                // a Target, a report and a live preview mesh for a body part the swap had destroyed.
+                // Measured in game: after 'ct_bench unit', HasPreview stayed true and OurMeshCount 1.
+                // The rebuild is not observable from the transform, but the death of the chosen renderer
+                // is - and that is the thing that actually invalidates everything downstream.
+                bool rebuilt = Renderer == null && !ReferenceEquals(Renderer, null);
+                if (ReferenceEquals(root, value) && !rebuilt) return;
                 Revert();                                  // the preview belongs to the OLD renderer
                 root = value;
                 Renderer = null;
