@@ -2451,102 +2451,27 @@ namespace Morgott.ContentTool.Import
             IList<string> blendShapeNames, out ushort[] joints, out float[][] bindposes)
         {
             if (file == null) throw new ArgumentNullException(nameof(file));
-            if (boneNames == null || boneNames.Count == 0)
-                throw new FormatException("the target model lists no bones, so there is no skeleton to bind onto; " +
-                    "reload the scene and try again");
-            if (file.JointNames.Count == 0)
-                throw new FormatException("the file carries no armature, so it cannot replace a rigged model; " +
-                    "in Blender export the mesh together with its armature, or put the file on a static object instead");
-            if (file.Joints == null || file.Weights == null || file.Positions == null ||
-                file.Joints.Length != file.Positions.Length * 4 || file.Weights.Length != file.Joints.Length)
-                throw new FormatException("the file's bone weights do not cover every vertex; " +
-                    "in Blender give the whole mesh an Armature modifier with vertex groups and re-export");
+
+            // Every check now lives in SkinCompatibility.Analyze so the Doctor can LIST what this
+            // throws at. The order is preserved exactly: the skin guards, then Submeshes/Shapes
+            // (which the replacement path calls with 0/null but a MATERIAL replacement does not),
+            // then the bone checks.
+            int[] liveOf, fileOf;
+            IList<BindingIssue> issues = SkinCompatibility.Analyze(file, boneNames, out liveOf, out fileOf);
+            BindingIssue first = SkinCompatibility.First(issues, BindStage.Skin);
+            if (first != null) throw new FormatException(first.Message);
 
             Submeshes(file, materialSlots);
             Shapes(file, blendShapeNames);
 
-            var liveOf = new int[file.JointNames.Count];
-            var fileOf = new int[boneNames.Count];
-            for (int i = 0; i < liveOf.Length; i++) liveOf[i] = -1;
-            for (int i = 0; i < fileOf.Length; i++) fileOf[i] = -1;
-
-            var live = new Dictionary<string, int>(StringComparer.Ordinal);
-            for (int i = 0; i < boneNames.Count; i++)
-            {
-                if (string.IsNullOrEmpty(boneNames[i]))
-                    throw new FormatException("the target model's bone " + i.ToString(CultureInfo.InvariantCulture) +
-                        " has no name, so nothing in the file can be matched to it; reload the scene and try again");
-                if (live.ContainsKey(boneNames[i]))
-                    throw new FormatException("the target model has two bones named '" + boneNames[i] +
-                        "', so a bone in the file cannot be matched to one of them; this model cannot be replaced by name");
-                live[boneNames[i]] = i;
-            }
-            var seen = new Dictionary<string, int>(StringComparer.Ordinal);
-            for (int j = 0; j < file.JointNames.Count; j++)
-            {
-                if (seen.ContainsKey(file.JointNames[j]))
-                    throw new FormatException("the file has two bones named '" + file.JointNames[j] +
-                        "'; rename one of them in Blender so every bone name is unique, then re-export");
-                seen[file.JointNames[j]] = j;
-            }
-            // A rig taken from a LIVE scene carries the game's own decoration on every attachment
-            // point instead of the plain bone name, so the intersection with the shipped skeleton is
-            // empty and every such file used to fall back to nearest-bone - which is exactly what
-            // loses the author's weights. Undecorate them, EXACT NAMES FIRST so a plainly-named file
-            // behaves byte-identically.
-            var plain = new Dictionary<string, int>(StringComparer.Ordinal);
-            for (int j = 0; j < file.JointNames.Count; j++)
-            {
-                string bare = Plain(file.JointNames[j]);
-                if (bare == file.JointNames[j] || seen.ContainsKey(bare)) continue;
-                if (plain.ContainsKey(bare))
-                    throw new FormatException("the file's bones '" + file.JointNames[plain[bare]] + "' and '" +
-                        file.JointNames[j] + "' both name the bone '" + bare + "' once the game's own " +
-                        "'#<bone>_Addon => <part>' decoration is removed, so neither can be matched to it; " +
-                        "keep the one that belongs to this model and re-export");
-                plain[bare] = j;
-            }
-
-            // Every live bone must be in the file. This is the one that breaks deformation, so it is
-            // reported first and by name.
-            for (int i = 0; i < boneNames.Count; i++)
-            {
-                if (!seen.TryGetValue(boneNames[i], out int j) && !plain.TryGetValue(boneNames[i], out j))
-                    throw new FormatException("the file does not contain the bone '" + boneNames[i] +
-                        "', which this model's skeleton has; the skeleton is never replaced, so in Blender keep the imported " +
-                        "armature exactly as it came, with every bone and its name unchanged, and re-export");
-                fileOf[i] = j;
-                liveOf[j] = i;
-            }
-            for (int j = 0; j < file.JointNames.Count; j++)
-                if (liveOf[j] < 0)
-                    throw new FormatException("the file adds the bone '" + file.JointNames[j] +
-                        "', which this model's skeleton does not have; the skeleton is never replaced, so delete the added bone " +
-                        "in Blender and re-export");
-            for (int i = 0; i < fileOf.Length; i++)
-                if (liveOf[fileOf[i]] != i)
-                    throw new FormatException("the file's bones could not be matched one to one onto this model's skeleton; " +
-                        "re-export from the model this mod dumped, without adding, removing or renaming bones");
-
-            if (file.InverseBindMatrices == null || file.InverseBindMatrices.Length != file.JointNames.Count)
-                throw new FormatException("the file has " +
-                    (file.InverseBindMatrices == null ? 0 : file.InverseBindMatrices.Length).ToString(CultureInfo.InvariantCulture) +
-                    " bind poses for " + file.JointNames.Count.ToString(CultureInfo.InvariantCulture) +
-                    " bones; re-export from Blender rather than editing the file by hand");
+            if (issues.Count > 0) throw new FormatException(issues[0].Message);
 
             joints = new ushort[file.Joints.Length];
-            for (int i = 0; i < file.Joints.Length; i++)
-            {
-                int slot = file.Joints[i];
-                if (slot >= liveOf.Length)
-                    throw new FormatException("vertex " + (i / 4).ToString(CultureInfo.InvariantCulture) + " references bone " +
-                        slot.ToString(CultureInfo.InvariantCulture) + " but the file has " +
-                        liveOf.Length.ToString(CultureInfo.InvariantCulture) + "; the file is corrupt, so re-export it");
-                joints[i] = (ushort)liveOf[slot];
-            }
+            for (int i = 0; i < file.Joints.Length; i++) joints[i] = (ushort)liveOf[file.Joints[i]];
             bindposes = new float[boneNames.Count][];
             for (int i = 0; i < boneNames.Count; i++) bindposes[i] = file.InverseBindMatrices[fileOf[i]];
         }
+
 
         /// <summary>
         /// The plain bone name inside a name the GAME decorated, or <paramref name="name"/> itself

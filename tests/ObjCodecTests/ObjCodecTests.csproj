@@ -121,6 +121,9 @@
     <Compile Include="..\..\src\Bake\MeshRead.cs" Link="MeshRead.cs" />
     <Compile Include="..\..\src\Bake\LooseFiles.cs" Link="LooseFiles.cs" />
     <Compile Include="..\..\src\Import\GlbCodec.cs" Link="GlbCodec.cs" />
+    <!-- The binding CHECKS, lifted out of SkinBinder.Bind so the Doctor can list them instead of
+         reading one thrown sentence. UnityEngine-free like the binder it came from. -->
+    <Compile Include="..\..\src\Import\SkinCompatibility.cs" Link="SkinCompatibility.cs" />
     <Compile Include="..\..\src\Import\GlbReader.cs" Link="GlbReader.cs" />
     <Compile Include="..\..\src\Import\Meshopt.cs" Link="Meshopt.cs" />
     <Compile Include="..\..\src\Import\Draco.cs" Link="Draco.cs" />

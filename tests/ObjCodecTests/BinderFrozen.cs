@@ -68,6 +68,21 @@ internal static class BinderFrozen
         checks += Refuses("blend shape wins over a bone name", morph, new[] { "Root" },
                           "the file has 1 blend shapes but this model has 0");
 
+        // ---- the extraction itself: Analyze must list EVERY reason, in Bind's own throw order,
+        // where Bind stops at the first. One file that is wrong three ways over.
+        SkinnedModel many = Model(new[] { "Root", "Hand" });
+        IList<BindingIssue> issues = SkinCompatibility.Analyze(many, new[] { "Root", "Neck" });
+        checks += Check(issues.Count == 2, "Analyze lists every reason, not just the first: " + issues.Count);
+        checks += Check(issues[0].Code == BindCode.MissingBone && issues[0].Subject == "Neck",
+                        "the missing live bone is reported FIRST and by name: " + issues[0].Code +
+                        " '" + issues[0].Subject + "'");
+        checks += Check(issues[1].Code == BindCode.ExtraBone && issues[1].Subject == "Hand",
+                        "the added file bone comes second: " + issues[1].Code + " '" + issues[1].Subject + "'");
+        checks += Check(issues[0].Message.IndexOf("does not contain the bone 'Neck'", StringComparison.Ordinal) >= 0,
+                        "an issue carries the BINDER's own sentence, not a new one: " + issues[0].Message);
+        checks += Check(SkinCompatibility.Analyze(Model(new[] { "Root" }), new[] { "Root" }).Count == 0,
+                        "a file that binds produces no issue at all");
+
         return "BINDER-FROZEN PASS, " + checks + " check(s) - the pre-refactor record of SkinBinder.Bind";
     }
 
