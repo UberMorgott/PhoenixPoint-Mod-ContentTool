@@ -57,6 +57,14 @@ internal static class AssetIndexTests
                           "no Mesh named 'no_such_mesh'"),
                   "an absent name is refused, and the message says it was absent");
 
+            // The bake loop asks this INSTEAD of calling a Replace* and catching the throw: a "replace"
+            // row naming a target the shipped bundle does not hold must be one counted P-REFUSED line,
+            // never an exception that abandons the rest of the bake (ProjectBake.MissingTarget).
+            Check(AssetIndex.WhyNot(m, afile, AssetClassID.Mesh, Mesh, MeshBundle) == null,
+                  "WhyNot says nothing about a target that IS there");
+            string why = AssetIndex.WhyNot(m, afile, AssetClassID.Mesh, "no_such_mesh", MeshBundle);
+            Check(why != null && why.Contains("no Mesh named 'no_such_mesh'"),
+                  "WhyNot REPORTS an absent target instead of throwing: " + why);
         });
 
         Open(classData, ambiguous, (m, afile) =>

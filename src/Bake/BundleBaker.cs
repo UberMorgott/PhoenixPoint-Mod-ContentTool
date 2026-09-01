@@ -506,6 +506,15 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>
+        /// Why one shipped object cannot be replaced (<see cref="AssetIndex.WhyNot"/>), or null when
+        /// it can - what a Replace* call would have THROWN, asked without throwing.
+        /// </summary>
+        internal string WhyNot(AssetClassID cls, string assetName)
+        {
+            return AssetIndex.WhyNot(man, afileInst, cls, assetName, SourceInfo);
+        }
+
+        /// <summary>
         /// What is IN a bundle, by type and name substring - the discovery half of extraction
         /// (<see cref="AssetIndex.Report"/> holds the format). Reads a file off disk, so it works on
         /// a shipped bundle and on one we wrote, the same way.

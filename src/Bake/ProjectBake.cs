@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using AssetsTools.NET.Extra;
 using Morgott.ContentTool.Import;
 using Morgott.ContentTool.Project;
 using Morgott.ContentTool.Tactical;
@@ -1450,6 +1451,25 @@ namespace Morgott.ContentTool.Bake
         /// The copy is produced from the player's own install and never leaves it, which is what
         /// keeps Phoenix Point's data out of the shipped mod.
         /// </summary>
+        /// <summary>
+        /// A "replace" row whose TARGET the shipped bundle does not hold (or holds twice). Every
+        /// Replace* call resolves `asset` by name through AssetIndex.FindUnique, which THROWS - and
+        /// that throw walked out of Patch, out of Run and out of the command, so the author saw a
+        /// stack trace instead of a per-row line, no "N FAILURE(S)" summary at all, and no word about
+        /// the rows that had already been patched. Same policy as every other refusal on this path:
+        /// say it, count it, keep going.
+        ///
+        /// Distinct from the "'x' is not a .png/.jpg under Content\Textures\" line, which is about the
+        /// author's own SOURCE file being missing - this one is about the GAME's object.
+        /// </summary>
+        private static void MissingTarget(StringBuilder log, string gate, string bundleFile,
+                                          string asset, AssetClassID cls, string why)
+        {
+            log.AppendLine(gate + " REFUSED target '" + asset + "' is not a " + cls + " in " + bundleFile +
+                           " - " + why + " - list the names it does hold with: ct_list assets " +
+                           bundleFile + " " + cls);
+        }
+
         private static int Patch(ContentProject p, StringBuilder log)
         {
             int failures = 0;
@@ -1480,6 +1500,11 @@ namespace Morgott.ContentTool.Bake
                     {
                         if (!string.Equals(r.bundle, bundleFile, StringComparison.OrdinalIgnoreCase)) continue;
 
+                        // Asked by EVERY arm below before it writes: the target is resolved by NAME and
+                        // every Replace* call THREW on a name the shipped bundle does not hold, which
+                        // took the whole bake down with it (see MissingTarget).
+                        string gone;
+
                         if (!string.IsNullOrEmpty(r.material))
                         {
                             string[] kv = r.material.Split('=');
@@ -1490,6 +1515,8 @@ namespace Morgott.ContentTool.Bake
                                 log.AppendLine("P3 REFUSED \"material\": \"" + r.material + "\" is not <property>=<number>");
                                 failures++; continue;
                             }
+                            gone = baker.WhyNot(AssetClassID.Material, r.asset);
+                            if (gone != null) { MissingTarget(log, "P3", bundleFile, r.asset, AssetClassID.Material, gone); failures++; continue; }
                             baker.ReplaceMaterialFloat(r.asset, kv[0], v);
                             mats.Add(new KeyValuePair<string, string>(r.asset, kv[0] + "=" +
                                      v.ToString(CultureInfo.InvariantCulture)));
@@ -1507,6 +1534,8 @@ namespace Morgott.ContentTool.Bake
                                 log.AppendLine("P7 REFUSED \"clip\": \"" + r.clip + "\" " + why);
                                 failures++; continue;
                             }
+                            gone = baker.WhyNot(AssetClassID.AnimationClip, r.asset);
+                            if (gone != null) { MissingTarget(log, "P7", bundleFile, r.asset, AssetClassID.AnimationClip, gone); failures++; continue; }
                             string walked = baker.ReplaceClipCurves(r.asset, attribute, k);
                             clips.Add(new KeyValuePair<string, ShippedReplacement>(r.asset, r));
                             log.AppendLine("patch " + bundleFile + ": clip '" + r.asset + "' " + r.clip +
@@ -1523,6 +1552,8 @@ namespace Morgott.ContentTool.Bake
                                                Elsewhere(p, r.mesh, "Meshes"));
                                 failures++; continue;
                             }
+                            gone = baker.WhyNot(AssetClassID.Mesh, r.asset);
+                            if (gone != null) { MissingTarget(log, "P4", bundleFile, r.asset, AssetClassID.Mesh, gone); failures++; continue; }
                             string refusal, mapping;
                             bool suspect;
                             string how = baker.ReplaceMesh(r.asset, im.Name, im.Baked, im.Model,
@@ -1549,6 +1580,8 @@ namespace Morgott.ContentTool.Bake
                                            Elsewhere(p, r.texture, "Textures"));
                             failures++; continue;
                         }
+                        gone = baker.WhyNot(AssetClassID.Texture2D, r.asset);
+                        if (gone != null) { MissingTarget(log, "P1", bundleFile, r.asset, AssetClassID.Texture2D, gone); failures++; continue; }
                         baker.ReplaceTexture2D(r.asset, t.Width, t.Height, t.Rgba32);
                         want.Add(t);
                         log.AppendLine("patch " + bundleFile + ": '" + r.asset + "' <- " + t.Name +

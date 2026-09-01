@@ -120,6 +120,19 @@ namespace Morgott.ContentTool.Bake
             return found;
         }
 
+        /// <summary>
+        /// Why <paramref name="assetName"/> cannot be addressed - the message <see cref="FindUnique"/>
+        /// would have thrown with - or null when it can. Asked BEFORE a replacement so a row naming a
+        /// target the shipped bundle does not hold is ONE counted refusal instead of an exception that
+        /// abandons every remaining row and prints no summary at all.
+        /// </summary>
+        internal static string WhyNot(AssetsManager m, AssetsFileInstance afile, AssetClassID cls,
+                                      string assetName, string where)
+        {
+            try { FindUnique(m, afile, cls, assetName, where); return null; }
+            catch (InvalidOperationException ex) { return ex.Message; }
+        }
+
         private static bool Contains(string haystack, string needle)
         {
             return string.IsNullOrEmpty(needle) ||
