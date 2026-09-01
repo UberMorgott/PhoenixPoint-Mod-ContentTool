@@ -30,7 +30,10 @@ namespace Morgott.ContentTool.Dev
         private const string Extension = ".glb";
 
         private string dir;
+        private string pending;
         private string problem;
+        private bool stale = true;
+        private string[] drives = new string[0], subs = new string[0], files = new string[0];
         private Vector2 scroll;
         private readonly List<string> recent = new List<string>();
 
@@ -39,7 +42,8 @@ namespace Morgott.ContentTool.Dev
         internal void Show(string startDir)
         {
             dir = Exists(startDir) ? startDir : FirstDrive();
-            problem = null;
+            pending = null;
+            stale = true;
             LoadRecent();
             Open = true;
         }
@@ -50,6 +54,20 @@ namespace Morgott.ContentTool.Dev
         /// <see cref="Open"/>.</summary>
         internal string Draw(float height)
         {
+            // EVERY navigation and every disk read happens HERE, in the LAYOUT pass, and nowhere else.
+            // IMGUI walks the same Draw twice per frame - Layout, then Repaint - and matches controls
+            // up by ORDER, so a click that changed the folder mid-frame made Repaint emit a different
+            // number of buttons than Layout had counted and EndScrollView threw
+            // "Getting control N's position in a group with only M controls". Deferring the move to
+            // the next Layout is what keeps the two passes identical. It also means the listing is
+            // read ONCE PER NAVIGATION rather than three times a frame, which is what stops a network
+            // folder from hitching the panel.
+            if (Event.current.type == EventType.Layout)
+            {
+                if (pending != null) { dir = pending; pending = null; scroll = Vector2.zero; stale = true; }
+                if (stale) Refresh();
+            }
+
             string picked = null;
             GUILayout.BeginVertical(GUI.skin.box);
 
@@ -69,17 +87,15 @@ namespace Morgott.ContentTool.Dev
                         picked = r;
             }
 
-            string[] subs = Subdirectories();
-            string[] files = Files();
             if (problem != null) GUILayout.Label(problem);
 
             scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(height));
-            foreach (string drive in Drives())
-                if (GUILayout.Button("[" + drive + "]", GUILayout.Height(18f))) Go(drive);
+            foreach (string drive in drives)
+                if (GUILayout.Button("[" + drive + "]", GUILayout.Height(18f))) pending = drive;
             foreach (string sub in subs)
                 if (GUILayout.Button("> " + BenchList.Elide(Leaf(sub), BenchList.NameChars - 2),
                                      GUILayout.Height(18f)))
-                    Go(sub);
+                    pending = sub;
             foreach (string file in files)
                 if (GUILayout.Button(BenchList.Elide(Path.GetFileName(file), BenchList.NameChars),
                                      GUILayout.Height(18f)))
@@ -93,21 +109,28 @@ namespace Morgott.ContentTool.Dev
 
         // ------------------------------------------------------------------ disk, defensively
 
-        private void Go(string target)
+        /// <summary>The one place the folder is read. <see cref="problem"/> is cleared here rather
+        /// than on navigation, so a message from a drive with no disk in it cannot outlive the
+        /// listing that produced it.</summary>
+        private void Refresh()
         {
-            dir = target;
             problem = null;
-            scroll = Vector2.zero;
+            drives = Drives();
+            subs = Subdirectories();
+            files = Files();
+            stale = false;
         }
 
+        /// <summary>A click on "up" only names where to go; the move itself waits for the next Layout
+        /// pass. No parent means this IS a drive root - the normal case, not something to say.</summary>
         private void Up()
         {
             try
             {
                 DirectoryInfo parent = Directory.GetParent(dir);
-                if (parent != null) Go(parent.FullName);
+                if (parent != null) pending = parent.FullName;
             }
-            catch (Exception ex) { problem = "cannot leave this folder: " + ex.Message; }
+            catch (Exception) { }
         }
 
         private string[] Subdirectories()
@@ -218,7 +241,7 @@ namespace Morgott.ContentTool.Dev
             try
             {
                 string folder = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(folder)) dir = folder;
+                if (!string.IsNullOrEmpty(folder)) { dir = folder; stale = true; }
             }
             catch (Exception) { }
         }
