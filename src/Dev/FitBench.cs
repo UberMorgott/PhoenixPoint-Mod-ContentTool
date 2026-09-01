@@ -1457,22 +1457,28 @@ namespace Morgott.ContentTool.Dev
             // more label anywhere above the fold pushes the SAVE row off the bottom of a small window -
             // which is the defect S29 exists to prevent, and it does not care which row was added.
             //
-            // NOT FRAMED is not a hint and stays out of Advanced: it is the panel's only word for
-            // "there is nothing on the platform", and hiding it leaves an empty screen with no
-            // explanation - which is the one state an author cannot reason their way out of.
+            // NEITHER HALF OF THIS LINE IS BEHIND Advanced BY ACCIDENT. The GESTURES are how an author
+            // learns that the mouse does all of this better than the buttons - hiding them behind the
+            // toggle hides the toggle's own justification, and a default view whose one instruction is
+            // invisible teaches nothing. The NUMBERS after them are a readout of knobs that only exist
+            // in Advanced, so only Advanced appends them. NOT FRAMED is neither: it is the panel's only
+            // word for "there is nothing on the platform", the one state an author cannot reason their
+            // way out of, so it is always drawn. Still exactly ONE row either way - see the note above.
             if (!framed)
                 GUILayout.Label("NOT FRAMED - nothing with a renderer is standing there yet. Try RESET VIEW.");
-            else if (advanced)
+            else
                 GUILayout.Label(
                     (FitGizmo.Live ? "ARROWS on the gun = move it, RINGS = turn it about that axis (Esc " +
                                      "cancels; a dimmed handle is edge-on to the camera). " : "handles OFF. ") +
                     "drag = orbit, wheel = zoom, right-drag = turn the model, MIDDLE-drag = pan, " +
-                    "WASD/QE (Shift = faster) = fly.  x" +
-                    zoom.ToString("0.00", CultureInfo.InvariantCulture) +
-                    " lift " + lift.ToString("0.00", CultureInfo.InvariantCulture) +
-                    " yaw " + yaw.ToString("0", CultureInfo.InvariantCulture) +
-                    " pitch " + pitch.ToString("0", CultureInfo.InvariantCulture) +
-                    " r " + frameRadius.ToString("0.00", CultureInfo.InvariantCulture) + "m");
+                    "WASD/QE (Shift = faster) = fly." +
+                    (advanced
+                        ? "  x" + zoom.ToString("0.00", CultureInfo.InvariantCulture) +
+                          " lift " + lift.ToString("0.00", CultureInfo.InvariantCulture) +
+                          " yaw " + yaw.ToString("0", CultureInfo.InvariantCulture) +
+                          " pitch " + pitch.ToString("0", CultureInfo.InvariantCulture) +
+                          " r " + frameRadius.ToString("0.00", CultureInfo.InvariantCulture) + "m"
+                        : ""));
         }
 
         /// <summary>Set the preview scale and re-apply the pose through the SAME callback that poses

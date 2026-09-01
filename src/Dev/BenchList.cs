@@ -520,9 +520,12 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>One button/label row including IMGUI's own 2 px spacing.</summary>
         internal const float Row = 22f;
-        /// <summary>Title, unit line, weapon line, saved/modified line, the view row, the drag-invert
-        /// row, the MODEL SCALE row, and the view readout.</summary>
-        internal const float ChromeRows = 8f;
+        /// <summary>Title, the FIT/MODEL DOCTOR tab strip, the Advanced toggle, unit line, weapon line,
+        /// saved/modified line, the view row, the drag-invert row, the MODEL SCALE row, and the gesture
+        /// line. Counted with Advanced ON, which is the tall case: with it OFF the view and drag-invert
+        /// rows are not drawn at all, and a budget that under-counts the worst case is the whole defect
+        /// this constant exists to prevent.</summary>
+        internal const float ChromeRows = 10f;
         /// <summary>The dial block: two readouts, the step row, move, turn, scale, the save row, its
         /// caption. THE PRIMARY WORKING SURFACE - everything else is a picker used once.</summary>
         internal const float DialRows = 9f;
