@@ -198,7 +198,15 @@ namespace Morgott.ContentTool.Import
             for (int i = 0; i < boneNames.Count; i++)
             {
                 int j;
-                if (!seen.TryGetValue(boneNames[i], out j) && !plain.TryGetValue(boneNames[i], out j))
+                // BOTH SIDES, exact first. The decoration is on whichever rig came out of a LIVE scene,
+                // and that is not always the file: the bake reads the SHIPPED asset's plain names, while
+                // the Model Doctor and the live preview read the renderer standing in front of them,
+                // where the addon system has already renamed every attachment point to
+                // '#<bone>_Addon => <part>'. Undecorating the file alone made ct_extract's own dump of
+                // CHR_SY_SNI_TS_F_V01 report 13 MissingBone + 13 ExtraBone against the very renderer it
+                // was extracted from, so the Doctor could never reach BY NAME in game.
+                if (!Match(seen, plain, boneNames[i], out j) &&
+                    !Match(seen, plain, SkinBinder.Plain(boneNames[i]), out j))
                 {
                     Add(issues, BindCode.MissingBone, BindStage.Bones, BindSide.File, boneNames[i],
                         "the file does not contain the bone '" + boneNames[i] +
@@ -258,6 +266,15 @@ namespace Morgott.ContentTool.Import
         {
             for (int i = 0; i < issues.Count; i++) if (issues[i].Stage == stage) return issues[i];
             return null;
+        }
+
+        /// <summary>One target bone name looked up against the file's bones - as exported, then as the
+        /// game's decoration leaves them. Two calls with the plain and the decorated spelling cover
+        /// every combination, and an undecorated name simply misses twice.</summary>
+        private static bool Match(Dictionary<string, int> exact, Dictionary<string, int> plain,
+                                  string name, out int j)
+        {
+            return exact.TryGetValue(name, out j) || plain.TryGetValue(name, out j);
         }
 
         private static void Add(List<BindingIssue> into, BindCode code, BindStage stage, BindSide side,
