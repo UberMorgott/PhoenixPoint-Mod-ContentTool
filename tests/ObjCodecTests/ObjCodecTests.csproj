@@ -33,6 +33,7 @@
     <Compile Include="BinderFrozen.cs" />
     <Compile Include="DecisionGolden.cs" />
     <Compile Include="AliasTests.cs" />
+    <Compile Include="PreflightTests.cs" />
     <Compile Include="MaterialBake.cs" />
     <Compile Include="MaterialTweakFixture.cs" />
     <Compile Include="ClipRoundTrip.cs" />
@@ -134,6 +135,10 @@
     <!-- THE replacement read itself: one place a sidecar can apply, carrying the provenance every
          caller has to say out loud. -->
     <Compile Include="..\..\src\Import\GlbSource.cs" Link="GlbSource.cs" />
+    <!-- The Doctor's pure half: plain report rows and the bytes-to-verdict pipeline. UnityEngine-free
+         on purpose (it runs on a worker thread), so the whole verdict is proven offline. -->
+    <Compile Include="..\..\src\Doctor\Diagnostic.cs" Link="Diagnostic.cs" />
+    <Compile Include="..\..\src\Doctor\ReplacementPreflight.cs" Link="ReplacementPreflight.cs" />
     <Compile Include="..\..\src\Import\SkinCompatibility.cs" Link="SkinCompatibility.cs" />
     <!-- The VERDICT itself, the one function both the bake and the Doctor ask, so its truth table is
          proven offline instead of by baking four bundles. -->

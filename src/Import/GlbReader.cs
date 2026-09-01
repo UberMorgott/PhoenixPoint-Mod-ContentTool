@@ -2434,8 +2434,12 @@ namespace Morgott.ContentTool.Import
             }
         }
 
+        /// <summary>A JSON-chunk refusal, which any real file with a truncated or corrupt description
+        /// reaches - so it carries a CODE like every other Read-path refusal, or the Doctor would have
+        /// nothing to name for sixteen throw sites. The sentence is unchanged.</summary>
         private static FormatException Fail(int at, string cause) =>
-            new FormatException("the file's description is malformed at character " +
+            new ImportRefusedException(ImportCode.MalformedGlb,
+                "the file's description is malformed at character " +
                 at.ToString(CultureInfo.InvariantCulture) + ": " + cause + "; re-export it rather than editing it by hand");
     }
 
