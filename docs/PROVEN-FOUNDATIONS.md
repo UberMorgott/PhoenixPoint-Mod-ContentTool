@@ -678,6 +678,23 @@ STREAMED media that are loose files; an embedded one is refused by name.
   be cited. `SoundbanksInfo.xml` gives only `ObjectPath="\Events\Default Work Unit\UI_Geoscape\
   GEO_UI\GUI_StatsPlusClick"` (`DurationMin=1.069 DurationMax=1.346`), which SUGGESTS a geoscape
   "+" stat button — a guess, not a fact, and it must not be promoted to one without a run.
+  - **2026-09-01: the POST is now measured headlessly, the SCREEN is still unverified.**
+    `autogate.ps1 -NoDeploy -Commands 'ct_sound probe event 784388130'` on `D:\PP-Instance2`, build
+    `e9e78a6f`, from the main menu, with no human and no geoscape:
+    `probe event 784388130: 'GUI_StatsPlusClick' in UIGeoscape -> media 18839791 'GUI_StatsPlusClick' - replaceable` ·
+    `POST event/784388130: playingID=3 dur=340ms estDur=321ms mediaID=18839791 streaming=false(MEMORY) endOfEvent=328ms`.
+    So the event resolves, posts and returns a duration callback with no screen open at all — the
+    trigger question and the screen question are separate, and only the first is answered. The 340 ms
+    is NOT the shipped 1 200 ms click: `demos\ReplaceUiSounds` declares
+    `{ "media": 18839791, "file": "sting_plus.mp3" }` and its prebuilt `Dist\Sounds\18839791.bnk`
+    (30 136 B of PCM at 44 100 Hz mono 16-bit ≈ 342 ms) was loaded into MEMORY at startup, which
+    `streaming=false(MEMORY)` states. The natural screen stays **UNVERIFIED** — still zero hits in
+    the whole decompile, still no `file:line` to cite.
+  - **Noticed while measuring, NOT chased:** that demo's `meta.json` description advertises
+    `1200 -> 888 ms` for this sound, and the bank on disk is 342 ms. Two of its three banks disagree
+    with the numbers in that text (`633458426.bnk` 39 352 B ≈ 446 ms vs "456"; `940964934.bnk`
+    53 176 B ≈ 603 ms vs "914"). Either the description is stale or the `.mp3`s were regenerated
+    after it was written. A human should re-measure the three and correct the text.
 - **The file alone is not the whole declaration.** Dropping a PCM `.wem` over the shipped Vorbis one
   gave `playingID=1`, NO `AK_Duration` callback and `endOfEvent=23ms` — the engine handed our file to
   the codec the BANK names. `apply` therefore also rewrites `ulPluginID` to PCM (and a zero-latency
