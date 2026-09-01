@@ -30,6 +30,7 @@
          compile list. See the arm's own note. -->
     <Compile Include="RefusalCount.cs" />
     <Compile Include="BoneNames.cs" />
+    <Compile Include="BinderFrozen.cs" />
     <Compile Include="MaterialBake.cs" />
     <Compile Include="MaterialTweakFixture.cs" />
     <Compile Include="ClipRoundTrip.cs" />
