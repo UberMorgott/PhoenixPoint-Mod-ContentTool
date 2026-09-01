@@ -239,6 +239,14 @@ namespace Morgott.ContentTool.Dev
         private static string unitFilter = "", weaponFilter = "";
         private static Vector2 unitScroll, weaponScroll, messageScroll;
         private static float step = 0.01f, turn = 5f, scaleStep = 0.01f;
+        /// <summary>The Model Doctor tab. One session per bench visit; <see cref="Close"/> gives its
+        /// meshes back and puts the shipped ones on again.</summary>
+        private static readonly ModelDoctor doctor = new ModelDoctor();
+        private static bool doctorTab;
+        /// <summary>The numeric readouts are for the ten minutes an author spends dialling a weapon,
+        /// not for the hour they spend looking at a model. Off by default, and session only - it is a
+        /// view preference like <see cref="BenchList.InvertX"/>, written nowhere.</summary>
+        private static bool advanced;
         /// <summary>
         /// The PREVIEW model scale: a multiplier on the pose the game itself chose for the displayed
         /// character, and nothing else. It is a view knob exactly like <see cref="zoom"/> and
@@ -865,6 +873,12 @@ namespace Morgott.ContentTool.Dev
             // The game's ears back on FIRST: everything below it is a scene object that may or may not
             // still exist, and being left deaf is the one failure the user cannot see or work around.
             Step(failed, "the game's own input handling", ResumeInput);
+            // THE DOCTOR BEFORE THE RIG IS LET GO. Dispose puts the shipped mesh back on every
+            // renderer it swapped and destroys the ones it built, so it has to run while those
+            // renderers are still the ones on screen. It is a Step like the rest - a throw in here is
+            // reported and retried by a second close, not swallowed, and NOT placed at the end where
+            // the partial-failure return above would skip it.
+            Step(failed, "the Model Doctor's preview meshes", () => { doctor.Dispose(); doctorTab = false; });
             // The animator BEFORE the rebuild callback goes: it puts the speed back and plays the
             // default state, and both need the builder this callback still points at.
             Step(failed, "the animator's speed and the weapon's idle pose", FitAnim.Release);
@@ -1069,6 +1083,12 @@ namespace Morgott.ContentTool.Dev
             try
             {
                 if (!open || unit == null || bay == null || bay.CharacterBuilder == null) return;
+                // THE DOCTOR'S ROOT, re-pointed on every rebuild. It is the same transform Reframe
+                // measures against - the builder is what the rig is instantiated under - and a unit
+                // swap destroys the old rig and builds a new one beneath it, so a Root taken once at
+                // Open would list renderers that no longer exist. Set here, where the rebuild has
+                // just finished, and nulled by Dispose in Close.
+                doctor.Root = bay.CharacterBuilder.transform;
                 AddonsManager manager = bay.CharacterBuilder.AddonsManager;
                 if (manager != null) manager.SetAutorefreshOnTagsChanged(true);
                 Handed(manager);
@@ -1330,6 +1350,24 @@ namespace Morgott.ContentTool.Dev
             bool resetting = GUILayout.Button("RESET VIEW", GUILayout.Width(110f));
             GUILayout.EndHorizontal();
 
+            // TWO TABS, ONE COLUMN. The Doctor is a different job done against the same standing
+            // character - it needs the whole width, and none of the fit rows mean anything while a
+            // mesh is being diagnosed. The close is still deferred past EndArea, exactly as below:
+            // the tab is a different panel, not a different set of rules about the layout stack.
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Toggle(!doctorTab, " FIT", GUILayout.Width(70f))) doctorTab = false;
+            if (GUILayout.Toggle(doctorTab, " MODEL DOCTOR", GUILayout.Width(130f))) doctorTab = true;
+            GUILayout.EndHorizontal();
+            if (doctorTab)
+            {
+                doctor.Draw(BenchList.ContentWidth(w));
+                GUILayout.EndScrollView();
+                GUILayout.EndArea();
+                if (leaving) message = Close();
+                else if (resetting) message = ResetView();
+                return;
+            }
+
             string fitKey = weapon == null ? null : BenchList.KeyFor(weapon.name, WeaponBuild.Fitted());
             GUILayout.Label("unit:   " + BenchList.Elide(unit == null ? "-" : unit.name, BenchList.NameChars));
             GUILayout.Label("weapon: " + BenchList.Elide(weapon == null ? "-" : weapon.name, BenchList.NameChars) +
@@ -1366,26 +1404,30 @@ namespace Morgott.ContentTool.Dev
         private static void View()
         {
             GUILayout.Space(4f);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("view", GUILayout.Width(40f));
-            if (GUILayout.Button("in"))      { zoom = BenchList.Wheel(zoom, 1f); Reframe(); }
-            if (GUILayout.Button("out"))     { zoom = BenchList.Wheel(zoom, -1f); Reframe(); }
-            if (GUILayout.Button("up"))      { lift = BenchList.Clamp(lift - BenchList.LiftStep,
-                                                                     BenchList.LiftMin, BenchList.LiftMax); Reframe(); }
-            if (GUILayout.Button("down"))    { lift = BenchList.Clamp(lift + BenchList.LiftStep,
-                                                                     BenchList.LiftMin, BenchList.LiftMax); Reframe(); }
-            if (GUILayout.Button("reframe")) { Reframe(); }
-            GUILayout.EndHorizontal();
-            // Which drag direction reads as "natural" is a matter of the hand, not of the code, so it
-            // is a toggle here rather than a sign the author has to come back and change. Session only.
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("drag", GUILayout.Width(40f));
-            BenchList.InvertX = GUILayout.Toggle(BenchList.InvertX, " invert X", GUILayout.Width(78f));
-            BenchList.InvertY = GUILayout.Toggle(BenchList.InvertY, " invert Y", GUILayout.Width(78f));
-            // The one button that gets the model back after a fly-about, and it is NOT RESET VIEW: it
-            // drops the pan only, so the zoom, the lift and the orbit that were dialled in survive.
-            if (GUILayout.Button("RECENTRE", GUILayout.Width(96f))) Recentre();
-            GUILayout.EndHorizontal();
+            advanced = GUILayout.Toggle(advanced, " Advanced (numeric readouts and per-axis nudges)");
+            if (advanced)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("view", GUILayout.Width(40f));
+                if (GUILayout.Button("in"))      { zoom = BenchList.Wheel(zoom, 1f); Reframe(); }
+                if (GUILayout.Button("out"))     { zoom = BenchList.Wheel(zoom, -1f); Reframe(); }
+                if (GUILayout.Button("up"))      { lift = BenchList.Clamp(lift - BenchList.LiftStep,
+                                                                         BenchList.LiftMin, BenchList.LiftMax); Reframe(); }
+                if (GUILayout.Button("down"))    { lift = BenchList.Clamp(lift + BenchList.LiftStep,
+                                                                         BenchList.LiftMin, BenchList.LiftMax); Reframe(); }
+                if (GUILayout.Button("reframe")) { Reframe(); }
+                GUILayout.EndHorizontal();
+                // Which drag direction reads as "natural" is a matter of the hand, not of the code, so
+                // it is a toggle here rather than a sign the author has to come back and change.
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("drag", GUILayout.Width(40f));
+                BenchList.InvertX = GUILayout.Toggle(BenchList.InvertX, " invert X", GUILayout.Width(78f));
+                BenchList.InvertY = GUILayout.Toggle(BenchList.InvertY, " invert Y", GUILayout.Width(78f));
+                // The one button that gets the model back after a fly-about, and it is NOT RESET VIEW:
+                // it drops the pan only, so the zoom, lift and orbit that were dialled in survive.
+                if (GUILayout.Button("RECENTRE", GUILayout.Width(96f))) Recentre();
+                GUILayout.EndHorizontal();
+            }
 
             // ---- THE MODEL SCALE, and it is a PREVIEW knob ----
             // A foreign model is either the right size next to a soldier or it is not, and that is an
@@ -1414,17 +1456,23 @@ namespace Morgott.ContentTool.Dev
             // a Label of their own: the panel's height is budgeted ROW BY ROW (BenchList.Rows), so one
             // more label anywhere above the fold pushes the SAVE row off the bottom of a small window -
             // which is the defect S29 exists to prevent, and it does not care which row was added.
-            GUILayout.Label(framed
-                ? (FitGizmo.Live ? "ARROWS on the gun = move it, RINGS = turn it about that axis (Esc " +
-                                   "cancels; a dimmed handle is edge-on to the camera). " : "handles OFF. ") +
-                  "drag = orbit, wheel = zoom, right-drag = turn the model, MIDDLE-drag = pan, " +
-                  "WASD/QE (Shift = faster) = fly.  x" +
-                  zoom.ToString("0.00", CultureInfo.InvariantCulture) +
-                  " lift " + lift.ToString("0.00", CultureInfo.InvariantCulture) +
-                  " yaw " + yaw.ToString("0", CultureInfo.InvariantCulture) +
-                  " pitch " + pitch.ToString("0", CultureInfo.InvariantCulture) +
-                  " r " + frameRadius.ToString("0.00", CultureInfo.InvariantCulture) + "m"
-                : "NOT FRAMED - nothing with a renderer is standing there yet. Try RESET VIEW.");
+            //
+            // NOT FRAMED is not a hint and stays out of Advanced: it is the panel's only word for
+            // "there is nothing on the platform", and hiding it leaves an empty screen with no
+            // explanation - which is the one state an author cannot reason their way out of.
+            if (!framed)
+                GUILayout.Label("NOT FRAMED - nothing with a renderer is standing there yet. Try RESET VIEW.");
+            else if (advanced)
+                GUILayout.Label(
+                    (FitGizmo.Live ? "ARROWS on the gun = move it, RINGS = turn it about that axis (Esc " +
+                                     "cancels; a dimmed handle is edge-on to the camera). " : "handles OFF. ") +
+                    "drag = orbit, wheel = zoom, right-drag = turn the model, MIDDLE-drag = pan, " +
+                    "WASD/QE (Shift = faster) = fly.  x" +
+                    zoom.ToString("0.00", CultureInfo.InvariantCulture) +
+                    " lift " + lift.ToString("0.00", CultureInfo.InvariantCulture) +
+                    " yaw " + yaw.ToString("0", CultureInfo.InvariantCulture) +
+                    " pitch " + pitch.ToString("0", CultureInfo.InvariantCulture) +
+                    " r " + frameRadius.ToString("0.00", CultureInfo.InvariantCulture) + "m");
         }
 
         /// <summary>Set the preview scale and re-apply the pose through the SAME callback that poses
@@ -1583,32 +1631,41 @@ namespace Morgott.ContentTool.Dev
                   + "them away. Nothing has been written to disk."
                 : ">> SAVED - what is on screen is exactly what the manifest holds.");
 
-            GUILayout.Label("pos " + Xyz(pos) + "   rot " + Xyz(euler) + "   scale " +
-                            scale.ToString("0.0000", CultureInfo.InvariantCulture));
-            GUILayout.Label("offset " + Xyz(offset) + "   (what the manifest carries)");
+            // ============ THE NUMBERS, AND WHO THEY ARE FOR ============
+            // Everything from here to the SAVE row is the ten-minute job of dialling a weapon into a
+            // hand. The hour spent looking at a MODEL needs none of it, and a panel that shows it
+            // anyway is a wall of figures in front of the one thing being judged - so it lives behind
+            // Advanced. The dirty/saved line above and the SAVE row below are NOT behind it: the
+            // first says whether the disk agrees with the screen, the second is the only write.
+            if (advanced)
+            {
+                GUILayout.Label("pos " + Xyz(pos) + "   rot " + Xyz(euler) + "   scale " +
+                                scale.ToString("0.0000", CultureInfo.InvariantCulture));
+                GUILayout.Label("offset " + Xyz(offset) + "   (what the manifest carries)");
 
-            // ponytail: 112 px x 3 is what fits BenchList.ContentWidth(PanelWidth); the offline arm
-            // S29-row asserts it, because IMGUI does not clip an over-wide row - it draws the third
-            // button past the edge of the panel where nothing can ever click it.
-            const float StepW = 112f;
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("move " + step.ToString("0.###", CultureInfo.InvariantCulture),
-                                 GUILayout.Width(StepW))) step = BenchList.NextStep(step);
-            if (GUILayout.Button("turn " + turn.ToString("0.##", CultureInfo.InvariantCulture) + "d",
-                                 GUILayout.Width(StepW))) turn = BenchList.NextTurn(turn);
-            if (GUILayout.Button("scale " + scaleStep.ToString("0.###", CultureInfo.InvariantCulture),
-                                 GUILayout.Width(StepW))) scaleStep = BenchList.NextStep(scaleStep);
-            GUILayout.EndHorizontal();
+                // ponytail: 112 px x 3 is what fits BenchList.ContentWidth(PanelWidth); the offline arm
+                // S29-row asserts it, because IMGUI does not clip an over-wide row - it draws the third
+                // button past the edge of the panel where nothing can ever click it.
+                const float StepW = 112f;
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("move " + step.ToString("0.###", CultureInfo.InvariantCulture),
+                                     GUILayout.Width(StepW))) step = BenchList.NextStep(step);
+                if (GUILayout.Button("turn " + turn.ToString("0.##", CultureInfo.InvariantCulture) + "d",
+                                     GUILayout.Width(StepW))) turn = BenchList.NextTurn(turn);
+                if (GUILayout.Button("scale " + scaleStep.ToString("0.###", CultureInfo.InvariantCulture),
+                                     GUILayout.Width(StepW))) scaleStep = BenchList.NextStep(scaleStep);
+                GUILayout.EndHorizontal();
 
-            Axes(fitKey, "move", step, true);
-            Axes(fitKey, "turn", turn, false);
+                Axes(fitKey, "move", step, true);
+                Axes(fitKey, "turn", turn, false);
 
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("scale", GUILayout.Width(40f));
-            if (GUILayout.Button("-")) message = WeaponBuild.Adjust(fitKey, Vector3.zero, Vector3.zero, -scaleStep);
-            if (GUILayout.Button("+")) message = WeaponBuild.Adjust(fitKey, Vector3.zero, Vector3.zero, scaleStep);
-            if (GUILayout.Button("report", GUILayout.Width(70f))) message = WeaponBuild.Report(fitKey);
-            GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("scale", GUILayout.Width(40f));
+                if (GUILayout.Button("-")) message = WeaponBuild.Adjust(fitKey, Vector3.zero, Vector3.zero, -scaleStep);
+                if (GUILayout.Button("+")) message = WeaponBuild.Adjust(fitKey, Vector3.zero, Vector3.zero, scaleStep);
+                if (GUILayout.Button("report", GUILayout.Width(70f))) message = WeaponBuild.Report(fitKey);
+                GUILayout.EndHorizontal();
+            }
 
             // ============ THE ONE WRITE, AND THE TWO WAYS OUT ============
             // Deliberately on their OWN row, away from the axis buttons and from each other, and named
@@ -1735,6 +1792,17 @@ namespace Morgott.ContentTool.Dev
                     {
                         message = open ? Close() : Open();
                         ContentToolMain.Say(message);
+                    }
+                    // EVERY FRAME, tab or no tab, and BEFORE the bay guard: the Doctor's queues carry
+                    // a finished worker's report and the main-thread edits that swap a mesh back, and
+                    // a drain that only runs while its tab is open strands both the moment the author
+                    // clicks FIT. Its own try, because a Doctor bug must not set inputBroken and take
+                    // the bench's mouse and hotkey down with it for the rest of the session.
+                    if (open)
+                    {
+                        try { doctor.Tick(); }
+                        catch (Exception ex)
+                        { message = "ct_bench: doctor - " + ex.GetType().Name + ": " + ex.Message; }
                     }
                     if (!open || bay == null || bay.SceneRoot == null) return;
                     Mouse();
