@@ -2840,6 +2840,62 @@ git add internal-docs/planning/2026-09-01-model-doctor-design.md
 git commit -m "docs(planning): record the Model Doctor in-game acceptance run"
 ```
 
+### In-game acceptance 2026-09-02
+
+Install `D:\PP-Instance2` (never the user's own game), ContentTool `1.1.3.0`, PPBridge `build=8939f00f`,
+geoscape from `plans\start-campaign.json`, bench on `S_SY_Eileen_CharacterTemplateDef`, target
+`CHR_SY_SNI_TS_F_V01` (13 bones). IMGUI cannot be clicked through PPCLI, so the Doctor was driven by
+reflection on the live instance — `AccessTools.Field(FitBench,"doctor").GetValue(null)`, then
+`PickFile` / `PickTarget` / `SetAlias` / `Enqueue` — which is the same code every button reaches.
+
+**Fixtures.** `ct_extract mesh sy_sniper_assets_all.bundle CHR_SY_SNI_TS_F_V01` names its joints by
+HASH (`bone_2424243207`), because a serialized Unity Mesh stores `m_BoneNameHashes` and not names, so
+the dump was renamed through the repo's own `GlbCodec.Write` to the 13 names `ct_list bones` reports:
+`ts_good.glb` (the rig's own names) and `ts_bad.glb` (`L.Arm` -> `L.Arn`, one bone).
+
+| # | Item | Result | Evidence |
+|---|---|---|---|
+| 1 | tab strip + Advanced at minimum height | PASS | `Screen.SetResolution(640,480)`, both tabs x Advanced on/off/on: **0** `Getting control` errors in `Player.log`, panel intact, FIT scrolls to its last row (`shots\04`, `shots\05`) |
+| 2 | browser on an unavailable folder | PASS | `A:\` -> `UNAVAILABLE - DirectoryNotFoundException: Could not find a part of the path 'A:\'.`; `C:\System Volume Information` -> `UNAVAILABLE - no permission to read this folder.`; panel alive (`shots\03`) |
+| 3 | recents file | PASS | `…\Phoenix Point\ContentTool\doctor-recent.txt`, newest first, capped at 5 (the 6th drops off) |
+| 4 | known-bad vs a rigged target | PASS | `NEAREST-BONE - the bake would import this but NOT use your weights (2 reason(s))`; `MissingBone '#L.Arm_Addon => SY_Sniper_Torso_BodyPartDef'` + `ExtraBone 'L.Arn'`, both Downgrade, both with remedies (`shots\02`, `shots\07`) |
+| 5 | preview / revert | PASS | `sharedMesh` `CHR_SY_SNI_TS_F_V01` id `1633376` -> `ts_bad.glb` id `-192190` -> `1633376` again; `OurMeshCount` 1 -> 0 |
+| 6 | alias, save, sidecar | PASS | `SetAlias("L.Arn","L.Arm")` -> `BY NAME - your weights will be used`; `ts_bad.glb.aliases.json` with `schema`/`source.sha256`/`bones`; `canSave` true -> false after the save |
+| 7 | the bake reads it back | PASS | `ct_project DoctorFix`: `mesh 'CHR_SY_SNI_TS_F_V01' <- ts_bad … skinned BY NAME onto the target's own 13 bones, carrying 4 of the file's own influences per vertex with 1 alias(es) from …\ts_bad.glb.aliases.json` |
+| 8 | re-pick during a parse | PASS | 36 MB `body_bad.glb` then `ts_good.glb`: `Busy` true, only the last became Ready, no exception |
+| 9 | unit swapped under the Doctor | PASS after fix | `ct_bench unit spider` with a live preview -> `Target`/`Renderer` null, `HasPreview` false, `OurMeshCount` 0 |
+| 10 | leak gate | PASS | `Resources.FindObjectsOfTypeAll<Mesh>()` 2855 before, 2855 after 100x(preview,revert); with a preview live 2856, and after `ct_bench close` (Dispose) 2855 with `OurMeshCount` 0 |
+| 11 | known-good vs its own rig | PASS after fix | `ts_good.glb` -> `BY NAME - your weights will be used`; the live preview reports `skinned BY NAME onto the target's own 13 bones, carrying the file's own weights` |
+| 12 | refusals | PASS | `truncated.glb` and `notglb.glb` -> `IMPORT REFUSED (1 reason(s))`, row `MalformedGlb` / Blocking |
+
+**Two defects found and fixed, both root cause, both offline suites green afterwards.**
+
+- `87a65fb` `fix(binder): undecorate the LIVE rig's bone names too, not just the file's`.
+  `SkinCompatibility.Analyze` undecorated only `file.JointNames`, while the Doctor and the live
+  preview read a rig off a LIVE renderer, where the addon system has already renamed every attachment
+  point to `#<bone>_Addon => <part>` (`Addon.MovedBoneNameFormat`). The bake reads the SHIPPED asset,
+  whose names are plain (`ct_list bones` -> `Root, Spine_1, … Head`), so the Doctor contradicted the
+  bake for every body part: measured `NEAREST-BONE … (26 reason(s))` = 13 `MissingBone` + 13
+  `ExtraBone` for a file whose bones ARE that rig's. BY NAME was unreachable in game. Both sides are
+  now looked up exact-first, then undecorated.
+- `87f95cf` `fix(doctor): let go of a target the bench rebuilt under us`. `FitBench.Posed` assigns
+  `bay.CharacterBuilder.transform` on every rebuild — always the SAME Transform, because the rig is
+  rebuilt underneath the builder — so `Root`'s `ReferenceEquals` early-out was taken on every unit
+  swap and its reset never ran: measured `HasPreview` true and `OurMeshCount` 1 for a body part the
+  swap had destroyed. The reset now also fires when the chosen renderer has been destroyed.
+
+**Two observations, neither a defect.**
+
+- `ct_project DoctorFix` ends `1 FAILURE(S)`: `P4-ctl-shipped`. The control arm asserts the shipped
+  bundle does not look like the replacement, and this fixture IS the shipped mesh with one bone
+  renamed, so the two are indistinguishable by vert/index/centre/extent. `P6` says the same about the
+  bone order (`VOID`). A fixture artefact of replacing a mesh with itself, not a bake failure.
+- The panel's labels are clipped, not wrapped, at the right edge of the strip (`shots\02`). The whole
+  text is reachable through `Copy report`.
+
+Screenshots: `C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\253e8cfb-94db-49b1-8672-cbe452669de4\scratchpad\shots\`
+(`01` tab strip, `02` known-bad report, `03` browser refusal, `04`/`05`/`06` 640x480, `07` final state).
+
 ---
 
 ## Self-review
