@@ -111,6 +111,35 @@ internal static class AliasTests
                             "and the log NAMES the mapping, so nothing is silent: " + aliased.AliasLog);
             checks += Check(aliased.Original.JointNames[0] == firstBone,
                             "the pristine names survive for re-aliasing without a re-parse");
+
+            // ---- the block COUNTS what applied, so it cannot disagree with the bake's own number.
+            SkinnedModel two = Model("A", "B");
+            AliasMap described = AliasMap.Of(new Dictionary<string, string> { { "A", "Root" }, { "Q", "Neck" } });
+            described.Apply(two, out unused);
+            string block = described.Describe("s.json", unused);
+            checks += Check(block.StartsWith("1 alias(es) from s.json", StringComparison.Ordinal) &&
+                            block.IndexOf("'A' -> 'Root'", StringComparison.Ordinal) >= 0 &&
+                            block.IndexOf("unused (this file has no such bone): 'Q'", StringComparison.Ordinal) >= 0 &&
+                            block.IndexOf("'Q' -> 'Neck'", StringComparison.Ordinal) < 0,
+                            "the log block counts the APPLIED alias and names the unused key apart: " + block);
+
+            // ---- an empty "bones" is its own cause, not the collision sentence.
+            File.WriteAllText(AliasMap.SidecarPathOf(glb),
+                              "{\"schema\":1,\"source\":{\"sha256\":\"" + sha + "\"},\"bones\":{}}");
+            checks += Check(AliasMap.LoadSidecar(glb, sha, out why) == null && why != null &&
+                            why.IndexOf("no aliases", StringComparison.Ordinal) >= 0 &&
+                            why.IndexOf("onto one", StringComparison.Ordinal) < 0,
+                            "an empty sidecar says it is EMPTY, not that it collides: " + why);
+
+            // ---- a failed write leaves no half-map beside the model.
+            string blocked = Path.Combine(dir, "y.glb");
+            File.WriteAllBytes(blocked, bytes);
+            Directory.CreateDirectory(AliasMap.SidecarPathOf(blocked));   // the destination cannot be a file
+            bool threw = false;
+            try { AliasMap.SaveSidecar(blocked, sha, bytes.Length, new Dictionary<string, string> { { "A", "Root" } }); }
+            catch (Exception) { threw = true; }
+            checks += Check(threw && !File.Exists(AliasMap.SidecarPathOf(blocked) + ".tmp"),
+                            "a write that fails rethrows and takes its .tmp with it");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
 

@@ -68,7 +68,7 @@ namespace Morgott.ContentTool.Import
             source.AliasesApplied = map.Count - unused.Count;
             source.UnusedAliasKeys = unused;
             source.SidecarPath = AliasMap.SidecarPathOf(path);
-            source.AliasLog = map.Describe(source.SidecarPath);
+            source.AliasLog = map.Describe(source.SidecarPath, unused);
             return source;
         }
     }

@@ -98,6 +98,10 @@ namespace Morgott.ContentTool.Project
         /// bake log can name it - an author must never discover a rename by its effect.</summary>
         internal string SidecarPath;
         internal int AliasesApplied;
+        /// <summary>Why a sidecar that EXISTS was not applied, or null. Carried for the same reason:
+        /// the bake route has no other voice, and a stale sidecar the log never mentions is exactly
+        /// the silence design §5 forbids.</summary>
+        internal string SidecarRefusal;
     }
 
     /// <summary>
@@ -628,7 +632,8 @@ namespace Morgott.ContentTool.Project
                 Baked = ModelBuild.From(source.Model, name).Mesh,
                 Model = source.Model,
                 SidecarPath = source.SidecarPath,
-                AliasesApplied = source.AliasesApplied
+                AliasesApplied = source.AliasesApplied,
+                SidecarRefusal = source.SidecarRefusal
             };
         }
 

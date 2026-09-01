@@ -1591,10 +1591,13 @@ namespace Morgott.ContentTool.Bake
                             bool suspect;
                             string how = baker.ReplaceMesh(r.asset, im.Name, im.Baked, im.Model,
                                                            out refusal, out mapping, out suspect,
-                                                           im.AliasesApplied, im.SidecarPath);
+                                                           im.AliasesApplied, im.SidecarPath, im.SidecarRefusal);
                             if (refusal != null)
                             {
-                                log.AppendLine("P4 REFUSED '" + im.Name + "' -> " + refusal);
+                                // The ignored sidecar rides on 'how' when there is one; a refusal has
+                                // no 'how', and that is the one path where it would go unsaid.
+                                log.AppendLine("P4 REFUSED '" + im.Name + "' -> " + refusal +
+                                               (im.SidecarRefusal == null ? "" : " (sidecar ignored: " + im.SidecarRefusal + ")"));
                                 failures++; continue;
                             }
                             meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));

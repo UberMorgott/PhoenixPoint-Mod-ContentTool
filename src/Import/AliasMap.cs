@@ -26,8 +26,6 @@ namespace Morgott.ContentTool.Import
 
         internal int Count => bones.Count;
 
-        internal IEnumerable<KeyValuePair<string, string>> Entries => bones;
-
         /// <summary>
         /// A map, or NULL when it could never be applied: no entries, an empty output, or two file
         /// bones renamed onto one game bone (which is the PlainCollision the binder already refuses,
@@ -89,12 +87,28 @@ namespace Morgott.ContentTool.Import
             return bad;
         }
 
-        internal string Describe(string sidecarPath)
+        /// <summary>
+        /// The block a caller logs. It counts and lists what ACTUALLY APPLIED - the same number the
+        /// bake prints - and names the rest on a line of its own, because a block claiming three
+        /// aliases beside a log saying two is the kind of disagreement an author cannot resolve.
+        /// </summary>
+        /// <param name="unusedKeys">Apply's out list, or null when every key applied.</param>
+        internal string Describe(string sidecarPath, IList<string> unusedKeys)
         {
+            var skipped = new HashSet<string>(unusedKeys ?? new List<string>(), StringComparer.Ordinal);
             var sb = new StringBuilder();
-            sb.Append(bones.Count.ToString(CultureInfo.InvariantCulture)).Append(" alias(es) from ").Append(sidecarPath);
+            sb.Append((bones.Count - skipped.Count).ToString(CultureInfo.InvariantCulture))
+              .Append(" alias(es) from ").Append(sidecarPath);
             foreach (KeyValuePair<string, string> e in bones)
-                sb.Append("\n    '").Append(e.Key).Append("' -> '").Append(e.Value).Append('\'');
+                if (!skipped.Contains(e.Key))
+                    sb.Append("\n    '").Append(e.Key).Append("' -> '").Append(e.Value).Append('\'');
+            if (skipped.Count > 0)
+            {
+                sb.Append("\n    unused (this file has no such bone):");
+                bool first = true;
+                foreach (KeyValuePair<string, string> e in bones)
+                    if (skipped.Contains(e.Key)) { sb.Append(first ? " '" : ", '").Append(e.Key).Append('\''); first = false; }
+            }
             return sb.ToString();
         }
 
@@ -156,6 +170,9 @@ namespace Morgott.ContentTool.Import
                 if (bones == null) { why = "'" + path + "' carries no \"bones\" object, so nothing was applied"; return null; }
                 var map = new Dictionary<string, string>(StringComparer.Ordinal);
                 foreach (KeyValuePair<string, object> e in bones) map[e.Key] = e.Value as string;
+                // Said as its own sentence: an empty map is a sidecar with nothing in it, NOT the
+                // collision below, and naming the wrong cause sends the author to fix the wrong thing.
+                if (map.Count == 0) { why = "'" + path + "' carries no aliases, so nothing was applied"; return null; }
                 AliasMap loaded = Of(map);
                 if (loaded == null)
                     why = "'" + path + "' maps two of the file's bones onto one of the game's, or leaves a name " +
@@ -193,8 +210,18 @@ namespace Morgott.ContentTool.Import
             sb.Append(first ? "}" : "\n  }").Append("\n}\n");
 
             File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(false));
-            if (File.Exists(path)) File.Replace(tmp, path, null);
-            else File.Move(tmp, path);
+            try
+            {
+                if (File.Exists(path)) File.Replace(tmp, path, null);
+                else File.Move(tmp, path);
+            }
+            catch (Exception)
+            {
+                // The write failed, so the caller must hear about it - but a half-written map must not
+                // be left sitting beside the model where the next run finds it.
+                try { File.Delete(tmp); } catch (Exception) { }
+                throw;
+            }
         }
 
         private static string Escape(string s)
