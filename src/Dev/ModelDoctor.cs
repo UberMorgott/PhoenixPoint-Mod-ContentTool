@@ -35,6 +35,13 @@ namespace Morgott.ContentTool.Dev
         private readonly ConcurrentQueue<Action> edits = new ConcurrentQueue<Action>();
         private readonly ConcurrentQueue<Job> done = new ConcurrentQueue<Job>();
         private readonly Dictionary<string, string> aliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        /// <summary>What the sidecar already held when this file was opened. SaveSidecar rewrites the
+        /// WHOLE bones object, so a Doctor that starts empty and saves deletes every mapping the author
+        /// made in an earlier session. This is the baseline the editor is seeded from, and the thing
+        /// "has the map changed?" is asked against.</summary>
+        private readonly Dictionary<string, string> seeded = new Dictionary<string, string>(StringComparer.Ordinal);
+        private string seededFor;
+        private bool canSave;
         private readonly List<int> ourMeshes = new List<int>();
 
         private sealed class Job
@@ -72,6 +79,9 @@ namespace Morgott.ContentTool.Dev
         {
             Path = path;
             aliases.Clear();
+            seeded.Clear();
+            seededFor = null;                          // the sidecar seeds it when the first result lands
+            canSave = false;
             Restart();
         }
 
@@ -86,7 +96,41 @@ namespace Morgott.ContentTool.Dev
         {
             if (string.IsNullOrEmpty(targetBone)) aliases.Remove(fileBone);
             else aliases[fileBone] = targetBone;
+            Rethink();
             Restart();
+        }
+
+        /// <summary>Can this map be written? Asked HERE and cached, not in the draw: AliasMap.Of builds
+        /// two collections, and a button that asks it twice a frame allocates for the whole session.</summary>
+        private void Rethink()
+        {
+            bool differs = aliases.Count != seeded.Count;
+            if (!differs)
+                foreach (KeyValuePair<string, string> e in aliases)
+                {
+                    string was;
+                    if (seeded.TryGetValue(e.Key, out was) && was == e.Value) continue;
+                    differs = true;
+                    break;
+                }
+            canSave = differs && aliases.Count > 0 && AliasMap.Of(aliases) != null;
+        }
+
+        /// <summary>The sidecar's own mappings become the editor's starting rows, once per file. Without
+        /// this the table shows nothing while the sidecar holds three names, and the first Save writes a
+        /// map of one - the two the author could not see are gone, silently.</summary>
+        private void Seed()
+        {
+            if (seededFor == Path || Ready == null) return;
+            seededFor = Path;
+            seeded.Clear();
+            if (Ready.Source != null && Ready.Source.Aliases != null)
+                foreach (KeyValuePair<string, string> e in Ready.Source.Aliases.Pairs)
+                {
+                    seeded[e.Key] = e.Value;
+                    if (!aliases.ContainsKey(e.Key)) aliases[e.Key] = e.Value;
+                }
+            Rethink();
         }
 
         internal void Enqueue(string what)
@@ -216,8 +260,10 @@ namespace Morgott.ContentTool.Dev
         /// <summary>Called every frame from the bench's Update. Drains results, then intents.</summary>
         internal void Tick()
         {
+            // An edit queued before the bench dropped its actor would otherwise revive the Doctor onto
+            // a stand that is no longer there; with no Root there is nothing to preview against anyway.
             Action edit;
-            while (edits.TryDequeue(out edit)) edit();
+            while (edits.TryDequeue(out edit)) if (Root != null) edit();
 
             Job job;
             while (done.TryDequeue(out job))
@@ -228,12 +274,16 @@ namespace Morgott.ContentTool.Dev
                 RigTarget now = Snapshot(Renderer, Target.TransformPath);
                 if (!now.SameAs(Target))
                 {
-                    job.Result.Report.Add("TargetChanged", Severity.Blocking, DiagnosticSide.Target,
-                                          "the model this report was made for has changed since it was picked",
-                                          "Press Change and pick the target again.");
+                    // The report was made against a rig that no longer exists. It is not annotated and
+                    // shown - it is thrown away and asked again, because a verdict about the previous
+                    // mesh with a warning under it is still a verdict the author will read as this one's.
                     Target = now;
+                    Message = "the target changed while it was being read - reading it again";
+                    Restart();
+                    continue;
                 }
                 Ready = job.Result;
+                Seed();
             }
             if (!running && Ready == null && Path != null && Target != null) Start(gen);
 
@@ -270,11 +320,14 @@ namespace Morgott.ContentTool.Dev
                 // that disagreed with the prediction is destroyed rather than shown. A wrong skinning
                 // shown confidently is worse than none.
                 UnityEngine.Object.Destroy(candidate);
-                Ready.Report.Add("PreviewDisagreed", Severity.Blocking, DiagnosticSide.Target,
-                                 "the live bind came out " + got + " where the report predicted " + Ready.Outcome +
-                                 ", so the preview was not applied",
-                                 "The model changed under the report. Press Change and pick the target again.");
-                return "preview REFUSED: the live bind disagreed with the report (" + got + " vs " + Ready.Outcome + ")";
+                string said = "preview REFUSED: the live bind disagreed with the report (" +
+                              got + " vs " + Ready.Outcome + ")";
+                Say(Ready.Report, "PreviewDisagreed", Severity.Blocking, DiagnosticSide.Target,
+                    "the live bind came out " + got + " where the report predicted " + Ready.Outcome +
+                    ", so the preview was not applied",
+                    "The model changed under the report. Press Change and pick the target again.");
+                Restart();                                  // ask again against whatever the rig is NOW
+                return said;
             }
 
             if (preview == null)
@@ -312,11 +365,30 @@ namespace Morgott.ContentTool.Dev
             {
                 byte[] bytes = File.ReadAllBytes(Path);
                 AliasMap.SaveSidecar(Path, AliasMap.Sha256(bytes), bytes.Length, aliases);
-                Ready.Report.Add("AliasesSaved", Severity.Info, DiagnosticSide.Sidecar,
-                                 aliases.Count + " alias(es) saved to " + AliasMap.SidecarPathOf(Path), "");
+                // What is on disk is the new baseline, so the button goes quiet until something changes
+                // again - a Save that stays lit is a Save the author presses twice to be sure.
+                seeded.Clear();
+                foreach (KeyValuePair<string, string> e in aliases) seeded[e.Key] = e.Value;
+                Rethink();
+                Say(Ready.Report, "AliasesSaved", Severity.Info, DiagnosticSide.Sidecar,
+                    aliases.Count + " alias(es) saved to " + AliasMap.SidecarPathOf(Path), "");
                 return "saved " + aliases.Count + " alias(es) to " + AliasMap.SidecarPathOf(Path);
             }
             catch (Exception ex) { return "could not save: " + ex.Message; }
+        }
+
+        /// <summary>
+        /// Add a row the REPORT did not produce, replacing the one this Doctor last said. Pressing a
+        /// button twice is not two facts, and a report that grows a line per press is one an author
+        /// stops reading. A Blocking row also moves the verdict: a header still reading BY NAME above a
+        /// refusal is the panel contradicting itself.
+        /// </summary>
+        private static void Say(DiagnosticReport report, string code, Severity severity, DiagnosticSide side,
+                                string message, string remedy)
+        {
+            report.Rows.RemoveAll(delegate (Diagnostic d) { return d.Code == code; });
+            report.Add(code, severity, side, message, remedy);
+            if (severity == Severity.Blocking) report.Outcome = Outcome.Refused;
         }
 
         /// <summary>
@@ -343,9 +415,33 @@ namespace Morgott.ContentTool.Dev
         private string boneOpen;
         private SkinnedMeshRenderer[] candidates = new SkinnedMeshRenderer[0];
 
-        /// <summary>The benched actor the target list is drawn from. Set by the bench, which is the
-        /// only thing that knows what is on the stand; the Doctor does not go looking for it.</summary>
-        internal Transform Root;
+        private Transform root;
+
+        /// <summary>
+        /// The benched actor the target list is drawn from. Set by the bench, which is the only thing
+        /// that knows what is on the stand; the Doctor does not go looking for it.
+        ///
+        /// A NEW actor invalidates everything downstream of it - the renderer, its fingerprint and the
+        /// report made against it all belong to a model that is no longer here - so the setter is the
+        /// generation trigger for a unit swap. The bench assigns this every time it poses one, which is
+        /// why nothing else has to remember to tell the Doctor.
+        /// </summary>
+        internal Transform Root
+        {
+            get { return root; }
+            set
+            {
+                if (root == value) return;
+                Revert();                                  // the preview belongs to the OLD renderer
+                root = value;
+                Renderer = null;
+                Target = null;
+                Ready = null;
+                candidates = new SkinnedMeshRenderer[0];
+                targetsOpen = false;
+                gen++;                                     // an answer in flight is about the old actor
+            }
+        }
 
         /// <summary>
         /// Draws the whole Doctor. READS ONLY: every button enqueues an intent that Tick performs on
@@ -402,13 +498,16 @@ namespace Morgott.ContentTool.Dev
             GUILayout.EndScrollView();
 
             GUILayout.BeginHorizontal();
-            GUI.enabled = Ready.Outcome == Outcome.ByName || Ready.Outcome == Outcome.NearestBone;
+            // A Blocking row is a refusal even when the VERDICT was reached before it - a live bind that
+            // disagreed, a rig that moved. Preview follows the rows, not the outcome it was born with.
+            GUI.enabled = (Ready.Outcome == Outcome.ByName || Ready.Outcome == Outcome.NearestBone) &&
+                          Ready.Report.Count(Severity.Blocking) == 0;
             if (GUILayout.Button("Preview", GUILayout.Width(80f))) Enqueue("preview");
             GUI.enabled = HasPreview;
             if (GUILayout.Button("Revert preview", GUILayout.Width(110f))) Enqueue("revert");
-            // Valid as well as changed: AliasMap.Of returns null for a map that could never apply, and
-            // a sidecar written from one would be refused by the very loader that is about to read it.
-            GUI.enabled = aliases.Count > 0 && AliasMap.Of(aliases) != null;
+            // Changed AND valid, decided in Rethink: an unchanged map rewrites the sidecar for nothing,
+            // and a map AliasMap.Of refuses would be refused again by the loader about to read it.
+            GUI.enabled = canSave;
             if (GUILayout.Button("Save aliases", GUILayout.Width(110f))) Enqueue("save");
             GUI.enabled = true;
             if (GUILayout.Button("Copy report", GUILayout.Width(100f)))
@@ -441,7 +540,7 @@ namespace Morgott.ContentTool.Dev
             foreach (SkinnedMeshRenderer r in candidates)
             {
                 if (r == null) continue;
-                string path = PathFrom(Root, r.transform);
+                string path = SeamSwap.RelativePath(root, r.transform);
                 if (!GUILayout.Button("   " + BenchList.Elide(path.Length == 0 ? r.name : path, BenchList.NameChars) +
                                       "  (" + (r.bones == null ? 0 : r.bones.Length) + " bones)")) continue;
                 SkinnedMeshRenderer chosen = r;
@@ -449,17 +548,6 @@ namespace Morgott.ContentTool.Dev
                 edits.Enqueue(delegate { PickTarget(chosen, chosenPath); });
                 targetsOpen = false;
             }
-        }
-
-        /// <summary>Transform path from the root; "" is the root itself - the same shape SeamSwap's
-        /// TargetPath uses, so a path read here can be pasted into a manifest.</summary>
-        private static string PathFrom(Transform root, Transform t)
-        {
-            if (root == null || t == root) return "";
-            var parts = new List<string>();
-            for (Transform w = t; w != null && w != root; w = w.parent) parts.Add(w.name);
-            parts.Reverse();
-            return string.Join("/", parts.ToArray());
         }
 
         /// <summary>
@@ -514,6 +602,16 @@ namespace Morgott.ContentTool.Dev
                     boneOpen = null;
                 }
             }
+
+            // WHAT IS STILL UNSPOKEN FOR, said outside any dropdown: the bones the target has and this
+            // file answered nothing for are the whole reason the weights are being lost, and an author
+            // cannot count them by opening every row's list one at a time.
+            var open = new List<string>();
+            foreach (string bone in free) if (!Claimed(bone, null)) open.Add(bone);
+            GUILayout.Label(open.Count == 0
+                ? "   every target bone is spoken for"
+                : "   unmatched target bones (" + open.Count + "): " +
+                  BenchList.Elide(string.Join(", ", open.ToArray()), 110));
         }
 
         /// <summary>Is this target bone already the output of some OTHER file bone? Two file bones on
@@ -600,12 +698,26 @@ namespace Morgott.ContentTool.Dev
             Revert();
             browser.Hide();
             gen++;
+            // Drained, not left queued: a button pressed on the frame the bench closed would otherwise
+            // run against a Doctor with nothing behind it the next time one is opened. The gen bump
+            // covers the worker; only what the AUTHOR asked for has to be thrown away by hand.
+            Action edit;
+            while (edits.TryDequeue(out edit)) { }
+            Intent intent;
+            while (intents.TryDequeue(out intent)) { }
+            Job job;
+            while (done.TryDequeue(out job)) { }
             Path = null;
-            Root = null;
+            root = null;
             Renderer = null;
             Target = null;
             Ready = null;
+            candidates = new SkinnedMeshRenderer[0];
+            targetsOpen = false;
             aliases.Clear();
+            seeded.Clear();
+            seededFor = null;
+            canSave = false;
         }
     }
 }

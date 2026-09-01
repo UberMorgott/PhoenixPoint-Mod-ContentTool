@@ -727,7 +727,7 @@ namespace Morgott.ContentTool.Dev
         }
 
         /// <summary>Transform path from the prefab root; "" is the root itself (FINAL-PLAN 39.2).</summary>
-        private static string RelativePath(Transform root, Transform t)
+        internal static string RelativePath(Transform root, Transform t)
         {
             if (t == root) return "";
             List<string> parts = new List<string>();

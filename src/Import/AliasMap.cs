@@ -32,6 +32,11 @@ namespace Morgott.ContentTool.Import
 
         internal int Count => bones.Count;
 
+        /// <summary>The mappings themselves, for an editor that has to SEED itself from what is already
+        /// on disk. SaveSidecar rewrites the whole "bones" object, so an editor that starts empty and
+        /// saves silently deletes every mapping it never saw.</summary>
+        internal IDictionary<string, string> Pairs => bones;
+
         /// <summary>
         /// A map, or NULL when it could never be applied: no entries, an empty output, or two file
         /// bones renamed onto one game bone (which is the PlainCollision the binder already refuses,
