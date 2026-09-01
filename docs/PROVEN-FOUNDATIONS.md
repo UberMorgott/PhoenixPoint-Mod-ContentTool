@@ -687,14 +687,20 @@ STREAMED media that are loose files; an embedded one is refused by name.
     trigger question and the screen question are separate, and only the first is answered. The 340 ms
     is NOT the shipped 1 200 ms click: `demos\ReplaceUiSounds` declares
     `{ "media": 18839791, "file": "sting_plus.mp3" }` and its prebuilt `Dist\Sounds\18839791.bnk`
-    (30 136 B of PCM at 44 100 Hz mono 16-bit ≈ 342 ms) was loaded into MEMORY at startup, which
+    (30 136 B of PCM at 44 100 Hz mono 16-bit; its media measures exactly 340 ms) was loaded into MEMORY at startup, which
     `streaming=false(MEMORY)` states. The natural screen stays **UNVERIFIED** — still zero hits in
     the whole decompile, still no `file:line` to cite.
-  - **Noticed while measuring, NOT chased:** that demo's `meta.json` description advertises
-    `1200 -> 888 ms` for this sound, and the bank on disk is 342 ms. Two of its three banks disagree
-    with the numbers in that text (`633458426.bnk` 39 352 B ≈ 446 ms vs "456"; `940964934.bnk`
-    53 176 B ≈ 603 ms vs "914"). Either the description is stale or the `.mp3`s were regenerated
-    after it was written. A human should re-measure the three and correct the text.
+  - **Measured and closed 2026-09-01.** All six lengths are now read off the real files by
+    `tests\ObjCodecTests` (`DemoBankTests.cs`, offline: the bank's DIDX/DATA walked, each media
+    parsed by `WwiseWem.Parse`, PCM = data / (channels·2·rate), Vorbis = `SampleCount` / rate).
+    The three shipped media are LOOSE `.wem` and measure **1200 / 3533 / 2231 ms**, exactly the
+    "shipped" column. The three replacement banks measure **340 / 444 / 601 ms** (18839791 =
+    340 ms, matching the live `dur=340ms` POST above to the millisecond) — so the stale numbers
+    were the REPLACEMENT ones: `meta.json` said `888 / 456 / 914 ms` and now says `340 / 444 /
+    601 ms`, and the demo README's length column went `0.30/0.40/0.55 s` -> `0.340/0.444/0.601 s`.
+    The `.mp3`s were regenerated after that text was written; `ZW4` below quotes the 888 ms bank of
+    2026-08-27, which is a correct record of what was measured THEN, not of what ships now.
+    The test asserts all six, so a re-bake that changes a length now fails offline.
 - **The file alone is not the whole declaration.** Dropping a PCM `.wem` over the shipped Vorbis one
   gave `playingID=1`, NO `AK_Duration` callback and `endOfEvent=23ms` — the engine handed our file to
   the codec the BANK names. `apply` therefore also rewrites `ulPluginID` to PCM (and a zero-latency

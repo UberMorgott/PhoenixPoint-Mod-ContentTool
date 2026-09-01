@@ -66,6 +66,7 @@
     <Compile Include="SourceAudioTests.cs" />
     <Compile Include="SourceDecodeTests.cs" />
     <Compile Include="WemLoopTests.cs" />
+    <Compile Include="DemoBankTests.cs" />
     <!-- The whole SOURCE reader carries no UnityEngine type, and the engine cannot decode audio in
          this game at all (gate F1), so .wav, .ogg and .mp3 import is proven here - the same files
          the mod compiles against the same NVorbis/NLayer it merges. -->

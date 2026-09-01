@@ -139,8 +139,10 @@ internal static class Program
         Console.WriteLine(dec);
         string loop = WemLoopTests.Run();
         Console.WriteLine(loop);
+        string banks = DemoBankTests.Run();
+        Console.WriteLine(banks);
         return wav.Contains("FAILURE") || src.Contains("FAILURE") || dec.Contains("FAILURE") ||
-               loop.Contains("FAILURE") ? 1 : 0;
+               loop.Contains("FAILURE") || banks.Contains("FAILURE") ? 1 : 0;
     }
 
     private static void Check(bool condition, string name)

@@ -42,13 +42,16 @@ without unloading the first), so overlap is silent, not an error. One media ID, 
 
 | media | shipped sound | event | gets | length | shipped length |
 |---|---|---|---|---|---|
-| 18839791 | `GUI_StatsPlusClick` | 784388130 | `sting_plus.mp3` — one bright ping | **0.30 s** | 1.200 s |
-| 633458426 | `GUI_SkillConfirmClick` | 1437631612 | `sting_confirm.mp3` — two notes, rising | **0.40 s** | 3.533 s |
-| 940964934 | `GUI_CancelMission` | 346433775 | `sting_cancel.mp3` — a reedy buzz, falling | **0.55 s** | 2.231 s |
+| 18839791 | `GUI_StatsPlusClick` | 784388130 | `sting_plus.mp3` — one bright ping | **0.340 s** | 1.200 s |
+| 633458426 | `GUI_SkillConfirmClick` | 1437631612 | `sting_confirm.mp3` — two notes, rising | **0.444 s** | 3.533 s |
+| 940964934 | `GUI_CancelMission` | 346433775 | `sting_cancel.mp3` — a reedy buzz, falling | **0.601 s** | 2.231 s |
 
-**Short blips only, measured with `ffprobe`, and all three are GENERATED** by
+**Short blips only, and all three are GENERATED** by
 `..\tools\make_demo_audio.ps1` — sines under exponential envelopes, ours by construction, so nothing
-of anyone else's is redistributed here (`SOURCES.md`). The lengths are deliberately unlike the media
+of anyone else's is redistributed here (`SOURCES.md`). Both length columns are read off the real
+files by `tests\ObjCodecTests` (`DemoBankTests.cs`): the replacement out of the shipped
+`Dist\Sounds\<mediaId>.bnk`, the shipped one out of the game's own `<mediaId>.wem`, so a re-bake that
+changes a length fails the test instead of leaving this table wrong. The lengths are deliberately unlike the media
 they replace: that difference is what `ct_sound probe <mediaId>` reads back as proof the engine is
 serving ours.
 
