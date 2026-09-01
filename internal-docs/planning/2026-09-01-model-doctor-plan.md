@@ -2896,6 +2896,33 @@ the dump was renamed through the repo's own `GlbCodec.Write` to the 13 names `ct
 Screenshots: `C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\253e8cfb-94db-49b1-8672-cbe452669de4\scratchpad\shots\`
 (`01` tab strip, `02` known-bad report, `03` browser refusal, `04`/`05`/`06` 640x480, `07` final state).
 
+### Round 2 (Codex findings) 2026-09-02
+
+Same install and rig, on `3441a4f` (build `d25fc3a5`) and then on the fix below (build `b917b039`).
+
+| Check | Result | Evidence |
+|---|---|---|
+| 4 known-bad | PASS | `NEAREST-BONE … (2 reason(s))` |
+| 5 preview/revert | PASS | mesh swapped and the original reference restored, `OurMeshCount` 1 -> 0 |
+| 6 alias -> save | PASS | `BY NAME`, sidecar written, `canSave` true -> false |
+| 9 unit swap with a live preview | PASS | `Target`/`Renderer` null, `HasPreview` false, `OurMeshCount` 0 |
+| P1-1 preview follows its renderer | PASS | preview on A, `PickTarget(B)` -> A back to `CHR_SY_SNI_TS_F_V01`, `OurMeshCount` 0, `HasPreview` false; preview on B then reverts B and leaves A alone |
+| P1-2 the file is replaced under a seeded sidecar | PASS | overwrote `ts_bad.glb` in place with `ts_good.glb`: row `SidecarStale`/Warning, `aliases` 0, `AliasesApplied` 0, `canSave` false, header follows the NEW content (`BY NAME`) |
+| P2-3 the bone map survives BY NAME, and `x` undoes the alias | PASS | the map's fold is drawn under a `BY NAME` header; `SetAlias(k,null)` -> `NEAREST-BONE (2 reason(s))`, `aliases` 0, `canSave` false. With a SAVED sidecar the header stays `BY NAME` and `canSave` goes true instead — correct, because the bake still reads that file until Save removes it |
+| P2-4 remove the last alias | PASS | `canSave` true on an empty map, `save` -> `sidecar removed: …ts_bad.glb.aliases.json`, file gone, `canSave` false; `ct_project DoctorFix` then prints `skinned nearest-bone … does not contain the bone 'L.Arm'` with no `with n alias(es)` |
+| P2-6 blind target | PASS (driven) | no SMR on this rig has bindposes without bones (12/12 have `bones == bindposes`: 1x1, 4x8, 1x13, 4x25, 1x34, 1x4), so `Target.BoneNames` was set to null on the live target: the button reads `Preview - no live bones to bind onto` and is disabled (`ModelDoctor.cs:595-599`) |
+
+**One more defect, found and fixed:** `2b1cca7` `fix(alias): stop calling a decorated live bone a bone
+the model does not have`. `AliasMap.OutputsNotIn` compared alias OUTPUTS against the target's bone
+names as raw strings, so an alias onto `L.Arm` against a live rig that spells it
+`#L.Arm_Addon => SY_Sniper_Torso_BodyPartDef` produced `AliasNotATargetBone` — an IGNORED row under a
+BY NAME verdict telling the author to fix a mapping that had already bound. Both call sites
+(`ReplacementPreflight.Sidecar`, `ModelDoctor.ApplyLiveAliases`) go through that one method. After the
+fix the same state reports zero rows in game; `AliasTests` covers both directions (28 checks).
+
+Round-2 screenshots: `shots\r2-p1-1.png`, `r2-p1-2-sidecar-stale.png`, `r2-p2-3-bonemap-byname.png`,
+`r2-p2-6-no-live-bones.png`, `r2-final-known-bad.png`.
+
 ---
 
 ## Self-review
