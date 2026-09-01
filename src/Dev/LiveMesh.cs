@@ -43,7 +43,14 @@ namespace Morgott.ContentTool.Dev
                 BakedMesh baked;
                 if (string.Equals(ext, ".glb", StringComparison.OrdinalIgnoreCase))
                 {
-                    model = GlbReader.Read(File.ReadAllBytes(file));
+                    ReplacementSource source = GlbSource.ReadReplacement(File.ReadAllBytes(file), file);
+                    model = source.Model;
+                    // NEVER SILENT: a bone the game renamed for the author is exactly the kind of help
+                    // that becomes a mystery when it is not said out loud.
+                    if (source.AliasLog != null)
+                        ContentToolMain.Say("ct_replace: applied " + source.AliasLog);
+                    else if (source.SidecarRefusal != null)
+                        ContentToolMain.Say("ct_replace: " + source.SidecarRefusal);
                     baked = ModelBuild.From(model, Path.GetFileNameWithoutExtension(file)).Mesh;
                 }
                 else baked = MeshBuild.From(ObjCodec.Parse(File.ReadAllText(file)));

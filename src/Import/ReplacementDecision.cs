@@ -29,9 +29,11 @@ namespace Morgott.ContentTool.Import
         /// <param name="targetRigged">the target has bind poses: SkinFields.Rigged (BundleBaker.cs:154) live-side, smr.sharedMesh.bindposes.Length &gt; 0.</param>
         /// <param name="targetBoneNamesAvailable">SkinFields.BoneNames(...) != null (BundleBaker.cs:177) live-side, smr.bones is non-empty.</param>
         /// <param name="firstIssue">
-        /// the first thing SkinCompatibility.Analyze found, or null. The Doctor has this up front; the
-        /// bake only learns it when RebindByName throws, and re-asks with it from the catch. It is the
-        /// ONE input this function cannot compute for itself.
+        /// the first thing SkinCompatibility.Analyze found, or null. The Doctor has this up front and
+        /// passes it; the bake does not - it asks with null, tries the by-name bind, and falls back in
+        /// its own catch when RebindByName throws, which lands on the very outcome this function would
+        /// have named had the issue been known. It is the ONE input this function cannot compute for
+        /// itself.
         /// </param>
         internal static Outcome Decide(bool sourceHasArmature, bool targetRigged,
                                        bool targetBoneNamesAvailable, BindingIssue firstIssue)

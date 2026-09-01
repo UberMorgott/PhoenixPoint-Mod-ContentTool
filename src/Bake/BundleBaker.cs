@@ -140,7 +140,8 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         /// <param name="model">the .glb this geometry came out of, or null for an .obj.</param>
         internal string ReplaceMesh(string assetName, string sourceName, BakedMesh baked, SkinnedModel model,
-                                    out string refusal, out string mapping, out bool suspect)
+                                    out string refusal, out string mapping, out bool suspect,
+                                    int aliases = 0, string sidecar = null)
         {
             AssetFileInfo info = FindUnique(AssetClassID.Mesh, assetName);
             AssetTypeValueField mesh = man.GetBaseField(afileInst, info);
@@ -179,11 +180,13 @@ namespace Morgott.ContentTool.Bake
             Outcome outcome = ReplacementDecision.Decide(armature, rigged, names != null, null);
             if (outcome != Outcome.ByName)
             {
-                how = SkinFields.Rebind(mesh, baked, influences)
-                    ? "nearest-bone, one full-weight influence per vertex (" +
-                      (!armature ? "the source carries no armature"
-                                 : "no SkinnedMeshRenderer in this bundle names the target's bones") + ")"
-                    : "not rigged - the target carries no bind poses";
+                // Rebind is still CALLED for its effect; which sentence this is comes from the outcome,
+                // not from its return value - two definitions of "not rigged" is one too many.
+                SkinFields.Rebind(mesh, baked, influences);
+                how = outcome == Outcome.NotRigged
+                    ? "not rigged - the target carries no bind poses"
+                    : "nearest-bone, one full-weight influence per vertex (no SkinnedMeshRenderer in " +
+                      "this bundle names the target's bones)";
             }
             else
             {
@@ -208,6 +211,11 @@ namespace Morgott.ContentTool.Bake
                     how = "nearest-bone - the file's own weights were NOT used: " + ex.Message;
                 }
             }
+            // NEVER SILENT: a bone renamed by a sidecar is named in the bake log beside the binding it
+            // produced, so an author never discovers a rename by its effect alone.
+            if (aliases > 0 && sidecar != null)
+                how += " with " + aliases + " alias(es) from " + sidecar;
+
             info.SetNewData(mesh);
             return how;
         }

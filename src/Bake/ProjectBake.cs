@@ -1590,7 +1590,8 @@ namespace Morgott.ContentTool.Bake
                             string refusal, mapping;
                             bool suspect;
                             string how = baker.ReplaceMesh(r.asset, im.Name, im.Baked, im.Model,
-                                                           out refusal, out mapping, out suspect);
+                                                           out refusal, out mapping, out suspect,
+                                                           im.AliasesApplied, im.SidecarPath);
                             if (refusal != null)
                             {
                                 log.AppendLine("P4 REFUSED '" + im.Name + "' -> " + refusal);

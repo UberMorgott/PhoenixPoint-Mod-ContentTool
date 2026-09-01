@@ -94,6 +94,10 @@ namespace Morgott.ContentTool.Project
         /// skin: the joint names and WEIGHTS_0 a by-name rebind needs live only on the model.
         /// </summary>
         internal SkinnedModel Model;
+        /// <summary>The alias sidecar that was applied to <see cref="Model"/>, or null. Carried so the
+        /// bake log can name it - an author must never discover a rename by its effect.</summary>
+        internal string SidecarPath;
+        internal int AliasesApplied;
     }
 
     /// <summary>
@@ -603,7 +607,10 @@ namespace Morgott.ContentTool.Project
         /// .obj through the tool's own parser, straight to the buffers a serialized Mesh wants -
         /// no UnityEngine type takes part, which is what lets the same conversion be proven offline.
         ///
-        /// A .glb takes the same route through the same reader the ADD path uses, and additionally
+        /// A .glb comes through GlbSource.ReadReplacement - the ONE replacement read, so the alias
+        /// sidecar that a preview applied applies here too (the ADD path, ImportModel, deliberately
+        /// does NOT go through it: its published bone-path hashes must not depend on a file sitting
+        /// next to the .glb). It additionally
         /// KEEPS the model: an .obj holds no skin, while a .glb holds the joint names, the bind poses
         /// and WEIGHTS_0 that let a rigged replacement carry the author's own weights instead of
         /// synthesised ones. Which of the two a replacement got is reported by the bake, never assumed.
@@ -614,8 +621,15 @@ namespace Morgott.ContentTool.Project
             if (!string.Equals(Path.GetExtension(path), ".glb", StringComparison.OrdinalIgnoreCase))
                 return new ImportedMesh { Name = name, Baked = MeshBuild.From(ObjCodec.Parse(File.ReadAllText(path))) };
 
-            SkinnedModel model = GlbReader.Read(File.ReadAllBytes(path));
-            return new ImportedMesh { Name = name, Baked = ModelBuild.From(model, name).Mesh, Model = model };
+            ReplacementSource source = GlbSource.ReadReplacement(File.ReadAllBytes(path), path);
+            return new ImportedMesh
+            {
+                Name = name,
+                Baked = ModelBuild.From(source.Model, name).Mesh,
+                Model = source.Model,
+                SidecarPath = source.SidecarPath,
+                AliasesApplied = source.AliasesApplied
+            };
         }
 
         /// <summary>

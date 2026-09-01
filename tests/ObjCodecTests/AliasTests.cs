@@ -89,6 +89,28 @@ internal static class AliasTests
             checks += Check(AliasMap.LoadSidecar(glb, sha, out why) == null &&
                             why != null && why.IndexOf("99", StringComparison.Ordinal) >= 0,
                             "an unknown schema is not applied and names the number: " + why);
+
+            // ---- the READ that every replacement path goes through, with its provenance intact.
+            byte[] real = File.ReadAllBytes(Probe());
+            string realGlb = Path.Combine(dir, "probe.glb");
+            File.WriteAllBytes(realGlb, real);
+            ReplacementSource plain = GlbSource.ReadReplacement(real, realGlb);
+            checks += Check(plain.Model != null && plain.AliasesApplied == 0 && plain.SidecarPath == null,
+                            "a .glb with no sidecar reads clean and claims no aliases");
+            checks += Check(plain.Sha256 == AliasMap.Sha256(real) && plain.Bytes == real.Length,
+                            "the envelope carries the bytes' own hash and length");
+
+            string firstBone = plain.Model.JointNames[0];
+            AliasMap.SaveSidecar(realGlb, plain.Sha256, real.Length,
+                                 new Dictionary<string, string> { { firstBone, "CT_RENAMED" } });
+            ReplacementSource aliased = GlbSource.ReadReplacement(real, realGlb);
+            checks += Check(aliased.Model.JointNames[0] == "CT_RENAMED" && aliased.AliasesApplied == 1,
+                            "the sidecar renamed the file's first bone: " + aliased.Model.JointNames[0]);
+            checks += Check(aliased.AliasLog != null &&
+                            aliased.AliasLog.IndexOf("CT_RENAMED", StringComparison.Ordinal) >= 0,
+                            "and the log NAMES the mapping, so nothing is silent: " + aliased.AliasLog);
+            checks += Check(aliased.Original.JointNames[0] == firstBone,
+                            "the pristine names survive for re-aliasing without a re-parse");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
 
@@ -131,6 +153,16 @@ internal static class AliasTests
         if (a.Length != b.Length) return false;
         for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
         return true;
+    }
+
+    /// <summary>The committed rigged fixture. Copied beside the build output by ContentTool.csproj,
+    /// and read here from the repo so this gate does not depend on a deploy.</summary>
+    internal static string Probe()
+    {
+        string here = AppDomain.CurrentDomain.BaseDirectory;
+        string path = Path.GetFullPath(Path.Combine(here, "..\\..\\..\\..\\..\\lib\\u9_probe.glb"));
+        if (!File.Exists(path)) throw new Exception("ALIAS FAILURE: lib\\u9_probe.glb is missing at " + path);
+        return path;
     }
 
     private static int Check(bool condition, string what)

@@ -131,6 +131,9 @@
     <!-- FILE BONE -> GAME BONE and its sidecar: the rename must be SIMULTANEOUS and must leave the
          index tables alone, and a sidecar must never apply silently, so both are proven offline. -->
     <Compile Include="..\..\src\Import\AliasMap.cs" Link="AliasMap.cs" />
+    <!-- THE replacement read itself: one place a sidecar can apply, carrying the provenance every
+         caller has to say out loud. -->
+    <Compile Include="..\..\src\Import\GlbSource.cs" Link="GlbSource.cs" />
     <Compile Include="..\..\src\Import\SkinCompatibility.cs" Link="SkinCompatibility.cs" />
     <!-- The VERDICT itself, the one function both the bake and the Doctor ask, so its truth table is
          proven offline instead of by baking four bundles. -->
