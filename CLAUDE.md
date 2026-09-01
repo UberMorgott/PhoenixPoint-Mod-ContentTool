@@ -1,5 +1,18 @@
 # ContentTool — project rules
 
+## PPCLI is a SEPARATE project — never mix the two (hard rule)
+
+`ContentTool\` and `PPCLI\` are two different projects in two different folders with two different
+git repos. They must never cross:
+
+- **Never commit a PPCLI change from a ContentTool session, and never the reverse.** One commit
+  touches one repo. If work in one seems to require an edit in the other, stop — it does not.
+- **Never edit PPCLI source.** We are a CONSUMER of that tool, not its author. We use it to drive the
+  game for diagnostics and to test our own mods, and that is the whole relationship.
+- **If PPCLI itself misbehaves, the only thing we do is write it down** in `PPCLI\ISSUES.md` — the log
+  its own maintainer reads. Then work around it and carry on with the ContentTool task. Do not fix it,
+  do not patch around it in its source, do not "improve" it while we are in there.
+
 ## Anything that touches the RUNNING GAME goes through PPCLI (standing rule)
 
 Never ask the user how to drive the game, and never hand-roll a way to do it. Whenever a task needs
@@ -29,7 +42,8 @@ model/texture renders — use **PPCLI** (`E:\DEV\PhoenixPoint\PPCLI\`).
 
 ### When PPCLI itself misbehaves
 
-Append it to **`E:\DEV\PhoenixPoint\PPCLI\ISSUES.md`** — the log lives in PPCLI's own repo root so the
+Log it, and ONLY log it — see the separation rule at the top. Append to
+**`E:\DEV\PhoenixPoint\PPCLI\ISSUES.md`** — the log lives in PPCLI's own repo root so the
 agent working on PPCLI finds it at session start without being told. Record only what an actual run
 showed (attempted → happened → expected → evidence → severity), never a suspicion from reading the
 source. Do not stop the current task to fix PPCLI; note it and work around it.
