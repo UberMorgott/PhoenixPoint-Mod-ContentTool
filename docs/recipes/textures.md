@@ -86,11 +86,16 @@ Sizes and absolute paths vary. These lines do not:
 
 ```text
 patch aln_acidworm_assets_all.bundle: 'acidworm_low_albedo' <- acidworm <width>x<height>
-WROTE <patched path> <bytes> B as <bundle identity>
-P1 PASS 'acidworm_low_albedo' in the copy is <width>x<height> RGBA32 and its bytes are the imported source
-copies ready in <path> - nothing to install: ticking 'MyTextureMod' on serves these private copies in memory; ticking it off hands the shipped bundles straight back
-ct_project: ALL PASS - this project has no bundle of its own; the patched copy(ies) above are the whole output
+WROTE <patched path> <bytes> B as <bundle identity> (shipped source is <bytes> B)
+P1 PASS every replaced Texture2D in aln_acidworm_assets_all.bundle reads back its new pixels
+copies ready in <path> - nothing to install: ticking 'MyTextureMod' on in the mod manager redirects them (dev-only shortcut: ct_route7 apply MyTextureMod)
+WROTE <project>\Dist\MyTextureMod.bundle <bytes> B as example_mytexturemod
+TEX PASS assets/example.mytexturemod/textures/acidworm -> <width>x<height> RGBA32 px[0,0]=<red>,<green>,<blue>,<alpha>
+ct_project: ALL PASS - <project>\Dist\MyTextureMod.bundle
 ```
+
+The source texture is written twice for two different jobs. P1 checks the private copy of the
+shipped bundle used by Replace. TEX checks the same imported source in this mod's own bundle.
 
 ## When it fails
 
@@ -98,7 +103,14 @@ ct_project: ALL PASS - this project has no bundle of its own; the patched copy(i
 |---|---|---|
 | `P1 REFUSED 'acidworm' is not a .png/.jpg under Content\Textures\` | The source was not imported. | Move `acidworm.png`, `.jpg` or `.jpeg` directly into `Content\Textures`, or correct `texture`. Delete any stale copy under `Content\Meshes\materials`. |
 | `P1 REFUSED target 'acidworm_low_albedo' is not a Texture2D in aln_acidworm_assets_all.bundle - <reason> - list the names it does hold with: ct_list assets aln_acidworm_assets_all.bundle Texture2D` | The source exists; the game target does not. | Run the printed command and copy the exact target name. Do not rename your source to hide a bad `asset`. |
-| `SOURCE SKIPPED: <file>: <reason> - SKIPPED, the project's other sources are unaffected` | The image decoder rejected the file. | Re-export it as PNG/JPG/JPEG and remove the unreadable file. |
+| `SOURCE SKIPPED: <file> <reason> - SKIPPED, the project's other sources are unaffected` | The image decoder rejected the file. | Re-export it as PNG/JPG/JPEG and remove the unreadable file. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md) before interpreting `SKIPPED`,
 `P1 REFUSED`, `FAILURE(S)` or a package refusal.
+
+Before testing, read [when a shipped-bundle redirect takes effect and why only one mod can own a
+bundle](../getting-started/lifecycle.md#redirects-affect-future-loads).
+
+## Worked demo
+
+[WeaponMesh](../examples/weapon-mesh.md) replaces five texture slots on one shipped rifle.

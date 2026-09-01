@@ -153,13 +153,21 @@ ct_creature: built 1 creature(s) from enabled content mods
 
 ## When it fails
 
-| Exact output | Meaning | Fix |
+| Console text | Meaning | Fix |
 |---|---|---|
-| `creature-roles FAIL ppcontent.json "creature": "clips" leaves <n> REQUIRED role(s) unmapped: <roles>. ...` | The scaffold has unassigned required roles. | Edit the `clips` map written into `ppcontent.json`; assign `walk`, `idle`, `attack` and `death`, then bake again. |
-| `creature-events WARN UNDECLARED: <role.event> - each costs a 10s stall per action ...` | A mapped action lacks an event the engine waits for. | Add that event and its measured fraction under `creature.events`. Do not guess the time. |
+| Output starts with `creature-roles FAIL ppcontent.json "creature": "clips" leaves <n> REQUIRED role(s) unmapped: <roles>.` The same line then lists the assignment rule and all accepted roles. | The scaffold has unassigned required roles. | Edit the `clips` map written into `ppcontent.json`; assign `walk`, `idle`, `attack` and `death`, then bake again. |
+| Output starts with `creature-events WARN UNDECLARED: <role.event> - each costs a 10s stall per action`. The same line then prints the manifest form to add. | A mapped action lacks an event the engine waits for. | Add that event and its measured fraction under `creature.events`. Do not guess the time. |
 | `ct_creature FAIL ppcontent.json "creature": "model" names '<name>' but Content\Models\ holds [<stems>]. Nothing was changed.` | `model` does not match a GLB stem. | Rename the GLB or change `model`. Delete stale extra GLBs. |
 | `ct_creature FAIL Content\Models\ holds 0 model(s) [] - there is no .glb to build a creature out of. Nothing was changed.` | No direct GLB exists. | Move one GLB directly into `Content\Models`. |
 | `ct_creature FAIL ppcontent.json "creature": "donor" is '<name>', which is neither a GameTagDef field on SharedGameTags nor the name of a shipped TacCharacterDef with a component set. Nothing was changed.` | The donor name is invalid. | Run `ct_list defs <filter> TacCharacterDef` and copy an exact suitable def name. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md). The scaffold's first failure is a
 request for decisions; the second bake must end in `ALL PASS`.
+
+## Worked demo
+
+[CustomCreature](../examples/custom-creature.md) wires a seven-clip, 49-bone spider to a Swarmer
+chassis and a Crabman ranged donor.
+
+[HumanoidSoldier](../examples/humanoid-soldier.md) uses the same creature builder with a playable
+human donor and `startingRoster: true`.

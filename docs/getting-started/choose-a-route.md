@@ -1,6 +1,7 @@
-# Choose Replace or Add
+# Choose Replace, Add or Build
 
-Decide whether the game already has the thing you want to change.
+Decide whether you are replacing shipped content, adding new content, or building a game object from
+content plus shipped definitions.
 
 | Your goal | Route | What your manifest names | Typical source folder |
 |---|---|---|---|
@@ -39,6 +40,12 @@ under `Content\Textures\`.
 No shipped target should be overwritten. ContentTool writes mod-owned content to the project's own
 bundle in `Dist\`. Adding content does not by itself tell the game when to use it. Some routes need a
 DLL for a trigger, a definition change or other behaviour.
+
+## Choose Build when
+
+You need ContentTool to create a creature or weapon definition around your content. A Build route
+names a shipped donor and a `creature` or `weapons` declaration. The donor supplies the game-facing
+structure; your manifest supplies the model, roles, values and other changes.
 
 ## Do not choose by folder name
 

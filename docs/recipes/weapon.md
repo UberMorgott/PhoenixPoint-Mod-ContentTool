@@ -205,7 +205,7 @@ Add prints:
 ```text
 model 'ar181' -> assets/example.myaddedweapon/models/ar181 <model summary>
 ct_project: ALL PASS - <project>\Dist\MyAddedWeapon.bundle
-1/1 key(s) published for 'example.myaddedweapon' - nothing was written to the game installation
+1/1 key(s) published LIVE for 'example.myaddedweapon' - nothing was written to the game installation
 ct_catalog: PASS - the game's own Addressables served the mod's own bundle, and nothing was written to the installation
 ct_weapon PASS 'Example AR' (Example_AR_WeaponDef) cloned from SY_LaserAssaultRifle_WeaponDef; icon (none declared); prefab load started for key 8f924c3a6d7e4b22a5f149b3cd882001; <tuning and VFX report>
 ct_weapon PASS StartingStorage of <n> difficulty def(s) now carries [10x Example_AR_WeaponDef + <ammo>]
@@ -227,4 +227,17 @@ saved manifest block.
 | `ct_bench REFUSED: the workbench stands a unit in the SQUAD BAY, and the squad bay is part of a loaded geoscape campaign. Load or start a campaign first.` | The visual bench has no geoscape squad bay. | Load or start a campaign, then open it again. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md). A P1/P4 refusal belongs to Replace;
-a `ct_weapon FAIL` belongs to runtime construction; `ct_package REFUSED` is a third, separate gate.
+a `ct_weapon FAIL` belongs to runtime construction; a refusal from `ct_package` is a third, separate
+gate.
+
+For the Replace route, read [when a shipped-bundle redirect takes effect and why only one mod can own
+a bundle](../getting-started/lifecycle.md#redirects-affect-future-loads). The
+[weapon workbench](../troubleshooting/bake-errors.md#inspect-a-weapon-replacement-without-a-mission)
+is the quickest visual check.
+
+## Worked demos
+
+- [WeaponMesh](../examples/weapon-mesh.md) is the Replace route: one shipped mesh, five shipped
+  textures and a DLL-written inventory icon.
+- [WeaponAdd](../examples/weapon-add.md) is the Add route: three published model keys and three cloned
+  weapon defs. Its current three-model revision still needs an in-game verification run.

@@ -51,7 +51,7 @@ nav:
   - Start here: index.md
   - Your first working mod:
       - First green bake: getting-started/first-mod.md
-      - Choose a route: getting-started/choose-a-route.md
+      - Choose Replace, Add or Build: getting-started/choose-a-route.md
       - Bake, test, package: getting-started/lifecycle.md
   - Project files: reference/project-files.md
   - Find game content: find-content/index.md
@@ -70,4 +70,16 @@ nav:
       - Weapons: recipes/weapon.md
       - Behaviour DLL: recipes/behavior-dll.md
       - Animation contract: recipes/animation-contract.md
-  - Worked examples: examples/index.md
+  - Worked examples:
+      - Choose a demo: examples/index.md
+      - MaterialTweak: examples/material-tweak.md
+      - WeaponMesh: examples/weapon-mesh.md
+      - ReplaceUiSounds: examples/replace-ui-sounds.md
+      - MenuMusic: examples/menu-music.md
+      - AddUiSounds: examples/add-ui-sounds.md
+      - IntroVideo: examples/intro-video.md
+      - QuitCutscene: examples/quit-cutscene.md
+      - CustomCreature: examples/custom-creature.md
+      - HumanoidSoldier: examples/humanoid-soldier.md
+      - ReplaceCharacterBody: examples/replace-character-body.md
+      - WeaponAdd: examples/weapon-add.md

@@ -27,12 +27,13 @@ Follow this route once before you pick a specialised recipe:
 
 1. [Make your first green bake](getting-started/first-mod.md). This proves that your folder, manifests,
    console and installation agree.
-2. [Choose Replace or Add](getting-started/choose-a-route.md).
+2. [Choose Replace, Add or Build](getting-started/choose-a-route.md).
 3. [Learn the project layout and file rules](reference/project-files.md).
 4. [Find the bundle, asset or media you need](find-content/index.md).
 5. [Bake, test and package](getting-started/lifecycle.md).
 6. [Read a failed bake](troubleshooting/bake-errors.md) before moving files at random.
 7. [Pick a recipe](recipes/index.md).
+8. [Open the closest worked demo](examples/index.md) and compare its manifest to yours.
 
 The first five pages are the golden path. They use one vocabulary throughout:
 
@@ -60,7 +61,8 @@ MyMod\
 copied by the packager, but `ct_project` will not import it. See
 [Textures versus materials](troubleshooting/bake-errors.md#textures-versus-materials).
 
-## Documentation status
+## Worked demos
 
-The setup, discovery, recipe and troubleshooting pages are complete through Phase 2. Worked demo
-explanations are still deferred to Phase 3 and remain marked as such.
+The site documents all [11 public demo projects](examples/index.md), including the route, targets,
+folder tree, authoring commands, success output and measured status of each. `NoDepTexture` is an
+internal fixture and is deliberately not presented as a modding example.

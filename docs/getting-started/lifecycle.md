@@ -53,7 +53,7 @@ ct_project: ALL PASS - <output>
 
 A replacement refusal is skipped so ContentTool can report and process the remaining rows. A thrown
 texture, mesh or model import is handled the same way. Those cases still end in
-`ct_project: N FAILURE(S)`. “Build continued” does not mean the declared change succeeded. The
+`ct_project: N FAILURE(S)`. Continuing to later rows does not mean the declared change succeeded. The
 [failure page](../troubleshooting/bake-errors.md#skipped-does-not-mean-successful) separates these
 counted failures from a reported unsupported audio file.
 
@@ -68,6 +68,40 @@ copies ready in <path> - nothing to install: ticking 'MyMod' on in the mod manag
 
 `ct_route7 apply MyMod` is a developer shortcut. It is not an installation step for authors or
 players. Test the real checkbox path before release.
+
+### Redirects affect future loads
+
+The checkbox installs a live path redirect. It cannot replace a bundle Unity has already loaded.
+When that bundle is resident, ContentTool refuses the redirect with this line:
+
+```text
+REFUSED: restart required: <bundle> is already loaded (as '<loaded identity>'). Unity rejects a second bundle of the same identity, and unloading the game's copy would pull it out from under live objects. Restart, then enable '<mod id>'.
+```
+
+This does not mean the bake is broken. Restart with the mod already ticked so ContentTool registers
+the redirect before the game first requests that bundle. For content loaded later, enable the mod
+before opening the screen or entering the mode that requests it.
+
+The redirect only changes the bundle named in `ppcontent.json`. A mission using assets named
+`CHR_PX_UNA_*` will not show replacements made only in `px_assault_assets_all.bundle` or
+`px_heavy_assets_all.bundle`. Confirm the target's real home with
+`ct_list assets <bundle> <Type> <name-filter>` before using a mission as the test. The
+[troubleshooting checks](../troubleshooting/bake-errors.md#the-redirect-is-live-but-the-old-asset-appears)
+separate a bad replacement from a bundle the game never requested.
+
+### One mod owns each shipped bundle
+
+ContentTool does not merge private copies made by separate mods. If two enabled mods replace assets
+in the same shipped bundle, only the mod with the lower ID keeps that bundle. The losing claim is
+reported by name:
+
+```text
+REFUSED: mod '<owner mod id>' already replaces <bundle> - '<other mod id>' cannot also replace it. One shipped bundle has exactly one owner and the lower mod id keeps it; one of the two has to go.
+```
+
+Activation order is not a compatibility strategy. Put both sets of replacement rows in one project,
+publish a compatibility version made from both authors' sources, or tell players to enable only one
+of the conflicting mods.
 
 ## 4. Package
 

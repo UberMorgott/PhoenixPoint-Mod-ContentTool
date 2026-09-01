@@ -1,13 +1,15 @@
 # Add a playable humanoid soldier
 
-This converts the repository's worked foreign humanoid onto Phoenix Point's Generic rig and adds it
-to a new campaign with no DLL. Use this route for a playable soldier that must carry the full game
-animation set, not for a creature with its own clips.
+This repository-only recipe retargets the included `tiffany_cox_idle_animation.glb` humanoid onto
+Phoenix Point's Generic rig and adds it to a new campaign with no DLL. Use it for a playable soldier
+that must carry the full game animation set, not for a creature with its own clips.
 
 ## What you need before you start
 
-- Python 3 and the repository's `tools` directory.
-- The worked source named `tiffany_cox_idle_animation.glb` at the repository root.
+- A clone of the GitHub source repository. The release zip installed by players does not contain the
+  retargeting scripts or the worked source used by this recipe.
+- Python 3. Run the offline commands from the cloned repository root.
+- The included source `tiffany_cox_idle_animation.glb` at that repository root.
 - The checked-in `tools\pp-clips.json` and `tools\pp-rest.tsv` for this game build.
 - All 300 retargeted clips. Do not run `ppslim.py` on a playable soldier: missing aim, reload, stance
   or weapon-family clips can leave an action waiting forever.
@@ -20,7 +22,7 @@ source constants in the scripts; the generated `ppskel-bone-map.json` is a repor
 ## Folder tree
 
 ```text
-ContentTool\
+PhoenixPoint-Mod-ContentTool\     <- cloned GitHub repository; run Python here
   tiffany_cox_idle_animation.glb <- fixed ppskel input
   tiffany_cox_ppskel.glb         <- ppskel output
   tiffany_cox_ppfit.glb          <- ppretarget output with all 300 clips
@@ -31,19 +33,32 @@ ContentTool\
     ppzip.py
     pp-clips.json                <- retarget input for the shipped game build
     pp-rest.tsv
-  MySoldier\
-    meta.json
-    ppcontent.json
-    Content\
-      Models\
-        soldier.glb              <- renamed copy of tiffany_cox_ppzip.glb
-    Dist\
-      MySoldier.bundle
+
+Phoenix Point\
+  Mods\
+    ContentTool\                 <- installed engine mod
+      meta.json
+    MySoldier\                   <- sibling project; ct_project MySoldier selects this
+      meta.json
+      ppcontent.json
+      Content\
+        Models\
+          soldier.glb            <- renamed copy of tiffany_cox_ppzip.glb
+      Dist\
+        MySoldier.bundle
 ```
 
 ## Steps
 
-1. Put the untouched worked source at repository root as `tiffany_cox_idle_animation.glb`.
+1. Clone the source repository and enter its root. Do not try to run this recipe from the player
+   release zip:
+
+   ```text
+   git clone https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool.git
+   cd PhoenixPoint-Mod-ContentTool
+   ```
+
+   Keep the included source named `tiffany_cox_idle_animation.glb` at this root.
 
 2. Rename and extend its skeleton onto Phoenix Point's bone paths:
 
@@ -68,8 +83,9 @@ ContentTool\
    python tools\ppzip.py --selfcheck
    ```
 
-5. Create `MySoldier\Content\Models`, copy `tiffany_cox_ppzip.glb` there, and rename the copy
-   `soldier.glb`. Do not leave a second GLB in that folder.
+5. Under the game's `Mods` folder, create sibling project `MySoldier\Content\Models`. Copy
+   `tiffany_cox_ppzip.glb` there and rename the copy `soldier.glb`. Do not leave a second GLB in
+   that folder, and do not put `MySoldier` under `Mods\ContentTool`.
 
 6. Create `MySoldier\meta.json`:
 
@@ -151,12 +167,19 @@ After restart, `Player.log` ends the build with `ct_creature PASS '<template>' i
 
 ## When it fails
 
-| Exact output | Meaning | Fix |
+| Console text | Meaning | Fix |
 |---|---|---|
 | `ppskel check OK:` is absent | The fixed source, mapping or generated rig did not pass the script's checks. | Stop. Restore the expected source filename or fix the mapping; do not pass a failed output to `ppretarget.py`. |
 | `ppretarget check OK:` is absent | Rest orientation, segment preservation or the 300-clip conversion failed. | Stop. Keep the console error and correct the input/mapping; do not ship `tiffany_cox_ppfit.glb`. |
-| `creature-roles FAIL ppcontent.json "creature": "clips" leaves <n> REQUIRED role(s) unmapped: <roles>. ...` | A required manifest clip is absent or unmapped. | Keep all 300 clips and restore the five exact mapping names above. Bake again. |
+| Output starts with `creature-roles FAIL ppcontent.json "creature": "clips" leaves <n> REQUIRED role(s) unmapped: <roles>.` The same line then lists the assignment rule and all accepted roles. | A required manifest clip is absent or unmapped. | Keep all 300 clips and restore the five exact mapping names above. Bake again. |
 | `ct_creature FAIL ppcontent.json "creature": "model" names 'soldier' but Content\Models\ holds [<stems>]. Nothing was changed.` | The shipped GLB was renamed differently or an extra model is present. | Keep one direct file named `soldier.glb`, or update `model`. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md). The offline check lines are required
 before `ct_project`; `ALL PASS` is required before packaging.
+
+## Worked demo
+
+[HumanoidSoldier](../examples/humanoid-soldier.md) is the data-only Add project built by this recipe.
+
+[ReplaceCharacterBody](../examples/replace-character-body.md) reuses the full retargeted clip set on
+the experimental in-place route.

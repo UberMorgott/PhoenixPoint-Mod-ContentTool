@@ -94,10 +94,10 @@ The geometry summary and binding text depend on the file:
 
 ```text
 patch px_equipment_assets_all.bundle: mesh 'WPN_PX_RG_Assault_Rifle_T01_V01' <- rifle <geometry summary> - skinned <binding result>
-WROTE <patched path> <bytes> B as <bundle identity>
-P4 PASS <read-back geometry comparison>
+WROTE <patched path> <bytes> B as <bundle identity> (shipped source is <bytes> B)
+P4 PASS mesh 'WPN_PX_RG_Assault_Rifle_T01_V01' in the copy IS rifle -> <read-back geometry summary>
 P5 VOID 'WPN_PX_RG_Assault_Rifle_T01_V01' is not rigged - <skin summary>
-copies ready in <path> - nothing to install: ticking 'MyMeshMod' on serves these private copies in memory; ticking it off hands the shipped bundles straight back
+copies ready in <path> - nothing to install: ticking 'MyMeshMod' on in the mod manager redirects them (dev-only shortcut: ct_route7 apply MyMeshMod)
 ct_project: ALL PASS - this project has no bundle of its own; the patched copy(ies) above are the whole output
 ```
 
@@ -110,7 +110,14 @@ For a rigged target, P5/P6 print `PASS` checks instead of the P5 `VOID` static-m
 | `P4 REFUSED 'rifle' is not a .obj or .glb under Content\Meshes\` | The source stem was not imported. | Move `rifle.obj` or `rifle.glb` directly into `Content\Meshes`, or correct `mesh`. |
 | `P4 REFUSED target 'WPN_PX_RG_Assault_Rifle_T01_V01' is not a Mesh in px_equipment_assets_all.bundle - <reason> - list the names it does hold with: ct_list assets px_equipment_assets_all.bundle Mesh` | The shipped target name is wrong or ambiguous. | Run the printed command and copy the exact name. |
 | `P4 REFUSED '<source>' -> '<target>' is a rigged model - it bends with the character's skeleton - and the replacement file carries no armature, so there are no weights to follow that skeleton with. Every vertex would be welded to whichever bone it happens to sit nearest, and the model would collapse onto that one bone as soon as the character moves. In Blender, give the mesh an Armature modifier with vertex groups, weight it to the bones the target already has, and export it as .glb. A file with no armature can only replace a STATIC object (one with a MeshFilter, like a weapon).` | A skinless source was aimed at a rigged target. | Add an armature and weights in Blender and export GLB, or choose a static target. OBJ cannot satisfy this route. |
-| `SOURCE SKIPPED: <file>: <reason> - SKIPPED, the project's other sources are unaffected` | The OBJ/GLB importer rejected the source. | Re-export or delete the bad file, then bake again. |
+| `SOURCE SKIPPED: <file> <reason> - SKIPPED, the project's other sources are unaffected` | The OBJ/GLB importer rejected the source. | Re-export or delete the bad file, then bake again. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md). A fallback binding reported in the
 successful `patch` line is not the same as a refused skinless source.
+
+Before testing, read [when a shipped-bundle redirect takes effect and why only one mod can own a
+bundle](../getting-started/lifecycle.md#redirects-affect-future-loads).
+
+## Worked demo
+
+[WeaponMesh](../examples/weapon-mesh.md) replaces a static rifle mesh and keeps the weapon def.

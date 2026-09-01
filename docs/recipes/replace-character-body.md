@@ -143,13 +143,18 @@ roster/tactical/save/reload test with Festering Skies installed and keep the log
 
 ## When it fails
 
-| Exact output | Meaning | Fix |
+| Console text | Meaning | Fix |
 |---|---|---|
 | `ct_creature FAIL ppcontent.json "creature": "replaceBody" is 'S_SY_Eileen_CharacterTemplateDef', which is not the name of a shipped TacCharacterDef with a component set. It names the ONE character whose body this model replaces - write a def name such as "S_SY_Eileen_CharacterTemplateDef". A DLC character is absent unless that DLC is installed. Nothing was changed.` | Festering Skies is absent, the name is wrong, or the def lacks the required structure. | Install/enable the DLC or choose a real target returned by `ct_list defs <filter> TacCharacterDef`. Do not fall back to a guessed name. |
 | `ct_creature FAIL '<target>' already wears the body of mod '<id>' - a character has one body, and two mods replacing the same one would share ByTemplate() state. Disable one of them, or point this mod's "replaceBody" at a different character. Nothing was changed.` | Another enabled mod already owns this character's body. | Disable one body mod or choose a different target. Restart before retesting. |
 | `ct_creature FAIL ppcontent.json "creature": "model" names 'body' but Content\Models\ holds [<stems>]. Nothing was changed.` | `body.glb` is absent or named differently. | Keep one direct `Content\Models\body.glb`, or update `model`. |
 | `ct_creature VOID '<project>\Dist\ReplaceCharacterBody.bundle' does not exist - run `ct_project ReplaceCharacterBody` in the console once, then restart. Nothing was changed.` | Runtime started before the mod-owned bundle existed. | Run the printed bake, require `ALL PASS`, then restart. |
-| `creature-roles FAIL ppcontent.json "creature": "clips" leaves <n> REQUIRED role(s) unmapped: <roles>. ...` | A required clip was removed or renamed. | Restore the full 300-clip output and exact role mappings. Do not trim a playable character. |
+| Output starts with `creature-roles FAIL ppcontent.json "creature": "clips" leaves <n> REQUIRED role(s) unmapped: <roles>.` The same line then lists the assignment rule and all accepted roles. | A required clip was removed or renamed. | Restore the full 300-clip output and exact role mappings. Do not trim a playable character. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md). A clean bake does not prove the
 experimental in-game result; the TODO above remains open until that separate run exists.
+
+## Worked demo
+
+[ReplaceCharacterBody](../examples/replace-character-body.md) targets Eileen from Festering Skies.
+It remains experimental and unverified in-game.

@@ -106,7 +106,7 @@ The success report begins and ends like this:
 
 ```text
 PACKAGED <count> file(s), <bytes> B into <package-path>
-Zip the FOLDER itself, so the archive holds MyFirstMod\meta.json, and upload it. <installation guidance>
+Zip the FOLDER itself, so the archive holds MyFirstMod\meta.json, and upload it. The player unzips it into Mods\ (ending up with Mods\<YourMod>\meta.json) or subscribes on the Workshop; the mod manager enables ContentTool for them because meta.json declares it.
 ```
 
 The staged folder is under:
@@ -122,9 +122,13 @@ Package the `MyFirstMod` folder itself. Do not put `meta.json` at the root of `M
 
 ## If it fails
 
-- `ct_project THREW System.IO.FileNotFoundException: no ppcontent.json in <root>` means the command
-  resolved a folder without the manifest. Check the folder name and put `ppcontent.json` at its root.
-- `ppcontent.json needs both "id" and "bundle"` means one of those root fields is missing or empty.
+- Output that starts with
+  `ct_project THREW System.IO.FileNotFoundException: no ppcontent.json in <root>` means the command
+  resolved a folder without the manifest. `File name: '<path>'` and a stack
+  trace follow that first line. Check the folder name and put `ppcontent.json` at its root.
+- Output that starts with
+  `ct_project THREW System.IO.InvalidDataException: ppcontent.json needs both "id" and "bundle"`
+  means one of those root fields is missing or empty. A stack trace follows.
 - `P3 REFUSED "material": "<value>" is not <property>=<number>` means the material value is not one
   property name, `=`, and a number written with a decimal point.
 - `P3 REFUSED target '<asset>' is not a Material in <bundle> - <reason> - list the names it does hold with: ct_list assets <bundle> Material`
@@ -132,8 +136,8 @@ Package the `MyFirstMod` folder itself. Do not put `meta.json` at the root of `M
   line and correct `asset`; do not rename your project files.
 - `ct_project: N FAILURE(S)` means at least one declared operation was not fulfilled. Read upward to
   the first `REFUSED`, `FAIL` or `SOURCE SKIPPED` line.
-- `meta.json does not declare "Dependencies": [ "com.morgott.ContentTool" ] - without it the player can install this mod with the engine switched off and it will silently do nothing. With it, Phoenix Point enables ContentTool for them.`
-  is a packaging refusal. Restore the dependency exactly as shown, then run `ct_package MyFirstMod`
-  again.
+- The package refusal list contains
+  `  REFUSED: meta.json does not declare "Dependencies": [ "com.morgott.ContentTool" ] - without it the player can install this mod with the engine switched off and it will silently do nothing. With it, Phoenix Point enables ContentTool for them.` Restore
+  the dependency exactly as shown, then run `ct_package MyFirstMod` again.
 
 Next: [choose the route for your real mod](choose-a-route.md).

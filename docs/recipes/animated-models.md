@@ -103,7 +103,7 @@ ct_project: ALL PASS - <project>\Dist\MyModelMod.bundle
 Publishing then ends with these actual summary shapes:
 
 ```text
-1/1 key(s) published for 'example.mymodelmod' - nothing was written to the game installation
+1/1 key(s) published LIVE for 'example.mymodelmod' - nothing was written to the game installation
 No restart needed, nothing was written to your game installation, and disabling 'example.mymodelmod' removes whatever published again.
 ct_catalog: PASS - the game's own Addressables served the mod's own bundle, and nothing was written to the installation
 ```
@@ -112,10 +112,14 @@ ct_catalog: PASS - the game's own Addressables served the mod's own bundle, and 
 
 | Exact output | Meaning | Fix |
 |---|---|---|
-| `SOURCE SKIPPED: <file>: <reason> - SKIPPED, the project's other sources are unaffected` | The GLB or an external image could not be imported. | Re-export the named file or delete it, then bake again. |
+| `SOURCE SKIPPED: <file> <reason> - SKIPPED, the project's other sources are unaffected` | The GLB or an external image could not be imported. | Re-export the named file or delete it, then bake again. |
 | `texture REFUSED 'soldier' material 'uniform' carries a <bytes> B embedded image that could not be decoded (<reason>); it would render white. Supply Content\Textures\soldier_uniform.png instead.` | The GLB image is unreadable. | Export `soldier_uniform.png` and put it directly in `Content\Textures`. |
 | `REFUSED: no mod bundle at <path> - bake it first with 'ct_project MyModelMod'. Installing a key does not bake, on purpose: a build command must not mutate the player's game installation.` | `ct_catalog apply` ran before a successful bake. | Run `ct_project MyModelMod` and fix its failures first. |
 | `REFUSED: 'assets/example.mymodelmod/models/soldier' is not in MyModelMod.bundle (it holds <n> asset(s)); the key '8f924c3a6d7e4b22a5f149b3cd881001' would resolve to null forever. Nothing was published.` | `publish.asset` does not match the baked relative path. | Use `models/soldier`; bake again, then apply. |
-| `REFUSED: '<mod>' publishes key '<key>', which the game's own catalog already has. A locator ContentTool appends is appended AFTER the shipped one, so the shipped asset would keep winning and this key would silently do nothing. Publishing ADDS new keys only. To REPLACE what an existing key already serves, declare it under "replace" instead - that route serves a patched private copy of the shipped bundle while the mod is enabled.` | The key is not new. | Generate a different key. Use Replace if the intent is to overwrite shipped content. |
+| `REFUSED: '<mod>' publishes key '<key>', which the game's own catalog already has. A locator ContentTool appends is appended AFTER the shipped one, so the shipped asset would keep winning and this key would silently do nothing. Publishing ADDS new keys only. To REPLACE what an existing key already serves, declare it under "replace" instead - that route serves a patched private copy of the shipped bundle and needs no catalog key at all.` | The key is not new. | Generate a different key. Use Replace if the intent is to overwrite shipped content. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md). `ct_catalog` publishes; it never bakes.
+
+## Worked demo
+
+[WeaponAdd](../examples/weapon-add.md) publishes three mod-owned GameObject keys from one bundle.

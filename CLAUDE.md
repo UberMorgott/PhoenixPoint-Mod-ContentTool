@@ -27,6 +27,13 @@ model/texture renders — use **PPCLI** (`E:\DEV\PhoenixPoint\PPCLI\`).
   `-PPRoot "D:\Steam\steamapps\common\Phoenix Point"`. Reads are free; anything that WRITES to a real
   save needs explicit permission each time. Do not kill a process there.
 
+### When PPCLI itself misbehaves
+
+Append it to **`E:\DEV\PhoenixPoint\PPCLI\ISSUES.md`** — the log lives in PPCLI's own repo root so the
+agent working on PPCLI finds it at session start without being told. Record only what an actual run
+showed (attempted → happened → expected → evidence → severity), never a suspicion from reading the
+source. Do not stop the current task to fix PPCLI; note it and work around it.
+
 ### Checking a model/texture without playing
 
 To look at replaced content there is no need to load a save or start a mission — the game's own

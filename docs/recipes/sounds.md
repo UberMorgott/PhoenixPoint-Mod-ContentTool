@@ -123,14 +123,21 @@ failure. The `BANK PASS` and final `ALL PASS` remain the bake result.
 
 ## When it fails
 
-| Exact output | Meaning | Fix |
+| Console text | Meaning | Fix |
 |---|---|---|
-| `"sounds" names 'sting_confirm.mp3' for media 633458426, and there is no such file in <dir>` | The replacement source is missing from `Content\Audio\Replace`. | Move that exact file there or correct `file`. |
-| `two files aim at media 633458426: '<a>' and '<b>'` | Two declarations target the same shipped media. | Delete the unwanted row/file or correct its media ID. |
+| Output starts with `ct_sound THREW System.IO.InvalidDataException: "sounds" names 'sting_confirm.mp3' for media 633458426, and there is no such file in <dir>`, followed by a stack trace. | The replacement source is missing from `Content\Audio\Replace`. | Move that exact file there or correct `file`. |
+| Output starts with `ct_sound THREW System.IO.InvalidDataException: two files aim at media 633458426: '<a>' and '<b>'`, followed by a stack trace. | Two declarations target the same shipped media. | Delete the unwanted row/file or correct its media ID. |
 | `bake REFUSED 633458426 is not one of the <count> media IDs Phoenix Point owns - nothing would ever play it` | The number is not a shipped media ID. | Repeat discovery and use a real owned ID. Use Add for a new event. |
 | `bake REFUSED sting_confirm.mp3 <reason>` | The decoder rejected the source. | Re-export it as WAV, OGG or MP3; delete the rejected copy. |
-| `Content\Audio\Replace\ holds two files for the same media: <a> and <b> - one of them has to go` | Two source filenames collapse to the same declared media mapping. | Remove one duplicate. |
+| Output starts with `ct_sound THREW System.IO.InvalidDataException: Content\Audio\Replace\ holds two files for the same media: <a> and <b> - one of them has to go`, followed by a stack trace. | Two source filenames collapse to the same declared media mapping. | Remove one duplicate. |
 | `SOURCE SKIPPED: Content\Audio\ holds <n> file(s) this tool does not import: <files> - the accepted set is .wav, .ogg and .mp3, which this tool decodes itself at bake time. Export the rest to .ogg (small) or .wav (lossless); no decoder for .flac, .m4a/.aac, .wma or .opus is going into this tool (docs\research-format-coverage.md 2.1).` | An Add source has an unsupported extension. | Export it to OGG or WAV and delete the unsupported file. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md). `ct_sound bake` builds replacement
 banks; `ct_project` builds added sounds. `ct_package` does neither.
+
+## Worked demos
+
+- [ReplaceUiSounds](../examples/replace-ui-sounds.md) uses explicit media-to-file mappings.
+- [MenuMusic](../examples/menu-music.md) uses numeric filenames for two looping replacements.
+- [AddUiSounds](../examples/add-ui-sounds.md) adds a bank and calls its new events from a DLL.
+- [IntroVideo](../examples/intro-video.md) replaces the Wwise-media part of a cutscene.

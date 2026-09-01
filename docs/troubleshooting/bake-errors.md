@@ -4,11 +4,11 @@ ContentTool 1.1.2 reports work at three levels. Do not treat them as synonyms.
 
 | Text | What happened | Can later work continue? |
 |---|---|---|
-| `SOURCE SKIPPED:` | One source file could not be read. That source is absent from this bake. | Yes. Other sources still bake, but the run ends in `FAILURE(S)`. |
+| `SOURCE SKIPPED:` | One source was not imported. An accepted file that throws while loading counts as a failure; an unsupported audio extension is reported and ignored. | Yes. Other sources still bake. Read the final summary. |
 | `P<n> REFUSED` | One declared replacement was not fulfilled. | Yes. Other rows still run, but the summary counts this refusal. |
 | `ct_project: ALL PASS` | Every check in this bake passed. | This is the result you want before packaging. |
 | `ct_project: N FAILURE(S)` | The bake finished, but `N` checks or declared rows failed. | Fix every earlier failure and bake again. |
-| `ct_package REFUSED` or `REFUSED - this package is NOT publishable` | Packaging itself stopped. | No publishable package was left behind. |
+| `REFUSED - this package is NOT publishable` from `ct_package` | Packaging itself stopped. | No publishable package was left behind. |
 
 `WROTE`, `patch` and `copies ready` describe intermediate work. They do not cancel a later
 `ct_project: N FAILURE(S)`.
@@ -46,10 +46,15 @@ continues with the other sources and can still write their output. The skipped i
 failure, so the run does not become `ALL PASS`. If you run `ct_package` anyway, packaging can still
 stage the author files because it does not repeat the import.
 
+An unsupported file under `Content\Audio\` also prints `SOURCE SKIPPED:`, but it was never an
+accepted source. That notice does not itself increment the failure count. The file is still absent
+from the bundle. Convert it to WAV, OGG or MP3, delete the unsupported copy, and bake again.
+
 `P<n> REFUSED` means a declared replacement did not happen. The row is counted, later rows continue,
 and the run ends with `ct_project: N FAILURE(S)`.
 
-`ct_package REFUSED` is different. Packaging itself stopped and removed its partial output folder.
+A refusal from `ct_package` is different. Packaging itself stopped and removed its partial output
+folder.
 The packager never checks whether a texture came from `Content\Textures`; that check belongs to P1
 inside `ct_project`.
 
@@ -85,9 +90,77 @@ The source may be fine. `asset` names a `Texture2D` inside the shipped bundle, a
 case-sensitive name is absent. Run the command printed in the refusal. Copy a real name into
 `ppcontent.json`.
 
-Both are per-row `ct_project` failures. Version 1.1.2 contains missing-target failures in the P1
-texture, P3 material, P4 mesh and P7 clip arms. It reports the bad row, continues with later rows and
-still prints a summary.
+Both are per-row `ct_project` failures. Version 1.1.2 confines each missing-target failure to its own
+P1 texture, P3 material, P4 mesh or P7 clip row. It reports that row, continues with later rows and
+still prints a summary; one bad target no longer terminates the entire bake.
+
+## The redirect is live but the old asset appears
+
+A shipped-bundle replacement is used only for bundle loads that happen after its redirect is
+registered. `ct_project: ALL PASS` proves the private copy; it does not force Unity to unload the
+shipped bundle or make the current screen request it again.
+
+If the bundle was already resident, registration prints:
+
+```text
+REFUSED: restart required: <bundle> is already loaded (as '<loaded identity>'). Unity rejects a second bundle of the same identity, and unloading the game's copy would pull it out from under live objects. Restart, then enable '<mod id>'.
+```
+
+Restart with the mod ticked before the target bundle is first loaded. Do not keep applying the route
+inside the same session; the refusal is protecting objects that are already using the shipped copy.
+
+If registration succeeded but you still see the old asset, check that the thing on screen actually
+uses the bundle and asset you changed:
+
+```text
+ct_route7 status
+ct_list assets <declared-bundle> <Type> <target-name>
+```
+
+The first command shows the live bundle claims. The second proves whether the named target belongs
+to your declared bundle. Use `ct_list bundles <name-filter>` and then `ct_list assets` to investigate
+another likely bundle. In one measured mission, `px_assault_assets_all.bundle` and
+`px_heavy_assets_all.bundle` were redirected while the squad wore `CHR_PX_UNA_*` assets. The
+replacements did not fail; that mission never requested the patched bundles.
+
+## Another mod owns the bundle
+
+Separate private copies of one shipped bundle cannot be combined at load time. ContentTool keeps one
+owner, chosen by the lower mod ID, and reports the losing claim:
+
+```text
+REFUSED: mod '<owner mod id>' already replaces <bundle> - '<other mod id>' cannot also replace it. One shipped bundle has exactly one owner and the lower mod id keeps it; one of the two has to go.
+```
+
+Two mods that replace different assets still conflict when those assets live in the same bundle.
+Disable one mod, or make one compatibility project containing both sets of replacement rows and both
+authors' permitted source files. State the incompatibility on both release pages; changing load order
+does not make the private copies merge.
+
+## Inspect a weapon replacement without a mission
+
+The weapon-fit workbench is the quickest way to look at a replaced weapon. You do not need a tactical
+save or a mission. You do need a loaded geoscape campaign because the workbench uses its squad bay.
+Open the console and run:
+
+```text
+ct_bench open
+```
+
+A successful open prints this shape and shows the full-screen workbench:
+
+```text
+ct_bench open (<units> unit template(s), <content-mod units> of them built by a content mod and listed FIRST, <weapons> weapon(s), <this-mod weapons> of them built by this mod and listed FIRST). Ctrl+Alt+B, the RESET VIEW button, or 'ct_bench close' to leave.
+```
+
+Choose the shipped weapon whose mesh or textures you replaced. This makes the visual check independent
+of a mission's roster and equipment. Close it with `ct_bench close`.
+
+If no geoscape squad bay is available, the exact refusal is:
+
+```text
+ct_bench REFUSED: the workbench stands a unit in the SQUAD BAY, and the squad bay is part of a loaded geoscape campaign. Load or start a campaign first.
+```
 
 ## Texture placement never belongs to packaging
 
@@ -111,7 +184,7 @@ Angle-bracketed words below stand for values printed from your project.
 
 | Exact output | Meaning | Fix |
 |---|---|---|
-| `SOURCE SKIPPED: <filename>: <reason> - SKIPPED, the project's other sources are unaffected` | An accepted source extension was found, but its decoder or parser threw. | Re-export the named file in a supported form, or delete it if it is not part of the mod. |
+| `SOURCE SKIPPED: <filename> <reason> - SKIPPED, the project's other sources are unaffected` | An accepted source extension was found, but its decoder or parser threw. | Re-export the named file in a supported form, or delete it if it is not part of the mod. |
 | `P1 REFUSED '<name>' is not a .png/.jpg under Content\Textures\` | No imported PNG/JPG/JPEG has that stem. | Put the file directly in `Content\Textures\`, or correct `texture`. Do not use `Content\Meshes\materials\`. |
 | `P1 REFUSED target '<asset>' is not a Texture2D in <bundle> - <reason> - list the names it does hold with: ct_list assets <bundle> Texture2D` | The game bundle has no unique `Texture2D` with that exact name. | Run the printed command and copy the exact case. |
 | `P3 REFUSED "material": "<value>" is not <property>=<number>` | The property edit did not parse. | Write one property, one `=`, and an invariant decimal such as `_GlossMapScale=0.15`. |
@@ -127,20 +200,20 @@ Duplicate names say how many were found and end with `refusing to guess which on
 
 ## Sound replacement refusals
 
-| Exact output | Meaning | Fix |
+| Console text | Meaning | Fix |
 |---|---|---|
-| `"sounds" names '<file>' for media <id>, and there is no such file in <dir>` | The manifest names a source that is absent from `Content\Audio\Replace`. | Move the named WAV/OGG/MP3 there or correct `file`. |
-| `two files aim at media <id>: '<a>' and '<b>'` | Two rows replace one shipped media ID. | Delete one row or give it the intended different media ID. |
+| Output starts with `ct_sound THREW System.IO.InvalidDataException: "sounds" names '<file>' for media <id>, and there is no such file in <dir>`, followed by a stack trace. | The manifest names a source that is absent from `Content\Audio\Replace`. | Move the named WAV/OGG/MP3 there or correct `file`. |
+| Output starts with `ct_sound THREW System.IO.InvalidDataException: two files aim at media <id>: '<a>' and '<b>'`, followed by a stack trace. | Two rows replace one shipped media ID. | Delete one row or give it the intended different media ID. |
 | `bake REFUSED <id> is not one of the <count> media IDs Phoenix Point owns - nothing would ever play it` | The target is not a shipped Wwise media ID. | Find the correct shipped ID; do not use this route to add a sound. |
 | `bake REFUSED <filename> <reason>` | The source decoder refused the file. | Re-export it as a supported WAV, OGG or MP3 and remove the bad file. |
 
 ## Project and package refusals
 
-| Exact output | Meaning | Fix |
+| Console text | Meaning | Fix |
 |---|---|---|
-| `ct_project THREW System.IO.FileNotFoundException: no ppcontent.json in <root>` | The command resolved the wrong or incomplete project folder. | Put `ppcontent.json` at the project root. Remove or rename a stale fallback project. |
-| `ppcontent.json needs both "id" and "bundle"` | A required root value is empty or absent. | Add both root strings. |
-| `Content\<folder>\ holds two files with the same name: <a> and <b> - a replacement names the stem, so one of them has to go` | Two accepted sources have the same stem ignoring case. | Delete or rename one and update its manifest reference. |
+| Output starts with `ct_project THREW System.IO.FileNotFoundException: no ppcontent.json in <root>`, then includes `File name: '<path>'` and a stack trace. | The command resolved the wrong or incomplete project folder. | Put `ppcontent.json` at the project root. Remove or rename a stale fallback project. |
+| Output starts with `ct_project THREW System.IO.InvalidDataException: ppcontent.json needs both "id" and "bundle"`, followed by a stack trace. | A required root value is empty or absent. | Add both root strings. |
+| Output starts with `ct_project THREW System.IO.InvalidDataException: Content\<folder>\ holds two files with the same name: <a> and <b> - a replacement names the stem, so one of them has to go`, followed by a stack trace. | Two accepted sources have the same stem ignoring case. | Delete or rename one and update its manifest reference. |
 | `nothing to bake - put .png/.jpg under Content\Textures\, .glb under Content\Models\ or .wav under Content\Audio\` | No own-bundle source and no usable replacement row was present. | Check direct placement and the parsed manifest. A stat-only weapon is intentionally built at runtime instead. |
 | `REFUSED - this package is NOT publishable, and <outDir> has been deleted rather than half-written.` | One or more package validation rules failed. | Read every indented `REFUSED:` below it. The partial output directory was deleted. |
 

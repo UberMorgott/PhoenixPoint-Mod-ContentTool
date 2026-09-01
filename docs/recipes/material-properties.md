@@ -70,9 +70,9 @@ MyMaterialMod\
 
 ```text
 patch aln_fireworm_assets_all.bundle: material 'ALN_Fireworm_DMG' _GlossMapScale=0.15
-WROTE <patched path> <bytes> B as <bundle identity>
+WROTE <patched path> <bytes> B as <bundle identity> (shipped source is <bytes> B)
 P3 PASS material 'ALN_Fireworm_DMG' in the copy carries _GlossMapScale=0.15 -> <read-back value>
-copies ready in <path> - nothing to install: ticking 'MyMaterialMod' on serves these private copies in memory; ticking it off hands the shipped bundles straight back
+copies ready in <path> - nothing to install: ticking 'MyMaterialMod' on in the mod manager redirects them (dev-only shortcut: ct_route7 apply MyMaterialMod)
 ct_project: ALL PASS - this project has no bundle of its own; the patched copy(ies) above are the whole output
 ```
 
@@ -85,3 +85,10 @@ ct_project: ALL PASS - this project has no bundle of its own; the patched copy(i
 
 Read [the status glossary](../troubleshooting/bake-errors.md). A P3 refusal is a failed row in
 `ct_project`; it is not `ct_package` stopping.
+
+Before testing, read [when a shipped-bundle redirect takes effect and why only one mod can own a
+bundle](../getting-started/lifecycle.md#redirects-affect-future-loads).
+
+## Worked demo
+
+[MaterialTweak](../examples/material-tweak.md) is this recipe reduced to one `_GlossMapScale` row.

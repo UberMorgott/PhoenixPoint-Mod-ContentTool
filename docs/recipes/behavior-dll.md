@@ -144,10 +144,19 @@ If you used the sample builder call with a valid `weapons` entry, `Player.log` a
 
 | Exact output | Meaning | Fix |
 |---|---|---|
-| `REFUSED: meta.json declares "AssemblyName": "MyCodeMod.dll" but the package does not contain that file - the game refuses to load the mod. Build it, or set "AssemblyName": "" for a content-only mod.` | The named DLL was not found under the project. | Run the build, correct `AssemblyName`, or remove it for a content-only mod. |
-| `REFUSED: meta.json does not declare "Dependencies": [ "com.morgott.ContentTool" ] - without it the player can install this mod with the engine switched off and it will silently do nothing. With it, Phoenix Point enables ContentTool for them.` | The dependency is missing. | Add the exact dependency string and package again. |
+| `  REFUSED: meta.json declares "AssemblyName": "MyCodeMod.dll" but the package does not contain that file - the game refuses to load the mod. Build it, or set "AssemblyName": "" for a content-only mod.` | The named DLL was not found under the project. | Run the build, correct `AssemblyName`, or remove it for a content-only mod. |
+| `  REFUSED: meta.json does not declare "Dependencies": [ "com.morgott.ContentTool" ] - without it the player can install this mod with the engine switched off and it will silently do nothing. With it, Phoenix Point enables ContentTool for them.` | The dependency is missing. | Add the exact dependency string and package again. |
 | `ct_weapon VOID no ppcontent.json in '<dir>'` | The builder was called with a folder that has no manifest. | Pass `Instance.Entry.Directory` and keep `ppcontent.json` at the mod root. |
 | `ct_weapon VOID ppcontent.json declares no "weapons" block` | The sample builder call has no work. | Add a valid `weapons` array, or remove the call and implement the behaviour your mod needs. |
 
 Read [the status glossary](../troubleshooting/bake-errors.md). A compiler error is neither a bake
 failure nor a package refusal; fix it before running `ct_package`.
+
+## Worked demos
+
+- [WeaponMesh](../examples/weapon-mesh.md) writes two icon fields after replacing content.
+- [AddUiSounds](../examples/add-ui-sounds.md) loads an added bank and supplies an Alt+B trigger.
+- [IntroVideo](../examples/intro-video.md) assigns a subtitle `TextAsset` to a cutscene def.
+- [QuitCutscene](../examples/quit-cutscene.md) adds a runtime def and intercepts main-menu quit.
+- [CustomCreature](../examples/custom-creature.md) adds the built unit through both new-game paths.
+- [WeaponAdd](../examples/weapon-add.md) delegates three manifest entries to the shared weapon builder.

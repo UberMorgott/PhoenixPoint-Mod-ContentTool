@@ -81,7 +81,7 @@ MyVideoMod\
    }
    ```
 
-6. Ask the project command to validate the declaration, then serve it live:
+6. Run `ct_project` to validate the declaration, then serve it live:
 
    ```text
    ct_project MyVideoMod
@@ -92,7 +92,7 @@ MyVideoMod\
    [Build a behaviour DLL](behavior-dll.md). For Replace, enabling the mod serves the row
    automatically; `ct_video live` is also the author's refresh command.
 
-8. Package after the project command passes:
+8. Package after `ct_project` passes:
 
    ```text
    ct_package MyVideoMod
@@ -137,3 +137,8 @@ P-number, because no shipped Unity bundle is patched.
 The main-menu exit path in `demos\QuitCutscene` has been measured: on 2026-09-01 it closed in 3.0
 seconds against a 13.0-second deadline. The ESC-keypress skip path has not been run. That is the only
 remaining unmeasured path; do not treat the normal exit as pending.
+
+## Worked demos
+
+- [IntroVideo](../examples/intro-video.md) replaces an existing streamed catalog row.
+- [QuitCutscene](../examples/quit-cutscene.md) adds a new row and supplies its own trigger.

@@ -26,7 +26,7 @@ MyMod\
 | Add or replace Wwise media | [Add or replace sounds](sounds.md) |
 | Add or replace a streamed clip | [Add or replace a video](videos.md) |
 | Add a non-humanoid with its own clips | [Add a creature](creature.md) |
-| Retarget the worked foreign humanoid | [Add a playable humanoid soldier](humanoid-soldier.md) |
+| Retarget the included Tiffany Cox humanoid source as a playable soldier | [Add a playable humanoid soldier](humanoid-soldier.md) |
 | Experiment with an existing character's body | [Replace a shipped character body](replace-character-body.md) |
 | Replace weapon art or clone a new weapon def | [Replace weapon art or add a weapon](weapon.md) |
 | Add a trigger or builder call | [Build a behaviour DLL](behavior-dll.md) |
