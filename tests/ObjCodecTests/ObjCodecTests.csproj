@@ -24,6 +24,11 @@
          mod fail to activate. -->
     <Compile Include="..\..\src\Project\SourceImport.cs" Link="SourceImport.cs" />
     <Compile Include="SourceSkip.cs" />
+    <!-- The rest of the skip rule - a refusal nobody COUNTS reports as ALL PASS - is asserted on the
+         built ContentTool.dll by reflection: ContentProject reads its manifest through JsonUtility,
+         which is an ECall and cannot run outside the player, so the file itself cannot join this
+         compile list. See the arm's own note. -->
+    <Compile Include="RefusalCount.cs" />
     <Compile Include="BoneNames.cs" />
     <Compile Include="MaterialBake.cs" />
     <Compile Include="MaterialTweakFixture.cs" />

@@ -500,8 +500,10 @@ namespace Morgott.ContentTool.Bake
                 if (c.Tracks.Count == 0)
                 {
                     if (skipped != null)
-                        skipped.Add("clip '" + c.Name + "' drives no bone of this rig and was SKIPPED - " +
-                                    "the model's other clips are unaffected; " + c.LossyReason);
+                        skipped.Add("clip REFUSED '" + c.Name + "' drives no bone of this rig and was " +
+                                    "SKIPPED - the model's other clips are unaffected, and the bake " +
+                                    "COUNTS this one as a failure rather than reporting ALL PASS over an " +
+                                    "animation the game will not have; " + c.LossyReason);
                     continue;
                 }
                 // Normalized the way the container key will be, so two names that differ only in case

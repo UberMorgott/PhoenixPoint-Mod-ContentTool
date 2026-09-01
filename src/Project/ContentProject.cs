@@ -241,8 +241,9 @@ namespace Morgott.ContentTool.Project
         /// The bake reports each line out loud - a skipped source is never a silent one.
         /// </summary>
         internal readonly List<string> SourceRefusals = new List<string>();
-        /// <summary>How many of those refusals were an importer THROWING on a file it should have been
-        /// able to read - a bug or a broken source, as opposed to a format the tool never accepts.
+        /// <summary>How many of those refusals there are - ALL of them, not only the ones an importer
+        /// THREW: a format the tool never accepts, a stem two files answer to and a half-typed row of
+        /// ppcontent.json are declared work that did not happen just as much as a broken .glb is.
         /// The bake adds it to its failure count, so skipping a source stays non-fatal to the OTHER
         /// sources without the run reporting ALL PASS over a model that never made it in.</summary>
         internal int ImportFailures;
@@ -295,32 +296,32 @@ namespace Morgott.ContentTool.Project
             ContentProject p = new ContentProject
             {
                 Root = root, Id = m.id, BundleName = m.bundle,
-                LoopDeclaration = m.loop, PlayDeclaration = m.play,
-                Scale = m.scale > 0f ? m.scale : 1f
+                LoopDeclaration = m.loop, PlayDeclaration = m.play
             };
-            if (m.scale < 0f)
-                throw new InvalidDataException("ppcontent.json \"scale\" is negative; it is the uniform " +
-                    "scale the mod puts on the rig root, so it has to be a positive number");
+            p.Scale = ScaleOrRefuse(m.scale, p.SourceRefusals);
             // ONE SOURCE FILE CANNOT TAKE THE PROJECT DOWN WITH IT: every importer below throws by
             // design - that is how a .glb states what is wrong with it - and an escaping throw used to
             // abort this whole method, so a single unusable mesh produced no bundle at all and the
             // author saw only "the mod does not activate". SourceImport.Each is the audio path's
             // arrangement (9a3747b) applied to the other three folders.
-            p.ImportFailures += SourceImport.Each(Sources(root, "Textures", "*.png", "*.jpg", "*.jpeg"),
-                                                  p.Textures, p.SourceRefusals, ImportTexture);
-            p.ImportFailures += SourceImport.Each(Sources(root, "Meshes", "*.obj", "*.glb"),
-                                                  p.Meshes, p.SourceRefusals, ImportMesh);
-            p.ImportFailures += SourceImport.Each(Sources(root, "Models", "*.glb"),
-                                                  p.Models, p.SourceRefusals, ImportModel);
+            // The return of Each is NOT added here any more: every refusal below - thrown or not - is
+            // counted once, in ONE place, at the end of this method. Adding it twice would report two
+            // failures for one unreadable .glb.
+            SourceImport.Each(Sources(root, "Textures", p.SourceRefusals, "*.png", "*.jpg", "*.jpeg"),
+                              p.Textures, p.SourceRefusals, ImportTexture);
+            SourceImport.Each(Sources(root, "Meshes", p.SourceRefusals, "*.obj", "*.glb"),
+                              p.Meshes, p.SourceRefusals, ImportMesh);
+            SourceImport.Each(Sources(root, "Models", p.SourceRefusals, "*.glb"),
+                              p.Models, p.SourceRefusals, ImportModel);
             p.Videos.AddRange(ImportVideos(root));
-            p.Replace.AddRange(ParseReplace(File.ReadAllText(metaPath)));
-            p.Publish.AddRange(ParsePublish(File.ReadAllText(metaPath)));
+            p.Replace.AddRange(ParseReplace(File.ReadAllText(metaPath), p.SourceRefusals));
+            p.Publish.AddRange(ParsePublish(File.ReadAllText(metaPath), p.SourceRefusals));
 
             string refused = RefuseUnsupported(Path.Combine(Path.Combine(root, "Content"), "Audio"));
             if (refused != null) p.SourceRefusals.Add(refused);
 
             uint next = MediaIdBase;
-            foreach (string f in Sources(root, "Audio", "*.wav", "*.ogg", "*.mp3"))
+            foreach (string f in Sources(root, "Audio", p.SourceRefusals, "*.wav", "*.ogg", "*.mp3"))
             {
                 string why;
                 ImportedAudio a = p.ImportAudio(f, ref next, out why);
@@ -330,6 +331,13 @@ namespace Morgott.ContentTool.Project
             }
 
             p.Replacements.AddRange(ReplacementFile.Load(root, p.ReplacementRefusals));
+            // EVERY REFUSAL IS A FAILURE OF THIS RUN, not only the ones an importer THREW. An
+            // unreadable .ogg, a .flac the tool never accepts, two files sharing a stem, a half-typed
+            // "replace" row and a negative "scale" are all declared work that did not happen, and each
+            // of them used to be printed and then reported under ALL PASS - which Route7.cs:249 reads
+            // as permission to stamp the patch cache current. Counted ONCE, here, so an arm that adds
+            // a line can never forget to add its count.
+            p.ImportFailures = p.SourceRefusals.Count;
             return p;
         }
 
@@ -338,7 +346,9 @@ namespace Morgott.ContentTool.Project
         private static List<ImportedVideo> ImportVideos(string root)
         {
             List<ImportedVideo> list = new List<ImportedVideo>();
-            foreach (string f in Sources(root, "Videos", "*.webm", "*.mp4", "*.mov"))
+            // null: shared with LoadDeclared, which carries no refusal list at all - a video stem
+            // collision keeps the throw it has always had rather than being dropped silently.
+            foreach (string f in Sources(root, "Videos", null, "*.webm", "*.mp4", "*.mov"))
                 list.Add(new ImportedVideo
                 {
                     Name = Path.GetFileNameWithoutExtension(f).ToLowerInvariant(),
@@ -358,11 +368,15 @@ namespace Morgott.ContentTool.Project
         /// of nesting, accessibility or the private container it objects to, this reads the three
         /// flat string fields directly. A declared entry can no longer parse to silence.
         /// </summary>
-        private static List<ShippedReplacement> ParseReplace(string json)
+        /// <param name="refusals">Where an INCOMPLETE entry goes instead of ending the run. Null keeps
+        /// the old throw, for the declaration-only load that has no refusal channel of its own: one
+        /// half-typed row must not stop the project's other rows from baking (Load's own note).</param>
+        private static List<ShippedReplacement> ParseReplace(string json, List<string> refusals = null)
         {
             List<ShippedReplacement> list = new List<ShippedReplacement>();
             Match arr = Regex.Match(json, "\"replace\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
             if (!arr.Success) return list;
+            int marked = refusals == null ? 0 : refusals.Count;
 
             foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
             {
@@ -389,14 +403,23 @@ namespace Morgott.ContentTool.Project
                 bool needsBundle = string.IsNullOrEmpty(r.video);
                 if ((needsBundle && string.IsNullOrEmpty(r.bundle)) ||
                     (needsBundle && string.IsNullOrEmpty(r.asset)) || kinds != 1)
-                    throw new InvalidDataException(
-                        "every \"replace\" entry needs exactly one of \"texture\", \"material\", " +
+                {
+                    string why =
+                        "\"replace\" row REFUSED: every entry needs exactly one of \"texture\", \"material\", " +
                         "\"mesh\", \"clip\" or \"video\", plus \"bundle\" and \"asset\" for everything but " +
-                        "\"video\" (a \"video\" entry with no \"asset\" ADDS a new clip); got " + o.Value);
+                        "\"video\" (a \"video\" entry with no \"asset\" ADDS a new clip); got " + o.Value +
+                        " - SKIPPED, this project's other rows still bake";
+                    if (refusals == null) throw new InvalidDataException(why);
+                    refusals.Add(why); continue;
+                }
                 list.Add(r);
             }
-            if (list.Count == 0)
-                throw new InvalidDataException("ppcontent.json declares \"replace\" but no complete entry was read from it");
+            if (list.Count == 0 && (refusals == null || refusals.Count == marked))
+            {
+                string why = "ppcontent.json declares \"replace\" but no complete entry was read from it";
+                if (refusals == null) throw new InvalidDataException(why);
+                refusals.Add(why);
+            }
             return list;
         }
 
@@ -419,24 +442,37 @@ namespace Morgott.ContentTool.Project
         /// null for an array of custom classes here). "media" is a NUMBER, so it is read with its own
         /// pattern rather than through <see cref="Field"/>, and a quoted number is accepted too.
         /// </summary>
-        internal static List<SoundEntry> ParseSounds(string json)
+        /// <param name="refusals">Where an INCOMPLETE entry goes instead of ending the run - one
+        /// half-typed row must not stop the project's other sounds from being replaced. Null keeps the
+        /// old throw for a caller that has no refusal channel to write into.</param>
+        internal static List<SoundEntry> ParseSounds(string json, List<string> refusals = null)
         {
             List<SoundEntry> list = new List<SoundEntry>();
             Match arr = Regex.Match(json, "\"sounds\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
             if (!arr.Success) return list;
+            int marked = refusals == null ? 0 : refusals.Count;
 
             foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
             {
                 Match media = Regex.Match(o.Value, "\"media\"\\s*:\\s*\"?(\\d+)\"?");
                 string file = Field(o.Value, "file");
                 if (!media.Success || string.IsNullOrEmpty(file))
-                    throw new InvalidDataException(
-                        "every \"sounds\" entry needs \"media\" (the shipped media ID it replaces) and " +
-                        "\"file\" (the name of your own file in Content\\Audio\\Replace\\); got " + o.Value);
+                {
+                    string why =
+                        "\"sounds\" row REFUSED: every entry needs \"media\" (the shipped media ID it " +
+                        "replaces) and \"file\" (the name of your own file in Content\\Audio\\Replace\\); " +
+                        "got " + o.Value + " - SKIPPED, this project's other sounds are unaffected";
+                    if (refusals == null) throw new InvalidDataException(why);
+                    refusals.Add(why); continue;
+                }
                 list.Add(new SoundEntry { Media = uint.Parse(media.Groups[1].Value), File = file });
             }
-            if (list.Count == 0)
-                throw new InvalidDataException("ppcontent.json declares \"sounds\" but no complete entry was read from it");
+            if (list.Count == 0 && (refusals == null || refusals.Count == marked))
+            {
+                string why = "ppcontent.json declares \"sounds\" but no complete entry was read from it";
+                if (refusals == null) throw new InvalidDataException(why);
+                refusals.Add(why);
+            }
             return list;
         }
 
@@ -445,11 +481,14 @@ namespace Morgott.ContentTool.Project
         /// returns null for an array of custom classes here). A declared entry can never parse to
         /// silence: an incomplete one is refused by name.
         /// </summary>
-        private static List<PublishedKey> ParsePublish(string json)
+        /// <param name="refusals">Where an INCOMPLETE entry goes instead of ending the run. A "publish"
+        /// row is irrelevant to a texture bake, and a half-typed one used to stop that bake dead.</param>
+        private static List<PublishedKey> ParsePublish(string json, List<string> refusals = null)
         {
             List<PublishedKey> list = new List<PublishedKey>();
             Match arr = Regex.Match(json, "\"publish\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
             if (!arr.Success) return list;
+            int marked = refusals == null ? 0 : refusals.Count;
 
             foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
             {
@@ -461,13 +500,22 @@ namespace Morgott.ContentTool.Project
                     deps = Field(o.Value, "deps")
                 };
                 if (string.IsNullOrEmpty(k.key) || string.IsNullOrEmpty(k.asset))
-                    throw new InvalidDataException(
-                        "every \"publish\" entry needs \"key\" (the address the game will ask for) and " +
-                        "\"asset\" (the path inside this mod's own bundle); got " + o.Value);
+                {
+                    string why =
+                        "\"publish\" row REFUSED: every entry needs \"key\" (the address the game will " +
+                        "ask for) and \"asset\" (the path inside this mod's own bundle); got " + o.Value +
+                        " - SKIPPED, this project's other keys and its sources still bake";
+                    if (refusals == null) throw new InvalidDataException(why);
+                    refusals.Add(why); continue;
+                }
                 list.Add(k);
             }
-            if (list.Count == 0)
-                throw new InvalidDataException("ppcontent.json declares \"publish\" but no complete entry was read from it");
+            if (list.Count == 0 && (refusals == null || refusals.Count == marked))
+            {
+                string why = "ppcontent.json declares \"publish\" but no complete entry was read from it";
+                if (refusals == null) throw new InvalidDataException(why);
+                refusals.Add(why);
+            }
             return list;
         }
 
@@ -488,23 +536,38 @@ namespace Morgott.ContentTool.Project
         /// A record is named by its file STEM, so two files that differ only in extension
         /// (swatch.png next to swatch.jpg) would both answer to "swatch" and the first one found
         /// would win silently. That is refused, by name, rather than resolved by a rule nobody can
-        /// remember.
+        /// remember - and it is refused as a pair of SOURCES, not as the project: the collision used to
+        /// throw out of Load before <see cref="SourceImport.Each"/> could contain it, so swatch.jpg
+        /// beside swatch.png cost the author every mesh, model and sound in the project too. Both
+        /// colliding files are left out (choosing one is exactly what this refuses to do) and the other
+        /// kinds are untouched. A null <paramref name="refusals"/> keeps the old throw, for a caller
+        /// with no refusal channel to write into.
         /// </summary>
-        private static string[] Sources(string root, string folder, params string[] patterns)
+        private static string[] Sources(string root, string folder, List<string> refusals,
+                                        params string[] patterns)
         {
             string dir = Path.Combine(Path.Combine(root, "Content"), folder);
             if (!Directory.Exists(dir)) return new string[0];
             List<string> files = new List<string>();
             foreach (string pattern in patterns) files.AddRange(Directory.GetFiles(dir, pattern));
             files.Sort(StringComparer.OrdinalIgnoreCase);
-            for (int i = 1; i < files.Count; i++)
-                if (string.Equals(Path.GetFileNameWithoutExtension(files[i]),
-                                  Path.GetFileNameWithoutExtension(files[i - 1]),
-                                  StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException(
-                        "Content\\" + folder + "\\ holds two files with the same name: " +
-                        Path.GetFileName(files[i - 1]) + " and " + Path.GetFileName(files[i]) +
-                        " - a replacement names the stem, so one of them has to go");
+            int i = files.Count - 1;
+            while (i > 0)
+            {
+                if (!string.Equals(Path.GetFileNameWithoutExtension(files[i]),
+                                   Path.GetFileNameWithoutExtension(files[i - 1]),
+                                   StringComparison.OrdinalIgnoreCase))
+                { i--; continue; }
+                string why = "Content\\" + folder + "\\ holds two files with the same name: " +
+                             Path.GetFileName(files[i - 1]) + " and " + Path.GetFileName(files[i]) +
+                             " - a replacement names the stem, so one of them has to go; BOTH were " +
+                             "SKIPPED, the project's other sources are unaffected";
+                if (refusals == null) throw new InvalidDataException(why);
+                refusals.Add(why);
+                files.RemoveAt(i);
+                files.RemoveAt(i - 1);
+                i -= 2;
+            }
             return files.ToArray();
         }
 
@@ -572,6 +635,29 @@ namespace Morgott.ContentTool.Project
             ImportedModel imported = new ImportedModel { Name = name };
             imported.Baked = ModelBuild.From(GlbReader.Read(File.ReadAllBytes(path), imported.Clips), name);
             return imported;
+        }
+
+        /// <summary>
+        /// The scale a project DECLARES, or 1 with a refusal saying why. A negative one threw
+        /// InvalidDataException straight out of <see cref="Load"/>, so ONE mistyped number - a row of
+        /// the manifest, nothing more - cost the author every texture, mesh, model and sound in the
+        /// project, and the run ended in "ct_project THREW" with no per-row line and no summary.
+        /// It is refused by name and the bake goes on at 1, which is what every project that never
+        /// declared one already uses.
+        ///
+        /// Carries no UnityEngine type on purpose - the arrangement <see cref="SourceImport"/> uses -
+        /// so the clamp is proven in ObjCodecTests rather than by watching a bake die.
+        /// </summary>
+        internal static float ScaleOrRefuse(float declared, List<string> refusals)
+        {
+            if (declared < 0f)
+            {
+                refusals.Add("ppcontent.json \"scale\": " + declared + " is negative - it is the uniform " +
+                             "scale the mod puts on the rig root, so it has to be a positive number; " +
+                             "SKIPPED, this bake used scale 1 (the model arrives at its file's own size)");
+                return 1f;
+            }
+            return declared > 0f ? declared : 1f;
         }
 
         /// <summary>

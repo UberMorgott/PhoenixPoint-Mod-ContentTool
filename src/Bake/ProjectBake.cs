@@ -200,10 +200,17 @@ namespace Morgott.ContentTool.Bake
                                 model.Name + "_" + s.ToString(CultureInfo.InvariantCulture) + "_" + Safe(slots[s]),
                                 out why);
                             if (decoded == null)
+                            {
+                                // COUNTED, not just printed: the material ships without the paint the
+                                // author's file carries, which is declared work that did not happen -
+                                // and an uncounted one let the run end ALL PASS over a model that
+                                // renders white.
+                                failures++;
                                 log.AppendLine("texture REFUSED '" + model.Name + "' material '" + slots[s] +
                                                "' carries a " + embedded[s].Length + " B embedded image that " +
                                                "could not be decoded (" + why + "); it would render white. " +
                                                "Supply Content\\Textures\\" + model.Name + "_" + slots[s] + ".png instead.");
+                            }
                             else
                             {
                                 string key = baker.AddTexture2D("textures/" + decoded.Name,
@@ -268,7 +275,12 @@ namespace Morgott.ContentTool.Bake
                     // U9: a model whose own .glb carries animation gets THOSE baked, for every project
                     // and not only the sample - that is the feature. U7's synthetic lift clip is what a
                     // model with no animation of its own gets, and only in the sample project.
-                    string clipKey = ImportedClips(baker, p, model, log) ?? LiftClip(baker, p, model, log);
+                    int clipsRefused;
+                    string clipKey = ImportedClips(baker, p, model, log, out clipsRefused) ??
+                                     LiftClip(baker, p, model, log);
+                    // A clip of the author's file that could not be baked is one animation the game
+                    // will not have - counted, so the run does not end ALL PASS over it.
+                    failures += clipsRefused;
                     clipKeys.Add(clipKey);
                     string aocKey = null;
                     if (clipKey != null)
@@ -840,15 +852,20 @@ namespace Morgott.ContentTool.Bake
                 string.Join(", ", CreatureManifest.RequiredRoles) + ") is mapped");
         }
 
+        /// <param name="refused">How many of the model's own clips this bake had nowhere to put. The
+        /// caller adds it to the run's failure count: the drop is REPORTED and non-fatal, but it is
+        /// not an ALL PASS either.</param>
         private static string ImportedClips(BundleBaker baker, ContentProject p, ImportedModel m,
-                                            StringBuilder log)
+                                            StringBuilder log, out int refused)
         {
+            refused = 0;
             if (!m.Baked.Rigged || m.Clips.Count == 0) return null;
             var skipped = new List<string>();
             List<KeyValuePair<string, SampledClip>> plan = ClipFields.Bakeable(m.Name, m.Clips, skipped);
             // Said out loud, not dropped quietly: a clip the bake has nowhere to put is an author's
             // file being read correctly, so it costs its line and not the whole bake.
             foreach (string line in skipped) log.AppendLine(line);
+            refused = skipped.Count;
             var loops = ClipFields.Names(p.LoopDeclaration);
             // WHICH clip the AOC hands Mecanim. -1 is "declared, but it is another model's clip", which
             // is not an error - the project-level `clip-names` arm is what refuses a name no model has.
@@ -1480,6 +1497,18 @@ namespace Morgott.ContentTool.Bake
             foreach (string bundleFile in Bundles(p))
             {
                 string shipped = BakeSelfCheck.ShippedBundlePath(bundleFile);
+                // THE BUNDLE NAME ITSELF IS A ROW'S FIELD, so a typo in it is a bad row and not a
+                // broken tool: BundleBaker's constructor throws FileNotFoundException on a path that
+                // does not exist, and that throw escaped Run as "ct_project THREW" - no summary, no
+                // line naming the row, and every OTHER bundle of the project unpatched. Same rule one
+                // level up from the per-row refusals below (3a4fb5b): say it, count it, keep going.
+                if (!File.Exists(shipped))
+                {
+                    log.AppendLine("P0 REFUSED \"bundle\": \"" + bundleFile + "\" is not a bundle this game " +
+                                   "ships - no file at " + shipped + " - check the spelling and list the " +
+                                   "real names with: ct_list bundles");
+                    failures++; continue;
+                }
                 string copy = Path.Combine(outDir, bundleFile);
                 List<ImportedTexture> want = new List<ImportedTexture>();
                 List<KeyValuePair<string, string>> mats = new List<KeyValuePair<string, string>>();
@@ -1495,7 +1524,11 @@ namespace Morgott.ContentTool.Bake
                     // happen. Measured on a project whose first of four rows was a skinless mesh onto a
                     // rigged target: the other two meshes were never patched and the texture refusal was
                     // never printed. Same rule as the source importers (9a3747b, c74658f) - reported and
-                    // skipped, and the count says how many.
+                    // skipped, and the count says how many. WHAT THE PLAYER THEN GETS IS THIS RUN'S
+                    // COPY, partial: the rows that succeeded, over the shipped data everywhere a row
+                    // was refused. It is NOT the previous bake's copy - this one overwrites it - which
+                    // is what the line after Write says out loud rather than leaving to be discovered.
+                    int refusedHere = failures;
                     foreach (ShippedReplacement r in p.Replace)
                     {
                         if (!string.Equals(r.bundle, bundleFile, StringComparison.OrdinalIgnoreCase)) continue;
@@ -1590,6 +1623,13 @@ namespace Morgott.ContentTool.Bake
                     baker.Write(copy, null);   // identity kept: the copy stands in for the shipped file
                     log.AppendLine("WROTE " + copy + " " + new FileInfo(copy).Length + " B as " +
                                    baker.WrittenIdentity + " (shipped source is " + new FileInfo(shipped).Length + " B)");
+                    refusedHere = failures - refusedHere;
+                    if (refusedHere > 0)
+                        log.AppendLine("PARTIAL " + bundleFile + ": " + refusedHere + " row(s) above were " +
+                                       "REFUSED and the copy was rewritten anyway - what the game loads is " +
+                                       "THIS run's file, the rows that worked over the shipped data " +
+                                       "everywhere a row did not. The previous copy is gone; fix the rows " +
+                                       "named above and bake again to get all of them.");
                 }
 
                 // Read the pixels back out of the COPY, and check the shipped original still reads its
