@@ -78,8 +78,7 @@ namespace Morgott.ContentTool.Doctor
         private static void Sidecar(ReplacementPreflightResult result, ReplacementSource source, RigTarget target)
         {
             if (source.SidecarRefusal != null)
-                result.Report.Add(source.SidecarRefusal.IndexOf("re-exported", StringComparison.Ordinal) >= 0
-                                      ? "SidecarStale" : "SidecarInvalid",
+                result.Report.Add(source.SidecarProblem == SidecarProblem.Stale ? "SidecarStale" : "SidecarInvalid",
                                   Severity.Warning, DiagnosticSide.Sidecar, source.SidecarRefusal,
                                   "Open the bone map, set the names again and press Save aliases.");
             foreach (string key in source.UnusedAliasKeys)
@@ -103,9 +102,10 @@ namespace Morgott.ContentTool.Doctor
             bool armature = effective.JointNames.Count > 0;
             bool names = target.BoneNames != null && target.BoneNames.Length > 0;
 
-            IList<BindingIssue> issues = names
-                ? SkinCompatibility.Analyze(effective, target.BoneNames)
-                : new List<BindingIssue>();
+            // Analyze is asked even with no bone names: it emits TargetBonesUnavailable itself
+            // (SkinCompatibility.cs:111), in the binder's own words, so the row cannot drift from a
+            // second copy of the same sentence written here.
+            IList<BindingIssue> issues = SkinCompatibility.Analyze(effective, target.BoneNames);
             BindingIssue first = issues.Count == 0 ? null : issues[0];
             Outcome outcome = ReplacementDecision.Decide(armature, target.Rigged, names, first);
 
@@ -119,10 +119,6 @@ namespace Morgott.ContentTool.Doctor
                                   "not rigged - the target carries no bind poses", "");
             else
             {
-                if (!names)
-                    result.Report.Add("TargetBonesUnavailable", Severity.Downgrade, DiagnosticSide.Target,
-                                      "the target model lists no bones, so there is no skeleton to bind onto",
-                                      "Re-pick the target, or reload the scene.");
                 foreach (BindingIssue issue in issues)
                     result.Report.Add(issue.Code.ToString(),
                                       issue.Code == BindCode.NoArmature ? Severity.Blocking : Severity.Downgrade,

@@ -7,6 +7,12 @@ using System.Text;
 
 namespace Morgott.ContentTool.Import
 {
+    /// <summary>Why a sidecar that EXISTS was not applied, as a VALUE rather than a sentence: the
+    /// Doctor has to tell "re-export the file" apart from "the map is broken", and deciding that by
+    /// searching the prose for a word means a reworded sentence silently changes a diagnostic code.
+    /// Everything that is not a hash mismatch is Invalid - the message already names which.</summary>
+    internal enum SidecarProblem { None, Stale, Invalid }
+
     /// <summary>
     /// FILE BONE -&gt; GAME BONE, and nothing else. The game's skeleton is never renamed and never
     /// replaced; what an author can honestly fix from inside the game is which of THEIR bones stands
@@ -136,13 +142,23 @@ namespace Morgott.ContentTool.Import
         /// </summary>
         internal static AliasMap LoadSidecar(string glbPath, string sha256, out string why)
         {
+            SidecarProblem problem;
+            return LoadSidecar(glbPath, sha256, out why, out problem);
+        }
+
+        /// <param name="problem">the same refusal as a VALUE, for a caller that has to BRANCH on it
+        /// rather than print it. <paramref name="why"/> stays the sentence, word for word.</param>
+        internal static AliasMap LoadSidecar(string glbPath, string sha256, out string why,
+                                             out SidecarProblem problem)
+        {
             why = null;
+            problem = SidecarProblem.None;
             string path = SidecarPathOf(glbPath);
             if (!File.Exists(path)) return null;
             try
             {
                 var root = Json.Parse(File.ReadAllText(path), 16) as Dictionary<string, object>;
-                if (root == null) { why = "'" + path + "' is not a JSON object, so its aliases were NOT applied"; return null; }
+                if (root == null) { why = "'" + path + "' is not a JSON object, so its aliases were NOT applied"; problem = SidecarProblem.Invalid; return null; }
 
                 object schema;
                 double declared = root.TryGetValue("schema", out schema) && schema is double d ? d : 0;
@@ -151,6 +167,7 @@ namespace Morgott.ContentTool.Import
                     why = "'" + path + "' declares schema " + ((int)declared).ToString(CultureInfo.InvariantCulture) +
                           " but this mod reads " + Schema.ToString(CultureInfo.InvariantCulture) +
                           ", so its aliases were NOT applied";
+                    problem = SidecarProblem.Invalid;
                     return null;
                 }
 
@@ -162,26 +179,31 @@ namespace Morgott.ContentTool.Import
                 {
                     why = "'" + path + "' was written for a different version of this .glb (the file has been " +
                           "re-exported since), so its aliases were NOT applied - open the Doctor and save them again";
+                    problem = SidecarProblem.Stale;
                     return null;
                 }
 
                 object raw;
                 var bones = root.TryGetValue("bones", out raw) ? raw as Dictionary<string, object> : null;
-                if (bones == null) { why = "'" + path + "' carries no \"bones\" object, so nothing was applied"; return null; }
+                if (bones == null) { why = "'" + path + "' carries no \"bones\" object, so nothing was applied"; problem = SidecarProblem.Invalid; return null; }
                 var map = new Dictionary<string, string>(StringComparer.Ordinal);
                 foreach (KeyValuePair<string, object> e in bones) map[e.Key] = e.Value as string;
                 // Said as its own sentence: an empty map is a sidecar with nothing in it, NOT the
                 // collision below, and naming the wrong cause sends the author to fix the wrong thing.
-                if (map.Count == 0) { why = "'" + path + "' carries no aliases, so nothing was applied"; return null; }
+                if (map.Count == 0) { why = "'" + path + "' carries no aliases, so nothing was applied"; problem = SidecarProblem.Invalid; return null; }
                 AliasMap loaded = Of(map);
                 if (loaded == null)
+                {
                     why = "'" + path + "' maps two of the file's bones onto one of the game's, or leaves a name " +
                           "empty, so NONE of its aliases were applied";
+                    problem = SidecarProblem.Invalid;
+                }
                 return loaded;
             }
             catch (Exception ex)
             {
                 why = "'" + path + "' could not be read (" + ex.Message + "), so its aliases were NOT applied";
+                problem = SidecarProblem.Invalid;
                 return null;
             }
         }

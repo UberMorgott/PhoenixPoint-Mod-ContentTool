@@ -69,13 +69,22 @@ internal static class PreflightTests
             ReplacementPreflightResult wrongOut = ReplacementPreflight.Run(bytes, glb, Rig(own));
             checks += Check(Has(wrongOut, "AliasNotATargetBone"),
                             "an alias output that is not a target bone is named: " + Codes(wrongOut));
+            checks += Check(Severity(wrongOut, "AliasNotATargetBone") == Morgott.ContentTool.Doctor.Severity.Warning,
+                            "and it is a WARNING - a sidecar never decides the outcome");
             File.Delete(AliasMap.SidecarPathOf(glb));
 
             // ---- the target the game gave us has no bone list at all.
             RigTarget noNames = Rig(own);
             noNames.BoneNames = null;
-            checks += Check(ReplacementPreflight.Run(bytes, glb, noNames).Outcome == Outcome.NearestBone,
+            ReplacementPreflightResult blind = ReplacementPreflight.Run(bytes, glb, noNames);
+            checks += Check(blind.Outcome == Outcome.NearestBone,
                             "no target bone names is NEAREST-BONE, not a crash");
+            // The row must be the BINDER's own sentence: a second wording under the same code is how a
+            // remedy and the thing it explains stop matching.
+            checks += Check(Message(blind, "TargetBonesUnavailable") ==
+                            "the target model lists no bones, so there is no skeleton to bind onto; " +
+                            "reload the scene and try again",
+                            "and it is reported in SkinCompatibility's own words: " + Codes(blind));
 
             // ---- the target is not rigged.
             RigTarget flat = Rig(own);
@@ -140,6 +149,12 @@ internal static class PreflightTests
     private static Morgott.ContentTool.Doctor.Severity Severity(ReplacementPreflightResult r, string code)
     {
         foreach (Diagnostic d in r.Report.Rows) if (d.Code == code) return d.Severity;
+        throw new Exception("PREFLIGHT FAILURE: no row '" + code + "'");
+    }
+
+    private static string Message(ReplacementPreflightResult r, string code)
+    {
+        foreach (Diagnostic d in r.Report.Rows) if (d.Code == code) return d.Message;
         throw new Exception("PREFLIGHT FAILURE: no row '" + code + "'");
     }
 

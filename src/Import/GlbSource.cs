@@ -28,6 +28,9 @@ namespace Morgott.ContentTool.Import
         /// <summary>Why a sidecar that EXISTS was not applied, or null. Always a warning, never an
         /// outcome: ignoring a sidecar leaves a file that may still bind by name on its own.</summary>
         internal string SidecarRefusal;
+        /// <summary>The same refusal as a value, so a caller branches on it instead of reading the
+        /// sentence. None whenever <see cref="SidecarRefusal"/> is null.</summary>
+        internal SidecarProblem SidecarProblem;
         /// <summary>One block naming the sidecar and every mapping, ready for the log. Null when no
         /// sidecar applied.</summary>
         internal string AliasLog;
@@ -54,8 +57,10 @@ namespace Morgott.ContentTool.Import
             source.Model = source.Original;
 
             string why;
-            AliasMap map = AliasMap.LoadSidecar(path, source.Sha256, out why);
+            SidecarProblem problem;
+            AliasMap map = AliasMap.LoadSidecar(path, source.Sha256, out why, out problem);
             source.SidecarRefusal = why;
+            source.SidecarProblem = problem;
             if (map == null) return source;
 
             // The aliased model is a SECOND read, not a mutation of Original: the Doctor re-applies a
