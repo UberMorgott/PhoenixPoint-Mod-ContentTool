@@ -80,15 +80,39 @@ namespace Morgott.ContentTool.Project
                        "shipped by accident.";
 
             string manifestText = File.ReadAllText(manifest);
-            Directory.CreateDirectory(outDir);
-            foreach (string item in Shipped)
+            // A MANIFEST NOBODY CAN READ IS A MOD THAT DOES NOTHING. Everything below only ever
+            // SCRAPES this text, so a zero-byte or half-typed file declares no rung, matches no
+            // regex, and sails through as a package that installs and sits there. The runtime reader
+            // is the one that would refuse it - on the player's machine, hours later.
+            if (manifestText.Trim().Length == 0 || Depth(manifestText, manifestText.Length) != 0)
+                return "REFUSED: " + manifest + " is EMPTY OR NOT VALID JSON - its braces and brackets " +
+                       "do not close. ContentTool reads that file to learn what this mod replaces, " +
+                       "publishes or adds, so a package built from it would install and do nothing. " +
+                       "Fix the file, then package again.";
+
+            try
             {
-                string from = Path.Combine(authorDir, item);
-                if (File.Exists(from)) File.Copy(from, Path.Combine(outDir, item), true);
-                else if (Directory.Exists(from)) CopyDir(from, Path.Combine(outDir, item));
+                Directory.CreateDirectory(outDir);
+                foreach (string item in Shipped)
+                {
+                    string from = Path.Combine(authorDir, item);
+                    if (File.Exists(from)) File.Copy(from, Path.Combine(outDir, item), true);
+                    else if (Directory.Exists(from)) CopyDir(from, Path.Combine(outDir, item));
+                }
+                if (!string.IsNullOrEmpty(assembly) && File.Exists(assembly))
+                    File.Copy(assembly, Path.Combine(outDir, Path.GetFileName(assembly)), true);
             }
-            if (!string.IsNullOrEmpty(assembly) && File.Exists(assembly))
-                File.Copy(assembly, Path.Combine(outDir, Path.GetFileName(assembly)), true);
+            catch (Exception copy)
+            {
+                // HALF A PACKAGE POISONS EVERY LATER RUN. The refusal path below deletes outDir for
+                // exactly this reason; an IO error mid-copy used to escape instead, leaving a folder
+                // that the "already holds files" check above then refuses forever.
+                try { if (Directory.Exists(outDir)) Directory.Delete(outDir, true); } catch { }
+                return "REFUSED: STAGING FAILED while copying into " + outDir + " - " + copy.Message +
+                       " The half-written folder has been deleted rather than left behind, so this " +
+                       "command still works once the file is free (close whatever holds it open) and " +
+                       "no leftover of a broken run can be shipped by accident.";
+            }
 
             long saved = 0;
             List<string> unbaked;
@@ -341,17 +365,21 @@ namespace Morgott.ContentTool.Project
             foreach (string f in Directory.GetFiles(sources))
             {
                 string name = Path.GetFileName(f);
-                // The same whitelist Content\Audio\ takes (SoundReplace.Sources): a stray .txt or
-                // .reaper next to the tracks is not a source this rule has any opinion about.
-                string ext = Path.GetExtension(name).ToLowerInvariant();
-                if (ext != ".wav" && ext != ".ogg" && ext != ".mp3") continue;
-
                 // Both ways a source names its media, in SoundReplace's own order of precedence: a
                 // "sounds" declaration keeps the author's filename, and the bare <mediaId>.ext
                 // convention is the lazy way to do one file.
+                //
+                // A DECLARED ROW IS JUDGED WHATEVER ITS EXTENSION. The whitelist below is about
+                // GUESSING - a stray .txt or .reaper next to the tracks is not a source this rule has
+                // any opinion about - but the author who wrote "hit.flac" into "sounds" said this file
+                // is a replacement, and one the bake never turned into a bank ships just as dead as a
+                // .wav would. Filtering by extension first let exactly that one out of the refusal.
                 string media;
                 if (!declared.TryGetValue(name, out media))
                 {
+                    // The same whitelist Content\Audio\ takes (SoundReplace.Sources).
+                    string ext = Path.GetExtension(name).ToLowerInvariant();
+                    if (ext != ".wav" && ext != ".ogg" && ext != ".mp3") continue;
                     uint id;
                     if (!uint.TryParse(Path.GetFileNameWithoutExtension(name), out id)) continue;
                     media = id.ToString();

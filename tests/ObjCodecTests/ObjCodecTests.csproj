@@ -49,6 +49,11 @@
     <Compile Include="..\..\src\Project\ContentMods.cs" Link="ContentMods.cs" />
     <Compile Include="..\..\src\Tactical\CreatureManifest.cs" Link="CreatureManifest.cs" />
     <Compile Include="StartRoster.cs" />
+    <!-- The PACKAGER carries no UnityEngine type on purpose (tools\Package compiles it alone), so
+         what may ship - and what must be refused rather than uploaded dead - is proven here instead
+         of by publishing a mod that installs and does nothing. -->
+    <Compile Include="..\..\src\Project\Package.cs" Link="Package.cs" />
+    <Compile Include="PackageGate.cs" />
     <Compile Include="ClipPlan.cs" />
     <Compile Include="Compressed.cs" />
     <Compile Include="DracoTests.cs" />
