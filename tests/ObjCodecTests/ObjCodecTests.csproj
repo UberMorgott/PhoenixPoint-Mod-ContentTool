@@ -31,6 +31,7 @@
     <Compile Include="RefusalCount.cs" />
     <Compile Include="BoneNames.cs" />
     <Compile Include="BinderFrozen.cs" />
+    <Compile Include="DecisionGolden.cs" />
     <Compile Include="MaterialBake.cs" />
     <Compile Include="MaterialTweakFixture.cs" />
     <Compile Include="ClipRoundTrip.cs" />
@@ -124,6 +125,9 @@
     <!-- The binding CHECKS, lifted out of SkinBinder.Bind so the Doctor can list them instead of
          reading one thrown sentence. UnityEngine-free like the binder it came from. -->
     <Compile Include="..\..\src\Import\SkinCompatibility.cs" Link="SkinCompatibility.cs" />
+    <!-- The VERDICT itself, the one function both the bake and the Doctor ask, so its truth table is
+         proven offline instead of by baking four bundles. -->
+    <Compile Include="..\..\src\Import\ReplacementDecision.cs" Link="ReplacementDecision.cs" />
     <Compile Include="..\..\src\Import\GlbReader.cs" Link="GlbReader.cs" />
     <Compile Include="..\..\src\Import\Meshopt.cs" Link="Meshopt.cs" />
     <Compile Include="..\..\src\Import\Draco.cs" Link="Draco.cs" />

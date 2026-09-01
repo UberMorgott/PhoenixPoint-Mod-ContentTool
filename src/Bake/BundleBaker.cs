@@ -149,10 +149,12 @@ namespace Morgott.ContentTool.Bake
             // A SKINLESS SOURCE CANNOT SKIN A RIGGED TARGET, and saying so beats welding it. Checked
             // before MeshFields.Fill and long before SetNewData, so a refusal writes nothing at all and
             // the player keeps the model they had. Static targets are untouched - they have no bind
-            // poses, so Rigged is false and the whole guard is skipped.
-            refusal = model == null || model.JointNames.Count == 0
-                ? SkinFields.Rigged(mesh) ? SkinFields.Skinless(assetName) : null
-                : null;
+            // poses, so Rigged is false and the whole guard is skipped. WHICH ending this is comes from
+            // ReplacementDecision.Decide, the same function the Model Doctor predicts with.
+            bool armature = model != null && model.JointNames.Count > 0;
+            bool rigged = SkinFields.Rigged(mesh);
+            refusal = ReplacementDecision.Decide(armature, rigged, true, null) == Outcome.Refused
+                ? SkinFields.Skinless(assetName) : null;
             if (refusal != null) return null;
 
             // WHICH part lands on WHICH material, said out loud: the bake preserves the file's
@@ -173,20 +175,26 @@ namespace Morgott.ContentTool.Bake
             MeshFields.Fill(mesh, baked);
 
             string how;
-            string[] names = model == null || model.JointNames.Count == 0
-                ? null : SkinFields.BoneNames(man, afileInst, info.PathId);
-            if (names == null)
+            string[] names = armature ? SkinFields.BoneNames(man, afileInst, info.PathId) : null;
+            Outcome outcome = ReplacementDecision.Decide(armature, rigged, names != null, null);
+            if (outcome != Outcome.ByName)
             {
                 how = SkinFields.Rebind(mesh, baked, influences)
                     ? "nearest-bone, one full-weight influence per vertex (" +
-                      (model == null ? "the source carries no armature"
-                                     : "no SkinnedMeshRenderer in this bundle names the target's bones") + ")"
+                      (!armature ? "the source carries no armature"
+                                 : "no SkinnedMeshRenderer in this bundle names the target's bones") + ")"
                     : "not rigged - the target carries no bind poses";
             }
             else
             {
                 // RebindByName throws before writing anything, so a refusal costs the mesh nothing and
                 // the fallback below binds the very same geometry the strict path was handed.
+                //
+                // FormatException, not Exception: that is the ONLY way the binding path refuses -
+                // SkinBinder.Bind throws it at every site (GlbReader.cs:2463-2544) and RebindByName's
+                // own width checks do too (SkinFields.cs:739/752). A NullReference or an index error
+                // out of that code is a BUG, and quietly downgrading a bug to nearest-bone is how one
+                // ships.
                 try
                 {
                     SkinFields.RebindByName(mesh, baked, model, names, influences);
@@ -194,7 +202,7 @@ namespace Morgott.ContentTool.Bake
                           " bones, carrying " + Math.Max(influences, 1) +
                           " of the file's own influences per vertex";
                 }
-                catch (Exception ex)
+                catch (FormatException ex)
                 {
                     SkinFields.Rebind(mesh, baked, influences);
                     how = "nearest-bone - the file's own weights were NOT used: " + ex.Message;
