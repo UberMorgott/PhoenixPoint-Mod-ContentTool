@@ -370,6 +370,53 @@ namespace Morgott.ContentTool.Bake
                         pxWrongName + "' (expected '" + ErrorShaderName + "' - a different file)");
                 }
 
+                // U3b/U3c: the RUNTIME donor path (FINAL-PLAN 10.1/10.2). U3d made it OPTIONAL for the
+                // baked path by giving the shader at bake time, but nothing had ever measured the
+                // assignment itself, and it still stands for anything materialized live. The donor is
+                // a LIVE Shader instance taken off an object the game shipped - the one U3d just
+                // resolved out of defaultlocalgroup_unitybuiltinshaders.bundle - which is the same
+                // object a Def walk ends at, reached without loading an actor prefab. It is NOT
+                // Shader.Find: that would answer "does this process have a Standard shader", not
+                // "can a donor's shader be handed to our Material".
+                //
+                // Two separate questions again. U3b: does the assignment TAKE. U3c: does the property
+                // block written BEFORE any shader existed (U3a-refs read it off the file: a _MainTex
+                // PPtr and _Glossiness=0.25) survive being interpreted by a shader for the first time.
+                // U3c's texture oracle is object IDENTITY against the Texture2D U1 already asserted
+                // the pixels of - a shader that merely exposes a _MainTex slot cannot pass it - and
+                // U3b's control is the SAME material read BEFORE the assignment, so 'it says Standard'
+                // cannot be something it was already saying.
+                Material donorTarget = bundle.LoadAsset<Material>(matKey);
+                Shader donorShader = null;
+                Material donorSource = bundle.LoadAsset<Material>(extMatKey);
+                if (donorSource != null) donorShader = donorSource.shader;
+                Texture2D bakedTex = bundle.LoadAsset<Texture2D>(texKey);
+                if (!builtinReady || donorTarget == null || donorShader == null ||
+                    donorShader.name != StandardShaderName)
+                    log.AppendLine("U3b VOID no live donor shader to hand over (donor reports '" +
+                                   (donorShader == null ? "(none)" : donorShader.name) + "', expected '" +
+                                   StandardShaderName + "'), so U3c cannot answer either");
+                else
+                {
+                    string before = ShaderNameOf(donorTarget);
+                    donorTarget.shader = donorShader;
+                    string after = ShaderNameOf(donorTarget);
+                    failures += Check(log, "U3b",
+                        before == ErrorShaderName && after == StandardShaderName,
+                        "the shaderless baked Material reported '" + before + "', and after being handed " +
+                        "the live donor's shader reports '" + after + "' (expected '" + ErrorShaderName +
+                        "' then '" + StandardShaderName + "')");
+                    Texture gotTex = donorTarget.GetTexture("_MainTex");
+                    float gotGloss = donorTarget.GetFloat("_Glossiness");
+                    failures += Check(log, "U3c",
+                        bakedTex != null && ReferenceEquals(gotTex, bakedTex) && Near(gotGloss, 0.25f),
+                        "after the assignment _MainTex -> '" + (gotTex == null ? "(null)" : gotTex.name) +
+                        "' isTheBakedTexture2D=" + ReferenceEquals(gotTex, bakedTex) +
+                        " | _Glossiness=" + gotGloss +
+                        " (expected the baked texture '" + (bakedTex == null ? "(null)" : bakedTex.name) +
+                        "' and 0.25)");
+                }
+
                 // U4. Same two-question shape as U3d/U3e: what did we WRITE (read off the file, by the
                 // referenced objects' NAMES, which a broken PPtr cannot produce), and what does the
                 // ENGINE build out of it. The no-child twin is the control that keeps childCount=1
