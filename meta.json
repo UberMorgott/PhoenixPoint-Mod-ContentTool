@@ -1,7 +1,7 @@
 {
   "ID": "com.morgott.ContentTool",
   "AssemblyName": "ContentTool.dll",
-  "Version": "1.1.2",
+  "Version": "1.1.3",
   "Author": [
     { "Key": "English", "Value": "Morgott" }
   ],
