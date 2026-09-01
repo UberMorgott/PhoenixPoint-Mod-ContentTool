@@ -2912,7 +2912,7 @@ Same install and rig, on `3441a4f` (build `d25fc3a5`) and then on the fix below 
 | P2-4 remove the last alias | PASS | `canSave` true on an empty map, `save` -> `sidecar removed: …ts_bad.glb.aliases.json`, file gone, `canSave` false; `ct_project DoctorFix` then prints `skinned nearest-bone … does not contain the bone 'L.Arm'` with no `with n alias(es)` |
 | P2-6 blind target | PASS (driven) | no SMR on this rig has bindposes without bones (12/12 have `bones == bindposes`: 1x1, 4x8, 1x13, 4x25, 1x34, 1x4), so `Target.BoneNames` was set to null on the live target: the button reads `Preview - no live bones to bind onto` and is disabled (`ModelDoctor.cs:595-599`) |
 
-**One more defect, found and fixed:** `2b1cca7` `fix(alias): stop calling a decorated live bone a bone
+**One more defect, found and fixed:** `ae50d67` `fix(alias): stop calling a decorated live bone a bone
 the model does not have`. `AliasMap.OutputsNotIn` compared alias OUTPUTS against the target's bone
 names as raw strings, so an alias onto `L.Arm` against a live rig that spells it
 `#L.Arm_Addon => SY_Sniper_Torso_BodyPartDef` produced `AliasNotATargetBone` — an IGNORED row under a
