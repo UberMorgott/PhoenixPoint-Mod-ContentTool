@@ -157,7 +157,11 @@ namespace Morgott.ContentTool.Dev
         private void Seed()
         {
             if (Ready == null) return;
-            string key = Path + "|" + (Ready.Sha256 ?? "");
+            // A result that FAILED carries no hash, and a key built from one that is missing looks like
+            // a different file - which would clear the author's unsaved edits over a lock Blender holds
+            // for a second mid-export. A failure says nothing about the sidecar, so it says nothing here.
+            if (Ready.Failure != null || Ready.Sha256 == null) return;
+            string key = Path + "|" + Ready.Sha256;
             if (seededFor == key) return;
             seededFor = key;
 
@@ -434,9 +438,9 @@ namespace Morgott.ContentTool.Dev
                 Debug.Log("[ContentTool] Model Doctor: removed the bone map '" + sidecar + "'");
                 seeded.Clear();
                 Rethink();
-                Say(Ready.Report, "AliasesSaved", Severity.Info, DiagnosticSide.Sidecar,
-                    "the sidecar was removed - this file now binds on its own names", "");
-                Restart();                                 // the verdict without the map is a new one
+                // No row: Restart throws this report away. Message carries the sentence, and the next
+                // report - computed without the sidecar - is the honest answer about what happens now.
+                Restart();
                 return "sidecar removed: " + sidecar;
             }
             catch (Exception ex) { return "could not remove the sidecar: " + ex.Message; }
@@ -572,7 +576,8 @@ namespace Morgott.ContentTool.Dev
             // the table the moment an alias worked, which is exactly when the author wants to look at
             // what they mapped - and left no way to change or remove it.
             if (Ready.Model != null && Target.BoneNames != null &&
-                (aliases.Count > 0 || Ready.Outcome == Outcome.NearestBone))
+                (aliases.Count > 0 || Ready.Outcome == Outcome.NearestBone ||
+                 (Ready.Source != null && Ready.Source.AliasesApplied > 0)))
                 BoneMap(col);
 
             rowScroll = GUILayout.BeginScrollView(rowScroll, GUILayout.Height(200f));
