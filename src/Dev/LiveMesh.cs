@@ -40,7 +40,6 @@ namespace Morgott.ContentTool.Dev
             if (!IsModel(ext)) { why = "'" + file + "' is not a .glb or .obj"; return null; }
             try
             {
-                BakedMesh baked;
                 if (string.Equals(ext, ".glb", StringComparison.OrdinalIgnoreCase))
                 {
                     ReplacementSource source = GlbSource.ReadReplacement(File.ReadAllBytes(file), file);
@@ -51,9 +50,9 @@ namespace Morgott.ContentTool.Dev
                         ContentToolMain.Say("ct_replace: applied " + source.AliasLog);
                     else if (source.SidecarRefusal != null)
                         ContentToolMain.Say("ct_replace: " + source.SidecarRefusal);
-                    baked = ModelBuild.From(model, Path.GetFileNameWithoutExtension(file)).Mesh;
+                    return Build(model, Path.GetFileName(file));
                 }
-                else baked = MeshBuild.From(ObjCodec.Parse(File.ReadAllText(file)));
+                BakedMesh baked = MeshBuild.From(ObjCodec.Parse(File.ReadAllText(file)));
                 return ToMesh(baked, Path.GetFileName(file));
             }
             catch (Exception ex)
@@ -63,6 +62,20 @@ namespace Morgott.ContentTool.Dev
                 why = "'" + Path.GetFileName(file) + "' did not import: " + ex.Message;
                 return null;
             }
+        }
+
+        /// <summary>
+        /// A model that is ALREADY parsed to a live Mesh. The Doctor parses on a worker thread and
+        /// must build on the main one, so the two halves of <see cref="Load"/> are separated here
+        /// rather than duplicated - a preview built by a second path would be a different mesh that
+        /// merely looks similar, which is the exact bug Load's own remark exists to prevent.
+        ///
+        /// Main thread only: `new Mesh` is a UnityEngine.Object.
+        /// </summary>
+        internal static Mesh Build(SkinnedModel model, string name)
+        {
+            if (model == null) throw new ArgumentNullException(nameof(model));
+            return ToMesh(ModelBuild.From(model, Path.GetFileNameWithoutExtension(name)).Mesh, name);
         }
 
         /// <summary>BakedMesh buffers -&gt; the arrays a live Mesh wants. Stride and layout are BakedMesh's.</summary>
@@ -99,6 +112,10 @@ namespace Morgott.ContentTool.Dev
             return m;
         }
 
+        /// <summary>Which of the three things Bind actually did. Bind reports in ENGLISH, and a
+        /// preview that has to check its own prediction cannot read English.</summary>
+        internal enum BindMode { NotRigged, NearestBone, ByName }
+
         /// <summary>
         /// The runtime twin of <see cref="Morgott.ContentTool.Bake.SkinFields.Rebind"/> - SAME rule,
         /// different medium. Rebind writes serialized fields (AssetTypeValueField) and cannot be
@@ -120,7 +137,17 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal static string Bind(Mesh ours, SkinnedMeshRenderer smr, SkinnedModel file = null)
         {
+            BindMode mode;
+            return Bind(ours, smr, file, out mode);
+        }
+
+        /// <summary>The same bind, saying WHICH path it took. The Doctor refuses to swap a preview in
+        /// when the mode is not the one the preflight predicted: that mismatch means the target
+        /// changed under us, and showing the wrong skinning is worse than showing none.</summary>
+        internal static string Bind(Mesh ours, SkinnedMeshRenderer smr, SkinnedModel file, out BindMode mode)
+        {
             Transform[] bones = smr == null ? null : smr.bones;
+            mode = BindMode.NotRigged;
             if (bones == null || bones.Length == 0) return null;
 
             string source;
@@ -130,9 +157,10 @@ namespace Morgott.ContentTool.Dev
             if (file != null && file.JointNames.Count > 0)
             {
                 string byName = ByName(ours, bones, file, poses, source, out refused);
-                if (byName != null) return byName;
+                if (byName != null) { mode = BindMode.ByName; return byName; }
             }
 
+            mode = BindMode.NearestBone;
             Vector3[] verts = ours.vertices;
             BoneWeight[] weights = new BoneWeight[verts.Length];
             for (int i = 0; i < verts.Length; i++)
