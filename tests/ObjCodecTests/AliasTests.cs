@@ -112,6 +112,17 @@ internal static class AliasTests
             checks += Check(aliased.Original.JointNames[0] == firstBone,
                             "the pristine names survive for re-aliasing without a re-parse");
 
+            // ---- a hash-valid sidecar that matches NO bone of the file. The envelope must still name
+            // the sidecar, or the bake has nothing to say the "matched no bone" sentence from
+            // (BundleBaker.ReplaceMesh keys that branch off exactly these two fields; the how string
+            // itself needs a real bundle and is not reachable from this EXE).
+            AliasMap.SaveSidecar(realGlb, plain.Sha256, real.Length,
+                                 new Dictionary<string, string> { { "NoSuchBone", "Root" } });
+            ReplacementSource nomatch = GlbSource.ReadReplacement(real, realGlb);
+            checks += Check(nomatch.AliasesApplied == 0 && nomatch.SidecarPath != null &&
+                            nomatch.SidecarRefusal == null && nomatch.UnusedAliasKeys.Count == 1,
+                            "a sidecar that matched nothing still names itself, with its dead key");
+
             // ---- the block COUNTS what applied, so it cannot disagree with the bake's own number.
             SkinnedModel two = Model("A", "B");
             AliasMap described = AliasMap.Of(new Dictionary<string, string> { { "A", "Root" }, { "Q", "Neck" } });

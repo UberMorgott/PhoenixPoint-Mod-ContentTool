@@ -102,6 +102,9 @@ namespace Morgott.ContentTool.Project
         /// the bake route has no other voice, and a stale sidecar the log never mentions is exactly
         /// the silence design §5 forbids.</summary>
         internal string SidecarRefusal;
+        /// <summary>Sidecar keys this file has no bone for. Carried so the bake can name them exactly
+        /// as the live preview does - a sidecar that matched NOTHING is otherwise invisible here.</summary>
+        internal IList<string> UnusedAliasKeys;
     }
 
     /// <summary>
@@ -633,7 +636,8 @@ namespace Morgott.ContentTool.Project
                 Model = source.Model,
                 SidecarPath = source.SidecarPath,
                 AliasesApplied = source.AliasesApplied,
-                SidecarRefusal = source.SidecarRefusal
+                SidecarRefusal = source.SidecarRefusal,
+                UnusedAliasKeys = source.UnusedAliasKeys
             };
         }
 

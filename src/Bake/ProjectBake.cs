@@ -1591,7 +1591,8 @@ namespace Morgott.ContentTool.Bake
                             bool suspect;
                             string how = baker.ReplaceMesh(r.asset, im.Name, im.Baked, im.Model,
                                                            out refusal, out mapping, out suspect,
-                                                           im.AliasesApplied, im.SidecarPath, im.SidecarRefusal);
+                                                           im.AliasesApplied, im.SidecarPath, im.SidecarRefusal,
+                                                           im.UnusedAliasKeys);
                             if (refusal != null)
                             {
                                 // The ignored sidecar rides on 'how' when there is one; a refusal has

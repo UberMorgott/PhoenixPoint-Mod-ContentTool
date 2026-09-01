@@ -141,7 +141,8 @@ namespace Morgott.ContentTool.Bake
         /// <param name="model">the .glb this geometry came out of, or null for an .obj.</param>
         internal string ReplaceMesh(string assetName, string sourceName, BakedMesh baked, SkinnedModel model,
                                     out string refusal, out string mapping, out bool suspect,
-                                    int aliases = 0, string sidecar = null, string sidecarIgnored = null)
+                                    int aliases = 0, string sidecar = null, string sidecarIgnored = null,
+                                    IList<string> unusedAliases = null)
         {
             AssetFileInfo info = FindUnique(AssetClassID.Mesh, assetName);
             AssetTypeValueField mesh = man.GetBaseField(afileInst, info);
@@ -214,11 +215,21 @@ namespace Morgott.ContentTool.Bake
             // NEVER SILENT: a bone renamed by a sidecar is named in the bake log beside the binding it
             // produced, so an author never discovers a rename by its effect alone.
             if (aliases > 0 && sidecar != null)
+            {
                 how += " with " + aliases + " alias(es) from " + sidecar;
+                // The keys that matched nothing are named here too, exactly as the live preview names
+                // them: an author comparing the two must not have to wonder which one is lying.
+                if (unusedAliases != null && unusedAliases.Count > 0)
+                    how += ", unused: '" + string.Join("', '", unusedAliases) + "'";
+            }
             // A sidecar that EXISTS and did not apply changes what the author is looking at, so it is
             // named beside the binding it did not take part in rather than left to be inferred.
             else if (sidecarIgnored != null)
                 how += " (sidecar ignored: " + sidecarIgnored + ")";
+            // A hash-valid sidecar whose every key names a bone this file does not have: it LOADED and
+            // then did nothing, which is the one case that used to pass in silence.
+            else if (sidecar != null)
+                how += " (sidecar " + sidecar + " matched no bone in this file)";
 
             info.SetNewData(mesh);
             return how;
