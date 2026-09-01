@@ -671,13 +671,13 @@ STREAMED media that are loose files; an embedded one is refused by name.
   decoded LENGTH; neither can hear a voice that is audibly wrong at the right duration. What the ear
   added is CONTENT identity — the sound is the mod's sample, cleanly, and the codec swap did not
   mangle it. That is why this row exists separately from the three above it.
-- **How to TRIGGER it, and what is NOT known** (this cost a dig, do not repeat it). The certain
-  trigger is `ct_sound verify` from the console — it posts event 784388130 itself, then a 10.3 s
-  control. The NATURAL screen is **UNVERIFIED**: `GUI_StatsPlusClick` has **zero hits in the whole
-  decompile**, so the event is wired BY ID in prefabs, not by name in code, and no `file:line` can
-  be cited. `SoundbanksInfo.xml` gives only `ObjectPath="\Events\Default Work Unit\UI_Geoscape\
-  GEO_UI\GUI_StatsPlusClick"` (`DurationMin=1.069 DurationMax=1.346`), which SUGGESTS a geoscape
-  "+" stat button — a guess, not a fact, and it must not be promoted to one without a run.
+- **How to TRIGGER it — CLOSED 2026-09-01, the natural screen is now MEASURED.** The console
+  trigger is `ct_sound verify`, which posts event 784388130 itself, then a 10.3 s control. The
+  NATURAL trigger is the **three stat "+" buttons on the geoscape SOLDIER PROGRESSION screen**
+  (see the 2026-09-01 sweep entry below). `SoundbanksInfo.xml` gives
+  `ObjectPath="\Events\Default Work Unit\UI_Geoscape\GEO_UI\GUI_StatsPlusClick"`
+  (`DurationMin=1.069 DurationMax=1.346`) — its "geoscape + stat button" reading is now confirmed
+  by the live object, not inferred.
   - **2026-09-01: the POST is now measured headlessly, the SCREEN is still unverified.**
     `autogate.ps1 -NoDeploy -Commands 'ct_sound probe event 784388130'` on `D:\PP-Instance2`, build
     `e9e78a6f`, from the main menu, with no human and no geoscape:
@@ -710,7 +710,8 @@ STREAMED media that are loose files; an embedded one is refused by name.
       That is the binding, measured in the engine, not inferred. Its sibling
       `SkillConfirmClickEventDef` carries `GUI_SkillConfirmClick`, and the two are the only pair in
       the bank sitting directly under `GEO_UI\` rather than under `GEO_UI\GUI_CONTROL\`.
-    - **What is still NOT known: which button holds that def.** `UIButtonSounds` fields are set on
+    - **Which button holds that def — answered one entry below; this is how the search narrowed.**
+      `UIButtonSounds` fields are set on
       PREFABS, so the last hop is a prefab reference, not code. Swept live in the tactical mission:
       **813** loaded `UIButtonSounds` (`Resources.FindObjectsOfTypeAll`), every one's `Click` read
       through PPCLI — **0 of them carry `StatPlusClickEventDef`** (the loaded set is 213
@@ -732,9 +733,38 @@ STREAMED media that are loose files; an embedded one is refused by name.
       `StatSoldierLevelUp` / `StatSoldierInjured` / `StatSoldierKIA` events, `:101-109`) and the 58
       `*Sound*` defs were all checked and none of them holds it. `refs\TFTV-src` and
       `refs\Officer-src` contain **no** use of the event or its id.
-    - **Do not promote the guess.** "A `+` on the soldier progression screen, confirmed by
-      `GUI_SkillConfirmClick`" remains the plausible reading of the def's name and its sibling; it
-      is NOT measured and must not be written down as fact until a live geoscape names the prefab.
+    - **2026-09-01 — CLOSED. The owning buttons are named, live, on a GEOSCAPE.** A fresh campaign
+      started on `D:\PP-Instance2` (`plans\start-campaign.json`, difficulty Easy, 8 soldiers,
+      geoscape reached in 17.0 s; PPCLI build `c9ea2c6c`) loads **2777** `UIButtonSounds`
+      (`Resources.FindObjectsOfTypeAll`, up from 813 in a tactical mission). All six `BaseEventDef`
+      fields (`Click`/`Enter`/`Exit` + the `…Disabled` twins) were read on every one of them —
+      4509 non-null reads over 2255 components — and **exactly THREE carry
+      `StatPlusClickEventDef`, all on `Click`**, all on the same screen:
+
+      ```
+      GeoscapeUICanvas / ProgressionScreenModule / Canvas / MenuElements / MainStats /
+        UIPanel_Line / StatBar_Willpower   / UIButton_WillpowerIncrease  (iid 1553874)
+        UIPanel_Line / StatBar_Strength_1  / UIButton_StrengthIncrease   (iid 1562254)
+        UIPanel_Line / StatBar_Speed       / UIButton_SpeedIncrease      (iid 1762478)
+      ```
+
+      That is the **soldier progression screen's three stat `+` buttons** — Willpower, Strength,
+      Speed. The code side matches exactly: `PhoenixPoint.Geoscape.View.ViewModules\
+      UIModuleCharacterProgression.cs:91,:103,:115` declares `IncreaseStrengthStatButton` /
+      `IncreaseWillStatButton` / `IncreaseSpeedStatButton` and wires each one's `onClick` to
+      `Change*Stat(statIncrease: true)` at `:281,:289,:297`. So `GUI_StatsPlusClick` is the sound
+      of **spending a soldier's stat point**, and the hypothesis is now a measured fact.
+    - **The sibling lands in the same sweep, as a control.** The same run found exactly one
+      `SkillConfirmClickEventDef` and one each of `ConfirmClickEventDef` /
+      `ConfirmEnterEventDef` / `ConfirmExitEventDef`, plus geoscape-only defs a tactical mission
+      never loads (`GEOMenuClickEventDef`, `ScrapClickEventDef`, `ResearchEnquedClickEventDef`,
+      `GeoEncountersChoice*_UIEventDef`) — the sweep really did reach the geoscape prefabs, which
+      is why the tactical run of 813 could not.
+    - **Method note, so this is repeatable.** Handles are a **512-entry LRU** (`REFERENCE.md:376`),
+      so a naive "page all 2777 handles, then read them" sweep dies with
+      `handle 'h:…' expired or was released`. Page **64** components and read their 384 fields in
+      ONE `connect multi` per page, re-acquiring the array handle if it expires; 44 batches,
+      ~8 s each.
   - **Measured and closed 2026-09-01.** All six lengths are now read off the real files by
     `tests\ObjCodecTests` (`DemoBankTests.cs`, offline: the bank's DIDX/DATA walked, each media
     parsed by `WwiseWem.Parse`, PCM = data / (channels·2·rate), Vorbis = `SampleCount` / rate).
