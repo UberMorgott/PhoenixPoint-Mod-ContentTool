@@ -303,6 +303,20 @@ internal static class GlbSkelTests
               "a plan round-trips through its own JSON and a file that is not one comes back as a " +
               "sentence, not a throw");
 
+        // 28b. The same round trip with a full TRS on the insert step - the only step that carries
+        //      one - compared field by field through Printed, which spells every double with "R".
+        SkelPlan posed = Everything9();
+        posed.Inserts[0].Translation = new[] { 0.1, 0.2, 0.3 };
+        posed.Inserts[0].Rotation = new[] { 0, 0.7071068, 0, 0.7071068 };
+        posed.Inserts[0].Scale = new[] { 2.0, 2, 2 };
+        SkelPlan reposed = SkelPlan.Parse(posed.ToJson(), out string whyPosed);
+        Check(whyPosed == null && reposed != null && Printed(reposed) == Printed(posed) &&
+              Same(reposed.Inserts[0].Translation, posed.Inserts[0].Translation, 0) &&
+              Same(reposed.Inserts[0].Rotation, posed.Inserts[0].Rotation, 0) &&
+              Same(reposed.Inserts[0].Scale, posed.Inserts[0].Scale, 0),
+              "an insert's translation, rotation and scale survive the JSON round trip exactly - got '" +
+              (reposed == null ? whyPosed : Printed(reposed)) + "'");
+
         // --- Verify: the same file asked the TWO different questions the two binding mechanisms ask.
         // Addon.GetEquivalentBones compares a literal Transform.name (Addon.cs:1217); a generic clip
         // binds to crc32 of a '/'-joined PATH (ClipFields.cs:34-41). A file can be perfect by one and
@@ -336,6 +350,19 @@ internal static class GlbSkelTests
         Check(ext.MissingNames.Count == 0 && ext.MissingPaths.Count == 0 && ext.Ok &&
               ext.AttachmentsAbsent.Count == 1 && ext.AttachmentsAbsent[0] == "EXT_VoiceContext",
               "an attachment point the file lacks is information, not a missing bone: '" + ext.Sentence() + "'");
+
+        // 31b. A name carried TWICE is a defect, counted across every node and not just the root's
+        //      subtree: 'prop' (node 4, its own root) renamed to Neck doubles the Neck under rig.
+        //      Addon.cs:1217 binds the first Transform it meets and says nothing about the second.
+        GlbDocument twin9 = Renamed("u9_probe.glb", 2, "Neck");
+        GlbSlim.Obj(GlbSkel.Nodes(twin9)[4])["name"] = "Neck";
+        SkelVerdict twinned = GlbSkel.Verify(twin9, "rig", Words("Neck", "hip"), null);
+        Check(!twinned.Ok && twinned.MissingNames.Count == 0 && twinned.NamesResolved == 2 &&
+              twinned.Duplicates.Count == 1 &&
+              twinned.Duplicates[0] == "'Neck' is carried by 2 nodes - the game binds the first it meets" &&
+              twinned.Sentence().Contains("carried by 2 nodes") && bound.Duplicates.Count == 0,
+              "a bone name on two nodes is a defect naming the bone and the count, a unique one is not: '" +
+              twinned.Sentence() + "'");
 
         // 32. ppskel.check:249-256 ported whole, over the four-phase plans of check 27: the skin
         //     block and every node's mesh/skin binding come out of a rewrite untouched. This is the

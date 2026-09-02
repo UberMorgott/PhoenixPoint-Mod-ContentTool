@@ -208,8 +208,11 @@ namespace Morgott.ContentTool.Import
         internal List<string> MissingNames = new List<string>();
         internal List<string> MissingPaths = new List<string>();
         internal List<string> AttachmentsAbsent = new List<string>();
+        /// <summary>One sentence per prototype bone carried by two or more nodes anywhere in the
+        /// file. A defect: Addon.cs:1217 binds the first Transform it meets and says nothing.</summary>
+        internal List<string> Duplicates = new List<string>();
         internal int NamesResolved, PathsResolved, Nodes, SkinJoints;
-        internal bool Ok => MissingNames.Count == 0 && MissingPaths.Count == 0;
+        internal bool Ok => MissingNames.Count == 0 && MissingPaths.Count == 0 && Duplicates.Count == 0;
 
         /// <summary>ppskel's own closing line, in this repo's words.</summary>
         internal string Sentence()
@@ -221,6 +224,7 @@ namespace Morgott.ContentTool.Import
             };
             if (MissingNames.Count > 0) text.Add("no bone named " + Listed(MissingNames));
             if (MissingPaths.Count > 0) text.Add("no path " + Listed(MissingPaths));
+            text.AddRange(Duplicates);
             if (AttachmentsAbsent.Count > 0)
                 text.Add(AttachmentsAbsent.Count + " attachment point(s) absent, which the game skips anyway");
             return string.Join("; ", text.ToArray());
@@ -910,6 +914,12 @@ namespace Morgott.ContentTool.Import
                 }
                 if (under.Contains(bone)) verdict.NamesResolved++;
                 else verdict.MissingNames.Add(bone);
+                // Asked of EVERY node, not the root's subtree: a second carrier outside it is still
+                // a Transform the game can meet first.
+                int carriers = Carriers(names, bone, out _);
+                if (carriers > 1)
+                    verdict.Duplicates.Add("'" + bone + "' is carried by " + carriers +
+                                           " nodes - the game binds the first it meets");
             }
 
             // The PATH question is asked with EXACT names all the way down, and that is not an
