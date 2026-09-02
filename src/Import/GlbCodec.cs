@@ -1263,7 +1263,8 @@ namespace Morgott.ContentTool.Import
             throw new ArgumentException("a " + value.GetType().Name + " is not a JSON value");
         }
 
-        /// <summary>A double that may be integral. Integral -> no decimal point; else G17.</summary>
+        /// <summary>A double that may be integral. Integral -> no decimal point; else the shortest
+        /// spelling of 15, 16 or 17 significant digits that re-parses to the same value.</summary>
         internal JsonWriter Num(double value)
         {
             Comma();
@@ -1273,11 +1274,19 @@ namespace Morgott.ContentTool.Import
             if (integral) text.Append(((long)value).ToString(CultureInfo.InvariantCulture));
             else
             {
-                // Shortest-round-trip on .NET Framework: G15 when it survives a re-parse, else G17.
-                string brief = value.ToString("G15", CultureInfo.InvariantCulture);
-                text.Append(double.Parse(brief, CultureInfo.InvariantCulture) == value
-                    ? brief
-                    : value.ToString("G17", CultureInfo.InvariantCulture));
+                // Shortest-round-trip on .NET Framework, which has no "R" that round-trips and no
+                // shortest-form default: try 15, 16, then 17 significant digits and take the first
+                // spelling that re-parses to the same double. G16 is not a nicety - it is the width a
+                // great many doubles actually need, and skipping it spells every one of them with a
+                // redundant 17th digit. That is what stops a rewritten file from being byte-identical
+                // to the one it came from, since every other producer already writes the shortest form.
+                string brief = null;
+                for (int digits = 15; digits <= 17; digits++)
+                {
+                    brief = value.ToString("G" + digits, CultureInfo.InvariantCulture);
+                    if (double.Parse(brief, CultureInfo.InvariantCulture) == value) break;
+                }
+                text.Append(brief);
             }
             separate = true;
             return this;
