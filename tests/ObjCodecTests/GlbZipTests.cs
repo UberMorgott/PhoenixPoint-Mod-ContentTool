@@ -160,8 +160,441 @@ internal static class GlbZipTests
               GlbSlim.Long(GlbSlim.Obj(GlbSlim.Arr(fold.Json, "buffers")[0]), "byteLength", -1) == fold.Bin.Length,
               "a zipped document is Dirty and its buffer's byteLength is the BIN chunk it actually got");
 
-        return "GLB-ZIP PASS, " + checks + " check(s)";
+        // --- preservation, idempotence and the pose: what the rewrite must NOT change ---
+        //
+        // Every fixture is loaded ONCE and zipped IN PLACE, with everything the rewrite must not
+        // touch captured off the document before the call and read off the same document after it.
+        // Holding a before-and-after pair would double a 36 MB model's footprint for no more truth.
+
+        var runs = new Dictionary<string, Rerun>();
+        foreach (string name in Preserved) runs[name] = Rezip(GlbDocument.Load(Fixture(name)));
+
+        // 19. Every accessor no sampler names - positions, indices, joints, weights, bind matrices -
+        //     still reads the same bytes. Matched by VALUE and not by index, because Trim renumbers
+        //     everything it keeps and an index is therefore not a name.
+        Check(runs["u8_probe.glb"].Payloads,
+              "u8_probe.glb keeps every non-animation accessor byte-identical through the rewrite");
+
+        // 20. And on the two files where Trim really does compact BIN - the harder half, because the
+        //     bytes MOVE and still have to come out the same.
+        Check(runs["u8_rootfold.glb"].Payloads && runs["u9_probe.glb"].Payloads,
+              "u8_rootfold.glb and u9_probe.glb keep theirs across a BIN compaction");
+
+        // 21. Images are the loudest thing a compaction can cut loose: they own a bufferView directly,
+        //     with no accessor between, so a view that moves without its image following is a texture
+        //     of garbage that still loads.
+        Rerun tiffany = Tiffany();
+        Check(runs["u8_probe.glb"].Images && runs["u8_rootfold.glb"].Images &&
+              runs["u9_probe.glb"].Images && (tiffany == null || tiffany.Images),
+              "every image's bytes survive the rewrite" + (tiffany == null ? "" : ", the 6 in tiffany included"));
+
+        // 22. And the skin: inverse bind matrices are what stands a mesh on its rig, and they are an
+        //     accessor no animation names, so nothing else in this gate would catch them moving.
+        Check(runs["u8_probe.glb"].Skins && runs["u8_rootfold.glb"].Skins && runs["u9_probe.glb"].Skins,
+              "every skin's inverseBindMatrices read the same bytes afterwards");
+
+        // 23-24. IDEMPOTENCE. ReadFloats understands the normalized SHORT the quantiser writes, so a
+        //        second run reads back what the first wrote and re-emits it - not approximately, bit
+        //        for bit. A tool that drifts on the second run cannot be run by a pipeline.
+        Check(Idempotent(runs["u8_rootfold.glb"]), "zipping u8_rootfold.glb twice is zipping it once");
+        Check(Idempotent(runs["u8_probe.glb"]), "zipping u8_probe.glb twice is zipping it once");
+
+        // 25. The same claim at scale and against a file this C# did not write: 36 MB, 300 clips,
+        //     29,724 accessors, already zipped by tools\ppzip.py. An already-zipped file is a FIXED
+        //     POINT - the BIN chunk comes back byte for byte, the JSON comes back as the same
+        //     document, and zipping the RESULT again is byte-identical to zipping once.
+        //
+        //     NOT byte-identical to the Python file, and deliberately so: measured 2026-09-02, all
+        //     271,197 number tokens parse to the same doubles and only their SPELLING differs -
+        //     1,447 integral doubles Python writes as "1.0"/"0.0" and glTF is happier reading as
+        //     "1"/"0", 393 exponents cased "e-05" against "E-05", and 16 doubles whose shortest
+        //     round-tripping form has two equally short spellings that Python's Grisu and .NET's
+        //     G16 break differently. That is a float printer's business and not the zip's, so the
+        //     gate asserts what the zip is actually responsible for.
+        Check(tiffany == null || (tiffany.Fixed && tiffany.Stats.Collapsed == 15149 &&
+                                  tiffany.Stats.Quantised == 27284 &&
+                                  tiffany.Stats.KeysBefore == 2721855 && tiffany.Stats.KeysAfter == 2721855),
+              tiffany == null ? "tiffany_ppfit.glb is absent, so the real-world fixed point is skipped"
+                              : "tiffany_ppfit.glb is a fixed point: " + tiffany.Note);
+
+        // 26. NOT ONE CLIP, CHANNEL OR KEY IS DROPPED - the whole promise of the tool. Every clip name,
+        //     every channel's target node and path, and on a file where nothing collapsed, every key.
+        Check(runs["u8_probe.glb"].Clips && runs["u8_rootfold.glb"].Clips && runs["u9_probe.glb"].Clips,
+              "every clip keeps its name, its channel count and every channel's target node and path");
+
+        // 27. Quantising a quaternion component-wise moves it off the unit sphere by at most the
+        //     quantum; nothing renormalises, deliberately, so the gate asserts the drift instead.
+        Check(runs["u8_probe.glb"].Norms && runs["u8_rootfold.glb"].Norms && runs["u9_probe.glb"].Norms,
+              "no quantised rotation key leaves the unit sphere by more than 1e-4");
+
+        // 28. And the claim none of the above makes: the POSE. Sampled off the raw curves at 17 times
+        //     per sampler, by a sampler that owes GlbReader nothing, so the gate can disagree with the
+        //     importer. Rotations within two quanta, everything else EXACTLY equal.
+        Check(runs["u8_probe.glb"].Pose == null && runs["u8_rootfold.glb"].Pose == null &&
+              runs["u9_probe.glb"].Pose == null,
+              "every sampler poses the same at 17 times before and after: " +
+              (runs["u8_probe.glb"].Pose ?? runs["u8_rootfold.glb"].Pose ?? runs["u9_probe.glb"].Pose));
+
+        // 29. A hostile accessor cannot divide the rewrite by zero. An unknown "type" costs
+        //     ElementSize 0, which Packed refuses before ReadFloats can splice anything - the curve is
+        //     left alone and the clip still comes out whole.
+        GlbDocument junk = GlbDocument.Load(Synthetic());
+        GlbSlim.Obj(GlbSlim.Arr(junk.Json, "accessors")[2])["type"] = "MAT7";
+        GlbZip.Stats junkStats = GlbZip.Zip(junk, true, true);
+        Check(junkStats.Skipped >= 1 && junkStats.Quantised <= 1 && Names(junk) == "Clip",
+              "an accessor whose type glTF does not define is skipped, not divided by");
+
+        return "GLB-ZIP PASS, " + checks + " check(s)" +
+               (tiffany == null ? "\n  (skipped local\\PpFit\\Content\\Models\\tiffany_ppfit.glb - not present)" : "");
     }
+
+    // --- the before/after machinery -------------------------------------------------------------
+
+    /// <summary>The fixtures the whole-file promises are made over: the shrink case, the shared-view
+    /// growth case, and the one ppzip crashes on.</summary>
+    private static readonly string[] Preserved = { "u8_rootfold.glb", "u8_probe.glb", "u9_probe.glb" };
+
+    /// <summary>One zip and every verdict that can be read off it.</summary>
+    private sealed class Rerun
+    {
+        internal GlbZip.Stats Stats;
+        internal bool Payloads, Images, Skins, Clips, Norms, Fixed;
+        internal string Pose;        // null = every sampled pose matched
+        internal string Note;
+        internal byte[] Written;
+    }
+
+    /// <summary>Capture, zip in place, capture again. One document rather than a before-and-after
+    /// pair, because holding a 36 MB model twice buys no more truth than reading it twice.</summary>
+    private static Rerun Rezip(GlbDocument doc)
+    {
+        Dictionary<string, int> payloads = Payloads(doc);
+        List<string> images = ImageBytes(doc), skins = BindBytes(doc), clips = ClipShape(doc);
+        List<Curve> before = Curves(doc);
+
+        var run = new Rerun { Stats = GlbZip.Zip(doc, true, true) };
+        run.Payloads = SameBag(payloads, Payloads(doc));
+        run.Images = SameList(images, ImageBytes(doc));
+        run.Skins = SameList(skins, BindBytes(doc));
+        run.Clips = SameList(clips, ClipShape(doc)) &&
+                    (run.Stats.Collapsed != 0 || run.Stats.KeysBefore == run.Stats.KeysAfter);
+        run.Norms = Unit(doc);
+        run.Pose = Posed(before, Curves(doc));
+        run.Written = doc.Write();
+        return run;
+    }
+
+    /// <summary>The 36 MB real-world fixed point, or null when `local\` is not on this machine - it is
+    /// gitignored, so a clone has no way to produce it and its absence is not a failure.</summary>
+    private static Rerun Tiffany()
+    {
+        string path = Local(@"local\PpFit\Content\Models\tiffany_ppfit.glb");
+        if (!System.IO.File.Exists(path)) return null;
+        byte[] source = System.IO.File.ReadAllBytes(path);
+        Rerun run = Rezip(GlbDocument.Load(source));
+
+        GlbDocument was = GlbDocument.Load(source), now = GlbDocument.Load(run.Written);
+        bool bin = Same(was.Bin, now.Bin), json = SameJson(was.Json, now.Json), again = Idempotent(run);
+        run.Fixed = bin && json && again;
+        run.Note = "BIN identical " + bin + " (" + now.Bin.Length + " B), JSON the same document " +
+                   json + ", zipping the result again is a no-op " + again + "; " + run.Stats.Collapsed +
+                   " collapsed (15149), " + run.Stats.Quantised + " quantised (27284), keys " +
+                   run.Stats.KeysBefore + " -> " + run.Stats.KeysAfter + " (2721855)";
+        return run;
+    }
+
+    /// <summary>Zip the written file again and ask for the very same bytes.</summary>
+    private static bool Idempotent(Rerun run)
+    {
+        GlbDocument again = GlbDocument.Load(run.Written);
+        GlbZip.Zip(again, true, true);
+        return Same(again.Write(), run.Written);
+    }
+
+    /// <summary>Every accessor NO animation sampler names, as a multiset of its bytes. A multiset
+    /// because Trim renumbers what it keeps, so the only stable identity an accessor has is its
+    /// content - and two accessors with identical content are interchangeable by definition.</summary>
+    private static Dictionary<string, int> Payloads(GlbDocument doc)
+    {
+        var animated = new HashSet<int>();
+        foreach (object animation in GlbSlim.Arr(doc.Json, "animations") ?? new List<object>())
+            foreach (object sampler in GlbSlim.Arr(GlbSlim.Obj(animation), "samplers") ?? new List<object>())
+            {
+                animated.Add(GlbSlim.Int(GlbSlim.Obj(sampler), "input", -1));
+                animated.Add(GlbSlim.Int(GlbSlim.Obj(sampler), "output", -1));
+            }
+
+        var bag = new Dictionary<string, int>();
+        List<object> accessors = GlbSlim.Arr(doc.Json, "accessors") ?? new List<object>();
+        for (int i = 0; i < accessors.Count; i++)
+        {
+            if (animated.Contains(i)) continue;
+            byte[] slice = Slice(doc, i);
+            if (slice == null) continue;
+            string key = Convert.ToBase64String(slice);
+            bag.TryGetValue(key, out int seen);
+            bag[key] = seen + 1;
+        }
+        return bag;
+    }
+
+    /// <summary>Each image's bufferView bytes, in image order - images are never renumbered.</summary>
+    private static List<string> ImageBytes(GlbDocument doc)
+    {
+        var list = new List<string>();
+        foreach (object image in GlbSlim.Arr(doc.Json, "images") ?? new List<object>())
+            list.Add(Convert.ToBase64String(ViewBytes(doc, GlbSlim.Int(GlbSlim.Obj(image), "bufferView", -1))));
+        return list;
+    }
+
+    /// <summary>Each skin's inverse bind matrices, followed through the skin rather than by index.</summary>
+    private static List<string> BindBytes(GlbDocument doc)
+    {
+        var list = new List<string>();
+        foreach (object skin in GlbSlim.Arr(doc.Json, "skins") ?? new List<object>())
+            list.Add(Convert.ToBase64String(
+                Slice(doc, GlbSlim.Int(GlbSlim.Obj(skin), "inverseBindMatrices", -1)) ?? new byte[0]));
+        return list;
+    }
+
+    /// <summary>Name, channel count and every channel's target - the shape a rewrite may not alter.</summary>
+    private static List<string> ClipShape(GlbDocument doc)
+    {
+        var list = new List<string>();
+        foreach (object animation in GlbSlim.Arr(doc.Json, "animations") ?? new List<object>())
+        {
+            Dictionary<string, object> clip = GlbSlim.Obj(animation);
+            var row = new StringBuilder(GlbSlim.Str(clip, "name") ?? "");
+            List<object> channels = GlbSlim.Arr(clip, "channels") ?? new List<object>();
+            row.Append('|').Append(channels.Count);
+            foreach (object channel in channels)
+            {
+                Dictionary<string, object> target = GlbSlim.Obj(GlbSlim.Get(GlbSlim.Obj(channel), "target"));
+                row.Append('|').Append(GlbSlim.Int(target, "node", -1)).Append(':')
+                   .Append(GlbSlim.Str(target, "path") ?? "");
+            }
+            list.Add(row.ToString());
+        }
+        return list;
+    }
+
+    /// <summary>Whether every quantised rotation key is still a unit quaternion. Nothing renormalises
+    /// - ppzip does not either - so this is where that decision is held to its own bound.</summary>
+    private static bool Unit(GlbDocument doc)
+    {
+        foreach (Curve curve in Curves(doc))
+        {
+            if (curve == null || !curve.Rotation || curve.Stride != 4) continue;
+            for (int key = 0; key + 4 <= curve.Values.Length; key += 4)
+            {
+                double sum = 0;
+                for (int c = 0; c < 4; c++) sum += curve.Values[key + c] * (double)curve.Values[key + c];
+                if (Math.Abs(Math.Sqrt(sum) - 1.0) > 1e-4) return false;
+            }
+        }
+        return true;
+    }
+
+    // --- the pose oracle ------------------------------------------------------------------------
+
+    /// <summary>One animation sampler as raw numbers, with no glTF index left in it.</summary>
+    private sealed class Curve
+    {
+        internal float[] Times, Values;
+        /// <summary>Components per KEY, derived from the key count rather than from the accessor's
+        /// type: a morph-weight sampler stores N weights per key in a SCALAR accessor, so the
+        /// accessor's element size is not the stride.</summary>
+        internal int Stride;
+        internal bool Rotation, Step, Cubic;
+    }
+
+    /// <summary>Every sampler of every clip, in file order, so before and after line up by position.
+    /// A sampler this gate cannot read flat comes back null and both sides have to agree on that.</summary>
+    private static List<Curve> Curves(GlbDocument doc)
+    {
+        var list = new List<Curve>();
+        foreach (object animation in GlbSlim.Arr(doc.Json, "animations") ?? new List<object>())
+        {
+            Dictionary<string, object> clip = GlbSlim.Obj(animation);
+            var pathOf = new Dictionary<int, string>();
+            foreach (object channel in GlbSlim.Arr(clip, "channels") ?? new List<object>())
+            {
+                int si = GlbSlim.Int(GlbSlim.Obj(channel), "sampler", -1);
+                string path = GlbSlim.Str(GlbSlim.Obj(GlbSlim.Get(GlbSlim.Obj(channel), "target")), "path");
+                if (si >= 0 && path != null && !pathOf.ContainsKey(si)) pathOf[si] = path;
+            }
+
+            List<object> samplers = GlbSlim.Arr(clip, "samplers") ?? new List<object>();
+            for (int si = 0; si < samplers.Count; si++)
+            {
+                Dictionary<string, object> sampler = GlbSlim.Obj(samplers[si]);
+                float[] times = GlbZip.ReadFloats(doc, GlbSlim.Int(sampler, "input", -1));
+                float[] values = GlbZip.ReadFloats(doc, GlbSlim.Int(sampler, "output", -1));
+                string interpolation = GlbSlim.Str(sampler, "interpolation") ?? "LINEAR";
+                pathOf.TryGetValue(si, out string path);
+                list.Add(times == null || values == null || times.Length == 0 ||
+                         values.Length % times.Length != 0
+                    ? null
+                    : new Curve
+                      {
+                          Times = times, Values = values, Stride = values.Length / times.Length,
+                          Rotation = path == "rotation", Step = interpolation == "STEP",
+                          Cubic = interpolation == "CUBICSPLINE"
+                      });
+            }
+        }
+        return list;
+    }
+
+    /// <summary>17 poses per sampler, before against after. Returns null when every one matched, else
+    /// the first disagreement in words - the number matters more than the boolean when it goes red.</summary>
+    private static string Posed(List<Curve> before, List<Curve> after)
+    {
+        if (before.Count != after.Count)
+            return "the file came out with " + after.Count + " sampler(s) where it had " + before.Count;
+        for (int i = 0; i < before.Count; i++)
+        {
+            Curve a = before[i], b = after[i];
+            if ((a == null) != (b == null)) return "sampler " + i + " changed whether it can be read flat";
+            if (a == null) continue;
+            if (a.Stride != b.Stride || a.Rotation != b.Rotation || a.Step != b.Step || a.Cubic != b.Cubic)
+                return "sampler " + i + " changed shape: stride " + a.Stride + " -> " + b.Stride;
+
+            // CUBICSPLINE stores a tangent either side of every value, so sampling it as a line would
+            // compare the gate against itself. Zip refuses to rewrite one at all, so the bytes are the
+            // whole claim here.
+            if (a.Cubic)
+            {
+                if (!Same(a.Values, b.Values, 0f)) return "sampler " + i + " (CUBICSPLINE) values moved";
+                continue;
+            }
+
+            float tolerance = a.Rotation ? 2f * GlbZip.QuantMaxError : 0f;
+            float first = a.Times[0], last = a.Times[a.Times.Length - 1];
+            for (int step = 0; step <= 16; step++)
+            {
+                float t = first + (last - first) * step / 16f;
+                float[] want = SampleAt(a, t), got = SampleAt(b, t);
+                for (int c = 0; c < want.Length; c++)
+                    if (Math.Abs(want[c] - got[c]) > tolerance)
+                        return "sampler " + i + " component " + c + " at t=" + t + " moved by " +
+                               Math.Abs(want[c] - got[c]) + " (allowed " + tolerance + ")";
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Sample one animation channel at a time, over the RAW curves, with no Unity and no GlbReader:
+    /// the gate has to be able to disagree with the importer. LINEAR between the two bracketing keys,
+    /// clamped at both ends; STEP holds the earlier key; rotations are slerped over the shorter arc
+    /// the way GlbReader does (src\Import\GlbReader.cs:1472-1485), because a component-wise lerp takes
+    /// the same path at the wrong speed and would fail this test for a reason that is not the zip's.
+    /// </summary>
+    private static float[] SampleAt(Curve curve, float t)
+    {
+        float[] times = curve.Times, values = curve.Values;
+        int stride = curve.Stride, last = times.Length - 1;
+        var pose = new float[stride];
+        if (t <= times[0]) { Array.Copy(values, 0, pose, 0, stride); return pose; }
+        if (t >= times[last]) { Array.Copy(values, last * stride, pose, 0, stride); return pose; }
+
+        int i = 0;
+        while (i + 1 < last && times[i + 1] <= t) i++;
+        float span = times[i + 1] - times[i];
+        float u = curve.Step || span <= 0 ? 0f : (t - times[i]) / span;
+        if (curve.Rotation && stride == 4 && !curve.Step) return Slerp(values, i, u);
+        for (int c = 0; c < stride; c++)
+            pose[c] = values[i * stride + c] + (values[(i + 1) * stride + c] - values[i * stride + c]) * u;
+        return pose;
+    }
+
+    /// <summary>The shorter-arc slerp of keys i and i+1, normalised. No lerp shortcut above some
+    /// cosine threshold: before and after could land on OPPOSITE sides of such a threshold and differ
+    /// by far more than the quantum for a reason that has nothing to do with the rewrite. Only a
+    /// genuinely degenerate sine falls back, where lerp and slerp differ by ~1e-7.</summary>
+    private static float[] Slerp(float[] v, int i, float u)
+    {
+        int a = i * 4, b = (i + 1) * 4;
+        double bx = v[b], by = v[b + 1], bz = v[b + 2], bw = v[b + 3];
+        double dot = v[a] * bx + v[a + 1] * by + v[a + 2] * bz + v[a + 3] * bw;
+        if (dot < 0) { bx = -bx; by = -by; bz = -bz; bw = -bw; dot = -dot; }
+        if (dot > 1) dot = 1;
+
+        double s0 = 1 - u, s1 = u;
+        if (dot < 0.999999)
+        {
+            double theta = Math.Acos(dot), sine = Math.Sin(theta);
+            s0 = Math.Sin((1 - u) * theta) / sine;
+            s1 = Math.Sin(u * theta) / sine;
+        }
+        double x = v[a] * s0 + bx * s1, y = v[a + 1] * s0 + by * s1,
+               z = v[a + 2] * s0 + bz * s1, w = v[a + 3] * s0 + bw * s1;
+        double length = Math.Sqrt(x * x + y * y + z * z + w * w);
+        if (length <= 0) return new float[4];
+        return new[] { (float)(x / length), (float)(y / length), (float)(z / length), (float)(w / length) };
+    }
+
+    // --- byte helpers ---------------------------------------------------------------------------
+
+    /// <summary>One whole bufferView, or an empty run when the document names no such view.</summary>
+    private static byte[] ViewBytes(GlbDocument doc, int index)
+    {
+        List<object> views = GlbSlim.Arr(doc.Json, "bufferViews");
+        if (views == null || index < 0 || index >= views.Count || doc.Bin == null) return new byte[0];
+        Dictionary<string, object> view = GlbSlim.Obj(views[index]);
+        long at = GlbSlim.Long(view, "byteOffset", 0), length = GlbSlim.Long(view, "byteLength", 0);
+        if (at < 0 || length <= 0 || at + length > doc.Bin.Length) return new byte[0];
+        var bytes = new byte[length];
+        Buffer.BlockCopy(doc.Bin, (int)at, bytes, 0, (int)length);
+        return bytes;
+    }
+
+    /// <summary>Two parsed glTF documents, compared as VALUES: same keys in the same order, same
+    /// numbers, same strings. Not as text - two correct float printers disagree about how to spell a
+    /// double (Python writes an integral one as "1.0" and cases an exponent "e-05"), and that is the
+    /// printer's business, not the rewrite's.</summary>
+    private static bool SameJson(object a, object b)
+    {
+        if (a is Dictionary<string, object> left)
+        {
+            if (!(b is Dictionary<string, object> right) || left.Count != right.Count) return false;
+            using (var one = left.GetEnumerator())
+            using (var two = right.GetEnumerator())
+                while (one.MoveNext() && two.MoveNext())
+                {
+                    if (one.Current.Key != two.Current.Key) return false;
+                    if (!SameJson(one.Current.Value, two.Current.Value)) return false;
+                }
+            return true;
+        }
+        if (a is List<object> items)
+        {
+            if (!(b is List<object> others) || items.Count != others.Count) return false;
+            for (int i = 0; i < items.Count; i++) if (!SameJson(items[i], others[i])) return false;
+            return true;
+        }
+        return a == null ? b == null : a.Equals(b);
+    }
+
+    private static bool SameBag(Dictionary<string, int> a, Dictionary<string, int> b)
+    {
+        if (a.Count != b.Count) return false;
+        foreach (KeyValuePair<string, int> pair in a)
+            if (!b.TryGetValue(pair.Key, out int seen) || seen != pair.Value) return false;
+        return true;
+    }
+
+    private static bool SameList(List<string> a, List<string> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (int i = 0; i < a.Count; i++) if (a[i] != b[i]) return false;
+        return true;
+    }
+
+    private static string Local(string relative) =>
+        System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                                          @"..\..\..\..\..\" + relative));
 
     /// <summary>Whether the pre-flight refuses this fixture at all - zip reaches it with force, since
     /// it drops no clip and neither the mandatory nor the rigged-character arm can apply.</summary>
@@ -214,8 +647,12 @@ internal static class GlbZipTests
         return null;
     }
 
-    private static Dictionary<string, object> Accessor(GlbDocument doc, int index) =>
-        GlbSlim.Obj(GlbSlim.Arr(doc.Json, "accessors")[index]);
+    private static Dictionary<string, object> Accessor(GlbDocument doc, int index)
+    {
+        List<object> accessors = GlbSlim.Arr(doc.Json, "accessors");
+        return accessors == null || index < 0 || index >= accessors.Count
+            ? null : GlbSlim.Obj(accessors[index]);
+    }
 
     private static long Count(GlbDocument doc, int accessor) =>
         GlbSlim.Long(Accessor(doc, accessor), "count", 0);
@@ -225,11 +662,15 @@ internal static class GlbZipTests
     private static byte[] Slice(GlbDocument doc, int index)
     {
         Dictionary<string, object> accessor = Accessor(doc, index);
-        Dictionary<string, object> view =
-            GlbSlim.Obj(GlbSlim.Arr(doc.Json, "bufferViews")[GlbSlim.Int(accessor, "bufferView", -1)]);
-        int at = (int)(GlbSlim.Long(view, "byteOffset", 0) + GlbSlim.Long(accessor, "byteOffset", 0));
-        var slice = new byte[GlbSlim.Long(accessor, "count", 0) * GlbSlim.ElementSize(accessor)];
-        Buffer.BlockCopy(doc.Bin, at, slice, 0, slice.Length);
+        List<object> views = GlbSlim.Arr(doc.Json, "bufferViews");
+        int vi = GlbSlim.Int(accessor, "bufferView", -1);
+        if (views == null || vi < 0 || vi >= views.Count || doc.Bin == null) return null;
+        Dictionary<string, object> view = GlbSlim.Obj(views[vi]);
+        long at = GlbSlim.Long(view, "byteOffset", 0) + GlbSlim.Long(accessor, "byteOffset", 0);
+        long length = GlbSlim.Long(accessor, "count", 0) * GlbSlim.ElementSize(accessor);
+        if (at < 0 || length <= 0 || at + length > doc.Bin.Length) return null;
+        var slice = new byte[length];
+        Buffer.BlockCopy(doc.Bin, (int)at, slice, 0, (int)length);
         return slice;
     }
 
@@ -240,9 +681,7 @@ internal static class GlbZipTests
         return true;
     }
 
-    private static string Fixture(string name) =>
-        System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
-                                                          @"..\..\..\..\..\lib\" + name));
+    private static string Fixture(string name) => Local(@"lib\" + name);
 
     /// <summary>ppzip.py:211-238's own fixture: 4 still quaternion keys and one moving 2-key curve,
     /// 4 bufferViews, 4 accessors, one clip with two rotation channels.</summary>
