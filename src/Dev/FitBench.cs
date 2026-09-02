@@ -583,7 +583,8 @@ namespace Morgott.ContentTool.Dev
             // stands the unit in the weapon's own idle again, then re-binds against the live rig.
             try { FitAnim.Release(); } catch (Exception) { }
             try { if (bay != null && bay.CharacterBuilder != null)
-                      FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips()); }
+                      FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips(),
+                                   PrototypeClips()); }
             catch (Exception) { }
             // The pose re-asserted through the ordinary path, so the preview scale just put back to 1
             // is actually ON SCREEN rather than waiting for the next rebuild.
@@ -697,6 +698,28 @@ namespace Morgott.ContentTool.Dev
         internal static IList<PrototypeTarget> SlotTargets() { return slotTargets; }
 
         internal static PrototypeVariant ShownVariant() { return shownVariant; }
+
+        /// <summary>
+        /// The clip fallback for <see cref="FitAnim.Bind"/>: the standing VARIANT's own clips, or null.
+        /// Only reached when the anim actions catalogue nothing, which is Crabman's shipped state
+        /// (Crabman_AnimActionsDef.AnimActions.Count == 0) - an ordinary unit never sees it.
+        ///
+        /// "The prototype is what is standing there" is tested by <c>animActions == proto.Actions</c>:
+        /// the bench's own unit picks re-assign <c>animActions</c> off their own DisplayCharacter
+        /// (<see cref="Show"/>), so after one of those this stops answering even though
+        /// <c>shownVariant</c> is still set for the Doctor's slot list.
+        /// </summary>
+        // ponytail: reference equality is the whole guard. The one case it cannot separate is a
+        // DisplayCharacter that returned NULL actions for both the prototype and the ordinary unit that
+        // followed it - then both are null and this offers the last variant's clips. Add a rebuild
+        // generation counter if that ever shows up; today an empty catalogue is the only way in.
+        private static AnimationClip[] PrototypeClips()
+        {
+            if (proto == null || shownVariant == null || harvest == null) return null;
+            if (animActions != proto.Actions) return null;
+            try { return harvest.Clips(shownVariant.ManagerName); }
+            catch (Exception) { return null; }
+        }
 
         /// <summary>A prototype rebuild is in flight, so a second selection would leave the bay showing
         /// a mix of two and neither slot list trustworthy.</summary>
@@ -1275,7 +1298,9 @@ namespace Morgott.ContentTool.Dev
                 // rig that is really standing there: with no anim actions to catalogue the strip says
                 // so, which is the honest answer while the build is broken.
                 animActions = null; held = null;
-                try { FitAnim.Bind(bay.CharacterBuilder, null, null, null, null); }
+                // No fallback either: this arm is an ORDINARY unit whose build failed, and the last
+                // prototype's clips are not this rig's.
+                try { FitAnim.Bind(bay.CharacterBuilder, null, null, null, null, null); }
                 catch (Exception) { }
 
                 message = "ct_bench: could not build '" + unit.name + "' " +
@@ -1316,13 +1341,23 @@ namespace Morgott.ContentTool.Dev
                 // BEFORE Handed and FitAnim.Bind: the Doctor has to see this rebuild's slot renderers
                 // in the same frame the rest of the pose is applied, or a prototype selection reads
                 // the renderers of whatever stood here previously.
+                bool prototypeRebuild = false;
                 if (proto != null)
                 {
                     proto.Rebuilt();
                     // ... and the slots it produced, turned into targets in the SAME frame. Only a
                     // rebuild this bench asked a prototype for has a pending variant, so the bench's own
                     // unit picks leave the last prototype's targets exactly as they were.
-                    if (pendingVariant != null) Retarget();
+                    if (pendingVariant != null)
+                    {
+                        // THE PROTOTYPE'S OWN CLIP SET, before Handed and before Bind. Handed runs
+                        // SetActiveNumberOfHands (TacActorAnimActions.cs:66) on it, and Bind catalogues
+                        // it - both have to be looking at the actions the rig standing there came with,
+                        // not the previous unit's. Retarget clears pendingVariant, so this is read first.
+                        animActions = proto.Actions;
+                        Retarget();
+                        prototypeRebuild = true;
+                    }
                 }
                 AddonsManager manager = bay.CharacterBuilder.AddonsManager;
                 if (manager != null) manager.SetAutorefreshOnTagsChanged(true);
@@ -1332,7 +1367,13 @@ namespace Morgott.ContentTool.Dev
                 // idle and an empty hand gets the empty-handed one. Bind keeps the selection when the
                 // same clip is still there - a rebuild is what a nudge causes, and being thrown back to
                 // frame 0 after every nudge is what a fit cannot be judged through.
-                FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips());
+                FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips(),
+                             PrototypeClips());
+                // THE VARIANT'S OWN PREVIEW POSE, and only on the rebuild that stood it there. Doing it
+                // after every Bind would throw the author's chosen clip away on each weapon nudge, which
+                // is the very thing Bind:151-154 preserves the selection to avoid. A name the catalogue
+                // does not have is a no-op, leaving Bind's "clip 0, paused at frame 0".
+                if (prototypeRebuild && shownVariant != null) FitAnim.Select(shownVariant.PreviewPoseClip);
 
                 ViewElementDef view = unit.GetViewElementDef();
                 CharacterBuilderViewParametersDef p = view == null ? null : view.BuilderViewParamDef;

@@ -8,6 +8,7 @@ using PhoenixPoint.Common.Utils;
 using PhoenixPoint.Common.View.ViewModules;
 using PhoenixPoint.Geoscape.View.DataObjects;
 using PhoenixPoint.Tactical.Entities;
+using PhoenixPoint.Tactical.Entities.Animations;
 using UnityEngine;
 
 namespace Morgott.ContentTool.Dev
@@ -50,6 +51,27 @@ namespace Morgott.ContentTool.Dev
     ///
     /// DisplaySoldier has a fast path (:636-647): same addons and no rig change means NO rebuild, so
     /// no callback. Restore must therefore never depend on one - it does not, it only issues the call.
+    ///
+    /// ============ SAMPLING vs REBUILD vs RESTORE - THE THIRD ORDERING ============
+    /// <see cref="FitAnim"/> SAMPLES a clip straight onto the rig every LateUpdate while it is driving,
+    /// holding the animator at speed 0, so three things now write to the same bones and the order they
+    /// do it in is the whole contract:
+    ///
+    ///  a. REBUILD then SAMPLE. <see cref="Actions"/> is the clip set THIS rebuild produced, and
+    ///     FitBench.Posed hands it to FitAnim.Bind in the same callback - so a sample can only ever
+    ///     land on the rig the actions belong to. Before this field existed the bench catalogued the
+    ///     PREVIOUS unit's actions against the prototype's new rig (Show discarded DisplayCharacter's
+    ///     return), which is why a Crabman offered no clips at all.
+    ///  b. RESTORE then STOP. <see cref="Restore"/> issues DisplaySoldier and returns; it does NOT
+    ///     wait, so it cannot stop the sampler itself. FitBench.Close is what enforces the order, in
+    ///     one synchronous block: proto.Dispose() (this restore) and then FitAnim.Release - which puts
+    ///     the animator's speed back and runs CommonCharacterUtils.ResetCharacterAnimation
+    ///     (= Animator.Play(0, -1, 0), CommonCharacterUtils.cs:66-73). No LateUpdate can run between
+    ///     the two, so no sample can land on the restored soldier, and the rebuild the restore started
+    ///     is a coroutine that has not touched anything yet either.
+    ///  c. STALE ACTIONS AFTER A RESTORE. Restore and Dispose null <see cref="Actions"/> where they
+    ///     null <c>slots</c>, so nothing can catalogue a gone prototype's clips against whatever the
+    ///     bay puts back.
     ///
     /// PRESENTATION ONLY. Never GeoCharacter.SetItems, never SaveLoadout, never a template edit: the
     /// save's soldier is untouched, and the only thing put back is what is on the platform.
@@ -105,6 +127,12 @@ namespace Morgott.ContentTool.Dev
         /// restore, because it would DisplaySoldier a null.</summary>
         internal bool Captured { get { return captured; } }
 
+        /// <summary>The TacActorAnimActions the last prototype DisplayCharacter produced - the clip set
+        /// that belongs to the rig now standing there. Null before the first <see cref="Show"/>, on a
+        /// Show that failed, and after <see cref="Restore"/>, so a stale set can never be catalogued
+        /// against a new rig (class remark, case a).</summary>
+        internal TacActorAnimActions Actions { get; private set; }
+
         /// <summary>Snapshot the bay on first use, then show this variant. Returns null on success or
         /// a one-line reason.</summary>
         internal string Show(TacCharacterDef representative, List<ItemDef> bodyparts, ItemDef weapon)
@@ -121,7 +149,10 @@ namespace Morgott.ContentTool.Dev
             {
                 UnitDisplayData data = new UnitDisplayData(representative, shared);
                 bool rigChanged;
-                CommonCharacterUtils.DisplayCharacter(builder, data, out rigChanged);
+                // THE RETURN VALUE IS THE PROTOTYPE'S OWN CLIP SET, and discarding it is what made the
+                // transport catalogue the PREVIOUS unit's clips against this rig (FitBench.cs:1231 has
+                // kept it for the bench's own picks since the strip was written).
+                Actions = CommonCharacterUtils.DisplayCharacter(builder, data, out rigChanged);
                 // DisplaySoldier:613-615, verbatim: the manager SURVIVES a switch between two
                 // characters sharing one rig, and with it the previous character's tags - which are
                 // what pick the skin variant every addon resolves to. Re-tag or rebuild the wrong skin.
@@ -143,6 +174,7 @@ namespace Morgott.ContentTool.Dev
                 // finally - the successful path returns with the rebuild not yet started, and its
                 // callback is what un-quiesces it.
                 busy = false;
+                Actions = null;
                 try { if (manager != null) manager.SetAutorefreshOnTagsChanged(true); }
                 catch (Exception) { }
                 return "could not build '" + representative.name + "' - " + ex.GetType().Name + ": " + ex.Message;
@@ -170,7 +202,7 @@ namespace Morgott.ContentTool.Dev
             if (restored) return null;
             restored = true;
             busy = false;            // invalidate an in-flight rebuild; see the class remark, case 2
-            slots = NoSlots;
+            slots = NoSlots; Actions = null;
             if (!captured) return null;
             if (builder == null) return "the squad bay's character builder is gone.";
             try
@@ -221,7 +253,7 @@ namespace Morgott.ContentTool.Dev
             builder = null; cycle = null; shared = null;
             capturedUnit = null; capturedManagerDef = null;
             capturedAddons.Clear(); capturedTags.Clear();
-            slots = NoSlots; busy = false; restored = true;
+            slots = NoSlots; Actions = null; busy = false; restored = true;
         }
 
         /// <summary>The bay as it was, in this order and before anything is touched: the module's

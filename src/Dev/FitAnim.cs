@@ -117,8 +117,13 @@ namespace Morgott.ContentTool.Dev
         /// <param name="modClips">Every clip the content mod that BUILT this character shipped, or null
         /// for a vanilla one. It is the only thing that separates "the game swapped this clip" (which it
         /// does by itself, for the weapon's hand count) from "a mod shipped this clip".</param>
+        /// <param name="fallback">The standing variant's own clips (PrototypeHarvest.Clips), used ONLY
+        /// when the anim-actions def catalogued nothing - the shipped state of Crabman_AnimActionsDef,
+        /// whose AnimActions.Count is 0. Null for an ordinary bench unit, which keeps today's behaviour
+        /// byte for byte.</param>
         internal static void Bind(AddonsCharacterBuilder charBuilder, TacActorAnimActions actions,
-                                 Equipment held, List<ItemDef> worn, AnimationClip[] modClips)
+                                 Equipment held, List<ItemDef> worn, AnimationClip[] modClips,
+                                 AnimationClip[] fallback)
         {
             string was = chosen >= 0 && chosen < names.Count ? names[chosen] : null;
             float wasT = t;
@@ -144,7 +149,7 @@ namespace Morgott.ContentTool.Dev
             if (animator == null) { note = "this unit's rig has no Animator - nothing to play."; return; }
             rig = animator.gameObject;
             savedSpeed = animator.speed;
-            Catalogue(actions, held, worn);
+            Catalogue(actions, held, worn, fallback);
             Resolve(modClips);
             if (clips.Count == 0) return;
 
@@ -159,15 +164,30 @@ namespace Morgott.ContentTool.Dev
         /// set, the shoot set that matches the equipment, and the navigation set (run, climb, turn) -
         /// in that order, because that is the order they are reached for. Nulls are the norm rather than
         /// the exception here: every one of these defs is a fixed field list and most fields are unset.
+        ///
+        /// THE FALLBACK IS LAST AND ONLY ON AN EMPTY LIST. A def that names clips is always the better
+        /// answer - it is the set the game itself would reach for, weapon and all. The rig's own
+        /// controller is what is left when the def names nothing, which is the SHIPPED state of
+        /// Crabman_AnimActionsDef (AnimActions.Count == 0, slice 0(d)) - and a null <paramref
+        /// name="actions"/> is the same case, so it falls through here rather than returning.
         /// </summary>
-        private static void Catalogue(TacActorAnimActions actions, Equipment held, List<ItemDef> worn)
+        private static void Catalogue(TacActorAnimActions actions, Equipment held, List<ItemDef> worn,
+                                      AnimationClip[] fallback)
         {
             if (actions == null)
-            {
                 note = "this rig came back without its TacActorAnimActions, so there is no clip set to " +
                        "read. The idle below is still the weapon's own.";
-                return;
-            }
+            else Own(actions, held, worn);
+
+            if (clips.Count > 0 || fallback == null) return;
+            foreach (AnimationClip c in fallback) Add(c);
+            if (clips.Count > 0)
+                note = "clips from the rig's own controller - this variant's anim actions are empty.";
+        }
+
+        /// <summary>The def's own three sets, in the order the game reaches for them.</summary>
+        private static void Own(TacActorAnimActions actions, Equipment held, List<ItemDef> worn)
+        {
             Add(actions.ActiveIdleClips);
             // The shoot set is not held on the component and cannot be asked for through the game's own
             // TryGetAnimAction: that runs Match, and Match hands the context's TacticalActor to
@@ -275,12 +295,16 @@ namespace Morgott.ContentTool.Dev
             AnimationClip[] all;
             try { all = def.GetAllClips(); } catch (Exception) { return; }
             if (all == null) return;
-            foreach (AnimationClip c in all)
-            {
-                if (c == null || clips.Contains(c)) continue;
-                clips.Add(c);
-                names.Add(string.IsNullOrEmpty(c.name) ? "(unnamed)" : c.name);
-            }
+            foreach (AnimationClip c in all) Add(c);
+        }
+
+        /// <summary>One row, deduplicated by clip IDENTITY - the same rule the def arm has always used,
+        /// so a controller clip a def also names cannot be listed twice.</summary>
+        private static void Add(AnimationClip c)
+        {
+            if (c == null || clips.Contains(c)) return;
+            clips.Add(c);
+            names.Add(string.IsNullOrEmpty(c.name) ? "(unnamed)" : c.name);
         }
 
         /// <summary>
@@ -483,6 +507,17 @@ namespace Morgott.ContentTool.Dev
         private static void Select(int i)
         {
             chosen = i; t = 0f; playing = false;
+        }
+
+        /// <summary>Select a clip by NAME - the variant's own PreviewPoseClip, once, on the rebuild that
+        /// stood it there. A name that is not in the catalogue is a NO-OP, not a fault: the def's pose
+        /// clip need not be one of the clips its anim actions or its controller offer, and Bind's own
+        /// "clip 0, paused at frame 0" is the required first state either way.</summary>
+        internal static void Select(string clipName)
+        {
+            if (string.IsNullOrEmpty(clipName)) return;
+            int i = names.IndexOf(clipName);          // ordinal, like every other lookup in this file
+            if (i >= 0) Select(i);
         }
 
         private static void Controls()
