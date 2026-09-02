@@ -2279,6 +2279,12 @@ namespace Morgott.ContentTool.Dev
                     // AFTER the panel, and outside its area: the strip is its own region and IMGUI
                     // areas do not nest.
                     FitAnim.Draw(PanelWidth);
+                    // AFTER the strip, so the strip's own pixels are already the strip's; BEFORE the
+                    // hotControl latch, so a joint pick counts as a control taking the mouse and the
+                    // orbit stands down for it.
+                    if (doctorTab)
+                        doctor.Overlay(cam, PanelWidth,
+                                       BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
                     // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.
                     guiHot = GUIUtility.hotControl != 0;
                 }

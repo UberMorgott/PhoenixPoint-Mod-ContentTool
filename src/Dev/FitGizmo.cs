@@ -63,7 +63,7 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>Whether the handles are being drawn at all - the panel says so in words, because an
         /// author who cannot see them needs to know whether they are missing or merely off screen.</summary>
-        internal static bool Live { get { return Ready() && Mat() != null; } }
+        internal static bool Live { get { return Ready() && Colored() != null; } }
 
         internal static void Aim(Camera camera, Transform liveMesh, string fitKey)
         {
@@ -83,8 +83,12 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>The one unlit vertex-colour material, or null FOREVER if the shader is not in this
         /// build. Depth is off in both directions so the handles are visible through the gun they are
-        /// attached to - a handle hidden inside a barrel is a handle that cannot be grabbed.</summary>
-        private static Material Mat()
+        /// attached to - a handle hidden inside a barrel is a handle that cannot be grabbed.
+        ///
+        /// SHARED, not copied: the Doctor's skeleton overlay draws with this same material. A build that
+        /// stripped the shader must disable both drawings through ONE message, and probing a name-only
+        /// shader a second time is a second way for them to disagree about whether they can draw.</summary>
+        internal static Material Colored()
         {
             if (probed) return mat;
             probed = true;
@@ -278,7 +282,7 @@ namespace Morgott.ContentTool.Dev
         internal static void Render()
         {
             if (!Ready() || Camera.current != cam) return;
-            Material m = Mat();
+            Material m = Colored();
             if (m == null) return;
             try
             {

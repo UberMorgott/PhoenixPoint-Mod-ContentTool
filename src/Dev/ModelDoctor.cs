@@ -598,6 +598,199 @@ namespace Morgott.ContentTool.Dev
             }
         }
 
+        // ------------------------------------------------------------------ the skeleton overlay
+
+        /// <summary>Section 6's [Skeleton] toggle. Session-only, like every other view preference. The
+        /// toggle CONTROL is drawn by the transport's own row; this is the state it reads and writes.</summary>
+        private bool skeleton = true;
+        internal bool Skeleton { get { return skeleton; } set { skeleton = value; } }
+
+        // ---- ONE pass's projection, kept BETWEEN frames. A rig of 124 bones would otherwise allocate
+        // six arrays, a dictionary and a legend string every Repaint, and Renderer.bones allocates on
+        // every read of it. Rebuilt only when the generation or the report moves - which is every path
+        // that can change what the bones ARE or what they mean (Root's setter, PickTarget, and
+        // SetAlias -> Restart, all of which bump gen).
+        private Transform[] joints;
+        private int[] jointParent;                     // each joint's parent AS AN INDEX in joints, or -1
+        private BoneStatus[] jointStatus;
+        private float[] jointX, jointY;                // this pass's projection, in the camera's convention
+        private bool[] jointVisible;
+        private string legend = "";
+        private int jointsGen = -1;
+        private ReplacementPreflightResult jointsFor;
+
+        /// <summary>One colour per <see cref="BoneStatus"/>, in the enum's own order. The same five the
+        /// drag handles use (FitGizmo's AxisColour / Hot / Dim), so the bench has ONE palette.</summary>
+        private static readonly Color[] Colours =
+        {
+            new Color(0.92f, 0.25f, 0.25f),            // Unmatched  - red
+            new Color(0.35f, 0.9f, 0.35f),             // ByName     - green
+            new Color(1f, 0.92f, 0.3f),                // Alias      - yellow
+            new Color(0.35f, 0.55f, 1f),               // Nearest    - blue
+            new Color(0.45f, 0.45f, 0.45f, 0.5f),      // Attachment - dim grey, the game's own skip
+        };
+
+        private static readonly string[] StatusNames =
+            { "unmatched", "by name", "alias", "nearest bone", "attachment" };
+
+        private const float DotPixels = 3f;
+
+        /// <summary>
+        /// The skeleton over the viewport: one line per parent-child pair, one dot per joint, coloured
+        /// by <see cref="BoneOverlay.Classify"/>. Drawn from OnGUI in the REPAINT pass, in PIXEL space
+        /// with FitGizmo's own material, so the picture is projected by exactly the arithmetic a pick
+        /// will use - the classic gizmo bug is a hit test that disagrees with what is drawn, and it is
+        /// invisible until somebody clicks.
+        ///
+        /// The BONES ARE THE TARGET'S, not the rig's - see <see cref="Joints"/>.
+        /// </summary>
+        /// <param name="stripTopGui">The transport strip's top edge in IMGUI coordinates. The strip and
+        /// the panel own their pixels, exactly as FitGizmo.Gui documents, so nothing is drawn over
+        /// either of them.</param>
+        internal void Overlay(Camera cam, float panelWidth, float stripTopGui)
+        {
+            // REPAINT ONLY. This draws raw GL and one GUI.Label with an explicit rect - neither
+            // allocates a control id or a layout entry - so the control sequence IMGUI counts is
+            // identical in the Layout pass and this one. A press is not taken here at all.
+            if (Event.current == null || Event.current.type != EventType.Repaint) return;
+            if (!skeleton || cam == null) return;
+            try
+            {
+                if (cam.pixelWidth - panelWidth < 1f || cam.pixelHeight < 1f) return;   // no room to draw in
+                if (joints == null || jointsGen != gen || !ReferenceEquals(jointsFor, Ready))
+                {
+                    Recache();
+                    jointsGen = gen; jointsFor = Ready;
+                }
+                if (joints.Length == 0) return;
+                Material m = FitGizmo.Colored();
+                if (m == null) return;                 // no shader in this build; the gizmo already said so
+
+                // The two half-planes the overlay may draw in. Both are CONVEX, which is what makes the
+                // "both ends visible" rule enough on its own: a segment between two points that are each
+                // right of the panel and above the strip cannot cross into either.
+                float strip = stripTopGui >= cam.pixelHeight ? 0f : cam.pixelHeight - stripTopGui;
+                for (int i = 0; i < joints.Length; i++)
+                {
+                    jointVisible[i] = false;
+                    if (joints[i] == null) continue;
+                    Vector3 p = cam.WorldToScreenPoint(joints[i].position);
+                    jointX[i] = p.x; jointY[i] = p.y;
+                    // A joint BEHIND the camera projects to a mirrored point somewhere plausible - the
+                    // same trap FitGizmo.AxisVisible guards - so it is neither drawn nor pickable.
+                    jointVisible[i] = p.z > cam.nearClipPlane &&
+                                      p.x >= panelWidth && p.x <= cam.pixelWidth &&
+                                      p.y >= strip && p.y <= cam.pixelHeight;
+                }
+
+                m.SetPass(0);
+                GL.PushMatrix();
+                // PIXEL SPACE, stated rather than left to the default: the projection above is the
+                // camera's own screen convention (origin BOTTOM-left) and these four arguments - left,
+                // right, bottom, top - are the matrix that agrees with it.
+                GL.LoadPixelMatrix(0f, cam.pixelWidth, 0f, cam.pixelHeight);
+
+                GL.Begin(GL.LINES);
+                for (int i = 0; i < joints.Length; i++)
+                {
+                    int p = jointParent[i];
+                    if (p < 0 || !jointVisible[i] || !jointVisible[p]) continue;
+                    GL.Color(Colours[(int)jointStatus[i]]);
+                    GL.Vertex3(jointX[i], jointY[i], 0f);
+                    GL.Vertex3(jointX[p], jointY[p], 0f);
+                }
+                GL.End();
+
+                GL.Begin(GL.QUADS);
+                for (int i = 0; i < joints.Length; i++)
+                {
+                    if (!jointVisible[i]) continue;
+                    GL.Color(Colours[(int)jointStatus[i]]);
+                    float x = jointX[i], y = jointY[i];
+                    GL.Vertex3(x - DotPixels, y - DotPixels, 0f);
+                    GL.Vertex3(x - DotPixels, y + DotPixels, 0f);
+                    GL.Vertex3(x + DotPixels, y + DotPixels, 0f);
+                    GL.Vertex3(x + DotPixels, y - DotPixels, 0f);
+                }
+                GL.End();
+                GL.PopMatrix();
+
+                // ABOVE the strip, not inside it: the strip's pixels belong to the transport, and a
+                // legend written over its controls is not a legend, it is a collision.
+                if (legend.Length > 0)
+                    GUI.Label(new Rect(panelWidth + 8f,
+                                       Mathf.Min(stripTopGui, cam.pixelHeight) - 20f,
+                                       cam.pixelWidth - panelWidth - 16f, 18f), legend);
+            }
+            catch (Exception)
+            {
+                // SWALLOWED on purpose: this runs from OnGUI, and an exception there closes the whole
+                // bench (FitBench's own catch). A skeleton nobody can see is better than that.
+            }
+        }
+
+        /// <summary>
+        /// THE TARGET'S bones, never the rig's full hierarchy dressed up as a slot. On Replace they are
+        /// the renderer's own (slice 0 measured a Human head slot at 21 against the rig's 124); on
+        /// Extend there is no renderer at all, so they are the transforms under <see cref="Root"/> the
+        /// record calls bindable. A prototype whose slot produced nothing draws nothing.
+        /// </summary>
+        private Transform[] Joints()
+        {
+            if (Prototype != null && Prototype.Unavailable != null) return new Transform[0];
+            if (Renderer != null) return Renderer.bones;
+            if (Prototype == null || Prototype.Record == null || root == null) return new Transform[0];
+            var want = new HashSet<string>(Prototype.Record.BindableBones, StringComparer.Ordinal);
+            var found = new List<Transform>();
+            foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
+                if (want.Contains(t.name)) found.Add(t);
+            return found.ToArray();
+        }
+
+        /// <summary>The whole per-generation half of the overlay: which transforms, how they hang off
+        /// each other, what each one's colour MEANS, and the legend line. Everything here is read off
+        /// the report the preflight already produced - no binding is recomputed, because a second
+        /// opinion could drift from the verdict drawn three lines above it.</summary>
+        private void Recache()
+        {
+            joints = Joints();
+            int n = joints.Length;
+            jointParent = new int[n];
+            jointStatus = new BoneStatus[n];
+            jointX = new float[n]; jointY = new float[n]; jointVisible = new bool[n];
+
+            var index = new Dictionary<Transform, int>(n);
+            for (int i = 0; i < n; i++) if (joints[i] != null) index[joints[i]] = i;
+            for (int i = 0; i < n; i++)
+            {
+                int p;
+                jointParent[i] = joints[i] != null && joints[i].parent != null &&
+                                 index.TryGetValue(joints[i].parent, out p) ? p : -1;
+            }
+
+            ICollection<string> fileJoints =
+                Ready == null || Ready.Model == null ? null : Ready.Model.JointNames;
+            var missing = new HashSet<string>(StringComparer.Ordinal);
+            if (Ready != null)
+                foreach (Diagnostic d in Ready.Report.Rows)
+                    if (d.Code == "MissingBone" && d.Subject != null) missing.Add(d.Subject);
+            bool nearestBind = Ready != null && Ready.Outcome == Outcome.NearestBone;
+
+            var present = new bool[StatusNames.Length];
+            for (int i = 0; i < n; i++)
+            {
+                jointStatus[i] = BoneOverlay.Classify(joints[i] == null ? null : joints[i].name,
+                                                      fileJoints, aliases, missing, nearestBind);
+                present[(int)jointStatus[i]] = true;
+            }
+
+            // ONLY the statuses actually on the model. A legend naming five colours when three are on
+            // screen is a legend an author has to filter for themselves.
+            var names = new List<string>();
+            for (int s = 0; s < StatusNames.Length; s++) if (present[s]) names.Add(StatusNames[s]);
+            legend = names.Count == 0 ? "" : "skeleton: " + string.Join(" | ", names.ToArray());
+        }
+
         /// <summary>
         /// Draws the whole Doctor. READS ONLY: every button enqueues an intent that Tick performs on
         /// the next frame, because mutating Unity objects inside OnGUI is how an IMGUI layout ends up

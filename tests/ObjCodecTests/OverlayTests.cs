@@ -56,6 +56,54 @@ internal static class OverlayTests
                         source == PrototypeCatalog.ClipSource.AnimActions,
                         "'Idle' and 'idle' are two clips - dedup is ordinal");
 
+        // ---- 6. EXT_ is a skip the GAME itself makes (Addon.cs:1208), so an attachment point is never
+        // a defect and never green - whatever an alias, a file joint or the missing list says about it.
+        var loud = new Dictionary<string, string>(StringComparer.Ordinal) { { "j", "EXT_VoiceContext" } };
+        checks += Check(BoneOverlay.Classify("EXT_VoiceContext", new[] { "EXT_VoiceContext" }, loud,
+                                             new HashSet<string>(StringComparer.Ordinal) { "EXT_VoiceContext" },
+                                             true) == BoneStatus.Attachment,
+                        "an EXT_ attachment point is grey whatever else claims it");
+
+        // ---- 7. The author's explicit mapping outranks a coincidence of names.
+        var mapped = new Dictionary<string, string>(StringComparer.Ordinal) { { "Bip_Head", "Head" } };
+        checks += Check(BoneOverlay.Classify("Head", new[] { "Head" }, mapped, null, false) == BoneStatus.Alias,
+                        "a bone an alias points at is yellow even when a file joint carries its name");
+
+        // ---- 8. DECORATION-INSENSITIVE: '#Root_Addon => Def' and 'Root' are ONE bone to the binder,
+        // which is the same rule ModelDoctor.Suggest matches on.
+        checks += Check(BoneOverlay.Classify("Root", new[] { "#Root_Addon => PX_Heavy_Torso_BodyPartDef" },
+                                             null, null, false) == BoneStatus.ByName &&
+                        BoneOverlay.Classify("Root", new[] { "Pelvis" }, null, null, false)
+                            == BoneStatus.Unmatched,
+                        "a file joint matches through SkinBinder.Plain, and a different name does not");
+
+        // ---- 9. The report's own MissingBone subjects, coloured by which bind the verdict took.
+        var missing = new HashSet<string>(StringComparer.Ordinal) { "L_Hand" };
+        checks += Check(BoneOverlay.Classify("L_Hand", null, null, missing, true) == BoneStatus.Nearest &&
+                        BoneOverlay.Classify("L_Hand", null, null, missing, false) == BoneStatus.Unmatched,
+                        "an unmatched target bone is blue under a nearest-bone bind and red otherwise");
+
+        // ---- 10. THE PICK: the closest joint inside the radius, nothing outside it, and a tie that
+        // does not flicker - a pick that alternates between two overlapping joints is one nobody can make.
+        int hit;
+        bool near = BoneOverlay.Nearest(10f, 10f, new[] { 40f, 12f }, new[] { 10f, 10f },
+                                        new[] { true, true }, 12f, out hit) && hit == 1;
+        bool far = !BoneOverlay.Nearest(10f, 10f, new[] { 40f }, new[] { 10f }, new[] { true }, 12f, out hit)
+                   && hit == -1;
+        bool tie = BoneOverlay.Nearest(10f, 10f, new[] { 14f, 6f }, new[] { 10f, 10f },
+                                       new[] { true, true }, 12f, out hit) && hit == 0;
+        checks += Check(near && far && tie,
+                        "the pick takes the closest joint inside the radius, and a tie takes the lowest index");
+
+        // ---- 11. Every one of these arrives from a LIVE camera, so none of them may throw.
+        bool empty = !BoneOverlay.Nearest(10f, 10f, new float[0], new float[0], new bool[0], 12f, out hit);
+        bool nanCursor = !BoneOverlay.Nearest(float.NaN, 10f, new[] { 10f }, new[] { 10f },
+                                              new[] { true }, 12f, out hit);
+        bool nanPoint = !BoneOverlay.Nearest(10f, 10f, new[] { float.NaN }, new[] { 10f },
+                                             new[] { true }, 12f, out hit);
+        checks += Check(empty && nanCursor && nanPoint && hit == -1,
+                        "an empty array, a NaN cursor and a NaN joint are each a miss, never a throw");
+
         return "OVERLAY PASS, " + checks + " check(s)";
     }
 

@@ -43,7 +43,10 @@
     <Compile Include="CatalogTests.cs" />
     <!-- Which clips a variant offers is string arithmetic - an anim-actions def that ships EMPTY
          (Crabman) and a controller that lists the same clip twice (73 -> 69) - so it is proven here
-         rather than by counting rows on a bench. -->
+         rather than by counting rows on a bench. And which COLOUR a bone gets - and which joint a
+         click lands on - is string and pixel arithmetic over rows the preflight already produced,
+         so it is proven here instead of by squinting at a screenshot. -->
+    <Compile Include="..\..\src\Doctor\BoneOverlay.cs" Link="BoneOverlay.cs" />
     <Compile Include="OverlayTests.cs" />
     <Compile Include="MaterialBake.cs" />
     <Compile Include="MaterialTweakFixture.cs" />
