@@ -664,3 +664,135 @@ git commit -m "docs(planning): slice 2 visual-check acceptance run on Instance3"
   6. closing the bench leaves his squad member exactly as it was.
 
   **Do not cut a release** — the owner verifies first (slice 1 is still awaiting his check).
+
+---
+
+## Task 7 acceptance run - 2026-09-02, `D:\PP-Instance3`
+
+Real run only, every figure read off the running game. Install `D:\PP-Instance3`, profile
+`76561197996210593` (`com.morgott.ContentTool` and `com.morgott.PPBridge` were already in that
+profile's `MOD_ACTIVATED`, 14 entries against `ArrayDimensions` 14 - **nothing was edited there**).
+`D:\PP-Instance2` was never deployed to, connected to, launched or killed; neither was the user's
+own install. Deployed with the repo's own `.\deploy.ps1 -PPRoot 'D:\PP-Instance3'`, the game
+launched by hand with `-mods` (PPCLI `run`/`batch` stop the game they launch), PPBridge
+`build=46b377c2`. Geoscape reached with
+`.\ppcli.ps1 plan .\plans\start-campaign.json '{"difficultyIndex":1}'`, bench opened with
+`.\ppcli.ps1 connect console '{"command":"ct_bench","args":["open"]}'`; every PPCLI call carried
+`-PPRoot 'D:\PP-Instance3' -ProfileId 76561197996210593`.
+
+IMGUI cannot be clicked through PPCLI, so the panel was driven on the seams its controls call:
+`FitBench.Prototypes` / `PrototypeCatalog.Search` / `FitBench.ShowPrototype` / `FitBench.SlotTargets`
+/ `FitBench.ShownVariant` / `FitBench.PrototypeBusy`, the Doctor through
+`AccessTools.Field(typeof(FitBench),"doctor")`, and the click paths through the Doctor's own
+`Assign(armed, bone, hit)` - the very method `Press` calls once the hit test has answered.
+**Trap for the next run:** `FieldInfo.SetValue` refuses a JSON number for a `float` field
+(`ArgumentException: 'System.Double' cannot be converted to 'System.Single'`). Use PPCLI's own
+`{"op":"set","type":...,"member":...}`, which converts - it reaches private statics too.
+
+### Environment defect found first: Instance3's addressables catalog pointed at a missing bundle
+
+Before anything could be seen, **every prototype rebuilt with zero `SkinnedMeshRenderer`s** and
+`RESET VIEW` answered *"Still NOT FRAMED: nothing with a renderer is standing there"*, while the
+bay's own mod-built creature rendered fine. `Player.log` named the cause: hundreds of
+`Reference of E_SkinData [...] failed to load. Reason: Dependency Exception.` The install's
+`PhoenixPointWin64_Data\StreamingAssets\aa\catalog.json` had been rewritten on 2026-08-27 by an
+earlier ContentTool run (`catalog.json.ct-edits`) to serve `px_equipment_assets_all.bundle` from
+`...LocalLow\...\ContentTool\Patched\morgott.demo.weaponmesh\`, **and that file does not exist**, so
+every shipped body part failed to load. Not a slice-2 defect. Fixed by restoring ContentTool's own
+`catalog.json.ct-backup` over `catalog.json`, keeping the rewritten copy beside it as
+`catalog.json.pre-vischeck` (the `.ct-edits` ledger is untouched, so the edit can be re-applied once
+the patched bundle is rebuilt). After the restore and a relaunch, Human rebuilt with 25 renderers.
+
+### The matrix
+
+| # | Action | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| 1 | Human -> clip list | `Clips.Count` + `ClipSource` verbatim, compared against slice-0's 73/69 | `ShownVariant()` = `Human`, **421** clips, **421 distinct**, `ClipSource` = `Soldier_Utka_AnimActionsDef (anim actions)`, controller `HumanoidAnimatorLOC`, `PreviewPoseClip` null. The transport catalogued **49** rows from the same actions, `note` empty, `chosen` 0 and PAUSED at `0.00 / 10.23s` on `HL_CustomisationIdle_NoGun+Face` - the preview pose IS clip 0, paused. Bay: `Human_AddonsManagerDef`, 27 addons, **25** SMRs, 9 slot targets, 6 live. The 73/69 slice-0 figure is the CONTROLLER's list and is not what a Human resolves to: the def answers first and it is not empty | PASS |
+| 2 | Crabman -> clip list | non-empty, `ClipSource` ending `(controller)` | non-empty - **116** clips, 116 distinct - but `ClipSource` = **`Crabman_AnimActionsDef (anim actions)`**. Measured on the live def: `Crabman_AnimActionsDef.AnimActions.Count` = **18**, NOT the 0 slice-0(d) recorded, so the controller fallback is never reached here. Transport 31 rows, first `LL_Crabman_IdleAlertA`; bay 8 SMRs, framed | **FAIL (expectation, not code)** - see below |
+| 3 | Mutog -> clip list | non-empty off `MidMonsterAnimator` (60/45), `Chiron_*` names | `ShownVariant()` = `Mutog`, **65** clips / 65 distinct, `ClipSource` = `Mutog_AnimActionsDef (anim actions)`, controller `MidMonsterAnimator`. `Chiron_*` names present in the bound transport list (`Chiron_goo_start`, `Chiron_goo_loop`, `Chiron_goo_end`, `Chiron_goo_overwatch_wait`, `Chiron_Turn90left_stomping`, `Chiron_Turn90right_stomping`) beside `Mutog_Idle` / `Mutog_Death` - a clip list does not identify a prototype. Bay 7 SMRs, framed | PASS |
+| 4 | play / scrub / speed / loop | two visibly different poses, the controls do what they say | Crabman standing, `HL_Crabman_Idle` selected (2/31). `playing` true: `t` 0 -> **0.5699648** -> **0.0385546833** (it wrapped, so `loop` works), strip reading `PAUSE` and `1.32 / 2.23s`. Paused and scrubbed to `t` 0.5 -> `1.12 / 2.23s`; `speed` 2 and `loop` false -> strip `x2`, loop unticked, `PLAY`. The two poses differ in the screenshots | PASS |
+| 5a | overlay on a real .glb | skeleton drawn ON the model, coloured, legend naming only the statuses present | `CHR_PX_HVY_TS_M_V01_7c71cfba6f4e08f7.glb` (APOCD) over the live `Human_Torso_SlotDef`: 25 joints drawn with lines and dots on the torso, `legend` = `skeleton: by name \| nearest bone`, `jointStatus` **ByName=10, Nearest=15**, `Outcome` `NearestBone`, 15 `MissingBone` rows (the Heavy torso genuinely lacks the Assault torso's Bell_* and *_Roll_* bones) | PASS **after a fix** - see defect 1 |
+| 5b | a DELIBERATELY renamed joint | an `ExtraBone`/`MissingBone` pair, bone map auto-opened | same file with `Neck` -> `Nekc` (a byte-length-preserving edit of the glTF JSON chunk, so the BIN offsets are untouched): rows **15 -> 17**, the new pair `MissingBone #Neck_Addon => AN_Assault_Torso_BodyPartDef` + `ExtraBone #Nekc_Addon => PX_Heavy_Torso_BodyPartDef`, `jointStatus` ByName=9 / Nearest=16, `mapOpen` **true** on both reports (auto-opened by the NearestBone outcome, task 6 step 2) | PASS |
+| 5c | click a joint, read the joint | the inspector shows the bone that was clicked | `picked` + `inspectorOpen` set the way `Press` enqueues them for an unarmed click: the foldout opened with **all 7 rows** - `name #Neck_Addon => AN_Assault_Torso_BodyPartDef`, `path CHR_Human_Rig_Ready(Clone)~N_Assault_Torso_BodyPartDef`, `parent Neck`, `status alias`, `binds #Nekc_Addon => PX_Heavy_Torso_BodyPartDef (alias)`, `rest T 0,1.086,-0.017 R 297,287,0.0 S 1,1,1 (bind pose)`, `current T 0,0,0 R 0,0,0 S 1,1,1` | PASS **after fixes** - see defects 2 and 3 |
+| 5d | armed row + click-to-alias | rings on eligible joints, the alias written through `SetAlias`, verdict re-run | `boneOpen` armed -> eligible joints ringed yellow, ineligible dimmed, strip line `aliasing '#Nekc_Addon =>~rso_BodyPartDef' - click a ringed bone, Esc to cancel`. `Assign("#Nekc_Addon => PX_Heavy_Torso_BodyPartDef", "#Neck_Addon => AN_Assault_Torso_BodyPartDef", 5)` -> `Message` `'#Nekc_Addon => ...' -> '#Neck_Addon => ...'`, `aliases` 1, `boneOpen` cleared, preflight re-ran on its own: rows **17 -> 15**, `legend` `skeleton: by name \| alias \| nearest bone`, `jointStatus` **Alias=1, ByName=9, Nearest=15** - the bone recoloured to ALIAS | PASS |
+| 5e | the alias sidecar | one sidecar beside the .glb, no new format | `Enqueue("save")` -> `saved 1 alias(es) to ...\torso_broken.glb.aliases.json`, 243 B, `{"schema":1,"source":{"sha256":"282103b8...","bytes":4675544},"bones":{"#Nekc_Addon => PX_Heavy_Torso_BodyPartDef":"#Neck_Addon => AN_Assault_Torso_BodyPartDef"}}`. Re-picking the same file in a LATER game session loaded it back: `aliases` 1, rows 15, `Alias=1` without any re-assignment | PASS |
+| 5f | an armed click on an ineligible joint | refused by name, and DISARMED either way | `Assign(armed, "#Chest_Addon => AN_Assault_Torso_BodyPartDef", 4)` -> `Message` `'#Chest_Addon => ...' cannot take '#Nekc_Addon => ...': a joint in your file already binds to it by name`, `boneOpen` empty, `aliases` still 1 | PASS |
+| 5g | Esc disarms | `boneOpen` cleared on `KeyCode.Escape` | **NOT VERIFIED LIVE.** PPCLI has no keystroke surface (`console`, `var` and `call` cannot raise an IMGUI `Event`), so the Escape arm at `src\Dev\ModelDoctor.cs:723` was read, not exercised. The other two disarms - a successful assign and a refused one - are both proven above | UNVERIFIED |
+| 6 | close restores the bay | the bay's own unit and loadout come back exactly | baseline before any prototype: `ct_creature_morgott.demo.customcreature_AddonsManagerDef`, `Addons` 3, 1 SMR, transport on `cyborg_spider_spider_idle [MOD]` 1/30. After the Human prototype, a file pick, an alias and `ct_bench close`: `FitAnim.took` false, `chosen` -1, `Driving` false; reopening reads back the SAME triple - `ct_creature_morgott.demo.customcreature_AddonsManagerDef`, 3, 1 - and the screenshot shows the same spider on the platform | PASS |
+
+`FitBench.Prototypes()` harvested **35** binding prototypes on this install (Instance2 saw 36 - a
+different content-mod set, not a regression).
+
+### Case 2 is an expectation failure, not a code failure
+
+`ResolveClips` does exactly what task 1 specifies: the anim-actions def first, the controller only
+when that yields NOTHING. What slice 0(d) measured is no longer true of this install -
+`Crabman_AnimActionsDef` carries 18 anim actions, so the def answers and the fallback stands down.
+A sweep of **all 41 variants** on this install (`ClipSource` read off every one) found:
+
+- **0** variants sourced from the controller;
+- exactly **1** variant with no clips at all, `Facehugger_DroppedTorso`, whose `ControllerName` and
+  `AnimActionsDef` are both empty - `ClipSource.None`, empty list, no exception. That is offline
+  check 3 ("a rig-less/clip-less variant is a normal state") confirmed live.
+
+So the controller-fallback arm is CORRECT but currently UNREACHABLE in game: `ReadClips` always adds
+`DefaultActionClip` and `DefaultReactionClip` (every list above starts `HL_ActionPlaceholder`,
+`HL_ReactionPlaceholder`), so an anim-actions def is only ever empty when the variant has no def at
+all - and such a variant has no controller either. **Owner decision, deliberately not changed here:**
+whether the fallback should trigger on "the def yielded only its two placeholders" rather than on
+"the def yielded nothing". Changing that is a design call, not an acceptance fix.
+
+### Defects found and fixed during the run
+
+1. **`BoneOverlay.Classify` plained only the FILE side** (`49a0f90`). The binder undecorates BOTH
+   (`SkinCompatibility.cs:235-236`), and the Doctor's target is the renderer standing in front of it,
+   where the addon system has already renamed every attachment point to `#<bone>_Addon => <part>`.
+   Live before the fix: `jointStatus` **Nearest=15, Unmatched=10** and legend
+   `skeleton: unmatched | nearest bone` - ten bones the binder matches BY NAME drawn RED, and
+   `CanAlias` offering every one of them to the armed row, which is the `PlainCollision` map the
+   binder refuses. After: **ByName=10, Nearest=15**, legend `skeleton: by name | nearest bone`.
+   Gated offline first (`OverlayTests` check 8b, `OVERLAY PASS, 16 check(s)`), fix shared as
+   `BoneOverlay.MatchesByName` and reused by `ModelDoctor.FileJointFor`, which carried the same bug.
+2. **The bone inspector drew only 4 of its 7 rows** (`cef9a9b`). The box is measured at 18 px a row,
+   but the built-in label style word-wraps: one wrapped `path` pushed `binds`, `rest` and `current`
+   clean out of the area. Rows now draw in a non-wrapping style at a fixed height.
+3. **...and still lost the seventh** (`2783cbb`). IMGUI adds the style's vertical margin BETWEEN
+   stacked controls, so the bare line height was not the row height. 20 px a row puts all seven
+   inside the box - re-verified in game.
+
+Offline suite after all three: exit 0, `OVERLAY PASS, 16 check(s)` (was 15), `CATALOG PASS, 29` and
+`ALIAS PASS, 28` unchanged.
+
+### `Player.log`
+
+**0** occurrences of `Getting control ... in a group with only ...` - the IMGUI layout-imbalance
+signature this slice's new controls could have introduced - and **0** ContentTool exceptions across
+the whole run. The only exceptions in the log are third-party and pre-date the bench: 18
+`ArgumentException: Mesh can not have more than 65000 vertices` from `UnityEngine.UI.Text.UpdateGeometry`
+(TFTV's own error popup growing its text past the UGUI vertex cap) and 3 TFTV-reported exceptions.
+
+### Screenshots
+
+`C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\e31d205c-b842-452c-8655-3d543056001d\scratchpad\shots\`
+
+`vis-baseline-01.png` (the bay's own creature, before any prototype), `vis-human-02.png`,
+`vis-crabman-03.png`, `vis-mutog-04.png`, `vis-transport-05-play-a.png` /
+`vis-transport-06-play-b.png` (playing, two poses), `vis-transport-07-scrub50.png`,
+`vis-transport-08-speed2-noloop.png`, `vis-overlay-09-byname.png` (the overlay BEFORE defect 1 was
+fixed - red where green belongs), `vis-overlay-09-ok.png`, `vis-overlay-10-broken.png` (the renamed
+joint), `vis-alias-12.png`, `vis-armed-13.png` (rings + the armed strip line),
+`vis-refusal-14.png`, `vis-inspect-17.png` (all seven inspector rows), `vis-before-close-18.png`,
+`vis-after-close-19.png` (the bay restored).
+
+### Still the owner's to check, in game, by eye
+
+1. the overlay sits ON the model at every orbit angle and zoom, not beside or behind it;
+2. green / red / yellow / blue are distinguishable at a glance, on a dark model and a light one;
+3. the joint dots are big enough to hit and small enough not to hide the mesh;
+4. an idle clip plays SMOOTHLY (this run sampled it, it did not watch it) and the scrubber lands
+   where the thumb says it does;
+5. the inspector reads the bone he expected when he clicks a shoulder, a hand and a fingertip;
+6. Esc really disarms the armed row (case 5g above - no keystroke surface here);
+7. closing the bench leaves his own squad member exactly as it was.
+
+**No release cut.** Slice 1 is still awaiting his check as well.
