@@ -20,6 +20,7 @@ using PhoenixPoint.Tactical.Entities;
 using PhoenixPoint.Tactical.Entities.Animations;
 using PhoenixPoint.Tactical.Entities.Equipments;
 using PhoenixPoint.Tactical.Entities.Weapons;
+using Morgott.ContentTool.Doctor;
 using Morgott.ContentTool.Tactical;
 using UnityEngine;
 
@@ -119,8 +120,11 @@ namespace Morgott.ContentTool.Dev
                 case "close": return entered ? Close() : "ct_bench: not open";
                 case "reset": return entered ? ResetView() : "ct_bench: not open";
                 case "unit":  return open ? Choose(args) : "ct_bench: not open";
-                default:      return "ct_bench: args are [open|close|reset|unit <name>], or none to " +
-                                     "toggle. Hotkey " + HotkeyLabel;
+                // Not gated on the bench being open: the catalogue is read off DefRepository and
+                // nothing else, and this is the seam the Advanced row's Rescan button shares.
+                case "rescan": return RescanPrototypes();
+                default:      return "ct_bench: args are [open|close|reset|rescan|unit <name>], or none " +
+                                     "to toggle. Hotkey " + HotkeyLabel;
             }
         }
 
@@ -251,6 +255,20 @@ namespace Morgott.ContentTool.Dev
         /// <see cref="Open"/> and disposed by <see cref="Close"/>, which is where the squad bay's own
         /// soldier is put back - see <see cref="PrototypeBaySession"/> for the ordering.</summary>
         private static PrototypeBaySession proto;
+        /// <summary>The prototype catalogue, read off DefRepository ONCE - lazily, on the first browser
+        /// open, and kept across bench opens because it is def data and nothing else. Only
+        /// <see cref="RescanPrototypes"/> throws it away. Cached even when the scan FAILED: it is asked
+        /// for from a GUI loop, and a scan that throws once per frame is worse than an empty list.</summary>
+        private static PrototypeHarvest harvest;
+        /// <summary>The variant the bay is being rebuilt as, held from <see cref="ShowPrototype"/> until
+        /// the rebuild callback lands - the renderers do not exist until then (the rebuild is a
+        /// coroutine), so the targets cannot be built where the selection is made.</summary>
+        private static PrototypeRecord pendingRecord;
+        private static PrototypeVariant pendingVariant;
+        /// <summary>The variant currently standing on the platform, and one target per slot it declares -
+        /// what the browser lists and what the Doctor verifies against. Cleared with the session.</summary>
+        private static PrototypeVariant shownVariant;
+        private static readonly List<PrototypeTarget> slotTargets = new List<PrototypeTarget>();
         /// <summary>The numeric readouts are for the ten minutes an author spends dialling a weapon,
         /// not for the hour they spend looking at a model. Off by default, and session only - it is a
         /// view preference like <see cref="BenchList.InvertX"/>, written nowhere.</summary>
@@ -621,6 +639,130 @@ namespace Morgott.ContentTool.Dev
             weapons.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
         }
 
+        // ---------------------------------------------------------------- the prototype catalogue
+
+        /// <summary>
+        /// The 36 binding prototypes, read off <c>DefRepository</c> the FIRST time somebody asks and
+        /// never again until <see cref="RescanPrototypes"/>. Lazy on purpose: the scan is meaningful
+        /// only once a campaign's and every content mod's defs have settled, which is exactly what
+        /// "the browser was opened" proves and what "the game reached the menu" does not.
+        ///
+        /// Called from OnGUI, so it never throws and its result is cached even when the scan failed.
+        /// </summary>
+        internal static IList<PrototypeRecord> Prototypes()
+        {
+            if (harvest != null) return harvest.Records;
+            harvest = PrototypeHarvest.Scan();
+            // The census line is an ASSERTION against rig-census-2026-09-02.json, and the log is where
+            // it belongs: it is 37 rig names long and the panel has no room for it.
+            ContentToolMain.Say(harvest.Census);
+            return harvest.Records;
+        }
+
+        /// <summary>Read the catalogue again - the Advanced row's entry point. A content mod enabled
+        /// after the first browser open is otherwise invisible for the rest of the session, which is
+        /// the same reason <see cref="Catalog"/> is re-runnable.</summary>
+        internal static string RescanPrototypes()
+        {
+            harvest = null;
+            IList<PrototypeRecord> records = Prototypes();
+            return "ct_bench: prototype catalogue rescanned - " + records.Count + " binding prototype(s).";
+        }
+
+        /// <summary>Stand this variant on the platform. Returns null on success or a one-line reason;
+        /// the SLOTS are not answerable yet on the way out, because the rebuild is a coroutine and
+        /// <see cref="Posed"/> is where its renderers first exist.</summary>
+        internal static string ShowPrototype(PrototypeRecord record, PrototypeVariant variant)
+        {
+            if (proto == null) return "the workbench is not open, so there is no bay to show it in.";
+            if (variant == null) return "no variant was chosen.";
+            TacCharacterDef rep = harvest == null ? null : harvest.Representative(variant.RepresentativeCharacter);
+            if (rep == null)
+                return "no representative character def for '" + variant.Name + "' - nothing to build it from.";
+
+            slotTargets.Clear();
+            shownVariant = null;
+            pendingRecord = record; pendingVariant = variant;
+            string failure = proto.Show(rep, Bodyparts(rep), null);
+            if (failure != null) { pendingRecord = null; pendingVariant = null; }
+            return failure;
+        }
+
+        /// <summary>One target per slot the shown variant declares - what the browser lists and what the
+        /// Doctor is pointed at. Empty until a prototype rebuild has actually finished.</summary>
+        internal static IList<PrototypeTarget> SlotTargets() { return slotTargets; }
+
+        internal static PrototypeVariant ShownVariant() { return shownVariant; }
+
+        /// <summary>A prototype rebuild is in flight, so a second selection would leave the bay showing
+        /// a mix of two and neither slot list trustworthy.</summary>
+        internal static bool PrototypeBusy { get { return proto != null && proto.Busy; } }
+
+        /// <summary>
+        /// Turn the rebuild that has just finished into targets, one per declared slot. Run from
+        /// <see cref="Posed"/> and nowhere else: this is the only moment the slot renderers exist.
+        ///
+        /// The slot a renderer belongs to is taken from the GAME'S OWN object - the live
+        /// <c>Addon.ParentSlot.SlotDef</c> (AddonSlot.cs), the same <c>AddonSlotDef</c> the harvest read
+        /// the slot names off - and never from a transform path, which the rig-bone rename
+        /// (<c>Addon.SkinBoneToRig</c>, Addon.cs:1248) would make a guess anyway. A slot whose
+        /// Addressable never loaded produces no renderer and is reported as such rather than being
+        /// given a target fabricated from the full hierarchy.
+        /// </summary>
+        private static void Retarget()
+        {
+            PrototypeRecord record = pendingRecord; PrototypeVariant variant = pendingVariant;
+            pendingRecord = null; pendingVariant = null;
+            shownVariant = variant;
+            slotTargets.Clear();
+            if (variant == null) return;
+
+            Dictionary<string, SkinnedMeshRenderer> live = LiveSlots();
+            Transform root = bay.CharacterBuilder.transform;
+            foreach (PrototypeSlot slot in variant.Slots)
+            {
+                var target = new PrototypeTarget
+                {
+                    Record = record, Variant = variant,
+                    SlotDefName = slot.SlotDefName, Mode = VerifyMode.Replace
+                };
+                SkinnedMeshRenderer smr;
+                if (slot.SlotDefName != null && live.TryGetValue(slot.SlotDefName, out smr) && smr != null)
+                    target.Live = ModelDoctor.Snapshot(smr, SeamSwap.RelativePath(root, smr.transform));
+                else
+                    target.Unavailable = "slot visual unavailable";
+                slotTargets.Add(target);
+            }
+        }
+
+        /// <summary>Slot def name -&gt; the renderer THIS rebuild produced for it. Restricted to
+        /// <c>proto.Slots()</c> so a renderer left over from whatever stood here before can never be
+        /// snapshotted as this prototype's.</summary>
+        private static Dictionary<string, SkinnedMeshRenderer> LiveSlots()
+        {
+            var found = new Dictionary<string, SkinnedMeshRenderer>(StringComparer.Ordinal);
+            try
+            {
+                var produced = new HashSet<SkinnedMeshRenderer>(proto.Slots());
+                AddonsManager manager = bay.CharacterBuilder.AddonsManager;
+                if (manager == null || manager.RootAddon == null) return found;
+                foreach (Addon a in manager.RootAddon)
+                {
+                    if (a == null || a.VisualRoot == null) continue;
+                    AddonSlot slot = a.ParentSlot;
+                    if (slot == null || slot.SlotDef == null || found.ContainsKey(slot.SlotDef.name)) continue;
+                    foreach (SkinnedMeshRenderer smr in a.VisualRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                    {
+                        if (smr == null || smr.sharedMesh == null || !produced.Contains(smr)) continue;
+                        found[slot.SlotDef.name] = smr;
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex) { message = "ct_bench: slots - " + ex.GetType().Name + ": " + ex.Message; }
+            return found;
+        }
+
         /// <summary>Did a content mod build this character? The engine's own registry, by identity -
         /// CreatureBuild keeps the cloned addons manager on the Creature it built, and that manager def
         /// is what the character def points at. Never a name prefix: two mods may not collide.</summary>
@@ -949,6 +1091,9 @@ namespace Morgott.ContentTool.Dev
             // it, after this method has returned. The field is kept when the restore FAILED, so a
             // second close retries exactly it - that is this method's whole bookkeeping contract.
             Step(failed, "the squad bay's own soldier", () => {
+                // The targets hold LIVE renderer instance ids, so they go with the session that made
+                // them - keeping them would let a later close snapshot a rig that no longer exists.
+                pendingRecord = null; pendingVariant = null; shownVariant = null; slotTargets.Clear();
                 if (proto != null) { proto.Dispose(); proto = null; } });
             // A trim in flight owns a temp file and a pool thread, neither of which the bench closing
             // has any business leaving running. The file on disk is safe either way - SlimJob only
@@ -1167,7 +1312,14 @@ namespace Morgott.ContentTool.Dev
                 // BEFORE Handed and FitAnim.Bind: the Doctor has to see this rebuild's slot renderers
                 // in the same frame the rest of the pose is applied, or a prototype selection reads
                 // the renderers of whatever stood here previously.
-                if (proto != null) proto.Rebuilt();
+                if (proto != null)
+                {
+                    proto.Rebuilt();
+                    // ... and the slots it produced, turned into targets in the SAME frame. Only a
+                    // rebuild this bench asked a prototype for has a pending variant, so the bench's own
+                    // unit picks leave the last prototype's targets exactly as they were.
+                    if (pendingVariant != null) Retarget();
+                }
                 AddonsManager manager = bay.CharacterBuilder.AddonsManager;
                 if (manager != null) manager.SetAutorefreshOnTagsChanged(true);
                 Handed(manager);
@@ -1270,11 +1422,15 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>The template's own bodyparts, never throwing: this feeds both the rebuild and the
         /// slot test, and a GUI loop is the wrong place to discover a malformed def.</summary>
-        private static List<ItemDef> Bodyparts()
+        private static List<ItemDef> Bodyparts() { return Bodyparts(unit); }
+
+        /// <summary>The same list for an arbitrary template - what a prototype variant's representative
+        /// character is rebuilt with, so a Crabman stands there as a Crabman and not as a bare rig.</summary>
+        private static List<ItemDef> Bodyparts(TacCharacterDef d)
         {
             List<ItemDef> parts = new List<ItemDef>();
-            if (unit == null) return parts;
-            try { foreach (TacticalItemDef p in unit.GetTemplateBodyparts()) if (p != null) parts.Add(p); }
+            if (d == null) return parts;
+            try { foreach (TacticalItemDef p in d.GetTemplateBodyparts()) if (p != null) parts.Add(p); }
             catch (Exception) { }
             return parts;
         }
