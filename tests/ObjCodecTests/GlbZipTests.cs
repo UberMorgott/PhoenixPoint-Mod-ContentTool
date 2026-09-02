@@ -288,7 +288,8 @@ internal static class GlbZipTests
             // 33. The bar the panel draws: one snapshot per checkpoint, never past its total, ending
             //     ON it with the sentence to show.
             bool orderly = seen.Count >= 6 && seen[seen.Count - 1].Stage == "Done" &&
-                           seen[seen.Count - 1].Done == seen[0].Total;
+                           seen[seen.Count - 1].Done == seen[0].Total &&
+                           seen[4].Stage == "Verify" && seen[5].Stage == "Write";
             for (int i = 0; i < seen.Count; i++)
                 orderly &= seen[i].Done <= seen[i].Total && seen[i].Total == seen[0].Total &&
                            !string.IsNullOrEmpty(seen[i].Stage) && (i == 0 || seen[i].Done >= seen[i - 1].Done);
@@ -310,6 +311,21 @@ internal static class GlbZipTests
             catch (InvalidOperationException ex) { reported = ex.Message; }
             Check(reported != null && reported == Refusal("u12_norm.glb") && !File.Exists(refused) && noTmp(),
                   "a refused zip reports the guard verbatim and writes nothing");
+
+            // 36. A temp the game's importer refuses never becomes the destination: Verify runs on the
+            //     temp BEFORE the swap, so the file that was there stays byte-identical and the temp goes.
+            byte[] targetBytes = File.ReadAllBytes(target);
+            Func<string, int> realReadBack = SlimJob.ReadBack;
+            string unread;
+            try
+            {
+                SlimJob.ReadBack = path => { throw new InvalidOperationException("hostile importer"); };
+                unread = SlimJob.Zip(source, target, true, true, CancellationToken.None, null);
+            }
+            finally { SlimJob.ReadBack = realReadBack; }
+            Check(unread != null && unread.Contains("does not import: hostile importer") &&
+                  unread.Contains("destination left alone") && Same(File.ReadAllBytes(target), targetBytes) && noTmp(),
+                  "a temp that fails read-back is reported, the destination is untouched and no .ct_tmp survives: " + unread);
         }
         finally { Directory.Delete(work, true); }
 

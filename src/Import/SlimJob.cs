@@ -42,9 +42,10 @@ namespace Morgott.ContentTool.Import
         /// one does any work, and the last of them is the only one that touches the destination.</summary>
         private static readonly string[] Stages = { "Load", "Census", "Guard", "Trim", "Write" };
 
-        /// <summary>The zip run's six checkpoints. Verify is last and reads the file back through the
-        /// game's own importer, because "it still animates" is the only question worth answering.</summary>
-        private static readonly string[] ZipStages = { "Load", "Plan", "Guard", "Zip", "Write", "Verify" };
+        /// <summary>The zip run's six checkpoints. Verify reads the TEMP back through the game's own
+        /// importer before Write swaps it in, because "it still animates" is the only question worth
+        /// answering, and a file that does not must never reach the destination.</summary>
+        private static readonly string[] ZipStages = { "Load", "Plan", "Guard", "Zip", "Verify", "Write" };
 
         /// <summary>
         /// Run the whole pipeline and return the sentence to show the author.
@@ -110,7 +111,7 @@ namespace Morgott.ContentTool.Import
         }
 
         /// <summary>
-        /// The zip run: load, plan, guard, rewrite, save, read back. Same shape and same guarantees as
+        /// The zip run: load, plan, guard, rewrite, read back, save. Same shape and same guarantees as
         /// <see cref="Execute"/> - pure, no thread affinity, and the destination is only ever touched
         /// by the swap of a finished .ct_tmp.
         /// </summary>
@@ -141,7 +142,6 @@ namespace Morgott.ContentTool.Import
                 At(cancel, publish, ZipStages, 3, "Rewriting the curves");
                 GlbZip.Stats stats = GlbZip.Zip(doc, constant, quantise);
 
-                At(cancel, publish, ZipStages, 4, "Writing " + Path.GetFileName(dst));
                 doc.Write(tmp);
                 long now = new FileInfo(tmp).Length;
 
@@ -158,16 +158,25 @@ namespace Morgott.ContentTool.Import
                     return done;
                 }
 
+                At(cancel, publish, ZipStages, 4, "Reading " + Path.GetFileName(dst) + " back");
+                int clips;
+                try { clips = ReadBack(tmp); }
+                catch (Exception ex)
+                {
+                    done = "zipped file does not import: " + ex.Message + " - destination left alone";
+                    Publish(publish, new SlimProgress("Done", ZipStages.Length, ZipStages.Length, done));
+                    return done;
+                }
+
+                At(cancel, publish, ZipStages, 5, "Writing " + Path.GetFileName(dst));
                 if (File.Exists(dst)) File.Replace(tmp, dst, null);
                 else File.Move(tmp, dst);
                 swapped = true;
 
                 done = stats.Collapsed + " curve(s) collapsed, " + stats.Quantised + " rotation(s) as " +
                        "int16, " + stats.Skipped + " left alone, " + stats.Shared + " shared; " + was +
-                       " B -> " + now + " B (-" + ((was - now) * 100f / was).ToString("0.#") + "%)";
-
-                At(cancel, publish, ZipStages, 5, "Reading " + Path.GetFileName(dst) + " back");
-                done += "; " + ReadBack(dst);
+                       " B -> " + now + " B (-" + ((was - now) * 100f / was).ToString("0.#") + "%); " +
+                       "reads back as " + clips + " clip(s)";
                 Publish(publish, new SlimProgress("Done", ZipStages.Length, ZipStages.Length, done));
                 return done;
             }
@@ -211,23 +220,18 @@ namespace Morgott.ContentTool.Import
             });
         }
 
-        /// <summary>The written file back through the GAME'S OWN importer, which is the only reader
-        /// whose opinion matters: a rewrite that produces a file the game cannot animate has failed,
-        /// however small it is. A failure here is REPORTED and not thrown - the swap already happened,
-        /// so the author needs the sentence, not a stack trace over a file that is already there.</summary>
-        private static string ReadBack(string path)
+        /// <summary>The temp back through the GAME'S OWN importer, which is the only reader whose
+        /// opinion matters: a rewrite that produces a file the game cannot animate has failed, however
+        /// small it is. Throws the importer's refusal; Zip turns it into the sentence and keeps the
+        /// destination. Returns the clip count.</summary>
+        // ponytail: a static seam, because the gate cannot name the tmp to corrupt it - the test
+        // swaps in a refusing reader and restores this one.
+        internal static Func<string, int> ReadBack = path =>
         {
-            try
-            {
-                var clips = new List<SampledClip>();
-                GlbReader.Read(File.ReadAllBytes(path), clips);
-                return "reads back as " + clips.Count + " clip(s)";
-            }
-            catch (Exception ex)
-            {
-                return "but it does not read back: " + ex.Message;
-            }
-        }
+            var clips = new List<SampledClip>();
+            GlbReader.Read(File.ReadAllBytes(path), clips);
+            return clips.Count;
+        };
 
         /// <summary>
         /// Execute on the pool, like ModelDoctor.Start (src\Dev\ModelDoctor.cs:229). onProgress and
