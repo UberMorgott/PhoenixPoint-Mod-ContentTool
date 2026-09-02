@@ -594,6 +594,7 @@ namespace Morgott.ContentTool.Dev
                 Target = null;
                 Prototype = null;
                 Ready = null;
+                picked = null;                             // ... and so is the bone the inspector named
                 gen++;                                     // an answer in flight is about the old actor
             }
         }
@@ -635,6 +636,24 @@ namespace Morgott.ContentTool.Dev
 
         private const float DotPixels = 3f;
 
+        /// <summary>The bone the inspector is showing, BY NAME - a rebuild replaces every Transform on
+        /// the rig, and a name survives that where a reference does not. Null is "nothing picked".</summary>
+        private string picked;
+        private bool inspectorOpen;
+        /// <summary>What the inspector is drawing THIS FRAME, latched on the Layout pass. The pick and
+        /// the foldout both decide how many controls exist, and IMGUI replays the Repaint against the
+        /// layout the Layout pass recorded - the same rule <see cref="Refresh"/> exists for.</summary>
+        private string shownBone;
+        private bool shownOpen;
+        private int pickedAt = -1;
+        private readonly List<string> inspectorLines = new List<string>();
+
+        /// <summary>The overlay's own control id, hashed once. See <see cref="Overlay"/>.</summary>
+        private static readonly int PickHint = "Morgott.ContentTool.BonePick".GetHashCode();
+
+        private const float InspectorWidth = 380f;
+        private static readonly Color PickedRing = new Color(1f, 1f, 1f, 0.85f);
+
         /// <summary>
         /// The skeleton over the viewport: one line per parent-child pair, one dot per joint, coloured
         /// by <see cref="BoneOverlay.Classify"/>. Drawn from OnGUI in the REPAINT pass, in PIXEL space
@@ -649,42 +668,81 @@ namespace Morgott.ContentTool.Dev
         /// either of them.</param>
         internal void Overlay(Camera cam, float panelWidth, float stripTopGui)
         {
-            // REPAINT ONLY. This draws raw GL and one GUI.Label with an explicit rect - neither
-            // allocates a control id or a layout entry - so the control sequence IMGUI counts is
-            // identical in the Layout pass and this one. A press is not taken here at all.
-            if (Event.current == null || Event.current.type != EventType.Repaint) return;
-            if (!skeleton || cam == null) return;
+            Event e = Event.current;
+            // FIRST and unconditionally, exactly as FitGizmo.Gui does it: a control id comes off this
+            // pass's own counter, so an id fetched only sometimes is a different id every frame - and
+            // every id after it moves too. It is claimed for the overlay and never latched as
+            // hotControl: see Press for why a click has nothing to latch.
+            GUIUtility.GetControlID(PickHint, FocusType.Passive);
+            if (e == null) return;
             try
             {
-                if (cam.pixelWidth - panelWidth < 1f || cam.pixelHeight < 1f) return;   // no room to draw in
                 if (joints == null || jointsGen != gen || !ReferenceEquals(jointsFor, Ready))
                 {
+                    // A NEW GENERATION is a new rig - a unit swap, a prototype rebuild, a re-run
+                    // preflight - so the name the inspector was showing is about bones that are gone.
+                    if (jointsGen != gen) picked = null;
                     Recache();
                     jointsGen = gen; jointsFor = Ready;
                 }
+                if (e.type == EventType.Layout)
+                { shownBone = picked; shownOpen = inspectorOpen; Lines(); }
+                // ALWAYS drawn, on EVERY pass and whatever the skeleton toggle says: its foldout header
+                // is a control, and a control that exists only on some passes is the layout imbalance
+                // every other comment in this file is about.
+                Inspector(panelWidth, stripTopGui);
+
+                if (!skeleton || cam == null) return;
+                bool press = e.type == EventType.MouseDown && e.button == 0;
+                if (e.type != EventType.Repaint && !press) return;
+                if (cam.pixelWidth - panelWidth < 1f || cam.pixelHeight < 1f) return;   // no room to draw in
                 if (joints.Length == 0) return;
-                Material m = FitGizmo.Colored();
-                if (m == null) return;                 // no shader in this build; the gizmo already said so
+                // THE SAME arithmetic for the picture and for the press, run in both passes rather than
+                // remembered from one: a hit test projected differently from what is drawn is the classic
+                // gizmo bug, and it is invisible until somebody clicks.
+                Project(cam, panelWidth, stripTopGui);
+                if (press) Press(e, cam, panelWidth, stripTopGui);
+                else Paint(cam, panelWidth, stripTopGui);
+            }
+            catch (Exception)
+            {
+                // SWALLOWED on purpose: this runs from OnGUI, and an exception there closes the whole
+                // bench (FitBench's own catch). A skeleton nobody can see is better than that.
+            }
+        }
 
-                // The two half-planes the overlay may draw in. Both are CONVEX, which is what makes the
-                // "both ends visible" rule enough on its own: a segment between two points that are each
-                // right of the panel and above the strip cannot cross into either.
-                float strip = stripTopGui >= cam.pixelHeight ? 0f : cam.pixelHeight - stripTopGui;
-                for (int i = 0; i < joints.Length; i++)
-                {
-                    jointVisible[i] = false;
-                    if (joints[i] == null) continue;
-                    Vector3 p = cam.WorldToScreenPoint(joints[i].position);
-                    jointX[i] = p.x; jointY[i] = p.y;
-                    // A joint BEHIND the camera projects to a mirrored point somewhere plausible - the
-                    // same trap FitGizmo.AxisVisible guards - so it is neither drawn nor pickable.
-                    jointVisible[i] = p.z > cam.nearClipPlane &&
-                                      p.x >= panelWidth && p.x <= cam.pixelWidth &&
-                                      p.y >= strip && p.y <= cam.pixelHeight;
-                }
+        /// <summary>This pass's screen position per joint, into the arrays <see cref="Recache"/> sized.
+        /// Allocation-free on purpose - it runs every Repaint and again on every press.</summary>
+        private void Project(Camera cam, float panelWidth, float stripTopGui)
+        {
+            // The two half-planes the overlay may draw in. Both are CONVEX, which is what makes the
+            // "both ends visible" rule enough on its own: a segment between two points that are each
+            // right of the panel and above the strip cannot cross into either.
+            float strip = stripTopGui >= cam.pixelHeight ? 0f : cam.pixelHeight - stripTopGui;
+            for (int i = 0; i < joints.Length; i++)
+            {
+                jointVisible[i] = false;
+                if (joints[i] == null) continue;
+                Vector3 p = cam.WorldToScreenPoint(joints[i].position);
+                jointX[i] = p.x; jointY[i] = p.y;
+                // A joint BEHIND the camera projects to a mirrored point somewhere plausible - the
+                // same trap FitGizmo.AxisVisible guards - so it is neither drawn nor pickable.
+                jointVisible[i] = p.z > cam.nearClipPlane &&
+                                  p.x >= panelWidth && p.x <= cam.pixelWidth &&
+                                  p.y >= strip && p.y <= cam.pixelHeight;
+            }
+        }
 
-                m.SetPass(0);
-                GL.PushMatrix();
+        /// <summary>The lines, the dots, the picked joint's marker and the legend. Repaint only.</summary>
+        private void Paint(Camera cam, float panelWidth, float stripTopGui)
+        {
+            Material m = FitGizmo.Colored();
+            if (m == null) return;                     // no shader in this build; the gizmo already said so
+
+            m.SetPass(0);
+            GL.PushMatrix();
+            try
+            {
                 // PIXEL SPACE, stated rather than left to the default: the projection above is the
                 // camera's own screen convention (origin BOTTOM-left) and these four arguments - left,
                 // right, bottom, top - are the matrix that agrees with it.
@@ -702,31 +760,188 @@ namespace Morgott.ContentTool.Dev
                 GL.End();
 
                 GL.Begin(GL.QUADS);
+                // The PICKED joint gets a bigger square UNDER its own dot: an inspector that names a bone
+                // the author cannot find again on the model is half an answer.
+                if (pickedAt >= 0 && pickedAt < joints.Length && jointVisible[pickedAt])
+                    Dot(jointX[pickedAt], jointY[pickedAt], DotPixels + 3f, PickedRing);
                 for (int i = 0; i < joints.Length; i++)
-                {
-                    if (!jointVisible[i]) continue;
-                    GL.Color(Colours[(int)jointStatus[i]]);
-                    float x = jointX[i], y = jointY[i];
-                    GL.Vertex3(x - DotPixels, y - DotPixels, 0f);
-                    GL.Vertex3(x - DotPixels, y + DotPixels, 0f);
-                    GL.Vertex3(x + DotPixels, y + DotPixels, 0f);
-                    GL.Vertex3(x + DotPixels, y - DotPixels, 0f);
-                }
+                    if (jointVisible[i]) Dot(jointX[i], jointY[i], DotPixels, Colours[(int)jointStatus[i]]);
                 GL.End();
-                GL.PopMatrix();
-
-                // ABOVE the strip, not inside it: the strip's pixels belong to the transport, and a
-                // legend written over its controls is not a legend, it is a collision.
-                if (legend.Length > 0)
-                    GUI.Label(new Rect(panelWidth + 8f,
-                                       Mathf.Min(stripTopGui, cam.pixelHeight) - 20f,
-                                       cam.pixelWidth - panelWidth - 16f, 18f), legend);
             }
-            catch (Exception)
+            finally
             {
-                // SWALLOWED on purpose: this runs from OnGUI, and an exception there closes the whole
-                // bench (FitBench's own catch). A skeleton nobody can see is better than that.
+                // PAIRED WITH THE PUSH whatever happens above it: a GL matrix stack left one deep leaks
+                // into every camera that renders after this one, and the panel that caused it is the one
+                // place the fault does not show.
+                GL.PopMatrix();
             }
+
+            // ABOVE the strip, not inside it: the strip's pixels belong to the transport, and a
+            // legend written over its controls is not a legend, it is a collision.
+            if (legend.Length > 0)
+                GUI.Label(new Rect(panelWidth + 8f,
+                                   Mathf.Min(stripTopGui, cam.pixelHeight) - 20f,
+                                   cam.pixelWidth - panelWidth - 16f, 18f), legend);
+        }
+
+        private static void Dot(float x, float y, float r, Color c)
+        {
+            GL.Color(c);
+            GL.Vertex3(x - r, y - r, 0f);
+            GL.Vertex3(x - r, y + r, 0f);
+            GL.Vertex3(x + r, y + r, 0f);
+            GL.Vertex3(x + r, y - r, 0f);
+        }
+
+        /// <summary>
+        /// THE PRESS, in the precedence the bench already documents (FitGizmo.Gui): the panel, then the
+        /// transport strip, then FitGizmo's handles, then this overlay, then the orbit. A MISS consumes
+        /// nothing at all - a press that landed on no joint still belongs to whoever wants it next.
+        ///
+        /// No <c>hotControl</c> is taken. This is a CLICK: there is no gesture to latch and nothing to
+        /// hand back on a MouseUp, and a bare left press is <c>ViewGesture.None</c> anyway
+        /// (OrbitCamera.Classify), so the orbit was never going to act on it. ALT+LEFT, which the orbit
+        /// DOES claim, is refused below rather than fought over.
+        /// </summary>
+        private void Press(Event e, Camera cam, float panelWidth, float stripTopGui)
+        {
+            if (e.mousePosition.x <= panelWidth) return;      // the panel wins, always
+            if (e.mousePosition.y >= stripTopGui) return;     // ... and so does the transport
+            if (e.alt) return;                                // ALT+LEFT is the orbit's gesture
+            // IMGUI measures y from the TOP; the camera, FitGizmo's picks and this pass's projection all
+            // measure it from the BOTTOM. One conversion, here, for both questions asked below it.
+            float x = e.mousePosition.x, y = cam.pixelHeight - e.mousePosition.y;
+            if (FitGizmo.WouldGrab(x, y)) return;             // the handles get first refusal
+            int hit;
+            if (!BoneOverlay.Nearest(x, y, jointX, jointY, jointVisible,
+                                     BoneOverlay.PickRadiusPixels, out hit)) return;
+            Transform t = joints[hit];
+            if (t == null) return;
+            string name = t.name;
+            // ENQUEUED and not assigned: this is the draw pass, and what it picks decides how many rows
+            // the NEXT layout pass lays out - the same rule every button in this panel follows.
+            edits.Enqueue(delegate { picked = name; inspectorOpen = true; });
+            e.Use();
+        }
+
+        /// <summary>
+        /// The inspector's text, rebuilt ONCE a frame on the Layout pass so the Repaint replays exactly
+        /// the rows the layout recorded. The "current" row is live - a playing clip moves it every frame -
+        /// so it cannot be cached against the selection instead.
+        /// </summary>
+        private void Lines()
+        {
+            pickedAt = -1;
+            if (shownBone != null && joints != null)
+                for (int i = 0; i < joints.Length; i++)
+                    if (joints[i] != null && joints[i].name == shownBone) { pickedAt = i; break; }
+
+            inspectorLines.Clear();
+            if (!shownOpen) return;
+            if (shownBone == null)
+            { inspectorLines.Add("click a joint on the model to read it"); return; }
+            if (pickedAt < 0)
+            { inspectorLines.Add("'" + shownBone + "' is no longer on the rig"); return; }
+
+            Transform t = joints[pickedAt];
+            inspectorLines.Add("name     " + t.name);
+            // The LIVE path, walked to Root, rather than the census's PrototypeBone.Path copy of it: the
+            // path is the only thing that tells two same-named transforms apart, and a rebuild can move
+            // one after the census was taken.
+            inspectorLines.Add("path     " + BenchList.Elide(PathOf(t), 54));
+            inspectorLines.Add("parent   " + (t.parent == null ? "-" : t.parent.name));
+            inspectorLines.Add("status   " + StatusNames[(int)jointStatus[pickedAt]]);
+            inspectorLines.Add("binds    " + BenchList.Elide(FileJointFor(t.name), 54));
+            inspectorLines.Add("rest     " + (RestOf(pickedAt) ?? "-  (this target carries no bind pose)"));
+            inspectorLines.Add("current  " + Trs(t.localPosition, t.localRotation.eulerAngles, t.localScale));
+        }
+
+        /// <summary>
+        /// Section 6's <c>Selected bone inspector</c> foldout, in the RIGHT column above the transport
+        /// strip. Its own IMGUI area for the reason FitAnim.List documents: the strip has 80 usable
+        /// pixels and IMGUI does not clip a BeginArea, so anything past that is drawn where nothing can
+        /// reach it.
+        ///
+        /// READ-ONLY, every row. Section 1 refuses bone dragging, rest-pose editing and retargeting, and
+        /// an editable field here is the first step to all three.
+        /// </summary>
+        private void Inspector(float panelWidth, float stripTopGui)
+        {
+            float w = Screen.width, h = Screen.height;
+            float wide = Mathf.Min(InspectorWidth, w - panelWidth - 16f);
+            if (wide < 160f) return;
+            float high = 24f + (shownOpen ? inspectorLines.Count * 18f + 8f : 0f);
+            float top = Mathf.Min(stripTopGui, h) - high - 4f;
+            if (top < 4f) return;
+
+            GUI.Box(new Rect(w - 8f - wide, top, wide, high), GUIContent.none);
+            GUILayout.BeginArea(new Rect(w - 2f - wide, top + 3f, wide - 12f, high - 6f));
+            try
+            {
+                if (GUILayout.Button((shownOpen ? "v " : "> ") + "Selected bone inspector",
+                                     GUILayout.Height(18f)))
+                    inspectorOpen = !inspectorOpen;
+                // COLLAPSED IS THE DEFAULT and the whole body hangs off the LATCHED flag, never off the
+                // live one: the button above flips it mid-frame, and reading it here would lay out a
+                // different number of labels than the Layout pass counted.
+                if (!shownOpen) return;
+                for (int i = 0; i < inspectorLines.Count; i++) GUILayout.Label(inspectorLines[i]);
+            }
+            finally { GUILayout.EndArea(); }
+        }
+
+        /// <summary>The transform's path from <see cref="Root"/>, '/'-joined - the same shape
+        /// <c>SeamSwap.RelativePath</c> and <c>PrototypeBone.Path</c> use.</summary>
+        private string PathOf(Transform t)
+        {
+            if (t == null) return "-";
+            string p = t.name;
+            for (Transform up = t.parent; up != null && !ReferenceEquals(up, root); up = up.parent)
+                p = up.name + "/" + p;
+            return p;
+        }
+
+        /// <summary>Which file joint lands on this target bone - the author's alias first, then a
+        /// by-name match under <see cref="SkinBinder.Plain"/>, which is the order
+        /// <see cref="BoneOverlay.Classify"/> colours it in. A dash means nothing binds here.</summary>
+        private string FileJointFor(string bone)
+        {
+            foreach (KeyValuePair<string, string> e in aliases)
+                if (e.Value == bone) return e.Key + "   (alias)";
+            if (Ready != null && Ready.Model != null && Ready.Model.JointNames != null)
+                foreach (string j in Ready.Model.JointNames)
+                    if (j != null && SkinBinder.Plain(j) == bone) return j + "   (by name)";
+            return "-";
+        }
+
+        /// <summary>
+        /// The bone's REST placement, local to its parent, read off the renderer's own bind poses:
+        /// <c>bindposes[i]</c> is <c>worldToBone_i * rendererLocalToWorld</c>, so
+        /// <c>bindposes[p] * bindposes[i].inverse</c> is bone i expressed in bone p's rest frame.
+        ///
+        /// Null on Extend and on a mesh that carries no bind poses. There is no rest pose to read there,
+        /// and deriving one from the live transform would be the CURRENT pose wearing a different label -
+        /// which is worse than a dash, because it looks like an answer.
+        /// </summary>
+        private string RestOf(int i)
+        {
+            if (Renderer == null || Renderer.sharedMesh == null) return null;
+            Matrix4x4[] poses = Renderer.sharedMesh.bindposes;
+            if (poses == null || i < 0 || i >= poses.Length) return null;
+            Matrix4x4 m = poses[i].inverse;
+            int p = jointParent[i];
+            if (p >= 0 && p < poses.Length) m = poses[p] * m;
+            return Trs(m.GetColumn(3), m.rotation.eulerAngles, m.lossyScale) + "   (bind pose)";
+        }
+
+        private static string Trs(Vector3 t, Vector3 euler, Vector3 s)
+        {
+            return "T " + V(t) + "   R " + V(euler) + "   S " + V(s);
+        }
+
+        private static string V(Vector3 v)
+        {
+            return v.x.ToString("0.###") + "," + v.y.ToString("0.###") + "," + v.z.ToString("0.###");
         }
 
         /// <summary>
@@ -742,6 +957,10 @@ namespace Morgott.ContentTool.Dev
             if (Prototype == null || Prototype.Record == null || root == null) return new Transform[0];
             var want = new HashSet<string>(Prototype.Record.BindableBones, StringComparer.Ordinal);
             var found = new List<Transform>();
+            // DUPLICATE NAMES ARE ALL KEPT, deliberately - a vehicle rig carries several transforms
+            // called 'light' (PrototypeRecord.AmbiguousNames). Each is a distinct transform in a distinct
+            // place, so each gets its own dot and its own pick; the inspector's PATH row is what tells
+            // them apart afterwards.
             foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
                 if (want.Contains(t.name)) found.Add(t);
             return found.ToArray();
