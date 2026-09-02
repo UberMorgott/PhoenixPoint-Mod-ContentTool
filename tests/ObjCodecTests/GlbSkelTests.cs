@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using Morgott.ContentTool.Import;
 
 /// <summary>
@@ -418,6 +419,100 @@ internal static class GlbSkelTests
         File.Delete(thrice);
         Check(alone.Ok && inHand.Sentence() == alone.Sentence(),
               "the written file answers for itself: '" + alone.Sentence() + "' vs '" + inHand.Sentence() + "'");
+
+        // --- The job. Nothing below re-tests GlbSkel: what is on trial is the file on disk, which is
+        // only ever replaced by a finished, verified temp - the same swap Execute and Zip keep
+        // (SlimJob.cs:88-89, :172-173), because a rewrite the author cannot undo is a rewrite nobody ran.
+
+        string workDir = Path.Combine(Path.GetTempPath(), "ct_skel_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        try
+        {
+            string srcFile = Path.Combine(workDir, "u9_probe.glb");
+            byte[] srcBytes = File.ReadAllBytes(Fixture("u9_probe.glb"));
+            File.WriteAllBytes(srcFile, srcBytes);
+            string planFile = Path.Combine(workDir, SkelPlan.PlanPathOf("u9_probe.glb"));
+            File.WriteAllText(planFile, Renames("rig", "hip", "Spine_1", "head", "Neck").ToJson());
+            Func<bool> noTmp = () => Directory.GetFiles(workDir, "*.ct_tmp").Length == 0;
+            List<string> wantNames = Words("Spine_1", "Neck"), wantPaths = Words("Spine_1", "Spine_1/Neck");
+
+            // 37. The run end to end: a NEW sibling that verifies clean against the prototype's bones,
+            //     and a source that is byte for byte the file it was.
+            string outFile = Path.Combine(workDir, "out.glb");
+            var seen = new List<SlimProgress>();
+            string ran = SlimJob.Skel(srcFile, outFile, planFile, wantNames, wantPaths,
+                                      CancellationToken.None, seen.Add);
+            SkelVerdict onDisk = File.Exists(outFile)
+                ? GlbSkel.Verify(GlbDocument.Load(outFile), "rig", wantNames, wantPaths)
+                : null;
+            Check(onDisk != null && onDisk.Ok && ran.Contains("renamed 2") &&
+                  Same(File.ReadAllBytes(srcFile), srcBytes),
+                  "a skel run writes a verified sibling and leaves the source alone: " + ran);
+
+            // 38. Cancel: the swap is the only line that touches the destination and a cancel is seen
+            //     at the stage boundary before it, so there is nothing to undo.
+            string never = Path.Combine(workDir, "never.glb");
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+            bool cancelled = false;
+            try { SlimJob.Skel(srcFile, never, planFile, wantNames, wantPaths, cts.Token, null); }
+            catch (OperationCanceledException) { cancelled = true; }
+            Check(cancelled && !File.Exists(never) && Same(File.ReadAllBytes(srcFile), srcBytes),
+                  "a cancelled skel throws, creates no destination and leaves the source byte-identical");
+
+            // 39. And no half-written temp survives, whichever way a run ended.
+            Check(noTmp(), "no .ct_tmp survives a completed or a cancelled skel run");
+
+            // 40. The bar the panel draws: one snapshot per checkpoint, never past its total, ending ON
+            //     it - and Verify BEFORE Write, which is the whole ordering claim.
+            bool orderly = seen.Count >= 6 && seen[seen.Count - 1].Stage == "Done" &&
+                           seen[seen.Count - 1].Done == seen[0].Total &&
+                           seen[4].Stage == "Verify" && seen[5].Stage == "Write";
+            for (int i = 0; i < seen.Count; i++)
+                orderly &= seen[i].Done <= seen[i].Total && seen[i].Total == seen[0].Total &&
+                           (i == 0 || seen[i].Done >= seen[i - 1].Done);
+            Check(orderly, "the skel publishes " + seen.Count + " orderly snapshots, verifies before it " +
+                           "writes, and finishes on Done");
+
+            // 41. A refused plan is Validate's own sentences and nothing on disk - the panel shows what
+            //     the author has to fix, not "failed".
+            string unwritten = Path.Combine(workDir, "unwritten.glb");
+            string badPlan = Path.Combine(workDir, "bad.skelplan.json");
+            File.WriteAllText(badPlan, Renames("rig", "nope", "Spine_1").ToJson());
+            string reported = null;
+            try { SlimJob.Skel(srcFile, unwritten, badPlan, null, null, CancellationToken.None, null); }
+            catch (InvalidOperationException ex) { reported = ex.Message; }
+            Check(reported != null && reported.Contains("has no bone called 'nope'") &&
+                  !File.Exists(unwritten) && noTmp(),
+                  "a refused plan reports Validate verbatim and writes nothing: " + reported);
+
+            // 42. A plan that changes nothing is not a save. GlbDocument would write the source's own
+            //     JSON bytes back verbatim, so the only honest thing to do with the destination is
+            //     leave it alone - the same rule the zip run keeps for a file that would grow.
+            string empty = Path.Combine(workDir, "empty.glb");
+            string emptyPlan = Path.Combine(workDir, "empty.skelplan.json");
+            File.WriteAllText(emptyPlan, new SkelPlan { Root = "rig" }.ToJson());
+            string nothing = SlimJob.Skel(srcFile, empty, emptyPlan, null, null, CancellationToken.None, null);
+            Check(nothing.Contains("changed nothing") && !File.Exists(empty) && noTmp(),
+                  "an empty plan is reported and not written: " + nothing);
+
+            // 43. An IN-PLACE run takes the alias sidecar with it. AliasMap.cs:189-195 guards it with
+            //     the .glb's sha256, so after this rewrite it could never apply again - and every
+            //     mapping it carried is now baked into the node names, which is the point of a skel run.
+            string inPlace = Path.Combine(workDir, "inplace.glb");
+            File.WriteAllBytes(inPlace, srcBytes);
+            AliasMap.SaveSidecar(inPlace, AliasMap.Sha256(srcBytes), srcBytes.Length,
+                                 new Dictionary<string, string>(StringComparer.Ordinal) { { "hip", "Spine_1" } });
+            string sidecar = AliasMap.SidecarPathOf(inPlace);
+            bool had = File.Exists(sidecar);
+            string overwrote = SlimJob.Skel(inPlace, inPlace, planFile, wantNames, wantPaths,
+                                            CancellationToken.None, null);
+            Check(had && !File.Exists(sidecar) && overwrote.Contains("removed the now-stale") &&
+                  !Same(File.ReadAllBytes(inPlace), srcBytes) && noTmp(),
+                  "an in-place run rewrites the file and removes the sidecar the rewrite just made " +
+                  "stale: " + overwrote);
+        }
+        finally { Directory.Delete(workDir, true); }
 
         return "GLB-SKEL PASS, " + checks + " check(s)";
     }

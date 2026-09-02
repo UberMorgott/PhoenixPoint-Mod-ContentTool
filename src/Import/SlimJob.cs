@@ -47,6 +47,12 @@ namespace Morgott.ContentTool.Import
         /// answering, and a file that does not must never reach the destination.</summary>
         private static readonly string[] ZipStages = { "Load", "Plan", "Guard", "Zip", "Verify", "Write" };
 
+        /// <summary>The skel run's six checkpoints. Verify comes BEFORE Write for the same reason the
+        /// zip run's does: it asks the finished TEMP - with no plan in hand, the only form of the
+        /// question the game ever asks - whether the prototype's bones are now there, and a rewrite
+        /// that cannot answer must not replace the author's file.</summary>
+        private static readonly string[] SkelStages = { "Load", "Plan", "Validate", "Rewrite", "Verify", "Write" };
+
         /// <summary>
         /// Run the whole pipeline and return the sentence to show the author.
         /// </summary>
@@ -218,6 +224,159 @@ namespace Morgott.ContentTool.Import
                 }
                 if (onComplete != null) onComplete(result);
             });
+        }
+
+        /// <summary>
+        /// The skeleton run: load, read the plan, validate, rewrite, verify, save. Same shape and same
+        /// guarantees as <see cref="Execute"/> - pure, no thread affinity, and the destination is only
+        /// ever touched by the swap of a finished .ct_tmp.
+        /// </summary>
+        /// <param name="planPath">the .skelplan.json to apply.</param>
+        /// <param name="targetNames">the prototype's bindable bones, for the closing Verify. Null with
+        /// <paramref name="targetPaths"/> makes the sentence say the rewrite happened and claim nothing
+        /// about binding.</param>
+        /// <param name="targetPaths">the prototype's bone paths - the CLIP question, asked apart.</param>
+        /// <exception cref="OperationCanceledException">Cancelled before the swap; nothing was written.</exception>
+        /// <exception cref="InvalidOperationException">The plan would not parse, or Validate refused;
+        /// its refusals are the message, one per line.</exception>
+        internal static string Skel(string src, string dst, string planPath,
+                                    IList<string> targetNames, IList<string> targetPaths,
+                                    CancellationToken cancel, Action<SlimProgress> publish)
+        {
+            string tmp = dst + "." + Guid.NewGuid().ToString("N") + ".ct_tmp";
+            bool swapped = false;
+            string done = null;
+            try
+            {
+                At(cancel, publish, SkelStages, 0, "Reading " + Path.GetFileName(src));
+                GlbDocument doc = GlbDocument.Load(src);
+
+                At(cancel, publish, SkelStages, 1, "Reading " + Path.GetFileName(planPath));
+                string why;
+                SkelPlan plan = SkelPlan.Parse(File.ReadAllText(planPath), out why);
+                if (plan == null) throw new InvalidOperationException(why);
+
+                At(cancel, publish, SkelStages, 2, "Checking the plan against the file");
+                IList<string> refusals = GlbSkel.Validate(doc, plan, targetNames);
+                if (refusals.Count > 0)
+                    throw new InvalidOperationException(string.Join("\n", new List<string>(refusals).ToArray()));
+
+                At(cancel, publish, SkelStages, 3, "Rewriting the skeleton");
+                GlbSkel.Stats stats = GlbSkel.Apply(doc, plan);
+                // A REWRITE THAT REWRITES NOTHING IS NOT A SAVE. GlbDocument would write the source's
+                // own JSON bytes back verbatim (GlbDocument.cs:91-92), so the honest thing to do with
+                // the destination is leave it alone - the same rule Zip keeps for a file that would grow.
+                if (!doc.Dirty)
+                {
+                    done = "the plan changed nothing, so nothing was written";
+                    Publish(publish, new SlimProgress("Done", SkelStages.Length, SkelStages.Length, done));
+                    return done;
+                }
+                doc.Write(tmp);
+
+                At(cancel, publish, SkelStages, 4, "Reading " + Path.GetFileName(dst) + " back");
+                SkelVerdict verdict = GlbSkel.Verify(GlbDocument.Load(tmp), plan.Root, targetNames, targetPaths);
+                string unread = null;
+                try { ReadBack(tmp); }
+                catch (Exception ex)
+                {
+                    // The importer's refusal is only EVIDENCE when the source itself imported. GlbSkel
+                    // exists to rewrite the files GlbReader refuses, so failing on those would deny the
+                    // port the very files it was written for; what is refused here is a rewrite that
+                    // BROKE a file the game could read.
+                    if (Imports(src))
+                    {
+                        done = "the rewritten file does not import: " + ex.Message + " - destination left alone";
+                        Publish(publish, new SlimProgress("Done", SkelStages.Length, SkelStages.Length, done));
+                        return done;
+                    }
+                    unread = ex.Message;
+                }
+
+                At(cancel, publish, SkelStages, 5, "Writing " + Path.GetFileName(dst));
+                if (File.Exists(dst)) File.Replace(tmp, dst, null);
+                else File.Move(tmp, dst);
+                swapped = true;
+
+                done = "renamed " + stats.Renamed + ", collapsed " + stats.Collapsed + ", inserted " +
+                       stats.Inserted + ", created " + stats.Created + "; " +
+                       (targetNames == null && targetPaths == null
+                        ? "no prototype was selected, so nothing is claimed about binding"
+                        : verdict.Sentence());
+                if (unread != null)
+                    done += "; the game's own reader still refuses this file (" + unread +
+                            "), exactly as it refused the source";
+                done += Unsidecar(src, dst);
+                Publish(publish, new SlimProgress("Done", SkelStages.Length, SkelStages.Length, done));
+                return done;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!swapped) throw;
+                return done;
+            }
+            finally
+            {
+                // Same best-effort delete as Execute, for the same reason.
+                try { if (File.Exists(tmp)) File.Delete(tmp); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        /// <summary>Skel on the pool, exactly as <see cref="Start"/> runs Execute. Both callbacks land
+        /// on the WORKER thread.</summary>
+        internal static void StartSkel(string src, string dst, string planPath,
+                                       IList<string> targetNames, IList<string> targetPaths,
+                                       CancellationTokenSource cts, Action<SlimProgress> onProgress,
+                                       Action<string> onComplete)
+        {
+            // The caller's lists belong to the caller and the prototype it picked keeps moving.
+            List<string> names = targetNames == null ? null : new List<string>(targetNames);
+            List<string> paths = targetPaths == null ? null : new List<string>(targetPaths);
+            CancellationToken cancel = cts == null ? CancellationToken.None : cts.Token;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string result;
+                try
+                {
+                    result = Skel(src, dst, planPath, names, paths, cancel, onProgress);
+                }
+                catch (OperationCanceledException)
+                {
+                    result = "cancelled - " + Path.GetFileName(dst) + " was left alone";
+                }
+                catch (Exception ex)
+                {
+                    result = ex.Message;
+                }
+                if (onComplete != null) onComplete(result);
+            });
+        }
+
+        /// <summary>Does the GAME'S reader take this file at all? Asked only when the rewritten one was
+        /// refused, so a file that never imported is not blamed on the rewrite.</summary>
+        private static bool Imports(string path)
+        {
+            try { ReadBack(path); return true; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>An IN-PLACE run takes the alias sidecar with it and says so. The sidecar is
+        /// sha256-guarded (AliasMap.cs:189-195), so after this rewrite it can never apply again - and
+        /// every mapping it carried is now baked into the node names, which is the whole point of a
+        /// skel run. A run that wrote a SIBLING touches nothing: the source and its sidecar are both
+        /// still exactly as valid as they were.</summary>
+        private static string Unsidecar(string src, string dst)
+        {
+            if (!string.Equals(Path.GetFullPath(src), Path.GetFullPath(dst),
+                               StringComparison.OrdinalIgnoreCase)) return "";
+            string sidecar = AliasMap.SidecarPathOf(dst);
+            if (!File.Exists(sidecar)) return "";
+            try { File.Delete(sidecar); }
+            catch (IOException) { return "; " + Path.GetFileName(sidecar) + " is now stale and could not be removed"; }
+            catch (UnauthorizedAccessException) { return "; " + Path.GetFileName(sidecar) + " is now stale and could not be removed"; }
+            return "; removed the now-stale " + Path.GetFileName(sidecar);
         }
 
         /// <summary>The temp back through the GAME'S OWN importer, which is the only reader whose

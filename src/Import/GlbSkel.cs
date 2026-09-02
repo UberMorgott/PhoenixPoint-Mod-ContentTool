@@ -54,6 +54,11 @@ namespace Morgott.ContentTool.Import
 
         internal const int Schema = 1;
 
+        /// <summary>Where a plan for this .glb lives, spelled once so the Doctor that writes it and
+        /// the panel that offers it cannot disagree - the same shape AliasMap.SidecarPathOf keeps
+        /// (AliasMap.cs:134).</summary>
+        internal static string PlanPathOf(string glbPath) { return glbPath + ".skelplan.json"; }
+
         /// <summary>Read a plan file. Returns null and fills <paramref name="why"/> for anything a
         /// plan cannot be - not an object, an unknown schema, a step missing a name. Never throws:
         /// this is reached from OnGUI, where a throw tears the bench panel down mid-frame.</summary>
