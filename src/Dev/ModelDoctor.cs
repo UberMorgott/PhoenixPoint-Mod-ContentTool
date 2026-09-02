@@ -97,6 +97,10 @@ namespace Morgott.ContentTool.Dev
         {
             Path = path;
             aliases.Clear();
+            // A ROW ARMED FOR THE PREVIOUS FILE names a file joint this one need not carry, and the
+            // click that answered it would map a bone nobody asked about. Disarmed here, in Root's
+            // setter and on a new overlay generation - the three places the question stops being asked.
+            boneOpen = null;
             seeded.Clear();
             seededFor = null;                          // the sidecar seeds it when the first result lands
             canSave = false;
@@ -595,6 +599,7 @@ namespace Morgott.ContentTool.Dev
                 Prototype = null;
                 Ready = null;
                 picked = null;                             // ... and so is the bone the inspector named
+                boneOpen = null;                           // ... and the row waiting for one of them
                 gen++;                                     // an answer in flight is about the old actor
             }
         }
@@ -695,7 +700,9 @@ namespace Morgott.ContentTool.Dev
                 {
                     // A NEW GENERATION is a new rig - a unit swap, a prototype rebuild, a re-run
                     // preflight - so the name the inspector was showing is about bones that are gone.
-                    if (jointsGen != gen) picked = null;
+                    // ... and so is the row armed against them: the bone map is rebuilt from the new
+                    // report, and answering the old question would alias a file joint that is gone.
+                    if (jointsGen != gen) { picked = null; boneOpen = null; }
                     Recache();
                     jointsGen = gen; jointsFor = Ready;
                 }
@@ -820,7 +827,7 @@ namespace Morgott.ContentTool.Dev
             if (line.Length > 0)
                 GUI.Label(new Rect(panelWidth + 8f,
                                    Mathf.Min(stripTopGui, cam.pixelHeight) - 20f,
-                                   cam.pixelWidth - panelWidth - 16f, 18f), legend);
+                                   cam.pixelWidth - panelWidth - 16f, 18f), line);
         }
 
         private static void Dot(float x, float y, float r, Color c)
