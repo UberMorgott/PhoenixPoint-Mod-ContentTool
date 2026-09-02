@@ -202,9 +202,11 @@ namespace Morgott.ContentTool.Import
     /// </summary>
     internal static class GlbSkel
     {
-        // Stats (what one run renamed, inserted, collapsed and created) lands with Apply, which is the
-        // only thing that can fill it in - a struct nothing assigns is four CS0649 warnings and no
-        // information.
+        /// <summary>What one run did, for the sentence the panel shows.</summary>
+        internal sealed class Stats
+        {
+            internal int Renamed, Inserted, Collapsed, Created;
+        }
 
         /// <summary>The document's nodes array, or an empty list. Never null.</summary>
         internal static List<object> Nodes(GlbDocument doc) =>
@@ -670,6 +672,180 @@ namespace Morgott.ContentTool.Import
                                      "drop that channel");
             }
             return refusals;
+        }
+
+        /// <summary>
+        /// Apply a VALIDATED plan. Four phases in ppskel's own order (ppskel.py:281, :285, :301,
+        /// :316), each one geometry-preserving, and between them they never delete a node, reorder
+        /// one, or take one out of skin.joints. That is not tidiness - glTF skinning is INDEX-based
+        /// (skin.joints[] is parallel to inverseBindMatrices and a vertex names a joint by its slot),
+        /// so any of those three would silently re-bind every vertex in the file. Because none of
+        /// them happens, doc.Bin comes out reference-identical and the inverse bind matrices need no
+        /// recompute at all: an unchanged world matrix is an unchanged bind pose, which the gate
+        /// measures rather than argues.
+        ///
+        /// Call Validate first. This method assumes what Validate proved and throws
+        /// InvalidOperationException rather than write a broken document if that assumption is false.
+        /// </summary>
+        internal static Stats Apply(GlbDocument doc, SkelPlan plan)
+        {
+            var stats = new Stats();
+            if (plan == null) return stats;
+            List<object> nodes = Nodes(doc);
+            var names = new List<string>(nodes.Count);
+            for (int i = 0; i < nodes.Count; i++) names.Add(Name(nodes, i));
+
+            // RENAME (ppskel.py:281-283). Every From is resolved against the ORIGINAL table before
+            // any of them is written, so a plan that moves two names does not apply one half onto the
+            // other's result - the simultaneity rule AliasMap.Apply keeps (AliasMap.cs:60-63).
+            var moving = new int[plan.Renames.Count];
+            for (int i = 0; i < moving.Length; i++) moving[i] = One(names, plan.Renames[i].From);
+            for (int i = 0; i < moving.Length; i++)
+            {
+                string to = plan.Renames[i].To;
+                if (string.Equals(names[moving[i]], to, StringComparison.Ordinal)) continue;
+                GlbSlim.Obj(nodes[moving[i]])["name"] = to;
+                names[moving[i]] = to;
+                stats.Renamed++;
+            }
+
+            var owner = new List<int>();
+            if (plan.Collapses.Count > 0 || plan.Inserts.Count > 0)
+            {
+                int[] parents = Parents(nodes, out string why);
+                // An empty plan never gets here, which is what keeps the no-op run byte-identical
+                // even on a file this would refuse.
+                if (parents == null) throw new InvalidOperationException(why + "; Validate had to run first");
+                owner.AddRange(parents);
+            }
+
+            // COLLAPSE (ppskel.py:285-297). The kept node moves onto its grandparent with the skipped
+            // node's local composed in, so its world matrix is unchanged; the skipped node stays as a
+            // childless leaf, because removing it would renumber every index in the file.
+            foreach (SkelCollapse step in plan.Collapses)
+            {
+                int node = One(names, step.Node), into = One(names, step.Into);
+                int parent = owner[node];
+                if (parent < 0 || owner[parent] != into)
+                    throw new InvalidOperationException("'" + step.Node + "' is not a grandchild of '" +
+                                                        step.Into + "' in this document; Validate had to run first");
+                Unlink(nodes, parent, node);
+                Link(nodes, into, node);
+                owner[node] = into;
+                Rewrite(GlbSlim.Obj(nodes[node]),
+                        Mul(Trs(GlbSlim.Obj(nodes[node])), Trs(GlbSlim.Obj(nodes[parent]))), step.Node);
+                names[parent] += "_unused";
+                GlbSlim.Obj(nodes[parent])["name"] = names[parent];
+                stats.Collapsed++;
+            }
+
+            // INSERT (ppskel.py:301-313). APPENDED past the end of nodes[], so no existing index ever
+            // changes meaning. An identity local preserves the child's world matrix by construction;
+            // a non-identity one is compensated on the child, L_child' = L_child * inverse(L_new).
+            foreach (SkelInsert step in plan.Inserts)
+            {
+                int parent = One(names, step.Parent), child = One(names, step.Child);
+                if (owner[child] != parent)
+                    throw new InvalidOperationException("'" + step.Child + "' is not a child of '" + step.Parent +
+                                                        "' in this document; Validate had to run first");
+                var fresh = new Dictionary<string, object>(StringComparer.Ordinal) { { "name", step.Name } };
+                if (step.Translation != null) fresh["translation"] = Boxed(step.Translation);
+                if (step.Rotation != null) fresh["rotation"] = Boxed(step.Rotation);
+                if (step.Scale != null) fresh["scale"] = Boxed(step.Scale);
+                nodes.Add(fresh);
+                int at = nodes.Count - 1;
+                names.Add(step.Name);
+                owner.Add(parent);
+
+                Unlink(nodes, parent, child);
+                Link(nodes, parent, at);
+                Link(nodes, at, child);
+                owner[child] = at;
+
+                double[] local = Local(step);
+                if (!Same(local, Eye))
+                {
+                    double[] undo = Inverse(local);
+                    if (undo == null)
+                        throw new InvalidOperationException("the insert of '" + step.Name + "' has a transform " +
+                                                            "that cannot be undone; Validate had to run first");
+                    Rewrite(GlbSlim.Obj(nodes[child]), Mul(Trs(GlbSlim.Obj(nodes[child])), undo), step.Child);
+                }
+                stats.Inserted++;
+            }
+
+            // CREATE (ppskel.py:322-328, explicit paths only). Sorted by depth so a two-level create
+            // works in one pass, exactly as ppskel sorts by p.count("/").
+            var creates = new List<string>(plan.Create);
+            creates.Sort((left, right) => Depth(left).CompareTo(Depth(right)));
+            if (creates.Count > 0)
+            {
+                int root = One(names, plan.Root);
+                foreach (string path in creates)
+                {
+                    int found = Resolve(nodes, root, path, out int deepest, out string missing);
+                    string leaf = path.Substring(path.LastIndexOf('/') + 1);
+                    if (found >= 0 || deepest < 0 || !string.Equals(missing, leaf, StringComparison.Ordinal))
+                        throw new InvalidOperationException("the plan creates '" + path + "', which this document " +
+                                                            "either already carries or has no parent for; Validate " +
+                                                            "had to run first");
+                    nodes.Add(new Dictionary<string, object>(StringComparer.Ordinal) { { "name", leaf } });
+                    Link(nodes, deepest, nodes.Count - 1);
+                    names.Add(leaf);
+                    stats.Created++;
+                }
+            }
+
+            // Only a run that DID something re-serialises. An empty plan leaves GlbDocument writing
+            // its original JSON bytes verbatim (GlbDocument.cs:91-92), which is the cheapest possible
+            // proof that no phase touched a file it had nothing to do to.
+            if (stats.Renamed + stats.Collapsed + stats.Inserted + stats.Created > 0) doc.Dirty = true;
+            return stats;
+        }
+
+        /// <summary>The one node this name reaches, or the exception that says Validate was skipped.</summary>
+        private static int One(List<string> names, string name)
+        {
+            int carriers = Carriers(names, name ?? "", out int at);
+            if (carriers != 1)
+                throw new InvalidOperationException("this document has " + carriers + " bones called '" + name +
+                                                    "', so the plan cannot be applied to it; Validate had to run " +
+                                                    "first and its refusals had to be shown to the author");
+            return at;
+        }
+
+        /// <summary>Drop a child index, and the key with it when that empties the array - glTF has no
+        /// empty arrays and ppskel.py:290-291 deletes it for the same reason.</summary>
+        private static void Unlink(List<object> nodes, int parent, int child)
+        {
+            Dictionary<string, object> node = GlbSlim.Obj(nodes[parent]);
+            List<object> kids = GlbSlim.Arr(node, "children");
+            if (kids == null) return;
+            for (int i = 0; i < kids.Count; i++)
+                if (Index(kids[i]) == child) { kids.RemoveAt(i); break; }
+            if (kids.Count == 0) node.Remove("children");
+        }
+
+        private static void Link(List<object> nodes, int parent, int child)
+        {
+            Dictionary<string, object> node = GlbSlim.Obj(nodes[parent]);
+            List<object> kids = GlbSlim.Arr(node, "children");
+            if (kids == null) node["children"] = kids = new List<object>();
+            kids.Add((double)child);
+        }
+
+        /// <summary>Write a composed local back as translation/rotation/scale, dropping any "matrix"
+        /// the node carried (ppskel.py:295) - which ppskel does WITHOUT ever having read it, and is
+        /// why its collapse under a matrix-form node is silently wrong.</summary>
+        private static void Rewrite(Dictionary<string, object> node, double[] local, string what)
+        {
+            if (!Decompose(local, out double[] t, out double[] r, out double[] s))
+                throw new InvalidOperationException("'" + what + "' composes a local transform no " +
+                                                    "translation/rotation/scale can hold; Validate had to run first");
+            node.Remove("matrix");
+            node["translation"] = Boxed(t);
+            node["rotation"] = Boxed(r);
+            node["scale"] = Boxed(s);
         }
 
         /// <summary>The local 4x4 an insert asks for. Null members are glTF's own defaults, which is

@@ -149,7 +149,288 @@ internal static class GlbSkelTests
               "a collapse and a non-identity insert on an animated bone are refused BY CLIP NAME, not '" +
               Printed(hoisted) + "' / '" + Printed(shifted) + "'");
 
+        // --- Apply: the four phases, in ppskel's own order (convert:281, :285, :301, :316). Every
+        // check below is one sentence of the invariant the port rests on - nothing is deleted,
+        // nothing is reordered, nothing leaves skin.joints - stated numerically instead of argued.
+        // Apply is called DIRECTLY here, without Validate: the refusals are Task 2's subject and
+        // several of these plans (a collapse of an animated bone) are deliberately ones Validate
+        // would refuse, because what Apply does to the JSON has to be checked on its own.
+
+        // 19. The empty plan is what keeps GlbDocument's verbatim-JSON promise honest
+        //     (GlbDocument.cs:91-92): nothing counted, nothing marked, the original bytes back.
+        bool idle = true;
+        foreach (string fixture in new[] { "u9_probe.glb", "u8_probe.glb" })
+        {
+            GlbDocument doc = Doc(fixture);
+            GlbSkel.Stats none = GlbSkel.Apply(doc, new SkelPlan());
+            idle = idle && !doc.Dirty && Counted(none) == "0/0/0/0" &&
+                   Same(doc.Write(), File.ReadAllBytes(Fixture(fixture)));
+        }
+        Check(idle, "an empty plan counts nothing, dirties nothing and writes the file's own bytes back");
+
+        // 20. A rename is two strings moving. The whole document is compared against the same file
+        //     with ONLY those two strings moved by hand, so 'nothing else' is checked at every key
+        //     rather than at the handful a list would remember to name.
+        GlbDocument pristine9 = Doc("u9_probe.glb"), renamed9 = Doc("u9_probe.glb");
+        GlbSkel.Stats renames = GlbSkel.Apply(renamed9, Renames("rig", "hip", "Spine_1", "head", "Neck"));
+        GlbDocument mirror9 = Doc("u9_probe.glb");
+        GlbSlim.Obj(GlbSkel.Nodes(mirror9)[1])["name"] = "Spine_1";
+        GlbSlim.Obj(GlbSkel.Nodes(mirror9)[2])["name"] = "Neck";
+        Check(Counted(renames) == "2/0/0/0" && renamed9.Dirty &&
+              Deep(renamed9.Json, mirror9.Json) && Same(renamed9.Bin, pristine9.Bin),
+              "a rename moves the two names and leaves every other key and every BIN byte alone");
+
+        // 21. A rename is INDEX-blind: a channel names a node by index (glTF has no other way), so
+        //     a pass that remapped one would be a bug, not a feature.
+        Check(Deep(Section(renamed9, "animations"), Section(pristine9, "animations")) &&
+              Joints(renamed9) == "1,2",
+              "the rename leaves every channel target and skins[0].joints exactly as they were");
+
+        // 22. An insert APPENDS (ppskel.py:306). Parents coming back non-null is the check that the
+        //     moved child hangs in exactly ONE children array - two would be the refusal instead.
+        GlbDocument pristine8 = Doc("u8_probe.glb"), inserted8 = Doc("u8_probe.glb");
+        GlbSkel.Stats inserts = GlbSkel.Apply(inserted8, Insert("RootNode", "Root", "Spine_Roll_1", "Body", null));
+        List<object> in8 = GlbSkel.Nodes(inserted8);
+        int[] pin8 = GlbSkel.Parents(in8, out string whyIn8);
+        Check(Counted(inserts) == "0/0/1/0" && in8.Count == 43 && GlbSkel.Name(in8, 42) == "Spine_Roll_1" &&
+              whyIn8 == null && pin8[42] == 2 && pin8[3] == 42 &&
+              Deep(Section(inserted8, "skins"), Section(pristine8, "skins")) &&
+              Same(inserted8.Bin, pristine8.Bin),
+              "the new node lands at 42 under Root with Body beneath it, and skins + BIN are untouched");
+
+        // 23. The insert's geometry claim, measured: all 39 joints keep their world matrix, for an
+        //     identity insert by construction and for a non-identity one because the child's own
+        //     local is compensated with the inverse. And the inverse bind matrices, which nothing
+        //     here recomputes, stay exactly as right (or as wrong) as the file shipped them: their
+        //     distance from inverse(world) is the same number before and after, per joint. That is
+        //     the honest form of the claim - u8's rest pose is NOT its bind pose (the two differ by
+        //     up to 0.036 on MidFrontLeg3.L), so an absolute 'IBM == inverse(world)' would be false
+        //     of the fixture itself and would prove nothing about Apply.
+        double[][] world8 = Worlds(pristine8), worldIn8 = Worlds(inserted8);
+        var shift = Insert("RootNode", "Root", "Spine_Roll_1", "Body", new[] { 0.1, -0.2, 0.3 });
+        shift.Inserts[0].Rotation = Quat(0, 1, 0, 30);
+        GlbDocument shifted8 = Doc("u8_probe.glb");
+        GlbSkel.Apply(shifted8, shift);
+        double[][] worldSh8 = Worlds(shifted8);
+        bool moved = false, drifted = false;
+        List<double[]> ibm8 = Ibm(pristine8), ibmSh8 = Ibm(shifted8);
+        for (int j = 0; j < world8.Length; j++)
+        {
+            moved = moved || !Same(world8[j], worldIn8[j], 1e-9) || !Same(world8[j], worldSh8[j], 1e-9);
+            drifted = drifted || Math.Abs(Apart(ibm8[j], GlbSkel.Inverse(world8[j])) -
+                                          Apart(ibmSh8[j], GlbSkel.Inverse(worldSh8[j]))) > 1e-6;
+        }
+        Check(!moved && !drifted && world8.Length == 39 &&
+              Same(GlbSkel.Trs(GlbSlim.Obj(GlbSkel.Nodes(shifted8)[42])), GlbSkel.Local(shift.Inserts[0]), 0),
+              "an insert moves no joint's world matrix and no joint's bind residual, and the new " +
+              "node carries exactly the local the plan gave it");
+
+        // 24. A collapse composes the skipped node's local into the kept one (L' = L_kept * L_dropped),
+        //     so the kept bone stands where it stood; the skipped node stays as a childless leaf
+        //     named _unused (ppskel.py:290-297) because removing it would renumber every index in
+        //     the file, skin.joints included.
+        double[] headWas = Worlds(pristine9, 2);
+        GlbDocument collapsed9 = Doc("u9_probe.glb");
+        GlbSkel.Stats collapses = GlbSkel.Apply(collapsed9, Collapse("rig", "head", "rig"));
+        List<object> co9 = GlbSkel.Nodes(collapsed9);
+        int[] pco9 = GlbSkel.Parents(co9, out string whyCo9);
+        Check(Counted(collapses) == "0/1/0/0" && co9.Count == 5 && whyCo9 == null && pco9[2] == 0 &&
+              GlbSkel.Name(co9, 1) == "hip_unused" && !GlbSlim.Obj(co9[1]).ContainsKey("children") &&
+              Same(Worlds(collapsed9, 2), headWas, 1e-9),
+              "the collapsed bone keeps its world matrix under the grandparent and the skipped node " +
+              "is left as a childless _unused leaf");
+
+        // 25. ... and therefore no weight moves: the dropped node kept its own local under the same
+        //     grandparent, so its bind pose is unchanged and every vertex weighted to it deforms as
+        //     it did. Nothing to re-index, nothing to rewrite, BIN identical.
+        Check(Joints(collapsed9) == "1,2" &&
+              GlbSlim.Int(GlbSlim.Obj(GlbSlim.Arr(collapsed9.Json, "skins")[0]), "inverseBindMatrices", -1) == 5 &&
+              Same(collapsed9.Bin, pristine9.Bin),
+              "a collapse leaves skins[0].joints, the IBM accessor and every BIN byte alone");
+
+        // 26. Create hangs an identity leaf at an EXPLICIT path and invents nothing (design §9).
+        //     The path is measured from Root and does not repeat it, which is the semantics Resolve
+        //     and Validate already keep - PP's own paths start BELOW the animator root.
+        GlbDocument created9 = Doc("u9_probe.glb");
+        var creation = new SkelPlan { Root = "rig" };
+        creation.Create.Add("hip/Neck_Tip");
+        GlbSkel.Stats creates = GlbSkel.Apply(created9, creation);
+        List<object> cr9 = GlbSkel.Nodes(created9);
+        int[] pcr9 = GlbSkel.Parents(cr9, out string whyCr9);
+        Dictionary<string, object> leaf = GlbSlim.Obj(cr9[5]);
+        Check(Counted(creates) == "0/0/0/1" && cr9.Count == 6 && whyCr9 == null && pcr9[5] == 1 &&
+              GlbSkel.Name(cr9, 5) == "Neck_Tip" && leaf.Count == 1 &&
+              Deep(Section(created9, "skins"), Section(pristine9, "skins")) &&
+              Same(created9.Bin, pristine9.Bin),
+              "create appends one named node with no transform of its own under the parent the path names");
+
+        // 27. All four phases at once, on both fixtures: the animations block comes out identical,
+        //     clip for clip, channel for channel, target.node for target.path. There is no channel
+        //     remap in this port and there must not be one.
+        GlbDocument all9 = Doc("u9_probe.glb"), all8 = Doc("u8_probe.glb");
+        GlbSkel.Stats did9 = GlbSkel.Apply(all9, Everything9());
+        GlbSkel.Stats did8 = GlbSkel.Apply(all8, Everything8());
+        Check(Counted(did9) == "2/1/1/1" && Counted(did8) == "1/1/1/1" &&
+              Deep(Section(all9, "animations"), Section(pristine9, "animations")) &&
+              Deep(Section(all8, "animations"), Section(pristine8, "animations")) &&
+              Same(all9.Bin, pristine9.Bin) && Same(all8.Bin, pristine8.Bin),
+              "a four-phase plan leaves every clip, every channel and every BIN byte untouched");
+
+        // 28. The plan is a file an author edits, so it has to survive the round trip - and a file
+        //     that is not a plan has to come back as a sentence rather than as an exception thrown
+        //     through OnGUI.
+        string planPath = Path.Combine(Path.GetTempPath(), "ct_skel_roundtrip.json");
+        SkelPlan wrote = Everything9();
+        File.WriteAllText(planPath, wrote.ToJson());
+        SkelPlan read = SkelPlan.Parse(File.ReadAllText(planPath), out string whyRead);
+        SkelPlan broken = SkelPlan.Parse("[1, 2]", out string whyBroken);
+        SkelPlan garbage = SkelPlan.Parse("{\"renames\":[{\"from\":\"a\"}]}", out string whyGarbage);
+        File.Delete(planPath);
+        Check(whyRead == null && read != null && Printed(read) == Printed(wrote) &&
+              broken == null && !string.IsNullOrEmpty(whyBroken) &&
+              garbage == null && !string.IsNullOrEmpty(whyGarbage),
+              "a plan round-trips through its own JSON and a file that is not one comes back as a " +
+              "sentence, not a throw");
+
         return "GLB-SKEL PASS, " + checks + " check(s)";
+    }
+
+    /// <summary>A plan using all four phases on u9: hip/head become PP's names, the neck chain
+    /// collapses the way ppskel.py:89 needs it to, a roll bone is slipped in, and one explicit tip
+    /// is created.</summary>
+    private static SkelPlan Everything9()
+    {
+        SkelPlan plan = Renames("rig", "hip", "Spine_1", "head", "Neck");
+        plan.Collapses.Add(new SkelCollapse { Node = "Neck", Into = "rig" });
+        plan.Inserts.Add(new SkelInsert { Parent = "rig", Name = "Spine_Roll", Child = "Neck" });
+        plan.Create.Add("Spine_Roll/Tip");
+        return plan;
+    }
+
+    /// <summary>The same four phases at u8's scale, where 39 joints and 277 accessors have to come
+    /// out of it unmoved.</summary>
+    private static SkelPlan Everything8()
+    {
+        SkelPlan plan = Renames("RootNode", "Body", "Chest");
+        plan.Collapses.Add(new SkelCollapse { Node = "FrontLeg2.L", Into = "Chest" });
+        plan.Inserts.Add(new SkelInsert { Parent = "Root", Name = "Spine_Roll_1", Child = "Chest" });
+        plan.Create.Add("SpiderArmature/Root/Tail");
+        return plan;
+    }
+
+    private static GlbDocument Doc(string fixture) => GlbDocument.Load(Fixture(fixture));
+
+    private static string Counted(GlbSkel.Stats stats) =>
+        stats.Renamed + "/" + stats.Collapsed + "/" + stats.Inserted + "/" + stats.Created;
+
+    private static object Section(GlbDocument doc, string key) => GlbSlim.Get(doc.Json, key);
+
+    /// <summary>skins[0].joints, comma-joined, so a wrong answer prints as one.</summary>
+    private static string Joints(GlbDocument doc)
+    {
+        var indices = new List<string>();
+        foreach (object item in GlbSlim.Arr(GlbSlim.Obj(GlbSlim.Arr(doc.Json, "skins")[0]), "joints"))
+            indices.Add(((int)(double)item).ToString());
+        return string.Join(",", indices.ToArray());
+    }
+
+    /// <summary>Every skin joint's world matrix, walked with the same row-vector composition the
+    /// port uses - no Unity anywhere in the check.</summary>
+    private static double[][] Worlds(GlbDocument doc)
+    {
+        var joints = new List<int>();
+        foreach (object item in GlbSlim.Arr(GlbSlim.Obj(GlbSlim.Arr(doc.Json, "skins")[0]), "joints"))
+            joints.Add((int)(double)item);
+        var worlds = new double[joints.Count][];
+        for (int i = 0; i < joints.Count; i++) worlds[i] = Worlds(doc, joints[i]);
+        return worlds;
+    }
+
+    private static double[] Worlds(GlbDocument doc, int node)
+    {
+        List<object> nodes = GlbSkel.Nodes(doc);
+        int[] parents = GlbSkel.Parents(nodes, out _);
+        double[] world = GlbSkel.Trs(GlbSlim.Obj(nodes[node]));
+        for (int at = parents[node]; at >= 0; at = parents[at])
+            world = GlbSkel.Mul(world, GlbSkel.Trs(GlbSlim.Obj(nodes[at])));
+        return world;
+    }
+
+    /// <summary>The skin's inverse bind matrices, read straight out of BIN as float MAT4.</summary>
+    private static List<double[]> Ibm(GlbDocument doc)
+    {
+        Dictionary<string, object> skin = GlbSlim.Obj(GlbSlim.Arr(doc.Json, "skins")[0]);
+        Dictionary<string, object> accessor =
+            GlbSlim.Obj(GlbSlim.Arr(doc.Json, "accessors")[GlbSlim.Int(skin, "inverseBindMatrices", -1)]);
+        Dictionary<string, object> view =
+            GlbSlim.Obj(GlbSlim.Arr(doc.Json, "bufferViews")[GlbSlim.Int(accessor, "bufferView", -1)]);
+        int at = (int)(GlbSlim.Long(view, "byteOffset", 0) + GlbSlim.Long(accessor, "byteOffset", 0));
+        int count = GlbSlim.Int(accessor, "count", 0);
+        var all = new List<double[]>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var m = new double[16];
+            for (int k = 0; k < 16; k++) m[k] = BitConverter.ToSingle(doc.Bin, at + i * 64 + k * 4);
+            all.Add(m);
+        }
+        return all;
+    }
+
+    /// <summary>The largest element-wise distance between two matrices.</summary>
+    private static double Apart(double[] left, double[] right)
+    {
+        double worst = 0;
+        for (int i = 0; i < 16; i++) worst = Math.Max(worst, Math.Abs(left[i] - right[i]));
+        return worst;
+    }
+
+    /// <summary>Structural equality over what Json.Parse hands back. Used instead of a list of keys
+    /// so 'the rename changed nothing else' is asked of the whole document.</summary>
+    private static bool Deep(object left, object right)
+    {
+        if (left == null || right == null) return left == null && right == null;
+        if (left is Dictionary<string, object> a && right is Dictionary<string, object> b)
+        {
+            if (a.Count != b.Count) return false;
+            foreach (KeyValuePair<string, object> member in a)
+                if (!b.TryGetValue(member.Key, out object other) || !Deep(member.Value, other)) return false;
+            return true;
+        }
+        if (left is List<object> x && right is List<object> y)
+        {
+            if (x.Count != y.Count) return false;
+            for (int i = 0; i < x.Count; i++) if (!Deep(x[i], y[i])) return false;
+            return true;
+        }
+        return left.Equals(right);
+    }
+
+    private static bool Same(byte[] left, byte[] right)
+    {
+        if (left == null || right == null) return left == null && right == null;
+        if (left.Length != right.Length) return false;
+        for (int i = 0; i < left.Length; i++) if (left[i] != right[i]) return false;
+        return true;
+    }
+
+    private static string Printed(SkelPlan plan)
+    {
+        var text = new List<string> { "root=" + plan.Root };
+        foreach (SkelRename step in plan.Renames) text.Add("rename " + step.From + ">" + step.To);
+        foreach (SkelCollapse step in plan.Collapses) text.Add("collapse " + step.Node + ">" + step.Into);
+        foreach (SkelInsert step in plan.Inserts)
+            text.Add("insert " + step.Parent + "/" + step.Name + "/" + step.Child + " " +
+                     Spelled(step.Translation) + Spelled(step.Rotation) + Spelled(step.Scale));
+        foreach (string path in plan.Create) text.Add("create " + path);
+        return string.Join(" | ", text.ToArray());
+    }
+
+    private static string Spelled(double[] numbers)
+    {
+        if (numbers == null) return "-";
+        var text = new List<string>(numbers.Length);
+        foreach (double value in numbers) text.Add(value.ToString("R"));
+        return "[" + string.Join(",", text.ToArray()) + "]";
     }
 
     /// <summary>One plan, one refusal, and a document nobody touched.</summary>
