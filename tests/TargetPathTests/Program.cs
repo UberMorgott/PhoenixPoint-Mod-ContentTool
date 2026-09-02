@@ -3229,11 +3229,9 @@ internal static class Program
               "the framing distance is a function of the unit and the panel only - no orbit angle " +
               "enters it, so an orbit is a rotation about the bounds centre and nothing else");
 
-        // ---- and where the mouse is allowed to act at all ----
-        Check("S30-overscene", BenchList.OverScene(BenchList.PanelWidth + 1f, BenchList.PanelWidth) &&
-                               !BenchList.OverScene(BenchList.PanelWidth, BenchList.PanelWidth) &&
-                               !BenchList.OverScene(0f, BenchList.PanelWidth),
-              "the mouse drives the view only right of the panel - the panel's own edge counts as panel");
+        // Where the mouse is allowed to act at all is no longer BenchList's answer: OrbitCamera.InViewport
+        // owns it (src\Dev\OrbitCamera.cs), and it is measured in tests\ObjCodecTests\OrbitTests.cs -
+        // "the panel's own column is out". Re-asserting it here would only be a second copy.
     }
 
     /// <summary>
@@ -3325,9 +3323,10 @@ internal static class Program
               "13,128 NullReferenceExceptions in the 2026-08-29 Player.log");
         Check("S32-reset", Regex.IsMatch(text, @"static\s+string\s+ResetView\s*\(") &&
                            raw.Contains("RESET VIEW") &&
-                           Regex.IsMatch(text, @"zoom\s*=\s*BenchList\.ZoomDefault\s*;\s*lift\s*=\s*0f\s*;"),
+                           Regex.IsMatch(text, @"view\s*\.\s*Reset\s*\(\s*\)\s*;\s*lift\s*=\s*0f\s*;"),
               "and there is a RESET VIEW button that puts the knobs themselves back, not merely " +
-              "re-measures at the knobs that lost the picture");
+              "re-measures at the knobs that lost the picture - the zoom and the orbit through " +
+              "OrbitCamera.Reset (proven in tests\\ObjCodecTests\\OrbitTests.cs), the lift here");
         // The "record the pose once" rule, in the form that replaced the single `cameraTaken` bool:
         // a camera already on the ledger is returned from immediately, so a re-take can never record
         // OUR computed pose as the one to restore. Same guarantee, now per camera rather than global -
@@ -3553,18 +3552,10 @@ internal static class Program
         const float W = 1920f, H = 1080f, P = BenchList.PanelWidth;
         Check("S38-strip-shown", BenchList.StripShown(W, H, P),
               "a normal window has room for the strip");
-        Check("S38-strip-hit",
-              BenchList.OverStrip(P + 1f, 5f, W, H, P) &&
-              BenchList.OverStrip(W - 1f, BenchList.StripHeight, W, H, P),
-              "the band right of the panel and below its top edge belongs to the transport");
-        Check("S38-strip-not-panel",
-              !BenchList.OverStrip(P, 5f, W, H, P) && !BenchList.OverStrip(0f, 5f, W, H, P),
-              "and it does NOT overlap the panel - the panel's own column and edge stay the panel's");
-        Check("S38-strip-not-gizmo",
-              !BenchList.OverStrip(P + 1f, BenchList.StripHeight + 1f, W, H, P) &&
-              !BenchList.OverStrip(W * 0.5f, H * 0.5f, W, H, P),
-              "and it claims NOTHING above its own top edge - everything up there is still the " +
-              "gizmo's and the orbit's");
+        // Which pixels the strip CLAIMS from the mouse is no longer BenchList's answer either: the band
+        // is exactly what OrbitCamera.InViewport subtracts (via StripReserve, asserted just below), and
+        // tests\ObjCodecTests\OrbitTests.cs measures all three cases against it - "the transport strip is
+        // out", "the panel's own column is out", "the middle of the scene is in".
         Check("S38-strip-top",
               Math.Abs(BenchList.StripTop(W, H, P) - (H - BenchList.StripHeight)) < 1e-6f,
               "the same edge in IMGUI's own convention, which is what the gizmo compares against");
@@ -3573,11 +3564,11 @@ internal static class Program
         // that was never drawn would stand the unit too low with nothing on screen to say why.
         const float Narrow = BenchList.PanelWidth + BenchList.StripMinWidth - 1f;
         Check("S38-strip-noroom",
-              !BenchList.StripShown(Narrow, H, P) && !BenchList.OverStrip(Narrow - 1f, 5f, Narrow, H, P) &&
+              !BenchList.StripShown(Narrow, H, P) &&
               BenchList.StripReserve(Narrow, H, P) == 0f &&
               BenchList.StripTop(Narrow, H, P) == float.MaxValue,
-              "a free region narrower than " + BenchList.StripMinWidth + " px gets no strip, claims no " +
-              "mouse and costs no height");
+              "a free region narrower than " + BenchList.StripMinWidth + " px gets no strip and costs " +
+              "no height - and so claims no mouse either, since a zero reserve is what InViewport reads");
         Check("S38-strip-short",
               !BenchList.StripShown(W, BenchList.StripHeight * 3f - 1f, P) &&
               BenchList.StripReserve(W, H, P) == BenchList.StripHeight,
