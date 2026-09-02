@@ -1024,7 +1024,9 @@ namespace Morgott.ContentTool.Dev
             float w = Screen.width, h = Screen.height;
             float wide = Mathf.Min(InspectorWidth, w - panelWidth - 16f);
             if (wide < 160f) return;
-            float high = 24f + (shownOpen ? inspectorLines.Count * 18f + 8f : 0f);
+            // 20 px a row, not 18: IMGUI puts the style's own vertical margin BETWEEN stacked controls,
+            // and measuring the box at the bare line height left the last row outside it.
+            float high = 26f + (shownOpen ? inspectorLines.Count * 20f + 8f : 0f);
             float top = Mathf.Min(stripTopGui, h) - high - 4f;
             if (top < 4f) return;
 
