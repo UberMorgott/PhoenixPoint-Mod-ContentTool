@@ -1119,3 +1119,49 @@ step 4) and the `FitAnim.cs:501` comment that mentions the deleted `OverStrip` (
 of it). Task 2 makes it the only view state there is and deletes the two helpers it replaced, in one
 commit, so the bench is never half-converted. Task 3 adds two keys onto a controller that already exists.
 Task 4 changes no code unless it finds a defect.
+
+---
+
+## Task 4 acceptance run - 2026-09-02, D:\PP-Instance2
+
+Install `D:\PP-Instance2`, ContentTool `1.1.3.0` `build=c0869416`, PPBridge `build=2d9f4a41`,
+deployed with the repo's own `.\deploy.ps1`. Geoscape from `plans\start-campaign.json`, bench from
+`connect console '{"command":"ct_bench","args":["open"]}'`, FIT tab. PPCLI cannot deliver a mouse
+gesture to IMGUI, so the wiring was driven through the very functions the mouse drives -
+`AccessTools.Field(typeof(FitBench),"view").GetValue(null)` and then `OrbitBy` / `WheelAt` /
+`FrameOn` on the live `OrbitCamera`, plus `AccessTools.Method(typeof(FitBench),"Recentre"/"ResetView")`
+- each as one `connect plan` with an inline plan file kept outside the PPCLI repo.
+
+| Step | Action | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| 3 | read the hint line off the panel | the new scheme, the old `right-drag = turn the model` gone | `handles OFF. MIDDLE-drag = orbit (Alt+left too), SHIFT+middle = pan, wheel = zoom at the cursor, F = frame, Home = reset, WASD/QE (Shift = faster) = fly.` (`view-01-hintline.png`, also visible in `proto-baseline-01.png`) | PASS |
+| 4 | `OrbitBy(225, 0)`, read twice | a gesture writes only the TARGET; the live value arrives later | in the same plan: `Yaw` 0.0 with `YawTarget` 45.0; after a 1200 ms wait `Yaw` 45.0 / `YawTarget` 45.0 (`view-02-orbit45.png`) | PASS |
+| 5 | 40x `OrbitBy(0, -1000)`, then 80x `OrbitBy(0, +1000)` | stops at the band, no flip | `Pitch` 80.0 / `PitchTarget` 80.0, then `Pitch` -80.0 / `PitchTarget` -80.0 (`view-03-pitch-bottom.png`) | PASS |
+| 6 | `WheelAt(3, 400, 0)` | zoom in, distance with it, pivot walks toward the cursor | `Zoom` 1.35 -> 0.864, `frameDist` 2.70912457 -> 1.73383975, `pan` (0,0,0) -> (-0.333569676, -1.34e-08, -0.300347567), `AnchorX` 400 (`view-04-wheel-before.png` / `view-05-wheel-after.png`) | PASS |
+| 7 | F, then Home, from an awkward view | F keeps the orbit and re-frames; Home is a fresh open | after `OrbitBy(300,-80)` + `WheelAt(6,300,200)` (`view-06-awkward.png`): F (`view.FrameOn(frameRadius, frameRadius)` + `FitBench.Recentre`) -> `Zoom` back to 1.35 with `Yaw` 105 / `Pitch` -64 preserved (`view-07-after-F.png`); Home (`FitBench.ResetView`) -> `Yaw` 0, `Pitch` 0, `Zoom` 1.35, `YawTarget` 0, `ZoomTarget` 1.35, and it answered *"ct_bench: view RESET - zoom, lift, orbit, the animation transport and the bay's own rotation back to default, scene and lighting re-asserted, camera re-taken and re-measured."* (`view-08-after-Home.png`) | PASS |
+| 8a | `OrbitCamera.Classify` on the LIVE assembly | left is nobody's when the gizmo would grab; middle orbits; shift+middle pans | `Classify(true,true,false,false,false,true)` -> `None`; `Classify(true,false,true,false,false,false)` -> `Orbit`; `Classify(true,false,true,false,true,false)` -> `Pan` | PASS |
+| 8b | `FitGizmo.WouldGrab` over a handle | true over an arrow | **NOT EXERCISED** - the session had no weapon fitted, so the panel read `handles OFF` and there was no handle to be over. The gizmo-priority arithmetic it feeds is covered by 8a | not verified |
+| 8c | `Player.log` | no new exception, no IMGUI group error | **0** occurrences of `Getting control … in a group with only … controls`; no ContentTool exception. The only entries are third-party and pre-date the bench: TFTV's own `TFTVRevenant` NRE / InvalidOperationException in a tactical level, and 13 `ArgumentException: Mesh can not have more than 65000 vertices` from `UnityEngine.UI.Text.UpdateGeometry` (TFTV's error popup outgrowing the UGUI vertex cap), first seen at boot | PASS |
+
+**One number the plan predicted and the code does not produce.** Step 6's prose expects the zoom to
+fall by "roughly `0.88^3`". `BenchList.Wheel` is LINEAR in notches, not compounded: three notches at
+`ZoomFactor = 0.12` gave `1.35 x (1 - 0.36) = 0.864`, exactly. The gesture is correct and the pivot
+anchoring is what the step actually asserts; only the predicted figure was wrong. Nothing was changed.
+
+### OWNER-VISUAL - the six no agent can sign off
+
+PPCLI cannot deliver mouse gestures to IMGUI, so these stay outstanding until the owner drives them
+by hand on `D:\PP-Instance2` (ContentTool `1.1.3.0`, `build=c0869416`):
+
+1. MMB-drag orbits, and it eases rather than snapping.
+2. Shift+MMB pans in the screen plane.
+3. Alt+LMB orbits identically to MMB.
+4. The wheel zooms toward the cursor - the thing under the pointer stays under the pointer.
+5. LMB still grabs a gizmo arrow on the FIT tab and does NOT orbit anywhere else.
+6. `F` frames and `Home` resets, and neither fires while a text filter has the keyboard.
+
+Screenshots: `C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\e31d205c-b842-452c-8655-3d543056001d\scratchpad\shots\`
+(`view-01-hintline.png` … `view-09-closed.png`).
+
+The environment note about Renderforge restarting the game into the D3D12 debug layer - which ended
+three sessions of this run - is recorded once, in `2026-09-02-prototype-catalog-plan.md`.

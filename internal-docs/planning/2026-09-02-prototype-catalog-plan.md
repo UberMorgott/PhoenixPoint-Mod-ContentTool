@@ -769,3 +769,80 @@ git commit -m "docs(planning): prototype picker acceptance run on Instance2"
 - [ ] **Step 9: Hand off to the owner for the visual check.** Report to the user: the six screenshot
   paths, which prototypes rendered, the step-6 restore result, and that slice 1 is awaiting his visual
   in-game check before a release is cut. Do not cut a release.
+
+---
+
+## Task 7 acceptance run - 2026-09-02, D:\PP-Instance2
+
+Real run only. Install `D:\PP-Instance2` (never the user's own game), ContentTool `1.1.3.0`
+`build=c0869416`, PPBridge `build=2d9f4a41`, deployed with the repo's own `.\deploy.ps1` (its
+`-PPRoot` already defaults to `D:\PP-Instance2`). Geoscape reached with
+`.\ppcli.ps1 plan .\plans\start-campaign.json '{"difficultyIndex":1}'`, bench opened with
+`.\ppcli.ps1 connect console '{"command":"ct_bench","args":["open"]}'`. IMGUI cannot be clicked
+through PPCLI, so the browser was driven by reflection on the very seams its rows call -
+`FitBench.Prototypes` / `PrototypeCatalog.Search` / `FitBench.ShowPrototype` / `FitBench.SlotTargets`
+/ `FitBench.PrototypeBusy`, and `ModelDoctor.PickTarget(PrototypeTarget)` / `PickFile` through
+`AccessTools.Field(typeof(FitBench),"doctor")`. Every step ran as a `connect plan` with an inline
+plan file under the scratchpad (never inside the PPCLI repo).
+
+**The census line, verbatim, on its first harvest:**
+
+```
+ct_bench prototypes: 46 manager(s) [census 46], 42 with a rig [42], 37 distinct rig(s) [37], 2551 transform(s) [2551], 36 binding prototype(s) [36] - MATCHES rig-census-2026-09-02.json.
+```
+
+`FitBench.Prototypes()` returned `List<PrototypeRecord>` with `count: 36`.
+
+### The matrix
+
+| # | Action | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| 1 | Human -> Human -> slots | rebuild, real SMRs, bone names a subset of the 124-transform rig | 110 bindable + 14 `EXT_` = **124** (the census `count` for `CHR_Human_Rig_Ready`), 1 rig prefab, 1 variant, `Busy` false, **9** slot targets, 6 with a live SMR: Head 1, LeftArm 26, LeftLeg 11, RightArm 26, RightLeg 11, Torso 25 bone(s); FacialHair / Hair / Legs = `slot visual unavailable` | PASS |
+| 2 | Crabman -> Crabman -> Torso | a DIFFERENT RigTarget | 53 bindable + 5 `EXT_`, **8** slots, **all 8 live**: Head 3, LeftArm 5, LeftHand 2, LeftLeg 5, RightArm 3, RightHand 4, RightLeg 5, Torso 7; meshes `Geo_Head*/Geo_Arm0*/Geo_Torso*` | PASS |
+| 3 | Fishman -> Fishman -> wrist-adjacent slots | the case-variant wrists bind, no ambiguity | 138 bindable + 11 `EXT_`, 2 variants, **10** slots, 8 live including `Fishman_UpperLeftArms_SlotDef` and `Fishman_UpperRightArm_SlotDef`; `Record.Warning` null (no ambiguous name), matching the offline `CATALOG` check that `Ambiguous(Fishman)` is empty; `Fishman_Legs` / `Fishman_UpperArms` = `slot visual unavailable` | PASS |
+| 4 | the worm -> all three variants | ONE record, 2 rig prefabs, 3 variants, all three rebuild | one record `Acidworm`, 11 bindable, **2** `RigPrefabNames`, **3** variants; `ShowPrototype` for indexes 0/1/2 asked `Acidworm` / `Fireworm` / `Poisonworm` and `ShownVariant()` answered the same name each time, 1 slot each; `Poisonworm_Torso_SlotDef` live, 9 bones, mesh `ALN_Fireworm…` (the shared rig), transport strip showing `Fireworm_idle_loop` | PASS |
+| 5 | NJ_Armadillo -> Turret | rebuilds; duplicate `light` warns, never blocks | 50 bindable + 6 `EXT_`; `Record.Warning` = *"this rig carries the name(s) light more than once; the game matches by name and takes the first, so the others are unreachable - a slot is only blocked when it really references one of them"*; **12** slots, 6 live (`Vehicle_Top` 9 = the turret, `Vehicle_Front` 13, Back/Left/Right 2 each, `Armadillo_Engine_Upgrade` 1), the four wheels + front lights + hull upgrade `slot visual unavailable` | PASS |
+| 6 | EggFacehugger (static) | rebuilds or says "slot visual unavailable" - never a fabricated target | 23 bindable + 4 `EXT_`, **1** slot `Egg_Facehugger_Body_SlotDef`, live, 10 bones | PASS |
+| 7 | Replace verdict on a slot | a real verdict off the LIVE slot renderer | `PickTarget(Human_Torso_SlotDef target)` + `PickFile(lib\u9_probe.glb)` -> `Outcome.NearestBone`, **27** diagnostic rows, `Doctor.Target` non-null | PASS |
+| 8 | Extend verdict on the rig | `MissingBone` suppressed, an added bone still refused | same target with `Mode = Extend` -> `Outcome.Refused`, **exactly 2** rows, both `ExtraBone` / `Blocking` (`'hip'`, `'head'` - u9_probe's own joints), **zero** `MissingBone` against a 110-bone rig, `Doctor.Target` null | PASS |
+| 9 | close leaves the same squad member + loadout | the bay comes back exactly | before any prototype: `AddonsManagerDef` `ct_creature_morgott.demo.customcreature_AddonsManagerDef`, `Addons` 3, 1 `SkinnedMeshRenderer`. After 8 prototype rebuilds and `ct_bench close`: the same three values, unchanged | PASS |
+| 10 | rapid select-and-close leaves no mixed rig | restore invalidates the in-flight rebuild | `ShowPrototype(Crabman)` then `ct_bench close` in the same plan, no wait between them: `FitBench.PrototypeBusy` **true** at the moment of the close (the rebuild really was in flight); afterwards manager / addons / renderers back to the captured triple and `PrototypeBusy` false | PASS |
+
+`UIModuleActorCycle` is **not** reachable from a geoscape that never opened the roster screen
+(`PrototypeBaySession.FindCycle` returned null on every read), so every restore above went through
+the builder-state fallback (`UseAddonManager` + tags + `RebuildCharacter`) - the path the class
+remark calls the `ponytail:` arm. It is the path that was exercised; the `DisplaySoldier` arm was not.
+
+### `Player.log`
+
+No ContentTool exception, and **0** occurrences of `Getting control … in a group with only …`.
+The only entries in the whole run are third-party and pre-date the bench: TFTV's own
+`TFTVRevenant+Resistance.GetPreferredDamageType` NRE / InvalidOperationException in a tactical level,
+and 13 `ArgumentException: Mesh can not have more than 65000 vertices` from
+`UnityEngine.UI.Text.UpdateGeometry` - TFTV's error popup growing its own text past the UGUI vertex
+cap, first seen at boot before `ct_bench` was ever run.
+
+### Environment: Renderforge relaunches the game into the D3D12 DEBUG layer
+
+Not a ContentTool defect, but it cost this run three game sessions and is worth writing down.
+`com.morgott.Renderforge` on Instance2 restarts the process with `-force-d3d12 -force-d3d12-debug`
+about a minute into a session, whatever `Renderer`/`Upscaler`/`Mode` say in `ModConfig.json`. The
+D3D12 debug layer then runs at ~1 FPS and raises `0x0000087d` from `D3D12SDKLayers`, which the crash
+handler records as a crash (`C:\Temp\Snapshot Games Inc\Phoenix Point\Crashes\Crash_2026-09-02_105649977`)
+- taking the campaign, the bench and every live handle with it. The run was finished by removing
+`com.morgott.Renderforge` from `MOD_ACTIVATED` in the Instance2 profile for the duration and putting
+it back afterwards. **Renaming its `meta.json` instead does NOT work**: an activated mod whose folder
+no longer carries a `meta.json` stops PPModLoader enabling the mods listed after it, PPBridge
+included, and the game boots with no endpoint at all.
+
+### Screenshots
+
+`C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\e31d205c-b842-452c-8655-3d543056001d\scratchpad\shots\`
+
+`proto-baseline-01.png` (bench open, the bay's own unit), `proto-case1-human-02.png`,
+`proto-case1-extend-verdict-03.png`, `proto-case2-crabman-04.png`, `proto-case3-fishman-05.png`,
+`proto-armadillo.png`, `proto-facehugger.png`, `proto-case4-worm-v0.png` / `-v1.png` / `-v2.png`,
+`proto-before-close-06.png` (the Poisonworm on the platform), `proto-after-close-07.png`
+(the geoscape the bench came from), `proto-race-close-08.png`.
+
+Slice 1 is awaiting the owner's own visual check in game; no release cut.

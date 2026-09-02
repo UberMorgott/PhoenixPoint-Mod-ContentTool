@@ -435,3 +435,36 @@ Drive the panel through PPCLI, take screenshots, run a slimmed file through the 
   - Census populated with clip rows.
   - Trim completed, progress bar worked, result displayed.
   - Slimmed file accepted by Doctor (verdict, not refusal).
+
+---
+
+## Task 6 acceptance run - 2026-09-02, D:\PP-Instance2
+
+Install `D:\PP-Instance2`, ContentTool `1.1.3.0` `build=c0869416`, PPBridge `build=2d9f4a41`,
+deployed with the repo's own `.\deploy.ps1` (`-PPRoot` already defaults to that install). Geoscape
+from `plans\start-campaign.json`, bench from `connect console '{"command":"ct_bench","args":["open"]}'`.
+PPCLI cannot click IMGUI, so the panel was driven through its own fields and methods:
+`AccessTools.Field(typeof(FitBench), "doctorTab"/"advanced"/"slim")` and
+`AccessTools.Method(typeof(SlimPanel), "Pick"/"Run")`, with the tick boxes set by
+`Array.SetValue` on the panel's own `drop[]` - the same state a click writes.
+
+Fixture: `lib\u9_probe.glb` copied to the scratchpad (`slimtest\u9_probe.glb`, 2888 B) so nothing in
+the repo was written.
+
+| # | Action | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| 1 | Doctor tab + Advanced on | the slim panel is drawn there | `GLB SLIM - drop animation clips this model will never play` with Browse, the clip list, force / overwrite-in-place toggles, `writes: u9_probe.slim.glb`, an `idle` progress row and `result: -` (`slim-census-01.png`) | PASS |
+| 2 | census of the picked file | 4 clips with byte costs and mandatory flags | 4 rows: `Walk` idx 0 mandatory 48 B data / 0 B frees; `walk` idx 1 mandatory 48 / 0; `Morphs` idx 2 not mandatory 40 / 40; `Hold` idx 3 not mandatory 48 / 12 | PASS |
+| 3 | tick the two non-mandatory clips and RUN | progress, then a result line, guard silent (nothing mandatory dropped) | `running` true immediately after the press, first stage `Queued`; panel ended on `Done 5/5 - dropped 2 of 4 clip(s), 52 B freed` and `result: dropped 2 of 4 clip(s), 52 B freed` (`slim-result-02.png`) | PASS |
+| 4 | the files on disk | source untouched, sibling written, no temp left | `u9_probe.glb` still 2888 B, `u9_probe.slim.glb` 2008 B, no `.ct_tmp` in the folder | PASS |
+| 5 | `doctor.PickFile(<slimmed>)` | a VERDICT, not a refusal | against the `Human_Torso_SlotDef` prototype target: `Outcome.NearestBone` with 27 diagnostic rows - the same verdict the unslimmed file produces, so the trim carried mesh and skin through intact (`slim-doctor-verdict-03.png`) | PASS |
+
+**Observation, not a defect.** The `MANDATORY` badge on the `Walk` / `walk` rows is clipped off the
+right edge of the panel column at 1280x720 - the row ends at `48 B data, 0 B free`. Same clipping the
+Doctor's own labels have (2026-09-02 Doctor run, observation 2).
+
+The environment note about Renderforge restarting the game into the D3D12 debug layer is recorded
+once, in `2026-09-02-prototype-catalog-plan.md`'s acceptance section.
+
+Screenshots: `C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\e31d205c-b842-452c-8655-3d543056001d\scratchpad\shots\`
+(`slim-census-01.png`, `slim-result-02.png`, `slim-doctor-verdict-03.png`).
