@@ -139,6 +139,7 @@ internal static class Program
         Console.WriteLine(GlbDocTests.Run());
         Console.WriteLine(GlbSlimTests.Run());
         Console.WriteLine(ManifestTests.Run());
+        Console.WriteLine(ProjectScaffoldTests.Run());
         Console.WriteLine(GlbSkelTests.Run());
         Console.WriteLine(GlbZipTests.Run());
         Console.WriteLine(MeshExtractTests.Run());
