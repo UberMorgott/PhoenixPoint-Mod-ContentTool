@@ -57,12 +57,32 @@ namespace Morgott.ContentTool.Doctor
 
             if (fileJoints != null)
                 foreach (string joint in fileJoints)
-                    if (joint != null && string.Equals(SkinBinder.Plain(joint), boneName, StringComparison.Ordinal))
-                        return BoneStatus.ByName;
+                    if (MatchesByName(boneName, joint)) return BoneStatus.ByName;
 
             return nearestBind && missing != null && missing.Contains(boneName)
                  ? BoneStatus.Nearest : BoneStatus.Unmatched;
         }
+
+        /// <summary>
+        /// DOES THIS FILE JOINT REACH THIS TARGET BONE BY NAME? Exactly the binder's own test
+        /// (<c>SkinCompatibility.cs:235-236</c>), which undecorates BOTH sides: the game's
+        /// '#&lt;bone&gt;_Addon =&gt; &lt;part&gt;' decoration is on whichever rig came out of a LIVE
+        /// scene, and for the Doctor that is the TARGET - it reads the renderer standing in front of it,
+        /// where the addon system has already renamed every attachment point. Plaining the file side
+        /// alone coloured 10 by-name bones red on a live Human torso and offered every one of them to the
+        /// armed alias row, which is the PlainCollision map the binder refuses (measured on Instance3).
+        /// </summary>
+        internal static bool MatchesByName(string boneName, string joint)
+        {
+            if (boneName == null || joint == null) return false;
+            string plain = Plain(joint), bare = Plain(boneName);
+            return string.Equals(joint, boneName, StringComparison.Ordinal) ||
+                   string.Equals(plain, boneName, StringComparison.Ordinal) ||
+                   string.Equals(joint, bare, StringComparison.Ordinal) ||
+                   string.Equals(plain, bare, StringComparison.Ordinal);
+        }
+
+        private static string Plain(string name) { return SkinBinder.Plain(name); }
 
         /// <summary>
         /// CAN THE ARMED ALIAS ROW LAND ON THIS BONE? Decided from the status the bone was already

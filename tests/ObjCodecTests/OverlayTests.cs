@@ -77,6 +77,22 @@ internal static class OverlayTests
                             == BoneStatus.Unmatched,
                         "a file joint matches through SkinBinder.Plain, and a different name does not");
 
+        // ---- 8b. THE DECORATION IS ON WHICHEVER RIG CAME OUT OF A LIVE SCENE, AND THAT IS THE TARGET.
+        // The binder undecorates BOTH sides (SkinCompatibility.cs:235-236), and the Model Doctor's own
+        // target is the renderer standing in front of it, where the addon system has already renamed
+        // every attachment point. Measured live on Instance3: a PX_Heavy torso .glb over an
+        // AN_Assault torso slot coloured 10 bones the binder matches BY NAME as Unmatched, because
+        // only the FILE side was plained - and CanAlias then offered every one of them as an alias
+        // target, building exactly the PlainCollision map the binder refuses.
+        checks += Check(BoneOverlay.Classify("#Chest_Addon => AN_Assault_Torso_BodyPartDef",
+                                             new[] { "#Chest_Addon => PX_Heavy_Torso_BodyPartDef" },
+                                             null, null, false) == BoneStatus.ByName &&
+                        BoneOverlay.Classify("#Chest_Addon => AN_Assault_Torso_BodyPartDef",
+                                             new[] { "Chest" }, null, null, false) == BoneStatus.ByName &&
+                        BoneOverlay.Classify("#Chest_Addon => AN_Assault_Torso_BodyPartDef",
+                                             new[] { "Neck" }, null, null, false) == BoneStatus.Unmatched,
+                        "a DECORATED target bone matches a file joint the way the binder matches it");
+
         // ---- 9. The report's own MissingBone subjects, coloured by which bind the verdict took.
         var missing = new HashSet<string>(StringComparer.Ordinal) { "L_Hand" };
         checks += Check(BoneOverlay.Classify("L_Hand", null, null, missing, true) == BoneStatus.Nearest &&
