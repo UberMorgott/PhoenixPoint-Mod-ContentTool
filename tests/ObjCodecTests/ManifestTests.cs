@@ -154,6 +154,23 @@ internal static class ManifestTests
                                 "E3 verbatim for " + reject + " -> " + said);
             }
 
+            // A non-object ELEMENT. The read side tolerates it per row (ContentProject.ParseReplace keeps
+            // the objects beside it), but the WRITE side refuses with that same E3 sentence, so a file
+            // holding a garbage element is never saved around.
+            Manifest garbage = Manifest.Parse(
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ 1," +
+                " { \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": \"m\" } ] }");
+            checks += Check(garbage.Replace.Count == 1,
+                            "a primitive element does not end the parse - the object row beside it is read");
+            string junk = null;
+            try { garbage.Validate(); }
+            catch (InvalidDataException wrong) { junk = wrong.Message; }
+            checks += Check(junk != null &&
+                            junk.StartsWith("\"replace\" row REFUSED: every entry needs exactly one of",
+                                            StringComparison.Ordinal) &&
+                            junk.IndexOf("got 1 -", StringComparison.Ordinal) >= 0,
+                            "and the STRICT path refuses it with E3, the element spelled as it parsed: " + junk);
+
             // ---- Manifest_RefusesDuplicateMeshTarget: V7, bundle case-blind, asset verbatim.
             Manifest twice = Manifest.Parse(
                 "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [" +

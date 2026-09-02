@@ -396,6 +396,16 @@ namespace Morgott.ContentTool.Project
                 return list;
             }
             if (!manifest.Declares("replace")) return list;
+
+            // An element that is not an object is refused ALONE - the object rows beside it are still
+            // read below. With no channel to say so the FIRST one throws, exactly as an incomplete row
+            // does. Counted BEFORE `marked`, so an array of nothing but junk still ends with the
+            // "declares but no complete entry" sentence rather than only the element's own line.
+            foreach (string junk in manifest.ElementRefusals)
+            {
+                if (refusals == null) throw new InvalidDataException(junk);
+                refusals.Add(junk);
+            }
             int marked = refusals == null ? 0 : refusals.Count;
 
             foreach (ReplaceRow row in manifest.Replace)

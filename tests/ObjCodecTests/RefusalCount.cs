@@ -82,10 +82,23 @@ internal static class RefusalCount
         checks += Check(Said("ParseReplace", "{\"replace\":[]}") ==
                         "ppcontent.json declares \"replace\" but no complete entry was read from it",
             "and a declared-but-empty array throws THAT sentence, word for word");
-        checks += Check((Said("ParseReplace", "{\"replace\":[1]}") ?? "")
+        // A primitive ELEMENT is one refused ROW, not a refused ARRAY: the objects beside it still bake.
+        // Own lists, so the running count of five below is untouched.
+        var mixed = new List<string>();
+        checks += Check(Rows("ParseReplace",
+            "{\"replace\":[1,{\"bundle\":\"a.bundle\",\"asset\":\"Foo\",\"mesh\":\"body\"}]}", mixed) == 1 &&
+            mixed.Count == 1 && mixed[0].IndexOf("got 1 -", StringComparison.Ordinal) >= 0,
+            "a primitive INSIDE \"replace\" refuses that element alone and the row beside it still bakes: " +
+            string.Join(" | ", mixed.ToArray()));
+        var only = new List<string>();
+        checks += Check(Rows("ParseReplace", "{\"replace\":[1]}", only) == 0 && only.Count == 2 &&
+            only[1] == "ppcontent.json declares \"replace\" but no complete entry was read from it",
+            "an array of nothing BUT a primitive refuses the element and then says the array declared " +
+            "nothing readable: " + string.Join(" | ", only.ToArray()));
+        checks += Check((Said("ParseReplace", "{\"replace\":5}") ?? "")
                             .IndexOf("ARRAY OF ROWS", StringComparison.Ordinal) >= 0,
-            "a \"replace\" holding a primitive is a manifest this cannot read - with no list it THROWS, " +
-            "it does not report an empty project");
+            "V3 stands: a \"replace\" VALUE of another shape is still the array-shape refusal, and with no " +
+            "list it THROWS rather than reporting an empty project");
 
         checks += Check(Threw("ParsePublish", "{\"publish\":[{\"key\":\"c/d\"}]}"),
             "with no list to collect into (LoadDeclared, SoundReplace's S1 gate) the throw is unchanged");

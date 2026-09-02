@@ -89,6 +89,7 @@ namespace Morgott.ContentTool.Project
         private readonly Dictionary<string, object> root;
         private readonly List<ReplaceRow> rows = new List<ReplaceRow>();
         private readonly List<ReplaceRow> pending = new List<ReplaceRow>();
+        private readonly List<string> badElements = new List<string>();
 
         private Manifest(Dictionary<string, object> root)
         {
@@ -100,7 +101,9 @@ namespace Morgott.ContentTool.Project
             foreach (object item in array)
             {
                 Dictionary<string, object> members = item as Dictionary<string, object>;
-                if (members == null) throw new InvalidDataException(NotAnArray);
+                // A primitive or a null ELEMENT is one refused ROW, not a refused ARRAY: throwing here
+                // would drop every valid row beside it, which is exactly what the regex read never did.
+                if (members == null) { badElements.Add(RowRefusal(item)); continue; }
                 rows.Add(new ReplaceRow(members));
             }
         }
@@ -149,6 +152,10 @@ namespace Morgott.ContentTool.Project
         /// <summary>Rows added in memory and not yet spliced into the file.</summary>
         internal IReadOnlyList<ReplaceRow> Pending => pending;
 
+        /// <summary>E3, one per element of "replace" that was not an OBJECT, in file order. The tolerant
+        /// caller reports them beside its own row refusals; Validate - the write side - throws the first.</summary>
+        internal IReadOnlyList<string> ElementRefusals => badElements;
+
         /// <summary>Whether the file SAYS the key, as opposed to saying it empty - the distinction
         /// ParseReplace's "declares but no complete entry" sentence turns on.</summary>
         internal bool Declares(string key) { return root.ContainsKey(key); }
@@ -176,6 +183,9 @@ namespace Morgott.ContentTool.Project
         /// <exception cref="InvalidDataException">E3 for a row, E4 for a duplicated target.</exception>
         internal void Validate()
         {
+            // The write side is strict where the read side is per-row tolerant: an element that is not an
+            // object cannot be edited, re-read or spliced around, so a file holding one is never saved.
+            if (badElements.Count > 0) throw new InvalidDataException(badElements[0]);
             var seen = new List<string>();
             foreach (ReplaceRow row in rows)
             {
@@ -204,12 +214,16 @@ namespace Morgott.ContentTool.Project
         /// by JsonWriter from the PARSED row rather than by a raw regex match, so its spacing and key order
         /// may differ from the file's - and a nested member shows up in the sentence at all, which the old
         /// "\{[^{}]*\}" match could never manage (design §7).</summary>
-        internal static string RowRefusal(ReplaceRow row)
+        internal static string RowRefusal(ReplaceRow row) { return RowRefusal(row.Tree); }
+
+        /// <summary>The same sentence for an ELEMENT that never became a row - a primitive or a null,
+        /// spelled by the same writer, so `[1]` reads "got 1".</summary>
+        internal static string RowRefusal(object element)
         {
             return "\"replace\" row REFUSED: every entry needs exactly one of \"texture\", \"material\", " +
                    "\"mesh\", \"clip\" or \"video\", plus \"bundle\" and \"asset\" for everything but " +
                    "\"video\" (a \"video\" entry with no \"asset\" ADDS a new clip); got " +
-                   new JsonWriter().Val(row.Tree).ToString() +
+                   new JsonWriter().Val(element).ToString() +
                    " - SKIPPED, this project's other rows still bake";
         }
 
