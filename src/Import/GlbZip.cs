@@ -210,7 +210,12 @@ namespace Morgott.ContentTool.Import
                     curve.Constant = IsConstant(values, curve.Stride);
                     if (!curve.Constant) continue;
                     float[] times = ReadFloats(doc, input);
-                    if (times == null || times.Length == 0) curve.Usable = false;
+                    // A NaN or an infinity in the key times is not survivable further down: a collapse
+                    // copies both ends into the new input accessor's min/max, and JSON has no token for
+                    // either - the document would serialise to something no glTF reader can parse. The
+                    // curve is left dense instead, which is always a legal answer.
+                    if (times == null || times.Length == 0 ||
+                        !Finite(times[0]) || !Finite(times[times.Length - 1])) curve.Usable = false;
                     else curve.Ends = new[] { times[0], times[times.Length - 1] };
                 }
             }
@@ -362,6 +367,9 @@ namespace Morgott.ContentTool.Import
         {
             for (long slack = (4 - stream.Length % 4) % 4; slack > 0; slack--) stream.WriteByte(0);
         }
+
+        /// <summary>A number JSON can spell. net472 has no float.IsFinite.</summary>
+        private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
         /// <summary>Components per element - 4 for a quaternion, 1 for a morph weight.</summary>
         private static int Lanes(Dictionary<string, object> accessor) =>
