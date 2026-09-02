@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using Morgott.ContentTool.Import;
+using Morgott.ContentTool.IO;
 
 namespace Morgott.ContentTool.Project
 {
@@ -154,6 +157,169 @@ namespace Morgott.ContentTool.Project
         {
             object value;
             return root.TryGetValue(key, out value) ? value as string : null;
+        }
+    }
+
+    /// <summary>
+    /// The FILE behind a Manifest: raw bytes, BOM, newline style, a SHA-256 of what was read, and the
+    /// [start, end) span of every ROOT member's value. Save splices into ONE span and copies every other
+    /// byte verbatim, so a whole-tree reserialization - which would lose the BOM, the indentation, the key
+    /// order, the number spelling and every unknown key, Dictionary insertion order not being contractual
+    /// (GlbDocument.cs:22) - never happens.
+    /// SAVE ONCE, THEN RELOAD: after a successful Save the file no longer matches the fingerprint this
+    /// instance holds, so a second Save refuses with E5 by construction.
+    /// </summary>
+    internal sealed class ManifestFile
+    {
+        /// <summary>[Start, End) of one root member's VALUE, trailing whitespace excluded - Save needs the
+        /// exact index of the array's closing ']'. Both are CHAR offsets into the DECODED text, and the BOM
+        /// is not part of that text - Load strips those three bytes before decoding and re-emits them from
+        /// the `bom` flag - so a char offset is a byte offset only while the file stays ASCII.</summary>
+        private sealed class Span { internal int Start; internal int End; }
+
+        private readonly string text;
+        private readonly string sha;
+        private readonly bool bom;
+        private readonly string newline;
+        private readonly Dictionary<string, Span> members;
+        private readonly int rootClose;
+
+        private ManifestFile(string path, string text, string sha, bool bom, string newline,
+                             Dictionary<string, Span> members, int rootClose, Manifest manifest)
+        {
+            Path = path; this.text = text; this.sha = sha; this.bom = bom; this.newline = newline;
+            this.members = members; this.rootClose = rootClose; Manifest = manifest;
+        }
+
+        internal string Path { get; }
+        internal Manifest Manifest { get; }
+
+        /// <exception cref="InvalidDataException">E1 (not UTF-8, not JSON, or a root that is not an
+        /// object), E2 (no "id"/"bundle") or E8 (two root keys that decode alike). Nothing is written on
+        /// any path through this method.</exception>
+        internal static ManifestFile Load(string path)
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            bool bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+            int from = bom ? 3 : 0;
+            string text;
+            try
+            {
+                // THROW ON INVALID, not replace: a permissive decode turns a byte this reader does not
+                // understand into U+FFFD, and Save would then write that replacement character back over
+                // whatever the author actually had there.
+                text = new UTF8Encoding(false, true).GetString(bytes, from, bytes.Length - from);
+            }
+            catch (DecoderFallbackException bad)
+            {
+                throw new InvalidDataException("'" + path + "' is not valid JSON: " + bad.Message, bad);
+            }
+
+            Manifest manifest = Manifest.ParseFor(text, "'" + path + "'");
+            // E2, the sentence ContentProject.cs:289 and :305 already say.
+            if (string.IsNullOrEmpty(manifest.Id) || string.IsNullOrEmpty(manifest.Bundle))
+                throw new InvalidDataException("ppcontent.json needs both \"id\" and \"bundle\"");
+
+            int close;
+            Dictionary<string, Span> members = Members(text, path, out close);
+            string newline = text.IndexOf("\r\n", StringComparison.Ordinal) >= 0 ? "\r\n" : "\n";
+            return new ManifestFile(path, text, Sha256(bytes), bom, newline, members, close, manifest);
+        }
+
+        internal static string Sha256(byte[] bytes)
+        {
+            using (SHA256 hash = SHA256.Create())
+            {
+                var spelled = new StringBuilder(64);
+                foreach (byte b in hash.ComputeHash(bytes)) spelled.Append(b.ToString("x2"));
+                return spelled.ToString();
+            }
+        }
+
+        /// <summary>ONE forward pass over the ROOT object: at depth 1 record each key and the [start, end)
+        /// of its value; deeper, only keep the counter honest. A '{', '[' or ']' inside a STRING never
+        /// moves it - that is CreatureManifest.Block:407's weakness, fixed rather than reused. The text has
+        /// already been through Json.Parse, so this pass never has to refuse malformed JSON - only V9.</summary>
+        private static Dictionary<string, Span> Members(string text, string path, out int close)
+        {
+            var spans = new Dictionary<string, Span>(StringComparer.Ordinal);
+            int depth = 0, valueStart = -1;
+            string key = null;
+            close = -1;
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c == '}' || c == ']')
+                {
+                    depth--;
+                    if (depth != 0) continue;
+                    if (key != null && valueStart >= 0)
+                        Record(spans, key, valueStart, Trim(text, valueStart, i), path);
+                    close = i;
+                    return spans;
+                }
+                if (c == '{' || c == '[') { depth++; continue; }
+                if (c == '"')
+                {
+                    int quote = i;
+                    i = EndOfString(text, i);
+                    if (depth == 1 && key == null) key = Key(text, quote, i);
+                    continue;
+                }
+                if (depth != 1) continue;
+                if (c == ':' && key != null && valueStart < 0)
+                {
+                    valueStart = i + 1;
+                    while (valueStart < text.Length && IsSpace(text[valueStart])) valueStart++;
+                    continue;
+                }
+                if (c == ',' && key != null && valueStart >= 0)
+                {
+                    Record(spans, key, valueStart, Trim(text, valueStart, i), path);
+                    key = null;
+                    valueStart = -1;
+                }
+            }
+            return spans;
+        }
+
+        /// <summary>The DECODED key. The scanner sees a LITERAL; the tree Json.Parse built holds the
+        /// decoded name, and if the two disagree a key spelled with an escape becomes an invisible second
+        /// member. Handing the literal - quotes included - back to Json.Parse means exactly one decoder
+        /// decides what a key spells.</summary>
+        private static string Key(string text, int openQuote, int closeQuote)
+        {
+            return (string)Json.Parse(text.Substring(openQuote, closeQuote - openQuote + 1), 1);
+        }
+
+        /// <summary>V9/E8. Two root keys that DECODE to one name cannot both be edited safely: the tree
+        /// keeps one of them and the splice would land in the other one's span.</summary>
+        private static void Record(Dictionary<string, Span> spans, string key, int start, int end,
+                                   string path)
+        {
+            if (spans.ContainsKey(key))
+                throw new InvalidDataException("'" + path + "' declares the root key \"" + key +
+                                               "\" twice, so it cannot be edited safely - delete one of them");
+            spans[key] = new Span { Start = start, End = end };
+        }
+
+        /// <summary>Index of the quote that CLOSES the string opening at <paramref name="at"/>.</summary>
+        private static int EndOfString(string text, int at)
+        {
+            for (int i = at + 1; i < text.Length; i++)
+            {
+                if (text[i] == '\\') { i++; continue; }
+                if (text[i] == '"') return i;
+            }
+            return text.Length - 1;
+        }
+
+        private static bool IsSpace(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+        private static int Trim(string text, int from, int to)
+        {
+            while (to > from && IsSpace(text[to - 1])) to--;
+            return to;
         }
     }
 }
