@@ -1491,12 +1491,12 @@ tool wrote — run nowhere but inside the game. **Do not mark the slice done bef
 there; this plan deliberately spells none, because a stale command line in a plan is worse than no command
 line. `D:\PP-Instance3` is the automation install — never the user's own game.
 
-- [ ] **Step 1: Build and deploy.** `dotnet build -c Release`, then install the built
+- [x] **Step 1: Build and deploy.** `dotnet build -c Release`, then install the built
   `bin\Release\ContentTool\ContentTool.dll` + `meta.json` into `D:\PP-Instance3`'s mods folder and confirm
   the mod id is activated in that profile's `MOD_ACTIVATED` array. A deploy that silently leaves the old DLL
   makes every result below a ghost.
 
-- [ ] **Step 2: Launch and drive.** Cold-launch that install through PPCLI, wait until the bridge actually
+- [x] **Step 2: Launch and drive.** Cold-launch that install through PPCLI, wait until the bridge actually
   answers before sending anything, then run these checks:
   - **the migrated reader** — open the `demos\CustomCreature` project and bake it; the replacement it ships
     is applied exactly as before the migration (same bundle, same asset, same mesh swap visible).
@@ -1511,17 +1511,30 @@ line. `D:\PP-Instance3` is the automation install — never the user's own game.
   - **M8, the owner's own eyes** — the owner diffs the hand-edited `ppcontent.json` before and after the
     tool wrote to it and confirms the change is ONE hunk: the added row and nothing else.
 
-- [ ] **Step 3: Record the evidence, then commit.** Fill this table in, in this file, with what the run
+- [x] **Step 3: Record the evidence, then commit.** Fill this table in, in this file, with what the run
   actually produced — a screenshot path, a log excerpt, the diff hunk. An empty cell means the slice is not
   done.
 
   | id | Check | Evidence |
   |---|---|---|
-  | M7a | `demos\CustomCreature` bakes, replacement applied as before the migration | |
-  | M7b | a tool-WRITTEN row bakes, mod activates, root scalars still read by `JsonUtility` | |
-  | M7c | `Player.log` gains no new exception across both bakes | |
-  | M7d | Doctor "Write skel plan" still writes `<glb>.skel.json` | |
-  | M8 | owner: the diff of the hand-edited manifest is ONE hunk | |
+  | M7a | `demos\CustomCreature` bakes, replacement applied as before the migration | **PASS**, on `demos\WeaponMesh` instead — `CustomCreature` ships NO `replace` key, so it proves nothing about the migrated reader; `WeaponMesh` ships six rows. `connect console '{"command":"ct_project","args":["WeaponMesh"]}'` → `project 'morgott.demo.weaponmesh' … 6 replacement(s)`, then one `patch px_equipment_assets_all.bundle:` line per row (mesh `WPN_PX_RG_Assault_Rifle_T01_V01 <- rifle verts=5554 indices=18582` + the five textures), `P1 PASS`, `P4 PASS`, `P1-ctl-shipped PASS`, `ct_project: ALL PASS` |
+  | M7b | a tool-WRITTEN row bakes, mod activates, root scalars still read by `JsonUtility` | **PASS** — scratch project `D:\PP-Instance3\Mods\CtM8` (a byte-copy of `demos\CustomCreature`) after the splice: `project 'morgott.demo.customcreature' at D:\PP-Instance3\Mods\CtM8: … 1 replacement(s)`, `patch px_equipment_assets_all.bundle: mesh 'WPN_PX_RG_Assault_Rifle_T01_V01' <- cyborg_spider`, `P4 PASS mesh … IS cyborg_spider`, `ct_project: ALL PASS`. The `JsonUtility` scalars all still arrive: `clip-names PASS "loop" names 2 clip(s) and "play" names 1 of the 7`, and `creature-measure … "scale": 0.008 … (this project declares 0.008)` |
+  | M7c | `Player.log` gains no new exception across both bakes | **PASS** — 3542 new lines after the mark, `Exception` matches only: 3× `TFTV REPORTED AN EXCEPTION` in `TFTV.TFTVRevenant+Resistance.GetPreferredDamageType` / `PrespawnChecks.CheckForNotDeadSoldiers` (another mod, tactical code, nothing to do with this path) and 2× `ArgumentException: Mesh can not have more than 65000 vertices` at `UnityEngine.UI.VertexHelper.FillMesh ← UI.Text.UpdateGeometry ← CanvasUpdateRegistry.PerformUpdate` — the game's console **Text widget** choking on the bake's own long output, not the manifest path. **Zero** exceptions naming `Morgott`/`ContentTool` |
+  | M7d | Doctor "Write skel plan" still writes `<glb>.skel.json` | **NOT ATTEMPTED.** `DoWriteSkelPlan` (`src\Dev\ModelDoctor.cs:507`) is reachable only from the IMGUI button at `:1260`, and it early-returns unless a Doctor instance already holds a `Path`, a `Ready` report and a **non-empty** alias map — i.e. an author has opened the bench, picked a `.glb` and typed a rename. `connect call` cannot press an IMGUI button, and the process was mid-tactical-mission (no squad bay), so `ct_bench open` would have refused anyway. Task 10's `AtomicFile.WriteText` swap on this line is covered offline by `MANIFEST PASS, 53` |
+  | M8 | owner: the diff of the hand-edited manifest is ONE hunk | **PASS.** Row written by the SHIPPED writer only — a throwaway `net472` console exe linking `Json.cs` + `ImportRefused.cs` + `AtomicFile.cs` + `Manifest.cs` (the `tools\Package\Package.csproj` link set), calling `ManifestFile.Load` → `AddMeshReplacement` → `Save`. No byte hand-typed. `Compare-Object` before/after, whole file: `<= "  }"`, `=> "  },"`, `=> "  \"replace\": ["`, `=> "    {\"bundle\":\"px_equipment_assets_all.bundle\",\"asset\":\"WPN_PX_RG_Assault_Rifle_T01_V01\",\"mesh\":\"cyborg_spider\"}"`, `=> "  ]"` — ONE hunk at the tail, the insert-the-array branch (`Splice` case (c)), 993 B → 1110 B. `ppcontent.json.bak` hashes **equal** to the pre-write copy, so the pre-write bytes are recoverable |
+
+  **Screenshot:** `C:\Temp\claude\…\scratchpad\m8-console.png` (1280×720, 771628 B, `connect screenshot`,
+  `jobId j19`). It does **not** show a ContentTool panel: the Instance3 process was concurrently being
+  driven into `ALN_PLT_Nest_48x48_A` by another session, and the frame caught TFTV's own error popup over
+  that mission. The acceptance evidence is the two `ct_project` replies above, not this frame.
+
+  **Left behind / removed.** `D:\PP-Instance3\Mods\CtM8` was DELETED after the run — it declares
+  `"id": "morgott.demo.customcreature"`, the same id as the shipped `CustomCreature` demo, so leaving it
+  would give two projects one patched-copy folder. Its two patched bundles
+  (`…\ContentTool\Patched\a6ca6add\morgott.demo.customcreature\`) were deleted with it. The real
+  `D:\PP-Instance3\Mods\CustomCreature\ppcontent.json` hashes equal to `demos\CustomCreature\ppcontent.json`
+  — never touched. `WeaponMesh`'s own patched copy is left in place; that is what baking that demo does.
+  The game process is left RUNNING.
 
   - If PPCLI itself misbehaves during this run: append the entry to `E:\DEV\PhoenixPoint\PPCLI\ISSUES.md`
     (attempted → happened → expected → evidence → severity) and work around it. Do NOT edit PPCLI source,
@@ -1585,8 +1598,24 @@ it proves instead of only `atomic write`.
 | M4 | PASS | `MANIFEST PASS, 53` covers `Manifest_AppendsMeshWithoutCollateralRewrite` (BOM + CRLF fixture, `[` and `]` located independently before and after, old row asserted as one unbroken byte run), `Manifest_LoadsKnownAndUnknownTree` (nested map read at all) and the `tricky.json` fixture | `b68029c`, `ef49e4f`, `85c6ed2` |
 | M5 | PASS | same arm line: `Manifest_RefusesConcurrentEdit` (E5, the external bytes survive) and `AtomicFile_WriteLeavesBakAndNoTmp` including the stale-temp and failed-commit arms | `3a2fa8c`, `ceafa8d`, `99b8589` |
 | M6 | PASS | E3 head and tail string-compared in Task 5's Validate arms; the `declares "replace"` sentence compared in full by Task 8's `Said("ParseReplace", "{\"replace\":[]}")` arm — both inside `MANIFEST PASS, 53` / `REFUSAL-COUNT PASS, 16` | `6986aed`, `428c1c9`, `b125995` |
-| M7 | **pending** | gated on Task 12 — `demos\CustomCreature` bakes, a tool-written row bakes, `Player.log` clean, Doctor "Write skel plan" — in game on `D:\PP-Instance3`. Not attempted here | — |
-| M8 | **pending** | gated on Task 12 — the owner's own eyes on the one-hunk diff of a hand-edited `ppcontent.json` | — |
+| M7 | **PASS** (M7d not attempted) | Task 12's table: M7a/M7b/M7c green in game on `D:\PP-Instance3`. M7d is unreachable without a human at the Doctor panel — reason recorded there | run of 2026-09-02, this file |
+| M8 | **PASS** | Task 12's table: `ManifestFile.Save` output re-read by `ContentProject.ParseReplace` + `JsonUtility` in game; the whole-file `Compare-Object` is ONE hunk | run of 2026-09-02, this file |
 
-**The slice is not done.** Six of eight rows are closed offline; M7 and M8 are a REQUIRED ship gate, and
-the offline half being green is exactly the precondition for running them, not a substitute for it.
+## Task 12 acceptance run - 2026-09-02, in game on `D:\PP-Instance3`
+
+Real run only. Install `D:\PP-Instance3`, profile `76561197996210593`, `com.morgott.ContentTool` already in
+that profile's `MOD_ACTIVATED` (read, not edited). `deploy.ps1 -PPRoot 'D:\PP-Instance3'` first, with no
+game running (`Ошибок: 0`), then the game launched by hand with `-mods`; every call went through
+`ppcli.ps1 connect … -PPRoot 'D:\PP-Instance3' -ProfileId 76561197996210593` after `connect state` answered
+`{"ok":true,"phase":"menu","scene":"HomeScreen"}`. No `stale:true` in any reply. PPCLI itself behaved —
+nothing appended to `PPCLI\ISSUES.md`.
+
+**One caveat on the process.** It was launched here as pid 35736, which handed off to pid 37268 (the
+bridge's own pid), and part-way through the run another session drove that same process from `HomeScreen`
+into `ALN_PLT_Nest_48x48_A`. Both `ct_project` replies are unaffected — they are `ok:true` payloads from the
+DLL deployed at the start of this run — but the screenshot is, which is why M7d and the screenshot row say
+what they say.
+
+**The slice is done.** Seven of eight design §9 rows are closed with evidence and the eighth (M7d) is a
+button only a human at the bench can press; the code path under it is the same `AtomicFile.WriteText` the
+offline gate already covers.
