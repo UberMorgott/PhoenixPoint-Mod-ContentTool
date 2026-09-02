@@ -648,11 +648,25 @@ namespace Morgott.ContentTool.Dev
         private int pickedAt = -1;
         private readonly List<string> inspectorLines = new List<string>();
 
+        /// <summary>The armed bone-map row AS THE DRAW SAW IT, latched on the Layout pass beside the
+        /// inspector's own state. <see cref="boneOpen"/> itself moves on the MouseUp and KeyDown passes -
+        /// drawing rings off the live field would ring a different set of joints than the pass that
+        /// laid the row out, and the press below would then mean something the picture never said.</summary>
+        private string shownArmed;
+        /// <summary>Which joints the armed row may land on this frame. Sized by <see cref="Recache"/>,
+        /// filled once a frame by <see cref="Arm"/>, and read by both the picture and the press - one
+        /// answer, so they cannot disagree.</summary>
+        private bool[] jointEligible;
+
         /// <summary>The overlay's own control id, hashed once. See <see cref="Overlay"/>.</summary>
         private static readonly int PickHint = "Morgott.ContentTool.BonePick".GetHashCode();
 
         private const float InspectorWidth = 380f;
         private static readonly Color PickedRing = new Color(1f, 1f, 1f, 0.85f);
+        /// <summary>The halo behind a joint the armed row may take - alias yellow, because that is the
+        /// colour it will BECOME.</summary>
+        private static readonly Color ArmedRing = new Color(1f, 0.92f, 0.3f, 0.55f);
+        private const float DimAlpha = 0.15f;
 
         /// <summary>
         /// The skeleton over the viewport: one line per parent-child pair, one dot per joint, coloured
@@ -686,11 +700,22 @@ namespace Morgott.ContentTool.Dev
                     jointsGen = gen; jointsFor = Ready;
                 }
                 if (e.type == EventType.Layout)
-                { shownBone = picked; shownOpen = inspectorOpen; Lines(); }
+                { shownBone = picked; shownOpen = inspectorOpen; shownArmed = boneOpen; Lines(); Arm(); }
                 // ALWAYS drawn, on EVERY pass and whatever the skeleton toggle says: its foldout header
                 // is a control, and a control that exists only on some passes is the layout imbalance
                 // every other comment in this file is about.
                 Inspector(panelWidth, stripTopGui);
+
+                // THE WAY OUT, handled before the skeleton toggle can return: a row is armed from the
+                // panel, so it must be cancellable whether or not the overlay is being drawn. An armed
+                // state with no way out is the trap the bone map's own 'x' button exists to avoid.
+                if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape && boneOpen != null)
+                {
+                    string armed = boneOpen;
+                    edits.Enqueue(delegate { boneOpen = null; Message = "'" + armed + "' left unmapped"; });
+                    e.Use();
+                    return;
+                }
 
                 if (!skeleton || cam == null) return;
                 bool press = e.type == EventType.MouseDown && e.button == 0;
@@ -764,8 +789,17 @@ namespace Morgott.ContentTool.Dev
                 // the author cannot find again on the model is half an answer.
                 if (pickedAt >= 0 && pickedAt < joints.Length && jointVisible[pickedAt])
                     Dot(jointX[pickedAt], jointY[pickedAt], DotPixels + 3f, PickedRing);
+                bool arming = shownArmed != null && jointEligible != null;
                 for (int i = 0; i < joints.Length; i++)
-                    if (jointVisible[i]) Dot(jointX[i], jointY[i], DotPixels, Colours[(int)jointStatus[i]]);
+                {
+                    if (!jointVisible[i]) continue;
+                    Color c = Colours[(int)jointStatus[i]];
+                    // ARMED: what the next click can land on is RINGED and what it cannot is faded, so
+                    // an author can see that this click means something the last one did not.
+                    if (arming && jointEligible[i]) Dot(jointX[i], jointY[i], DotPixels + 3f, ArmedRing);
+                    else if (arming) c = new Color(c.r, c.g, c.b, DimAlpha);
+                    Dot(jointX[i], jointY[i], DotPixels, c);
+                }
                 GL.End();
             }
             finally
@@ -778,7 +812,12 @@ namespace Morgott.ContentTool.Dev
 
             // ABOVE the strip, not inside it: the strip's pixels belong to the transport, and a
             // legend written over its controls is not a legend, it is a collision.
-            if (legend.Length > 0)
+            // While a row is armed the legend says what the next CLICK does instead of what the colours
+            // mean: the colours are on screen either way, and the armed state is not.
+            string line = shownArmed == null ? legend
+                        : "aliasing '" + BenchList.Elide(shownArmed, 30) +
+                          "' - click a ringed bone, Esc to cancel";
+            if (line.Length > 0)
                 GUI.Label(new Rect(panelWidth + 8f,
                                    Mathf.Min(stripTopGui, cam.pixelHeight) - 20f,
                                    cam.pixelWidth - panelWidth - 16f, 18f), legend);
@@ -820,8 +859,44 @@ namespace Morgott.ContentTool.Dev
             string name = t.name;
             // ENQUEUED and not assigned: this is the draw pass, and what it picks decides how many rows
             // the NEXT layout pass lays out - the same rule every button in this panel follows.
-            edits.Enqueue(delegate { picked = name; inspectorOpen = true; });
+            if (shownArmed == null) edits.Enqueue(delegate { picked = name; inspectorOpen = true; });
+            else Assign(shownArmed, name, hit);
             e.Use();
+        }
+
+        /// <summary>
+        /// THE ARMED CLICK, answering the question the bone map's open row is already asking. It goes
+        /// through the SAME <see cref="SetAlias"/> the dropdown calls - so the sidecar format, the
+        /// bijection rule and the re-run preflight all come for free, and there is no second way to
+        /// write this map.
+        ///
+        /// A refusal is SAID and the row is DISARMED either way: an armed state that survives a click
+        /// the author thought did something is worse than no arming at all.
+        /// </summary>
+        private void Assign(string armed, string bone, int hit)
+        {
+            // THE SAME rule the rings were drawn from, over the same inputs: Arm ran on this frame's own
+            // Layout pass and nothing between it and this press can move an alias, so asking again here
+            // cannot answer differently - and it is the only way to get the REASON for a refusal.
+            AliasRefusal why = BoneOverlay.CanAlias(bone, jointStatus[hit], aliases, armed);
+            string k = armed, v = bone;
+            edits.Enqueue(delegate
+            {
+                boneOpen = null;
+                if (why == AliasRefusal.Ok) { SetAlias(k, v); Message = "'" + k + "' -> '" + v + "'"; return; }
+                Message = "'" + v + "' cannot take '" + k + "': " + Refused(why);
+            });
+        }
+
+        /// <summary>Why the click was refused, in the author's own terms - a refusal that only says 'no'
+        /// leaves them clicking the same bone again.</summary>
+        private static string Refused(AliasRefusal why)
+        {
+            if (why == AliasRefusal.Attachment)
+                return "it is an EXT_ attachment point, which the game skips on every rig";
+            if (why == AliasRefusal.BoundByName)
+                return "a joint in your file already binds to it by name";
+            return "another bone of your file is already mapped to it";
         }
 
         /// <summary>
@@ -854,6 +929,20 @@ namespace Morgott.ContentTool.Dev
             inspectorLines.Add("binds    " + BenchList.Elide(FileJointFor(t.name), 54));
             inspectorLines.Add("rest     " + (RestOf(pickedAt) ?? "-  (this target carries no bind pose)"));
             inspectorLines.Add("current  " + Trs(t.localPosition, t.localRotation.eulerAngles, t.localScale));
+        }
+
+        /// <summary>
+        /// WHICH JOINTS THE ARMED ROW MAY TAKE, once a frame on the Layout pass, from the status each
+        /// joint was already coloured by (<see cref="BoneOverlay.CanAlias"/>). Not recomputed in the
+        /// press: the picture an author clicked at is the contract, and asking twice is two answers.
+        /// </summary>
+        private void Arm()
+        {
+            if (jointEligible == null || jointStatus == null) return;
+            for (int i = 0; i < jointEligible.Length; i++)
+                jointEligible[i] = shownArmed != null && joints[i] != null &&
+                                   BoneOverlay.CanAlias(joints[i].name, jointStatus[i], aliases, shownArmed)
+                                       == AliasRefusal.Ok;
         }
 
         /// <summary>
@@ -977,6 +1066,7 @@ namespace Morgott.ContentTool.Dev
             jointParent = new int[n];
             jointStatus = new BoneStatus[n];
             jointX = new float[n]; jointY = new float[n]; jointVisible = new bool[n];
+            jointEligible = new bool[n];
 
             var index = new Dictionary<Transform, int>(n);
             for (int i = 0; i < n; i++) if (joints[i] != null) index[joints[i]] = i;
@@ -1370,6 +1460,9 @@ namespace Morgott.ContentTool.Dev
                 GUILayout.EndHorizontal();
                 if (boneOpen != fileBone) continue;
 
+                // THE ARMED ROW SAYS SO ON THE ROW, not only over the viewport: the list below is a
+                // column of names, and nothing in it hints that the model itself became clickable.
+                GUILayout.Label("   armed - click a ringed bone on the model, or pick one here; Esc cancels");
                 foreach (string bone in free)
                 {
                     if (Claimed(bone, fileBone)) continue;

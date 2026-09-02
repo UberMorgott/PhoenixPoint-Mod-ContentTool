@@ -104,6 +104,33 @@ internal static class OverlayTests
         checks += Check(empty && nanCursor && nanPoint && hit == -1,
                         "an empty array, a NaN cursor and a NaN joint are each a miss, never a throw");
 
+        // ---- 12. CLICK-TO-ALIAS ELIGIBILITY, read off the SAME status the bone was coloured by: a
+        // joint nothing claims takes the armed row, and so does one only the nearest-bone fallback
+        // reached - those two ARE the report's unanswered target bones, which is what the bone map's
+        // own dropdown offers.
+        checks += Check(BoneOverlay.CanAlias("L_Hand", BoneStatus.Unmatched, null, "hand_L") == AliasRefusal.Ok &&
+                        BoneOverlay.CanAlias("L_Hand", BoneStatus.Nearest, null, "hand_L") == AliasRefusal.Ok,
+                        "an unmatched or nearest-bound target bone takes the armed alias row");
+
+        // ---- 13. An EXT_ attachment point is skipped by the game itself (Addon.cs:1208), so binding
+        // weights to one is a mapping that can never do anything.
+        checks += Check(BoneOverlay.CanAlias("EXT_VoiceContext", BoneStatus.Attachment, null, "hand_L")
+                        == AliasRefusal.Attachment,
+                        "an EXT_ attachment point is refused, not silently accepted");
+
+        // ---- 14. A bone a file joint already reaches BY NAME is the PlainCollision the binder refuses -
+        // two file bones on one game bone - so it is never assignable.
+        checks += Check(BoneOverlay.CanAlias("Root", BoneStatus.ByName, null, "hand_L") == AliasRefusal.BoundByName,
+                        "a bone already bound by name to a file joint is refused");
+
+        // ---- 15. ALIAS OVER ALIAS: another row's target is claimed, but the armed row's OWN target is
+        // just a re-pick of what it already says - which must not be refused, or a row cannot be
+        // confirmed from the model at all.
+        var map = new Dictionary<string, string>(StringComparer.Ordinal) { { "hand_R", "R_Hand" } };
+        checks += Check(BoneOverlay.CanAlias("R_Hand", BoneStatus.Alias, map, "hand_L") == AliasRefusal.Claimed &&
+                        BoneOverlay.CanAlias("R_Hand", BoneStatus.Alias, map, "hand_R") == AliasRefusal.Ok,
+                        "another row's alias target is claimed, and the armed row's own target is not");
+
         return "OVERLAY PASS, " + checks + " check(s)";
     }
 

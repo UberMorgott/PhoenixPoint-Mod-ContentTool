@@ -9,6 +9,10 @@ namespace Morgott.ContentTool.Doctor
     /// <c>EXT_</c> attachment point the game itself skips.</summary>
     internal enum BoneStatus { Unmatched, ByName, Alias, Nearest, Attachment }
 
+    /// <summary>Why a joint cannot take the armed alias row, or <see cref="Ok"/>. A refusal is SAID -
+    /// an armed click that lands on nothing and explains nothing reads as the overlay being broken.</summary>
+    internal enum AliasRefusal { Ok, Attachment, BoundByName, Claimed }
+
     /// <summary>
     /// THE SKELETON OVERLAY'S ARITHMETIC, decided offline. Which colour a bone gets is string work over
     /// rows the preflight already produced - the report's own <c>MissingBone</c> subjects, the author's
@@ -58,6 +62,39 @@ namespace Morgott.ContentTool.Doctor
 
             return nearestBind && missing != null && missing.Contains(boneName)
                  ? BoneStatus.Nearest : BoneStatus.Unmatched;
+        }
+
+        /// <summary>
+        /// CAN THE ARMED ALIAS ROW LAND ON THIS BONE? Decided from the status the bone was already
+        /// COLOURED by, so what an author sees is exactly what the click may do - a second rule here
+        /// would be a second opinion that can drift from the picture.
+        ///
+        /// <see cref="BoneStatus.Unmatched"/> and <see cref="BoneStatus.Nearest"/> are the eligible
+        /// pair: both mean no file joint answers for this bone, which is precisely the bone map's own
+        /// dropdown contents (the report's <c>MissingBone</c> subjects, minus the ones an alias already
+        /// claimed). <see cref="BoneStatus.Attachment"/> is an <c>EXT_</c> point the game skips
+        /// wholesale, <see cref="BoneStatus.ByName"/> is a bone a file joint already reaches - both are
+        /// the PlainCollision the binder refuses, and offering them would build a map that is rejected
+        /// on the next preflight. <see cref="BoneStatus.Alias"/> belongs to whichever row put it there:
+        /// another row's is claimed, the armed row's own is a harmless re-pick of what it already says.
+        /// </summary>
+        /// <param name="aliases">file bone -&gt; target bone. Only read for the Alias arm, where it says
+        /// WHOSE alias this bone is.</param>
+        /// <param name="armedFileJoint">The file joint the armed bone-map row is waiting to place.</param>
+        internal static AliasRefusal CanAlias(string boneName, BoneStatus status,
+                                              IDictionary<string, string> aliases, string armedFileJoint)
+        {
+            if (status == BoneStatus.Attachment) return AliasRefusal.Attachment;
+            if (status == BoneStatus.ByName) return AliasRefusal.BoundByName;
+            if (status != BoneStatus.Alias) return AliasRefusal.Ok;
+            if (aliases != null)
+                foreach (KeyValuePair<string, string> e in aliases)
+                    if (string.Equals(e.Value, boneName, StringComparison.Ordinal))
+                        return string.Equals(e.Key, armedFileJoint, StringComparison.Ordinal)
+                             ? AliasRefusal.Ok : AliasRefusal.Claimed;
+            // Coloured as an alias by a map that no longer holds one: the report moved under the
+            // colours. Refuse rather than guess - the next generation recolours it anyway.
+            return AliasRefusal.Claimed;
         }
 
         /// <summary>
