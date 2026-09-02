@@ -30,6 +30,7 @@
          compile list. See the arm's own note. -->
     <Compile Include="RefusalCount.cs" />
     <Compile Include="BoneNames.cs" />
+    <Compile Include="OrbitTests.cs" />
     <Compile Include="BinderFrozen.cs" />
     <Compile Include="DecisionGolden.cs" />
     <Compile Include="AliasTests.cs" />
@@ -132,6 +133,12 @@
          reading one thrown sentence. UnityEngine-free like the binder it came from. -->
     <!-- The stable CODE every refusal now carries, so a gate can assert the identity of a refusal
          instead of matching its sentence. -->
+    <!-- The bench's own arithmetic. BenchList has carried no UnityEngine type since it was written (its
+         Frame remark says so out loud), and OrbitCamera is held to the same rule, so which button means
+         orbit, where the pitch stops and where the wheel puts the pivot are proven here instead of by
+         dragging a mouse in a running game. -->
+    <Compile Include="..\..\src\Dev\BenchList.cs" Link="BenchList.cs" />
+    <Compile Include="..\..\src\Dev\OrbitCamera.cs" Link="OrbitCamera.cs" />
     <Compile Include="..\..\src\Import\ImportRefused.cs" Link="ImportRefused.cs" />
     <!-- FILE BONE -> GAME BONE and its sidecar: the rename must be SIMULTANEOUS and must leave the
          index tables alone, and a sidecar must never apply silently, so both are proven offline. -->

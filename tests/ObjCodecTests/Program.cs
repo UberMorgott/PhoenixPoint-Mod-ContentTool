@@ -114,6 +114,7 @@ internal static class Program
         Console.WriteLine(SourceSkip.Run());
         Console.WriteLine(RefusalCount.Run());
         Console.WriteLine(BoneNames.Run());
+        Console.WriteLine(OrbitTests.Run());
         Console.WriteLine(BinderFrozen.Run());
         Console.WriteLine(DecisionGolden.Run());
         Console.WriteLine(AliasTests.Run());
