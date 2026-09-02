@@ -46,6 +46,20 @@ namespace Morgott.ContentTool.Dev
         private bool force;
         private bool inPlace;
 
+        /// <summary>false = SLIM (drop clips), true = ZIP (rewrite how the same curves are stored).
+        /// One panel rather than two because every field around the middle block - the browser, the
+        /// intent queue, the progress trio, the writes line - is the same panel either way. It is
+        /// changed only in the intent drain, because the two modes draw different control COUNTS and
+        /// rule 1 above is what that costs.</summary>
+        private bool zipMode;
+        private bool collapse = true;
+        private bool quantise = true;
+        /// <summary>What a zip would work on, counted off the JSON when the file is picked: rotation
+        /// channels are the ones the quantiser may touch, and the bytes are the animation half of the
+        /// file. Upper bounds both - what a run actually rewrote is the sentence it returns.</summary>
+        private int rotations;
+        private long animBytes;
+
         // --- written by the worker, read by the UI ---
         private volatile SlimProgress progress;
         private volatile string result;
@@ -56,6 +70,7 @@ namespace Morgott.ContentTool.Dev
         private SlimProgress shownProgress;
         private string shownResult = "";
         private bool shownRunning;
+        private bool shownZip;
 
         /// <summary>Draws the panel. Called from the bench inside the Doctor tab, under Advanced.</summary>
         internal void Draw(float width)
@@ -80,10 +95,12 @@ namespace Morgott.ContentTool.Dev
                 shownProgress = progress;
                 shownResult = result ?? "";
                 shownRunning = running;
+                shownZip = zipMode;
             }
 
             GUILayout.Space(6f);
-            GUILayout.Label("GLB SLIM - drop animation clips this model will never play");
+            GUILayout.Label(shownZip ? "GLB ZIP - shrink the animation without dropping a clip"
+                                     : "GLB SLIM - drop animation clips this model will never play");
 
             GUILayout.BeginHorizontal();
             GUI.enabled = !shownRunning;
@@ -93,11 +110,21 @@ namespace Morgott.ContentTool.Dev
             GUILayout.Label("source: " + BenchList.Elide(sourcePath == null ? "-" : Path.GetFileName(sourcePath), 40));
             GUILayout.EndHorizontal();
 
-            Clips(width);
+            // The mode decides how many controls the block below emits, so the press only ENQUEUES -
+            // flipping it here would make the repaint pass lay out a different panel than the Layout
+            // pass counted, which is rule 1 in the remark above.
+            GUI.enabled = !shownRunning;
+            bool wantZip = GUILayout.Toggle(shownZip, " ZIP (rewrite curves, keep every clip)");
+            GUI.enabled = true;
+            if (wantZip != shownZip) intents.Enqueue(delegate { zipMode = wantZip; });
+
+            if (shownZip) Options(); else Clips(width);
 
             GUILayout.BeginHorizontal();
             GUI.enabled = !shownRunning;
-            force = GUILayout.Toggle(force, " force (drop mandatory clips too)", GUILayout.Width(220f));
+            // No force in ZIP mode: it overrides the mandatory-clip and rigged-character arms, and a
+            // run that drops no clip cannot reach either of them.
+            if (!shownZip) force = GUILayout.Toggle(force, " force (drop mandatory clips too)", GUILayout.Width(220f));
             inPlace = GUILayout.Toggle(inPlace, " overwrite in place", GUILayout.Width(150f));
             GUI.enabled = !shownRunning && sourcePath != null && census.Length > 0;
             bool run = GUILayout.Button("RUN", GUILayout.Width(70f));
@@ -112,7 +139,8 @@ namespace Morgott.ContentTool.Dev
             // is a row that appears BETWEEN the two passes of the frame the run starts in - which is
             // rule 1 above, broken in the one place it costs a wedged panel.
             GUILayout.Label("writes: " + (sourcePath == null ? "-"
-                                          : Path.GetFileName(inPlace ? sourcePath : Beside(sourcePath))));
+                                          : Path.GetFileName(inPlace ? sourcePath
+                                                             : Beside(sourcePath, shownZip ? "zip" : "slim"))));
             Bar();
             GUILayout.Label("result: " + (shownResult.Length == 0 ? "-" : shownResult));
         }
@@ -151,6 +179,26 @@ namespace Morgott.ContentTool.Dev
             }
         }
 
+        /// <summary>ZIP has no per-clip choice to make - it drops nothing - so the middle block is the
+        /// two passes and a census of what they would work on.</summary>
+        private void Options()
+        {
+            if (census.Length == 0) { GUILayout.Label("no clips listed - pick a .glb"); return; }
+
+            GUILayout.BeginHorizontal();
+            GUI.enabled = !shownRunning;
+            collapse = GUILayout.Toggle(collapse, " collapse curves that never move", GUILayout.Width(240f));
+            quantise = GUILayout.Toggle(quantise, " rotations as int16 (0.002 deg)", GUILayout.Width(230f));
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+
+            // ponytail: no predicted saving and no collapsible-curve count. Both mean reading every
+            // sampler's VALUES out of BIN, which is the run itself - on the UI thread, for a file the
+            // author may not even run. The result line reports both exactly, once, afterwards.
+            GUILayout.Label(census.Length + " clip(s), " + rotations + " rotation channel(s), " +
+                            Bytes(animBytes) + " of animation - no clip is dropped");
+        }
+
         /// <summary>The stage line and a plain box grown to the fraction done. No texture, no widget:
         /// a Box with a width is a bar in every skin the game might be wearing.</summary>
         private void Bar()
@@ -175,9 +223,13 @@ namespace Morgott.ContentTool.Dev
             progress = null;
             try
             {
-                List<GlbSlim.ClipRow> rows = GlbSlim.Census(GlbDocument.Load(path));
+                GlbDocument doc = GlbDocument.Load(path);
+                List<GlbSlim.ClipRow> rows = GlbSlim.Census(doc);
                 census = rows.ToArray();
                 drop = new bool[census.Length];
+                animBytes = 0L;
+                foreach (GlbSlim.ClipRow row in census) animBytes += row.AccessorBytes;
+                rotations = Rotations(doc);
                 if (census.Length == 0) result = "no animation clips in this file - nothing to slim";
             }
             catch (Exception ex)
@@ -186,6 +238,8 @@ namespace Morgott.ContentTool.Dev
                 // inside OnGUI, where a throw tears the whole bench panel down mid-frame.
                 census = new GlbSlim.ClipRow[0];
                 drop = new bool[0];
+                rotations = 0;
+                animBytes = 0L;
                 result = Path.GetFileName(path) + " could not be read: " +
                          ex.GetType().Name + " - " + ex.Message;
             }
@@ -194,19 +248,28 @@ namespace Morgott.ContentTool.Dev
         private void Run()
         {
             if (sourcePath == null || running) return;
-            var indices = new HashSet<int>();
-            for (int i = 0; i < census.Length; i++) if (drop[i]) indices.Add(census[i].Index);
-
             cts = new CancellationTokenSource();
             result = null;
             running = true;
-            progress = new SlimProgress("Queued", 0, 5, "waiting for a worker");
             // Both callbacks land on the POOL thread. They assign volatile fields and nothing else -
             // result BEFORE running, so the frame that first sees the run finished already has the
             // sentence to show for it.
-            SlimJob.Start(sourcePath, inPlace ? sourcePath : Beside(sourcePath), indices, force, cts,
-                          delegate(SlimProgress p) { progress = p; },
-                          delegate(string r) { result = r; running = false; });
+            Action<SlimProgress> onProgress = delegate(SlimProgress p) { progress = p; };
+            Action<string> onComplete = delegate(string r) { result = r; running = false; };
+
+            if (zipMode)
+            {
+                progress = new SlimProgress("Queued", 0, 6, "waiting for a worker");
+                SlimJob.StartZip(sourcePath, inPlace ? sourcePath : Beside(sourcePath, "zip"),
+                                 collapse, quantise, cts, onProgress, onComplete);
+                return;
+            }
+
+            var indices = new HashSet<int>();
+            for (int i = 0; i < census.Length; i++) if (drop[i]) indices.Add(census[i].Index);
+            progress = new SlimProgress("Queued", 0, 5, "waiting for a worker");
+            SlimJob.Start(sourcePath, inPlace ? sourcePath : Beside(sourcePath, "slim"), indices, force,
+                          cts, onProgress, onComplete);
         }
 
         private void Cancel()
@@ -216,11 +279,28 @@ namespace Morgott.ContentTool.Dev
 
         // ------------------------------------------------------------------ small change
 
-        /// <summary>The sibling a non-destructive run writes: <c>foo.glb</c> -> <c>foo.slim.glb</c>.</summary>
-        private static string Beside(string path)
+        /// <summary>The sibling a non-destructive run writes: <c>foo.glb</c> -> <c>foo.slim.glb</c>,
+        /// or <c>foo.zip.glb</c>. The tag says which run made it, so the two never overwrite each
+        /// other's output.</summary>
+        private static string Beside(string path, string tag)
         {
             string dir = Path.GetDirectoryName(path) ?? "";
-            return Path.Combine(dir, Path.GetFileNameWithoutExtension(path) + ".slim.glb");
+            return Path.Combine(dir, Path.GetFileNameWithoutExtension(path) + "." + tag + ".glb");
+        }
+
+        /// <summary>How many channels the quantiser could touch. Only a rotation fits a normalized
+        /// int16 - translation is metres with no bound and scale is unitless - so this is the same
+        /// filter GlbZip applies (src\Import\GlbZip.cs:283). Channels rather than accessors: two clips
+        /// sharing one output are two channels and at most one rewrite, so it is an upper bound and
+        /// the run's own sentence is the exact figure.</summary>
+        private static int Rotations(GlbDocument doc)
+        {
+            int found = 0;
+            foreach (object animation in GlbSlim.Arr(doc.Json, "animations") ?? new List<object>())
+                foreach (object channel in GlbSlim.Arr(GlbSlim.Obj(animation), "channels") ?? new List<object>())
+                    if (GlbSlim.Str(GlbSlim.Obj(GlbSlim.Get(GlbSlim.Obj(channel), "target")), "path") == "rotation")
+                        found++;
+            return found;
         }
 
         private static string Bytes(long n)
