@@ -414,6 +414,366 @@ namespace Morgott.ContentTool.Import
             return true;
         }
 
+        /// <summary>
+        /// EVERY reason this plan cannot be applied to this document, all of them at once. Empty list
+        /// = go. Mutates nothing, so a caller can show the list and let the author fix the plan, and
+        /// nothing in Apply re-checks: a plan that reaches it has already been proven applicable.
+        ///
+        /// Checked against the state each phase actually sees - renames first, so a Collapse or an
+        /// Insert names PP's bones rather than the foreign ones, which is the order convert applies
+        /// them in (ppskel.py:281, :285, :301) and the only order in which a plan reads like a
+        /// sentence. ppskel asserts instead (convert:277, :286; check:241-261) and dies; this is
+        /// reached from OnGUI, where a throw tears the bench panel down mid-frame.
+        /// </summary>
+        /// <param name="targetBones">the prototype this plan is aiming at, or null.</param>
+        // ponytail: targetBones produces NO refusal. WHICH bones the prototype wants is Verify's
+        // question and it is asked of the WRITTEN file; refusing a rename whose target is not a
+        // prototype bone would refuse every legitimate rename of a node that is not a bone at all.
+        // The parameter stays because SlimJob.Skel hands it down, so a target-side refusal that
+        // turns out to be real lands here rather than in a new signature.
+        internal static IList<string> Validate(GlbDocument doc, SkelPlan plan, IList<string> targetBones)
+        {
+            var refusals = new List<string>();
+            if (plan == null)
+            {
+                refusals.Add("there is no plan to apply");
+                return refusals;
+            }
+            List<object> nodes = Nodes(doc);
+            int[] parents = Parents(nodes, out string why);
+            if (parents == null)
+            {
+                refusals.Add(why + ", so no rewrite of it can be trusted; re-export the file rather " +
+                             "than editing its JSON by hand");
+                return refusals;
+            }
+
+            // The state each phase will SEE, simulated in Apply's own order: names change under
+            // renames and collapses, parents change under collapses and inserts, and both lists grow
+            // as inserts and creates append. The document itself is never touched.
+            var names = new List<string>(nodes.Count);
+            for (int i = 0; i < nodes.Count; i++) names.Add(Name(nodes, i));
+            var original = new List<string>(names);
+            var owner = new List<int>(parents);
+
+            int root = -1;
+            if (!string.IsNullOrEmpty(plan.Root))
+            {
+                int carriers = Carriers(original, plan.Root, out root);
+                if (carriers == 0)
+                    refusals.Add("the plan's root '" + plan.Root + "' names no node in this file; spell " +
+                                 "it the way the file does - every path a clip binds to is measured from it");
+                else if (carriers > 1)
+                {
+                    refusals.Add("the plan's root '" + plan.Root + "' names " + carriers + " nodes in this " +
+                                 "file, so which one the paths start under is not decided; rename one of " +
+                                 "them in Blender, or point 'root' at a name only one node carries");
+                    root = -1;
+                }
+            }
+
+            // RENAME. Every From is resolved against the ORIGINAL table, so the plan is read as one
+            // simultaneous move - the rule AliasMap.Apply keeps (AliasMap.cs:60-63).
+            var claimed = new Dictionary<string, int>(StringComparer.Ordinal);
+            var renamed = new List<int>(plan.Renames.Count);
+            foreach (SkelRename step in plan.Renames)
+            {
+                int at = Named(original, step.From, "the rename to '" + step.To + "'", refusals);
+                if (string.IsNullOrEmpty(step.To))
+                    refusals.Add("the rename of '" + step.From + "' names no target, so there is nothing " +
+                                 "to write; give it a 'to'");
+                else if (SkinBinder.Plain(step.To) != step.To)
+                    refusals.Add("the rename target '" + step.To + "' carries the game's own decoration " +
+                                 "('#<bone>_Addon => <part>', Addon.cs:143), and Addon.GetEquivalentBones " +
+                                 "compares the literal Transform.name (Addon.cs:1217) - so a node named " +
+                                 "that would bind to nothing; write the plain bone name instead");
+                // Taken-ness is asked EXACTLY, unlike From: two nodes only collide when the game reads
+                // one literal name twice, and a decorated node is a different literal name.
+                else if (Exact(original, step.To, out int taken) > 0 && taken != at)
+                    refusals.Add("this file already has a bone called '" + step.To + "', so renaming '" +
+                                 step.From + "' onto it would leave two bones with one name and the game " +
+                                 "would bind the wrong one; pick a name nothing in the file carries");
+                else if (claimed.ContainsKey(step.To))
+                    refusals.Add("this plan renames two of the file's bones onto '" + step.To + "', and the " +
+                                 "game matches a bone by its literal name, so one of them could never bind; " +
+                                 "give each rename its own target");
+                else claimed[step.To] = at;
+                renamed.Add(at);
+            }
+            // ponytail: a SWAP (A->B while B->A) is refused by the taken-ness arm above even though
+            // Apply's simultaneity could carry it. Refusing is the safe direction and the plan can be
+            // written in two runs; lift it the day a real rig needs one, by excusing a target whose
+            // own node is being renamed away in the same plan.
+            for (int i = 0; i < renamed.Count; i++)
+                if (renamed[i] >= 0 && !string.IsNullOrEmpty(plan.Renames[i].To))
+                    names[renamed[i]] = plan.Renames[i].To;
+
+            // COLLAPSE, against the post-rename table.
+            var hoisted = new List<int>();
+            foreach (SkelCollapse step in plan.Collapses)
+            {
+                int node = Named(names, step.Node, "the collapse onto '" + step.Into + "'", refusals);
+                int into = Named(names, step.Into, "the collapse of '" + step.Node + "'", refusals);
+                if (node < 0 || into < 0) continue;
+                int parent = owner[node];
+                if (parent < 0)
+                {
+                    refusals.Add("'" + step.Node + "' is a root of this file's scene, so there is no parent " +
+                                 "to skip and nothing to collapse; collapse a bone that has a grandparent");
+                    continue;
+                }
+                int grand = owner[parent];
+                if (grand != into)
+                {
+                    refusals.Add("'" + step.Into + "' is not the grandparent of '" + step.Node + "': the file " +
+                                 "hangs it under '" + names[parent] + "'" +
+                                 (grand < 0 ? ", and that is a scene root" : ", whose own parent is '" + names[grand] + "'") +
+                                 "; a collapse skips exactly ONE node, so name that grandparent instead");
+                    continue;
+                }
+                // ponytail: the composed local is read from the DOCUMENT, so two collapses down one
+                // chain check the first one's arithmetic twice. Both ask the same mirror question and
+                // a product of positive determinants keeps one, so no wrong answer gets through;
+                // carry the simulated local here the day a plan really chains them.
+                if (!Decompose(Mul(Trs(GlbSlim.Obj(nodes[node])), Trs(GlbSlim.Obj(nodes[parent]))),
+                               out _, out _, out _))
+                {
+                    refusals.Add("collapsing '" + step.Node + "' past '" + names[parent] + "' composes a local " +
+                                 "transform no translation/rotation/scale can hold (together they mirror or " +
+                                 "flatten the bone), so the result would not be the pose the file shows; fix " +
+                                 "those scales in Blender and re-export");
+                    continue;
+                }
+                hoisted.Add(node);
+                owner[node] = grand;
+                names[parent] = names[parent] + "_unused";     // ppskel.py:297
+            }
+
+            // INSERT, against the post-rename-post-collapse table.
+            var compensated = new List<int>();
+            foreach (SkelInsert step in plan.Inserts)
+            {
+                int parent = Named(names, step.Parent, "the insert of '" + step.Name + "'", refusals);
+                int child = Named(names, step.Child, "the insert of '" + step.Name + "'", refusals);
+                if (parent < 0 || child < 0) continue;
+                if (owner[child] != parent)
+                {
+                    refusals.Add("'" + step.Child + "' is not a child of '" + step.Parent + "' in this file" +
+                                 (owner[child] < 0 ? ", it is a scene root" : ", it hangs under '" + names[owner[child]] + "'") +
+                                 "; an insert only ever slips between a parent and its OWN child");
+                    continue;
+                }
+                if (string.IsNullOrEmpty(step.Name))
+                {
+                    refusals.Add("an insert under '" + step.Parent + "' names the new bone nothing, and a " +
+                                 "nameless bone binds to nothing; give it the name the rig spells");
+                    continue;
+                }
+                if (Exact(names, step.Name, out _) > 0)
+                {
+                    refusals.Add("this file already has a bone called '" + step.Name + "', so the insert would " +
+                                 "leave two bones with one name and the game would bind the wrong one; give " +
+                                 "the new bone a name nothing carries");
+                    continue;
+                }
+                if (Wrong(step.Translation, 3) || Wrong(step.Rotation, 4) || Wrong(step.Scale, 3))
+                {
+                    refusals.Add("the insert of '" + step.Name + "' carries a transform that is not 3 " +
+                                 "translation, 4 rotation and 3 scale numbers, so what it would write is not " +
+                                 "a transform at all; leave it out for an identity bone, or spell it in full");
+                    continue;
+                }
+                double[] local = Local(step);
+                if (!Same(local, Eye))
+                {
+                    if (Inverse(local) == null)
+                    {
+                        refusals.Add("the insert of '" + step.Name + "' has a transform that cannot be undone " +
+                                     "(an axis is scaled to nothing), and the child's own local is compensated " +
+                                     "with its inverse - so the model would collapse; give it a scale no axis zeroes");
+                        continue;
+                    }
+                    compensated.Add(child);
+                }
+                names.Add(step.Name);
+                owner.Add(parent);
+                owner[child] = names.Count - 1;
+            }
+
+            // CREATE. Sorted by depth, exactly as ppskel.py:322 sorts by p.count("/"), so a two-level
+            // create works in one pass.
+            var creates = new List<string>(plan.Create);
+            creates.Sort((left, right) => Depth(left).CompareTo(Depth(right)));
+            foreach (string path in creates)
+            {
+                if (string.IsNullOrEmpty(path))
+                {
+                    refusals.Add("one of the plan's 'create' entries is empty, so it names nothing to create");
+                    continue;
+                }
+                if (root < 0)
+                {
+                    // A root that was already refused says so once; a plan that never named one is a
+                    // different mistake and gets its own sentence.
+                    if (string.IsNullOrEmpty(plan.Root))
+                        refusals.Add("the plan creates '" + path + "' but never says which node is its root, " +
+                                     "so there is nowhere to hang it; set 'root' to the node these paths are " +
+                                     "measured from");
+                    continue;
+                }
+                string[] parts = path.Split('/');
+                int at = root;
+                bool lost = false;
+                for (int i = 0; i < parts.Length - 1 && !lost; i++)
+                {
+                    int next = ChildNamed(names, owner, at, parts[i]);
+                    if (next < 0)
+                    {
+                        refusals.Add("the plan creates '" + path + "', but '" + names[at] + "' has no child " +
+                                     "called '" + parts[i] + "'; nothing is ever invented here, so create the " +
+                                     "missing parents too - this pass hangs the shallower ones first");
+                        lost = true;
+                    }
+                    else at = next;
+                }
+                if (lost) continue;
+                string leaf = parts[parts.Length - 1];
+                if (ChildNamed(names, owner, at, leaf) >= 0)
+                {
+                    refusals.Add("the plan creates '" + path + "', but '" + names[at] + "' already has a child " +
+                                 "called '" + leaf + "', so there is nothing to create; drop it from 'create'");
+                    continue;
+                }
+                names.Add(leaf);
+                owner.Add(at);
+            }
+
+            // THE ANIMATION ARM, last. A collapse rewrites the kept bone's own local and a
+            // non-identity insert rewrites its child's, so a channel that writes that local every
+            // frame overwrites the composition on frame 1 and the geometry jumps. ppskel does not
+            // care - it throws the source's clips away - and this port cannot assume that.
+            if (hoisted.Count > 0 || compensated.Count > 0)
+            {
+                Dictionary<int, string> animated = Animated(doc);
+                foreach (int node in hoisted)
+                    if (animated.TryGetValue(node, out string clip))
+                        refusals.Add("'" + names[node] + "' is animated by the clip '" + clip + "', and a " +
+                                     "collapse rewrites that bone's own local transform - the clip would " +
+                                     "overwrite it on its first frame and the model would jump; drop that " +
+                                     "channel, or leave this bone where it is");
+                foreach (int child in compensated)
+                    if (animated.TryGetValue(child, out string clip))
+                        refusals.Add("'" + names[child] + "' is animated by the clip '" + clip + "', and a " +
+                                     "non-identity insert compensates that bone's own local transform - the " +
+                                     "clip would overwrite the compensation on its first frame and the model " +
+                                     "would jump; use an identity insert (no translation/rotation/scale), or " +
+                                     "drop that channel");
+            }
+            return refusals;
+        }
+
+        /// <summary>The local 4x4 an insert asks for. Null members are glTF's own defaults, which is
+        /// the identity - the world-preserving case and the only one ppskel emits (ppskel.py:307).</summary>
+        internal static double[] Local(SkelInsert step)
+        {
+            var node = new Dictionary<string, object>(StringComparer.Ordinal);
+            if (step.Translation != null) node["translation"] = Boxed(step.Translation);
+            if (step.Rotation != null) node["rotation"] = Boxed(step.Rotation);
+            if (step.Scale != null) node["scale"] = Boxed(step.Scale);
+            return Trs(node);
+        }
+
+        /// <summary>node index -> the FIRST clip that animates it. An author cannot act on "some
+        /// clip", so the refusal names one.</summary>
+        private static Dictionary<int, string> Animated(GlbDocument doc)
+        {
+            var animated = new Dictionary<int, string>();
+            List<object> clips = doc == null ? null : GlbSlim.Arr(doc.Json, "animations");
+            if (clips == null) return animated;
+            for (int i = 0; i < clips.Count; i++)
+            {
+                Dictionary<string, object> clip = GlbSlim.Obj(clips[i]);
+                string name = GlbSlim.Str(clip, "name") ?? ("animation " + i);
+                foreach (object item in GlbSlim.Arr(clip, "channels") ?? Nothing)
+                {
+                    var target = GlbSlim.Obj(GlbSlim.Get(GlbSlim.Obj(item), "target"));
+                    int node = GlbSlim.Int(target, "node", -1);
+                    if (node >= 0 && !animated.ContainsKey(node)) animated[node] = name;
+                }
+            }
+            return animated;
+        }
+
+        /// <summary>One node the plan reached for, or -1 with the sentence appended.</summary>
+        private static int Named(List<string> names, string name, string what, List<string> refusals)
+        {
+            int carriers = Carriers(names, name ?? "", out int at);
+            if (carriers == 0)
+                refusals.Add("this file has no bone called '" + name + "', so " + what + " cannot be applied; " +
+                             "check the spelling against the file's own bone list - the Doctor's bone map prints it");
+            else if (carriers > 1)
+                refusals.Add("this file has two bones called '" + name + "', so " + what + " cannot say which " +
+                             "one it means; rename one of them in Blender and re-export");
+            return carriers == 1 ? at : -1;
+        }
+
+        /// <summary>How many nodes answer to this name, EXACTLY.</summary>
+        private static int Exact(List<string> names, string name, out int first)
+        {
+            first = -1;
+            int found = 0;
+            for (int i = 0; i < names.Count; i++)
+                if (string.Equals(names[i], name, StringComparison.Ordinal) && found++ == 0) first = i;
+            return found;
+        }
+
+        /// <summary>How many nodes answer to this name, exact spelling FIRST and only then through
+        /// SkinBinder.Plain - the same two-call pattern SkinCompatibility.Match keeps
+        /// (SkinCompatibility.cs:334-338), so a plan written against plain names still finds a node
+        /// the game decorated while a plainly-named file behaves identically.</summary>
+        private static int Carriers(List<string> names, string name, out int first)
+        {
+            int found = Exact(names, name, out first);
+            if (found > 0) return found;
+            for (int i = 0; i < names.Count; i++)
+                if (string.Equals(SkinBinder.Plain(names[i]), name, StringComparison.Ordinal) && found++ == 0)
+                    first = i;
+            return found;
+        }
+
+        /// <summary>The child of <paramref name="parent"/> spelling this name, in the SIMULATED
+        /// hierarchy, or -1.</summary>
+        private static int ChildNamed(List<string> names, List<int> owner, int parent, string name)
+        {
+            for (int i = 0; i < names.Count; i++)
+                if (owner[i] == parent && string.Equals(names[i], name, StringComparison.Ordinal)) return i;
+            return -1;
+        }
+
+        private static bool Wrong(double[] values, int count) => values != null && values.Length != count;
+
+        private static bool Same(double[] left, double[] right)
+        {
+            for (int i = 0; i < 16; i++) if (left[i] != right[i]) return false;
+            return true;
+        }
+
+        private static int Depth(string path)
+        {
+            int depth = 0;
+            foreach (char c in path ?? "") if (c == '/') depth++;
+            return depth;
+        }
+
+        private static List<object> Boxed(double[] values)
+        {
+            var items = new List<object>(values.Length);
+            foreach (double value in values) items.Add(value);
+            return items;
+        }
+
+        private static readonly double[] Eye = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+
         /// <summary>A JSON array of exactly <paramref name="count"/> numbers, or null. A wrong length
         /// or a non-number reads as ABSENT, never as a throw - the contract GlbSlim's readers keep
         /// (GlbSlim.cs:370-372) and the reason a hostile file cannot crash the bench.</summary>

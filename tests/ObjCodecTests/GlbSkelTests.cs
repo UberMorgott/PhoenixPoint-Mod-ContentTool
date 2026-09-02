@@ -79,7 +79,125 @@ internal static class GlbSkelTests
               !GlbSkel.Decompose(mirrored, out _, out _, out _),
               "Decompose round-trips a composed matrix to 1e-9 and refuses a mirror");
 
+        // --- The refusal catalogue. ppskel asserts and dies (convert:277,:286; check:241-261); this
+        // runs inside OnGUI and inside a worker, so every refusal is a SENTENCE an author can act on
+        // and the document is still clean afterwards - which every arm below asserts as well.
+
+        GlbDocument u9doc = GlbDocument.Load(Fixture("u9_probe.glb"));
+        GlbDocument u8doc = GlbDocument.Load(Fixture("u8_probe.glb"));
+
+        // 7. The root is what every path a clip binds to is measured from, so one that names nothing
+        //    decides nothing (ppskel.check:241-242 asserts exactly one ANIM_ROOT).
+        Refuses(u9doc, new SkelPlan { Root = "Rig" }, "a root the file does not carry", "names no node");
+
+        // 8. ... and a root TWO nodes answer to does not decide it either.
+        Refuses(Renamed("u9_probe.glb", 4, "rig"), new SkelPlan { Root = "rig" },
+                "an ambiguous root", "names 2 nodes");
+
+        // 9. From has to name exactly one bone (ppskel.convert:277-278) - and the honest plan beside
+        //    it has to PASS, or a Validate that refused everything would look just as green.
+        IList<string> clean = GlbSkel.Validate(u9doc, Renames("rig", "hip", "Spine_1", "head", "Neck"), null);
+        IList<string> absent = GlbSkel.Validate(u9doc, Renames("rig", "spine", "Spine_1"), null);
+        Check(clean.Count == 0 && Says(absent, "has no bone called") && !u9doc.Dirty,
+              "the honest rename plan validates clean and a From the file lacks is refused, not '" +
+              Printed(clean) + "' / '" + Printed(absent) + "'");
+
+        // 10. Two bones of one name: the plan cannot say which one it meant.
+        Refuses(Renamed("u9_probe.glb", 3, "hip"), Renames("rig", "hip", "Spine_1"),
+                "a From two bones answer to", "has two bones called");
+
+        // 11. A target the file already carries would leave two bones with one name, and
+        //     Addon.cs:1217 binds the first literal match - so it would bind the wrong one.
+        Refuses(u9doc, Renames("rig", "hip", "head"),
+                "a target the file already carries", "already has a bone called");
+
+        // 12. The same collision AliasMap.Of refuses (AliasMap.cs:52-53), for the same reason.
+        Refuses(u9doc, Renames("rig", "hip", "Neck", "head", "Neck"),
+                "two renames onto one name", "two of the file's bones onto");
+
+        // 13. A decorated target binds to NOTHING: Addon.cs:1217 compares the literal Transform.name,
+        //     and the decoration is what SkinBinder.Plain exists to strip (GlbReader.cs:2499).
+        Refuses(u9doc, Renames("rig", "hip", "#Root_Addon => PX_Heavy_Torso_BodyPartDef"),
+                "a decorated target", "the game's own decoration");
+
+        // 14. A collapse skips the node's PARENT, so a scene root has nothing to skip.
+        Refuses(u8doc, Collapse("RootNode", "RootNode", "SpiderArmature"),
+                "a collapse of a scene root", "is a root");
+
+        // 15. ppskel.convert:287 asserts parent[keep] == drop; Body is Thorax's parent, not its
+        //     grandparent, so this collapse would re-parent it onto itself.
+        Refuses(u8doc, Collapse("RootNode", "Thorax", "Body"),
+                "a collapse onto something that is not the grandparent", "is not the grandparent of");
+
+        // 16. An insert only ever slips between a parent and its OWN child.
+        Refuses(u8doc, Insert("RootNode", "Root", "Spine_Roll_1", "Thorax", null),
+                "an insert above a child of someone else", "is not a child of");
+
+        // 17. The new node's name is a name like any other, and a second 'Head' binds the wrong one.
+        Refuses(u8doc, Insert("RootNode", "Root", "Head", "Body", null),
+                "an insert taking a name the file carries", "already has a bone called");
+
+        // 18. THE animation refusal, the one thing ppskel does not need to care about because it
+        //     throws the source's own clips away: a collapse rewrites the kept bone's local and a
+        //     non-identity insert rewrites its child's, and a channel that writes that local every
+        //     frame overwrites the composition on frame 1. All four of u9's clips animate hip/head.
+        IList<string> hoisted = GlbSkel.Validate(u9doc, Collapse("rig", "head", "rig"), null);
+        IList<string> shifted = GlbSkel.Validate(u9doc,
+            Insert("rig", "hip", "hip_roll", "head", new[] { 0.1, -0.2, 0.3 }), null);
+        Check(Says(hoisted, "is animated by") && hoisted[0].Contains("Walk") &&
+              Says(shifted, "is animated by") && shifted[0].Contains("Walk") && !u9doc.Dirty,
+              "a collapse and a non-identity insert on an animated bone are refused BY CLIP NAME, not '" +
+              Printed(hoisted) + "' / '" + Printed(shifted) + "'");
+
         return "GLB-SKEL PASS, " + checks + " check(s)";
+    }
+
+    /// <summary>One plan, one refusal, and a document nobody touched.</summary>
+    private static void Refuses(GlbDocument doc, SkelPlan plan, string what, params string[] phrases)
+    {
+        IList<string> refusals = GlbSkel.Validate(doc, plan, null);
+        bool ok = refusals.Count == 1 && !doc.Dirty;
+        foreach (string phrase in phrases) ok = ok && refusals[0].Contains(phrase);
+        Check(ok, what + " is refused once, saying " + string.Join(" + ", phrases) +
+                  " - got '" + Printed(refusals) + "'" + (doc.Dirty ? " and a dirtied document" : ""));
+    }
+
+    private static bool Says(IList<string> refusals, string phrase) =>
+        refusals.Count == 1 && refusals[0].Contains(phrase);
+
+    private static string Printed(IList<string> refusals) =>
+        refusals.Count == 0 ? "nothing" : string.Join(" | ", refusals);
+
+    /// <summary>A fixture with one node renamed, which is how the duplicate-name cases are reached:
+    /// neither probe ships two bones of one name, and a hand-built glTF would prove nothing about
+    /// the files this tool actually meets.</summary>
+    private static GlbDocument Renamed(string fixture, int node, string name)
+    {
+        GlbDocument doc = GlbDocument.Load(Fixture(fixture));
+        GlbSlim.Obj(GlbSkel.Nodes(doc)[node])["name"] = name;
+        return doc;
+    }
+
+    private static SkelPlan Renames(string root, params string[] fromTo)
+    {
+        var plan = new SkelPlan { Root = root };
+        for (int i = 0; i + 1 < fromTo.Length; i += 2)
+            plan.Renames.Add(new SkelRename { From = fromTo[i], To = fromTo[i + 1] });
+        return plan;
+    }
+
+    private static SkelPlan Collapse(string root, string node, string into)
+    {
+        var plan = new SkelPlan { Root = root };
+        plan.Collapses.Add(new SkelCollapse { Node = node, Into = into });
+        return plan;
+    }
+
+    private static SkelPlan Insert(string root, string parent, string name, string child, double[] translation)
+    {
+        var plan = new SkelPlan { Root = root };
+        plan.Inserts.Add(new SkelInsert { Parent = parent, Name = name, Child = child, Translation = translation });
+        return plan;
     }
 
     private static readonly double[] Identity = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
