@@ -151,6 +151,11 @@
          than by interrupting a panel and hoping. -->
     <Compile Include="..\..\src\Import\SlimJob.cs" Link="SlimJob.cs" />
     <Compile Include="GlbSlimTests.cs" />
+    <!-- SKEL decides nothing about bytes: it renames, re-parents and appends nodes, so what it does
+         is a graph and a 4x4 composition. Both are proven on values here, because a wrong local
+         matrix produces a file that loads perfectly and stands in the wrong place. -->
+    <Compile Include="..\..\src\Import\GlbSkel.cs" Link="GlbSkel.cs" />
+    <Compile Include="GlbSkelTests.cs" />
     <!-- ZIP rewrites how the SAME curves are stored, so what it decides - which accessor is a flat
          run it may touch, which curve never moves, what an int16 rotation key becomes - is proven
          here on values rather than by weighing a rewritten file. -->
