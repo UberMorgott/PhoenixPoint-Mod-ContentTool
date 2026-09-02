@@ -12,7 +12,7 @@ Read this first next session, then continue the plan task-by-task. Nothing here 
 
 ## Pending results (read these before dispatching Task 2)
 - Codex DEEP review of the plan (relaunched with `-TimeoutSec 1800` after a 900 s timeout): output `C:\Temp\cx\ec5951d509df433a980182e8a0b1d624.out.md`, status `C:\Temp\cx\ec5951d509df433a980182e8a0b1d624.status.txt`. If the status is `TIMEOUT` again, relaunch with the prompt `C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\f9375261-422d-40bc-ac5c-ccfc64676d2f\scratchpad\wizard-plan-review-prompt.md` (it is self-contained) or split it: one run for Tasks 1–4, one for 5–8. Digest via scout, apply accepted findings to spec+plan with one opus agent, commit, then continue.
-- cavecrew review of `13e6361` (Task 1) — if it reported findings, they are appended at the bottom of this file; otherwise treat Task 1 as closed.
+- cavecrew review of `13e6361` (Task 1) was still running when the session ended; its result was NOT captured. Codex `-Review` of the same commit was clean. Either re-run one `caveman:cavecrew-reviewer` on `git show 13e6361` (name rules, manifest-first meta, R2/R13 texts, temp cleanup) or accept Codex-clean and move on — lead's call, not the user's.
 
 ## Process (unchanged, from memory `codex-in-the-loop` + the user's rules)
 - Per task: one fresh opus implementer (reads ONLY its task from the plan; disk wins over plan; TDD red→green; commit by path) → `cx -Review E:\DEV\PhoenixPoint\ContentTool -Commit <sha> -TimeoutSec 600` (background) + `caveman:cavecrew-reviewer` in parallel → triage (ponytail: reject pedantry, fix real defects with a fix agent, re-review) → next task. Never two implementers at once (shared `obj\`, shared test files).
