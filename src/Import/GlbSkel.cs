@@ -191,6 +191,50 @@ namespace Morgott.ContentTool.Import
         }
     }
 
+    /// <summary>What a converted file still does not answer for. THREE lists, because there are three
+    /// different questions and merging them has cost this repo a wrong diagnosis before:
+    ///
+    ///  - MissingNames: prototype bones with no node of that literal name anywhere under Root. This is
+    ///    the Doctor's verdict question - Addon.cs:1217 matches names, not paths.
+    ///  - MissingPaths: prototype bone PATHS that do not resolve by walking child names down from
+    ///    Root. This is the CLIP question - ClipFields.cs:34-41, a generic binding is CRC-32 of a
+    ///    path. A file can be perfect by name and useless by path, which is exactly the state ppskel
+    ///    exists to leave behind (ppskel.check:244-246 checks only this one).
+    ///  - AttachmentsAbsent: EXT_ names the file lacks. Never a defect - the game skips them
+    ///    (Addon.cs:1209), so they are counted in neither list above and never fail Ok.
+    /// </summary>
+    internal sealed class SkelVerdict
+    {
+        internal List<string> MissingNames = new List<string>();
+        internal List<string> MissingPaths = new List<string>();
+        internal List<string> AttachmentsAbsent = new List<string>();
+        internal int NamesResolved, PathsResolved, Nodes, SkinJoints;
+        internal bool Ok => MissingNames.Count == 0 && MissingPaths.Count == 0;
+
+        /// <summary>ppskel's own closing line, in this repo's words.</summary>
+        internal string Sentence()
+        {
+            var text = new List<string>
+            {
+                NamesResolved + " of " + (NamesResolved + MissingNames.Count) + " bone(s) bind by name",
+                PathsResolved + " of " + (PathsResolved + MissingPaths.Count) + " path(s) resolve",
+            };
+            if (MissingNames.Count > 0) text.Add("no bone named " + Listed(MissingNames));
+            if (MissingPaths.Count > 0) text.Add("no path " + Listed(MissingPaths));
+            if (AttachmentsAbsent.Count > 0)
+                text.Add(AttachmentsAbsent.Count + " attachment point(s) absent, which the game skips anyway");
+            return string.Join("; ", text.ToArray());
+        }
+
+        /// <summary>The first few, because a rig with 39 missing bones prints as a wall otherwise.</summary>
+        private static string Listed(List<string> names)
+        {
+            var few = names.GetRange(0, Math.Min(4, names.Count));
+            return "'" + string.Join("', '", few.ToArray()) + "'" +
+                   (names.Count > few.Count ? " and " + (names.Count - few.Count) + " more" : "");
+        }
+    }
+
     /// <summary>
     /// The skeleton side of a .glb, read and rewritten through GlbDocument's parsed JSON exactly as
     /// GlbSlim reads the clip side - no Unity, no glTF model, so it handles the files GlbReader
@@ -821,6 +865,105 @@ namespace Morgott.ContentTool.Import
             return stats;
         }
 
+        /// <summary>
+        /// What this document still does not answer for, asked of the FILE and of nothing else - no
+        /// plan, no history, no in-memory state. That is deliberate: the game asks the file, so a
+        /// verdict that needed the plan in hand would be checking the tool's own opinion of its work.
+        /// This is ppskel.check:237-264 as a return value rather than as an assert (an assert inside
+        /// OnGUI tears the bench panel down mid-frame).
+        /// </summary>
+        /// <param name="rootName">the node PP's paths are measured from. When it names exactly one
+        /// node, names are looked for in ITS subtree and paths are walked down from it; when it names
+        /// none or two, names are looked for across the whole file and no path can resolve at all.</param>
+        /// <param name="targetNames">the prototype's BindableBones. Null asks only the path question.</param>
+        /// <param name="targetPaths">the prototype's bone paths, relative to the animator root -
+        /// PrototypeBone.Path (src\Doctor\PrototypeCatalog.cs:11). Null asks only the name question.</param>
+        internal static SkelVerdict Verify(GlbDocument doc, string rootName,
+                                           IList<string> targetNames, IList<string> targetPaths)
+        {
+            List<object> nodes = Nodes(doc);
+            var verdict = new SkelVerdict { Nodes = nodes.Count, SkinJoints = JointCount(doc) };
+            var names = new List<string>(nodes.Count);
+            for (int i = 0; i < nodes.Count; i++) names.Add(Name(nodes, i));
+
+            int root = -1;
+            if (!string.IsNullOrEmpty(rootName) && Carriers(names, rootName, out int at) == 1) root = at;
+
+            // Every name under the root, decorated AND undecorated: a node the engine renamed to
+            // '#<bone>_Addon => <part>' (Addon.cs:143) still ANSWERS for the bone it names. The
+            // asymmetry SkinCompatibility keeps (SkinCompatibility.cs:203-215) - the FILE side is
+            // undecorated, and a plan never writes a decorated name.
+            var under = new HashSet<string>(StringComparer.Ordinal);
+            foreach (int node in Subtree(nodes, root))
+            {
+                under.Add(names[node]);
+                under.Add(SkinBinder.Plain(names[node]));
+            }
+
+            foreach (string bone in targetNames ?? NoWords)
+            {
+                if (string.IsNullOrEmpty(bone)) continue;
+                if (Doctor.PrototypeCatalog.IsAttachmentPoint(bone))
+                {
+                    if (!under.Contains(bone)) verdict.AttachmentsAbsent.Add(bone);
+                    continue;
+                }
+                if (under.Contains(bone)) verdict.NamesResolved++;
+                else verdict.MissingNames.Add(bone);
+            }
+
+            // The PATH question is asked with EXACT names all the way down, and that is not an
+            // oversight: a generic binding is crc32 of the literal path (ClipFields.cs:34-41), so a
+            // decorated node genuinely does not answer for the path its plain name would spell.
+            foreach (string path in targetPaths ?? NoWords)
+            {
+                if (string.IsNullOrEmpty(path)) continue;
+                string leaf = path.Substring(path.LastIndexOf('/') + 1);
+                if (Doctor.PrototypeCatalog.IsAttachmentPoint(leaf)) continue;   // skipped, as above
+                if (root >= 0 && Resolve(nodes, root, path, out _, out _) >= 0) verdict.PathsResolved++;
+                else verdict.MissingPaths.Add(path);
+            }
+            return verdict;
+        }
+
+        /// <summary>Every node at or below <paramref name="root"/>, or the whole file when there is
+        /// no root to start from. The visited set is not tidiness: Verify is handed files nothing has
+        /// validated, and a "children" array that points back at an ancestor would otherwise spin
+        /// forever inside OnGUI.</summary>
+        private static IEnumerable<int> Subtree(List<object> nodes, int root)
+        {
+            if (root < 0)
+            {
+                for (int i = 0; i < nodes.Count; i++) yield return i;
+                yield break;
+            }
+            var seen = new bool[nodes.Count];
+            var pending = new Stack<int>();
+            pending.Push(root);
+            seen[root] = true;
+            while (pending.Count > 0)
+            {
+                int at = pending.Pop();
+                yield return at;
+                foreach (object item in Kids(nodes, at))
+                {
+                    int child = Index(item);
+                    if (child < 0 || child >= nodes.Count || seen[child]) continue;
+                    seen[child] = true;
+                    pending.Push(child);
+                }
+            }
+        }
+
+        /// <summary>How many joint slots this file's skins carry, for the sentence.</summary>
+        private static int JointCount(GlbDocument doc)
+        {
+            int total = 0;
+            foreach (object item in (doc == null ? null : GlbSlim.Arr(doc.Json, "skins")) ?? Nothing)
+                total += (GlbSlim.Arr(GlbSlim.Obj(item), "joints") ?? Nothing).Count;
+            return total;
+        }
+
         /// <summary>The one node this name reaches, or the exception that says Validate was skipped.</summary>
         private static int One(List<string> names, string name)
         {
@@ -994,5 +1137,7 @@ namespace Morgott.ContentTool.Import
             item is double number && number >= 0 && number <= int.MaxValue ? (int)number : -1;
 
         private static readonly List<object> Nothing = new List<object>();
+
+        private static readonly List<string> NoWords = new List<string>();
     }
 }

@@ -303,7 +303,126 @@ internal static class GlbSkelTests
               "a plan round-trips through its own JSON and a file that is not one comes back as a " +
               "sentence, not a throw");
 
+        // --- Verify: the same file asked the TWO different questions the two binding mechanisms ask.
+        // Addon.GetEquivalentBones compares a literal Transform.name (Addon.cs:1217); a generic clip
+        // binds to crc32 of a '/'-joined PATH (ClipFields.cs:34-41). A file can be perfect by one and
+        // useless by the other, so the two lists are computed apart and checked apart here.
+
+        // 29. BY NAME - the Doctor's verdict question, and the whole point of a rename plan.
+        GlbDocument named9 = Doc("u9_probe.glb");
+        SkelVerdict blind = GlbSkel.Verify(named9, "rig", Words("Spine_1", "Neck"), null);
+        GlbSkel.Apply(named9, Renames("rig", "hip", "Spine_1", "head", "Neck"));
+        SkelVerdict bound = GlbSkel.Verify(named9, "rig", Words("Spine_1", "Neck"), null);
+        Check(blind.MissingNames.Count == 2 && !blind.Ok && blind.NamesResolved == 0 &&
+              bound.MissingNames.Count == 0 && bound.NamesResolved == 2 && bound.Ok &&
+              bound.Nodes == 5 && bound.SkinJoints == 2,
+              "the rename plan turns two bones the rig wants from missing into bound: '" +
+              blind.Sentence() + "' -> '" + bound.Sentence() + "'");
+
+        // 30. BY PATH - the clip question, answered by walking child names rather than by looking a
+        //     name up, so a rig whose names collide across branches cannot pass this one by accident.
+        SkelVerdict walked = GlbSkel.Verify(named9, "rig", null, Words("Spine_1", "Spine_1/Neck"));
+        SkelVerdict unwalked = GlbSkel.Verify(Doc("u9_probe.glb"), "rig", null, Words("Spine_1", "Spine_1/Neck"));
+        Check(walked.MissingPaths.Count == 0 && walked.PathsResolved == 2 && walked.Ok &&
+              unwalked.MissingPaths.Count == 2 && !unwalked.Ok,
+              "the same plan resolves both prototype paths, and neither of them resolved before it: '" +
+              unwalked.Sentence() + "' -> '" + walked.Sentence() + "'");
+
+        // 31. EXT_ is not a failure of anything: Addon.GetEquivalentBones skips those transforms
+        //     outright (Addon.cs:1209), and PrototypeCatalog.IsAttachmentPoint (:91) is the shipped
+        //     predicate for the prefix. An absent one is reported as information, in its own list.
+        SkelVerdict ext = GlbSkel.Verify(named9, "rig", Words("Spine_1", "EXT_VoiceContext"),
+                                         Words("Spine_1", "Spine_1/EXT_VoiceContext"));
+        Check(ext.MissingNames.Count == 0 && ext.MissingPaths.Count == 0 && ext.Ok &&
+              ext.AttachmentsAbsent.Count == 1 && ext.AttachmentsAbsent[0] == "EXT_VoiceContext",
+              "an attachment point the file lacks is information, not a missing bone: '" + ext.Sentence() + "'");
+
+        // 32. ppskel.check:249-256 ported whole, over the four-phase plans of check 27: the skin
+        //     block and every node's mesh/skin binding come out of a rewrite untouched. This is the
+        //     assertion that would catch a pass that ever deleted or reordered a node.
+        Check(SkinIntact(pristine9, all9) && SkinIntact(pristine8, all8) &&
+              SkinIntact(pristine9, named9) && SkinIntact(pristine9, collapsed9),
+              "every skin, every IBM accessor and every node's mesh/skin binding survive a four-phase plan");
+
+        // 33. ppskel.check:257-261: the graph is still a forest of trees afterwards. An insert that
+        //     forgot to unlink its child is exactly what produces a second parent, and Parents is the
+        //     only thing that would notice. (The two reloaded documents below are covered by their own
+        //     Validate calls, which refuse a two-parent file before reading a single step.)
+        Check(Wired(named9, all9, all8, collapsed9, inserted8, created9, shifted8),
+              "no plan in this gate leaves a node with two parents");
+
+        // 34. Idempotence, honestly. A plan is a one-shot INSTRUCTION, not a fixed point: the second
+        //     run is refused because the bones it names are gone - which is the truthful answer. A
+        //     panel that reported it as a silent no-op would claim success for two different things.
+        string once = Path.Combine(Path.GetTempPath(), "ct_skel_once.glb");
+        GlbDocument first = Doc("u9_probe.glb");
+        SkelPlan plan = Renames("rig", "hip", "Spine_1", "head", "Neck");
+        GlbSkel.Apply(first, plan);
+        byte[] written = first.Write();
+        File.WriteAllBytes(once, written);
+        GlbDocument reloaded = GlbDocument.Load(once);
+        IList<string> twice = GlbSkel.Validate(reloaded, plan, null);
+        Check(Same(File.ReadAllBytes(once), written) && twice.Count > 0 && !reloaded.Dirty &&
+              Printed(twice).Contains("has no bone called 'hip'"),
+              "the same plan run a second time is refused by name, not silently repeated - got '" +
+              Printed(twice) + "'");
+
+        // 35. A DIFFERENT plan composes onto the output, and two full rewrites later BIN is still the
+        //     fixture's own bytes - the index invariant holding across a reload, not just in memory.
+        SkelPlan second = Renames("rig", "Spine_1", "Root");
+        IList<string> allowed = GlbSkel.Validate(reloaded, second, null);
+        GlbSkel.Apply(reloaded, second);
+        string thrice = Path.Combine(Path.GetTempPath(), "ct_skel_twice.glb");
+        reloaded.Write(thrice);
+        GlbDocument round = GlbDocument.Load(thrice);
+        SkelVerdict composed2 = GlbSkel.Verify(round, "rig", Words("Root", "Neck"), Words("Root", "Root/Neck"));
+        Check(allowed.Count == 0 && composed2.Ok && Same(round.Bin, pristine9.Bin),
+              "a second plan applies to the first one's output and neither rewrite touched a BIN byte - '" +
+              Printed(allowed) + "' / '" + composed2.Sentence() + "'");
+
+        // 36. And the verdict is a property of the FILE, not of the plan that produced it: the same
+        //     answer comes back from a document loaded off disk with no plan in hand. That is the only
+        //     form of the question the game ever asks, and what makes the in-game acceptance real.
+        SkelVerdict inHand = GlbSkel.Verify(first, "rig", Words("Spine_1", "Neck"),
+                                            Words("Spine_1", "Spine_1/Neck"));
+        SkelVerdict alone = GlbSkel.Verify(GlbDocument.Load(once), "rig", Words("Spine_1", "Neck"),
+                                           Words("Spine_1", "Spine_1/Neck"));
+        File.Delete(once);
+        File.Delete(thrice);
+        Check(alone.Ok && inHand.Sentence() == alone.Sentence(),
+              "the written file answers for itself: '" + alone.Sentence() + "' vs '" + inHand.Sentence() + "'");
+
         return "GLB-SKEL PASS, " + checks + " check(s)";
+    }
+
+    private static List<string> Words(params string[] items) => new List<string>(items);
+
+    /// <summary>ppskel.check:249-256, whole: the skin block and every node's mesh/skin binding come
+    /// out of a rewrite untouched. Nodes a plan APPENDED sit past the source's last index and must
+    /// carry neither key, so the shared prefix is compared and the tail is checked to be bone-only.</summary>
+    private static bool SkinIntact(GlbDocument was, GlbDocument now)
+    {
+        if (!Deep(Section(now, "skins"), Section(was, "skins"))) return false;
+        List<object> before = GlbSkel.Nodes(was), after = GlbSkel.Nodes(now);
+        if (after.Count < before.Count) return false;
+        for (int i = 0; i < before.Count; i++)
+        {
+            Dictionary<string, object> old = GlbSlim.Obj(before[i]), fresh = GlbSlim.Obj(after[i]);
+            if (!Deep(GlbSlim.Get(old, "mesh"), GlbSlim.Get(fresh, "mesh"))) return false;
+            if (!Deep(GlbSlim.Get(old, "skin"), GlbSlim.Get(fresh, "skin"))) return false;
+        }
+        for (int i = before.Count; i < after.Count; i++)
+            if (GlbSlim.Get(GlbSlim.Obj(after[i]), "mesh") != null ||
+                GlbSlim.Get(GlbSlim.Obj(after[i]), "skin") != null) return false;
+        return true;
+    }
+
+    /// <summary>Every one of these documents is still a forest of trees.</summary>
+    private static bool Wired(params GlbDocument[] docs)
+    {
+        foreach (GlbDocument doc in docs)
+            if (GlbSkel.Parents(GlbSkel.Nodes(doc), out string why) == null || why != null) return false;
+        return true;
     }
 
     /// <summary>A plan using all four phases on u9: hip/head become PP's names, the neck chain
