@@ -114,7 +114,8 @@ Nothing in this task touches Unity, so the whole merge rule is decided before a 
      every other;
   6. `Bindable(CHR_Human_Rig_Ready).Count` + `AttachmentPoints(...).Count` == the census `count` 124,
      and the same identity for `ALN_Crabman_Rig_Ready` (58) — the partition loses nothing;
-  7. `Ambiguous(ALN_Fishman_Rig_Ready)` contains exactly `Fishman_upWrist_l` and `Fishman_upWrist_r`;
+  7. `Ambiguous(ALN_Fishman_Rig_Ready)` is **empty** — `Fishman_upWrist_l` and `Fishman_upWrist_L` are
+     case-variants (two distinct transforms; `GetEquivalentBones` compares case-sensitively, both reachable);
      `Ambiguous` of `VEH_NJ_Armadillo_Rig_Ready`, `VEH_PX_Scarab_V01_Rig_Ready` and
      `VEH_SYN_Sanator_Rig_Ready` each contains `light`; `Ambiguous(ALN_Crabman_Rig_Ready)` is empty;
   8. the four rig-less managers (`DefaultTacCharacter`, `Dropped`, `FallDown`,
@@ -742,7 +743,7 @@ cd E:\DEV\PhoenixPoint\PPCLI
   |---|---|---|
   | 1 | Human → Soldier → Head | a `RigTarget` whose bone names are a SUBSET of the 124-transform rig (the in-mission control measured a head at 21) |
   | 2 | Crabman → Gunner → Torso | a DIFFERENT `RigTarget`; no name overlap with case 1 beyond the three `EXT_*` |
-  | 3 | Fishman → any → a wrist-adjacent slot | the ambiguity warning is shown; the verdict is blocked ONLY if the renderer references `Fishman_upWrist_l`/`_r`, and every other Fishman slot stays usable |
+  | 3 | Fishman → any → a wrist-adjacent slot | case-variant wrists (`_l`/`_L`) both bind — no ambiguity; ambiguity example = vehicle `light` (case 5) |
   | 4 | the worm prototype → all three variants | one prototype, two `RigPrefabNames`, three variants; all three rebuild |
   | 5 | a vehicle (`NJ_Armadillo`) → Turret | rebuilds; duplicate `light` is a warning, not a block |
   | 6 | a static structure (`EggFacehugger`) | rebuilds or reports "slot visual unavailable" — never a fabricated target |

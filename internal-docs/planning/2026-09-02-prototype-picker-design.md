@@ -20,7 +20,7 @@ Every change below is forced by a MEASURED fact from the slice-0 live run, not b
 | 1, 4 | instantiate an `AddonsManager` **at menu time** and read the slot renderer | rebuild the **geoscape squad-bay `CharacterBuilder`** the bench already drives | Slice 0(b): a menu-time `SetupAddons` returns `true`, reports the item attached, and produces **0 `SkinnedMeshRenderer`s** — `AddonSkinDataBase.GetPrefabAsset` returns null because the Addressable is not resident (taxonomy "(b) Menu-time bodypart load"). The A/B control in a loaded mission produced **7** SMRs. A Replace target cannot be snapshotted where no renderer exists. |
 | 2 | "40 shipped prototypes", merge on rig + slots + **animation** | **37 physical rigs, 36 binding prototypes** (Fireworm+Acidworm merged); animation is **variant** metadata | Slice 0(a): 37 distinct rig prefabs, 2551 transforms censused. Fireworm/Acidworm rigs differ only in the ROOT GAMEOBJECT'S OWN NAME — the 13 bone/`EXT_` names are identical. Slice 0(d): `HumanoidAnimatorLOC` is shared by Human AND Crabman, whose skeletons share 9 names of 124/58. A controller does not identify a rig. |
 | 2 | families 1-9 are prototypes | families are **navigation only**; the prototype unit is the **rig prefab** | Slice 0(a): no claimed family shares a bone-name set. The only name common to all 37 rigs is `EXT_VoiceContext`. Crabman ∩ Oilcrab = **34** names across *different* prefabs — a Crabman mesh binds partially and silently on an Oilcrab. |
-| 3 | Extend = "every joint resolves uniquely onto **the full rig**" | Extend matches **`BindableBones`** only; `EXT_*` policy stated; duplicate names refuse the verdict only when referenced | `Addon.GetEquivalentBones` skips `EXT_*` (`Addon.cs:1208`), and the intra-family overlap is almost entirely `EXT_*`. Duplicate names exist for real (`ALN_Fishman_Rig_Ready` has `Fishman_upWrist_l`/`_r` twice; three vehicle rigs have `light` twice) and `FirstOrDefault` makes the second unreachable. |
+| 3 | Extend = "every joint resolves uniquely onto **the full rig**" | Extend matches **`BindableBones`** only; `EXT_*` policy stated; duplicate names refuse the verdict only when referenced | `Addon.GetEquivalentBones` skips `EXT_*` (`Addon.cs:1208`), and the intra-family overlap is almost entirely `EXT_*`. Fishman's `Fishman_upWrist_l`/`_L` are case-variants (both reachable, NOT ambiguous — census was read case-insensitively); three vehicle rigs have `light` twice and `FirstOrDefault` makes the second unreachable. `PrototypeCatalog.Signature` excludes the prefab root (`Parent == null`) from the binding signature — with the root in, Fireworm != Acidworm; root stays inside `Bindable` so Human 124 / Crabman 58 identities hold. |
 | 7 | clips resolved from the selected role's `TacActorAnimActionsDef` | **fallback to the controller's own `animationClips`**, deduplicated | Slice 0(d): `Crabman_AnimActionsDef` has `AnimActions.Count == 0` and no default action/reaction clip — a preview reading only the anim-actions def shows nothing. Controllers list duplicate clip names (73 entries / 69 distinct; 60 / 45). |
 | 10 | slice 1 acceptance is main-menu, `~40 prototypes`, "slot visual unavailable" | slice 1 acceptance is **geoscape-only**, against **live renderers**, `37/36` counts | Same as §1/§4: at the menu there is nothing to accept against. |
 
@@ -215,18 +215,22 @@ overlap is almost entirely `EXT_*` (all four Pandoran bipeds share exactly three
 
 ### Duplicate bone names — never index-disambiguate
 
-Duplicates are real and shipped: `ALN_Fishman_Rig_Ready` carries `Fishman_upWrist_l` twice and
-`Fishman_upWrist_r` twice; `VEH_NJ_Armadillo_`, `VEH_PX_Scarab_V01_` and `VEH_SYN_Sanator_Rig_Ready`
-each carry `light` twice. The game resolves by **name plus `FirstOrDefault`** (`Addon.cs:1202-1231`),
-so the second one is unreachable.
+~~Duplicates are real and shipped: `ALN_Fishman_Rig_Ready` carries `Fishman_upWrist_l` twice and
+`Fishman_upWrist_r` twice~~ **CORRECTED:** the slice 0 census was read case-insensitively.
+Ordinally the rig carries `Fishman_upWrist_l` AND `Fishman_upWrist_L` (two distinct transforms
+differing only in trailing-letter case); `Addon.GetEquivalentBones` compares case-sensitively
+(`Addon.cs:1202-1231`), so both are reachable — NOT ambiguous. The only real shipped duplicates
+are the three vehicles' repeated `light` nodes: `VEH_NJ_Armadillo_`, `VEH_PX_Scarab_V01_` and
+`VEH_SYN_Sanator_Rig_Ready` each carry `light` twice. The game resolves by **name plus
+`FirstOrDefault`**, so the second `light` is unreachable.
 
 - **Never disambiguate compatibility by index.** Doing so would predict a binding the game cannot
   perform.
 - Display the full path and the index **for diagnosis only**.
 - **Block a verdict only when the selected file or the selected renderer actually references the
   ambiguous name.** Otherwise the record carries a prototype-level **warning** and every other slot
-  stays usable. Fishman's duplicate wrists and the vehicles' duplicate `light` nodes must not make
-  unrelated slots unverifiable.
+  stays usable. The vehicles' duplicate `light` nodes must not make unrelated slots unverifiable.
+  (Fishman's wrists are case-variants, not duplicates — see correction above.)
 - On the Replace path this is already the existing `BindCode.TargetBoneDuplicate`
   (`SkinCompatibility.cs:158-161`), which fires from the live SMR's own bone list — i.e. it fires
   exactly when the renderer references the ambiguous name, which is the rule above.

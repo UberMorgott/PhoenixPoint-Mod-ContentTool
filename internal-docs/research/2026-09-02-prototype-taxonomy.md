@@ -429,9 +429,12 @@ Other measured relations worth keeping:
   all 124 names present; the extra 92 are PPFit-specific (`BW_Chain_*`, ...).
 - The only name shared by **all 37** rigs is `EXT_VoiceContext`.
 - **Duplicate names inside one rig** (a real hazard for name-equality binding):
-  `ALN_Fishman_Rig_Ready` has `Fishman_upWrist_l` x2 and `Fishman_upWrist_r` x2;
-  `VEH_NJ_Armadillo_Rig_Ready`, `VEH_PX_Scarab_V01_Rig_Ready` and `VEH_SYN_Sanator_Rig_Ready` each
-  have `light` x2. `GetEquivalentBones` uses `FirstOrDefault`, so the second one is unreachable.
+  ~~`ALN_Fishman_Rig_Ready` has `Fishman_upWrist_l` x2 and `Fishman_upWrist_r` x2~~ **CORRECTED:**
+  the census was read case-insensitively; ordinally the rig carries `Fishman_upWrist_l` AND
+  `Fishman_upWrist_L` — two distinct transforms differing only in trailing-letter case.
+  `GetEquivalentBones` compares case-sensitively, so both are reachable, NOT ambiguous.
+  Real duplicates: `VEH_NJ_Armadillo_Rig_Ready`, `VEH_PX_Scarab_V01_Rig_Ready` and
+  `VEH_SYN_Sanator_Rig_Ready` each have `light` x2. `FirstOrDefault` makes the second unreachable.
 
 **Consequence for the picker:** the prototype unit is the **`Rig` prefab (37 of them)**, not the
 9 shape families. Section 2's grouping stays useful as a UI grouping, but must not be used to claim
