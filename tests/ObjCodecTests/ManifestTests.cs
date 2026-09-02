@@ -136,6 +136,7 @@ internal static class ManifestTests
                 "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\" }",
                 "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": \"m\", \"clip\": \"c\" }",
                 "{ \"bundle\": \"a.bundle\", \"mesh\": \"m\" }",
+                "{ \"asset\": \"Foo\", \"mesh\": \"m\" }",
                 "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": { \"file\": \"m\" } }",
                 "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": \"m\", \"clip\": null }"
             };
@@ -170,6 +171,103 @@ internal static class ManifestTests
                 " { \"bundle\": \"a.bundle\", \"asset\": \"foo\", \"texture\": \"two\" } ] }");
             apart.Validate();
             checks += Check(true, "a different asset CASE and a different kind are different targets - assets fold nowhere");
+
+            // ---- Manifest_AppendsMeshWithoutCollateralRewrite: the whole point of the slice.
+            string add = Path.Combine(dir, "add.json");
+            byte[] originalBytes = Bytes(true, Crlf);
+            File.WriteAllBytes(add, originalBytes);
+            ManifestFile target = ManifestFile.Load(add);
+            target.Manifest.AddMeshReplacement("b.bundle", "Torso", "torso");
+            target.Save();
+            byte[] afterBytes = File.ReadAllBytes(add);
+            // The markers are located INDEPENDENTLY in each file, so nothing here assumes the two agree on any
+            // offset. The fixture holds exactly one '[' and one ']', both belonging to "replace".
+            int openWas = IndexOf(originalBytes, (byte)'['), openNow = IndexOf(afterBytes, (byte)'[');
+            int closeWas = LastIndexOf(originalBytes, (byte)']'), closeNow = LastIndexOf(afterBytes, (byte)']');
+            checks += Check(openWas == openNow && Same(Head(originalBytes, openWas), Head(afterBytes, openNow)),
+                            "every byte BEFORE the array's '[' is identical, BOM included");
+            checks += Check(Same(Tail(originalBytes, originalBytes.Length - closeWas),
+                                 Tail(afterBytes, afterBytes.Length - closeNow)),
+                            "and every byte from its ']' on - the \"creature\" block was not rewritten");
+            byte[] wasRow = new UTF8Encoding(false).GetBytes(
+                "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"texture\": \"swatch\" }");
+            checks += Check(afterBytes.Length > originalBytes.Length && Holds(afterBytes, wasRow),
+                            "the row that was already there survives BYTE FOR BYTE - nothing reserialized it");
+            string afterText = new UTF8Encoding(false).GetString(afterBytes, 3, afterBytes.Length - 3);
+            checks += Check(afterText.Replace("\r\n", "").IndexOf('\n') < 0, "no bare LF was introduced - still CRLF");
+            checks += Check(afterText.IndexOf("}\r\n  ]", StringComparison.Ordinal) >= 0,
+                            "the author's whitespace before the ']' was COPIED, not regenerated as \"}]\"");
+            ManifestFile reread = ManifestFile.Load(add);
+            checks += Check(reread.Manifest.Replace.Count == 2 && reread.Manifest.Replace[1].Mesh == "torso" &&
+                            reread.Manifest.Replace[1].Asset == "Torso" && reread.Manifest.Replace[1].Kind == "mesh",
+                            "the added row reads back as exactly one mesh row");
+            checks += Check(reread.Manifest.Root.ContainsKey("creature") && reread.Manifest.Replace[0].Texture == "swatch",
+                            "and the row that was already there, plus the creature block, are what they were");
+
+            // ---- Manifest_InsertsMissingReplaceArray (demos\CustomCreature\ppcontent.json has no "replace" at all)
+            string none = Path.Combine(dir, "none.json");
+            File.WriteAllBytes(none, Bytes(false,
+                "{\n  \"id\": \"m.demo\",\n  \"bundle\": \"M.bundle\",\n  \"creature\": { \"name\": \"Spider\" }\n}\n"));
+            ManifestFile fresh = ManifestFile.Load(none);
+            fresh.Manifest.AddMeshReplacement("a.bundle", "Foo", "body");
+            fresh.Save();
+            ManifestFile grown = ManifestFile.Load(none);
+            checks += Check(grown.Manifest.Replace.Count == 1 && grown.Manifest.Replace[0].Kind == "mesh",
+                            "a manifest with no \"replace\" gets one holding exactly one valid row");
+            string grownText = File.ReadAllText(none);
+            checks += Check(grownText.IndexOf("\"creature\"", StringComparison.Ordinal) <
+                            grownText.IndexOf("\"replace\"", StringComparison.Ordinal),
+                            "added as the LAST root member, so nothing the author wrote moved");
+            checks += Check(grownText.StartsWith("{\n  \"id\": \"m.demo\",\n  \"bundle\": \"M.bundle\",",
+                                                 StringComparison.Ordinal),
+                            "and the head of the file is byte-for-byte what it was");
+
+            // No final newline in, NONE out: "...]}" is the ACCEPTED output. This tool inserts, it never reformats.
+            string tight = Path.Combine(dir, "tight.json");
+            File.WriteAllBytes(tight, Bytes(false, "{\"id\":\"m\",\"bundle\":\"M.bundle\"}"));
+            ManifestFile squeezed = ManifestFile.Load(tight);
+            squeezed.Manifest.AddMeshReplacement("a.bundle", "Foo", "body");
+            squeezed.Save();
+            string tightText = File.ReadAllText(tight);
+            checks += Check(tightText.EndsWith("]}", StringComparison.Ordinal) &&
+                            ManifestFile.Load(tight).Manifest.Replace.Count == 1,
+                            "a file with no final newline ends \"]}\" and still re-reads: " + tightText);
+
+            // An INLINE empty array is the whitespace-only branch: a body appears between the brackets.
+            string inline = Path.Combine(dir, "inline.json");
+            File.WriteAllBytes(inline, Bytes(false,
+                "{\n  \"id\": \"m\",\n  \"bundle\": \"M.bundle\",\n  \"replace\": [],\n  \"tail\": 1\n}\n"));
+            ManifestFile flat = ManifestFile.Load(inline);
+            flat.Manifest.AddMeshReplacement("a.bundle", "Foo", "body");
+            flat.Save();
+            string inlineText = File.ReadAllText(inline);
+            checks += Check(ManifestFile.Load(inline).Manifest.Replace.Count == 1,
+                            "an inline \"[]\" takes the row: " + inlineText);
+            checks += Check(inlineText.StartsWith("{\n  \"id\": \"m\",\n  \"bundle\": \"M.bundle\",",
+                                                  StringComparison.Ordinal) &&
+                            inlineText.EndsWith(",\n  \"tail\": 1\n}\n", StringComparison.Ordinal),
+                            "and everything on either side of it is untouched");
+
+            // The scanner's hard cases in ONE file: an escaped quote in a value, a '{' and a '[' inside a string,
+            // and a NON-ASCII character before the span, so a character index is not a byte index.
+            const string hard =
+                "{\n  \"id\": \"m\",\n  \"bundle\": \"M.bundle\",\n  \"note\": \"café { [ \\\" ]\",\n" +
+                "  \"replace\": [\n    { \"bundle\": \"a.bundle\", \"asset\": \"Fo\\\"o\", \"mesh\": \"m\" }\n  ],\n" +
+                "  \"tail\": \"]\"\n}\n";
+            string tricky = Path.Combine(dir, "tricky.json");
+            File.WriteAllBytes(tricky, Bytes(false, hard));
+            ManifestFile odd = ManifestFile.Load(tricky);
+            checks += Check(odd.Manifest.Replace.Count == 1 && odd.Manifest.Replace[0].Asset == "Fo\"o",
+                            "a '{', a '[' and an escaped quote inside STRINGS move neither the depth nor the span");
+            odd.Manifest.AddMeshReplacement("b.bundle", "Bar", "bar");
+            odd.Save();
+            byte[] trickyNow = File.ReadAllBytes(tricky);
+            UTF8Encoding utf8 = new UTF8Encoding(false);
+            byte[] headWas = utf8.GetBytes(hard.Substring(0, hard.IndexOf("\"replace\"", StringComparison.Ordinal)));
+            byte[] tailWas = utf8.GetBytes(hard.Substring(hard.IndexOf("  ],\n", StringComparison.Ordinal)));
+            checks += Check(Holds(trickyNow, headWas) && Holds(trickyNow, tailWas) &&
+                            Holds(trickyNow, utf8.GetBytes("\"Fo\\\"o\"")),
+                            "everything before and after the array - the two-byte 'e-acute' included - is byte-identical");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "MANIFEST PASS, " + checks + " check(s) - atomic write";
@@ -199,6 +297,44 @@ internal static class ManifestTests
         if (a.Length != b.Length) return false;
         for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
         return true;
+    }
+
+    private static byte[] Head(byte[] all, int count)
+    {
+        byte[] part = new byte[count];
+        Buffer.BlockCopy(all, 0, part, 0, count);
+        return part;
+    }
+
+    private static byte[] Tail(byte[] all, int count)
+    {
+        byte[] part = new byte[count];
+        Buffer.BlockCopy(all, all.Length - count, part, 0, count);
+        return part;
+    }
+
+    private static int IndexOf(byte[] all, byte b)
+    {
+        for (int i = 0; i < all.Length; i++) if (all[i] == b) return i;
+        return -1;
+    }
+
+    private static int LastIndexOf(byte[] all, byte b)
+    {
+        for (int i = all.Length - 1; i >= 0; i--) if (all[i] == b) return i;
+        return -1;
+    }
+
+    /// <summary>Whether <paramref name="needle"/> appears in <paramref name="hay"/> unbroken.</summary>
+    private static bool Holds(byte[] hay, byte[] needle)
+    {
+        for (int i = 0; i + needle.Length <= hay.Length; i++)
+        {
+            int k = 0;
+            while (k < needle.Length && hay[i + k] == needle[k]) k++;
+            if (k == needle.Length) return true;
+        }
+        return false;
     }
 
     private static int Check(bool condition, string what)

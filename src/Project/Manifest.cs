@@ -153,6 +153,22 @@ namespace Morgott.ContentTool.Project
         /// ParseReplace's "declares but no complete entry" sentence turns on.</summary>
         internal bool Declares(string key) { return root.ContainsKey(key); }
 
+        /// <summary>Queue ONE mesh row. Add only - editing or removing a row is design §2, and the wizard
+        /// needs neither. The row is a flat object of three string members, so the in-game JsonUtility read
+        /// of the root scalars (ContentProject.cs:287, :303) is unaffected. "asset" goes on VERBATIM:
+        /// shipped names are folded nowhere.</summary>
+        internal ReplaceRow AddMeshReplacement(string bundle, string asset, string meshFile)
+        {
+            var tree = new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                { "bundle", bundle }, { "asset", asset }, { "mesh", meshFile }
+            };
+            var added = new ReplaceRow(tree);
+            rows.Add(added);
+            pending.Add(added);
+            return added;
+        }
+
         /// <summary>V4/V5/V6/V7 over every row, existing and pending, before a byte moves. V4 and V5 are
         /// today's rule at ContentProject.cs:404-416 unchanged; V6 is new only because the read side can
         /// afford to treat `"mesh": 5` as an absent mesh and the WRITE side cannot hand the author back a
@@ -278,6 +294,131 @@ namespace Morgott.ContentTool.Project
                 foreach (byte b in hash.ComputeHash(bytes)) spelled.Append(b.ToString("x2"));
                 return spelled.ToString();
             }
+        }
+
+        /// <summary>Splice every pending row into the "replace" value span and commit. Everything outside
+        /// that span - a nested map inside an existing row included - is byte-identical by construction.</summary>
+        /// <exception cref="InvalidDataException">E3/E4 from Validate, or E6 when what this method produced
+        /// does not re-read. Nothing is written on either path.</exception>
+        /// <exception cref="IOException">E5, the file changed on disk since Load.</exception>
+        internal void Save()
+        {
+            Manifest.Validate();
+            if (Manifest.Pending.Count == 0) return;
+            string produced = Splice();
+
+            // E6: re-read what is about to be written, through the same reader and the same rules.
+            try { Manifest.ParseFor(produced, "'" + Path + "'").Validate(); }
+            catch (Exception)
+            {
+                throw new InvalidDataException("the edited ppcontent.json did not re-read as valid JSON, " +
+                                               "so the file on disk was NOT touched");
+            }
+
+            // E5, immediately before the commit: the last moment a concurrent edit is still recoverable by
+            // the author simply reloading.
+            if (!string.Equals(Sha256(File.ReadAllBytes(Path)), sha, StringComparison.Ordinal))
+                throw new IOException("'" + Path + "' changed on disk since it was loaded, so nothing was " +
+                                      "written - reload it and add the row again");
+
+            // Encoding back is lossless without a strict encoder: every char in `text` came out of the
+            // STRICT decode in Load, and the spliced row is JsonWriter output.
+            byte[] body = new UTF8Encoding(false).GetBytes(produced);
+            byte[] bytes = body;
+            if (bom)
+            {
+                bytes = new byte[body.Length + 3];
+                bytes[0] = 0xEF; bytes[1] = 0xBB; bytes[2] = 0xBF;
+                Buffer.BlockCopy(body, 0, bytes, 3, body.Length);
+            }
+            AtomicFile.Write(Path, bytes, Path + ".bak");
+        }
+
+        private string Splice()
+        {
+            var added = new StringBuilder();
+            foreach (ReplaceRow row in Manifest.Pending)
+            {
+                if (added.Length > 0) added.Append(',').Append(newline);
+                added.Append(new JsonWriter().Val(row.Tree).ToString());
+            }
+
+            Span span;
+            if (!members.TryGetValue("replace", out span))
+            {
+                // (c) no "replace" at all: as the LAST root member, inserted just past the last thing the
+                // author wrote, so the comma lands on THEIR line rather than on one of its own. A file
+                // with no final newline therefore ends "...]}" - accepted as written.
+                int at = Trim(text, 0, rootClose);
+                return text.Substring(0, at) + "," + newline + "  \"replace\": [" + newline + "    " +
+                       added.ToString().Replace(newline, newline + "    ") + newline + "  ]" +
+                       text.Substring(at);
+            }
+
+            int stop;
+            int last = LastElement(text, span.Start, span.End, out stop);
+            if (last < 0)
+            {
+                // (b) the array is empty or holds only whitespace: give it a body, one level in from
+                // "replace" itself.
+                string close = IndentOf(text, span.Start);
+                string inner = close + "  ";
+                return text.Substring(0, span.Start + 1) + newline + inner +
+                       added.ToString().Replace(newline, newline + inner) + newline + close +
+                       text.Substring(span.End - 1);
+            }
+
+            // (a) insert immediately AFTER the last existing row's last byte, indented exactly like that
+            // row. Everything from there on - the author's own whitespace and the closing ']' - is copied
+            // unchanged rather than regenerated.
+            string indent = IndentOf(text, last);
+            return text.Substring(0, stop) + "," + newline + indent +
+                   added.ToString().Replace(newline, newline + indent) + text.Substring(stop);
+        }
+
+        /// <summary>Where the LAST element of the array spanning [start, end) begins, or -1 when it holds
+        /// none; <paramref name="stop"/> comes back as the index just PAST that element. Walks the array's
+        /// INTERIOR only, so the outer brackets need no special case, and is string-aware for the same
+        /// reason Members is.</summary>
+        private static int LastElement(string text, int start, int end, out int stop)
+        {
+            int last = -1, from = -1, depth = 0;
+            stop = -1;
+            for (int i = start + 1; i < end - 1; i++)
+            {
+                char c = text[i];
+                if (c == '"')
+                {
+                    if (depth == 0 && from < 0) from = i;
+                    i = EndOfString(text, i);
+                    continue;
+                }
+                if (c == '{' || c == '[')
+                {
+                    if (depth == 0 && from < 0) from = i;
+                    depth++;
+                    continue;
+                }
+                if (c == '}' || c == ']') { depth--; continue; }
+                if (depth == 0 && c == ',')
+                {
+                    if (from >= 0) { last = from; stop = Trim(text, from, i); }
+                    from = -1;
+                    continue;
+                }
+                if (depth == 0 && from < 0 && !IsSpace(c)) from = i;
+            }
+            if (from >= 0) { last = from; stop = Trim(text, from, end - 1); }
+            return last;
+        }
+
+        /// <summary>The whitespace run opening the line <paramref name="at"/> sits on.</summary>
+        private static string IndentOf(string text, int at)
+        {
+            int line = text.LastIndexOf('\n', Math.Max(0, at - 1));
+            var indent = new StringBuilder();
+            for (int i = line + 1; i < at && IsSpace(text[i]); i++) indent.Append(text[i]);
+            return indent.ToString();
         }
 
         /// <summary>ONE forward pass over the ROOT object: at depth 1 record each key and the [start, end)
