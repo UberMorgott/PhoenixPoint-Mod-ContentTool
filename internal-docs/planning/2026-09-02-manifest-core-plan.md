@@ -84,7 +84,7 @@ only as the pattern being consolidated.
 Nothing below can be written twice, so the move comes first: `Manifest.cs` is then authored once, against a
 `Json` every project that needs it can already link.
 
-- [ ] **Step 1: Move, and link only `ObjCodecTests` — the red state is the two TOOL builds.** Cut
+- [x] **Step 1: Move, and link only `ObjCodecTests` — the red state is the two TOOL builds.** Cut
   `internal static class Json` (`src\Import\GlbReader.cs:2306-2444`, doc-comment included) and
   `internal sealed class JsonWriter` (`src\Import\GlbCodec.cs:1221-1332`, doc-comment included) into a new
   `src\Import\Json.cs`:
@@ -114,7 +114,7 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
     `GlbCodec.cs: error CS0246: The type or namespace name 'JsonWriter' could not be found (are you missing
     a using directive or an assembly reference?)`. That rise from 2 to 4 is this task's gate.
 
-- [ ] **Step 2: Link both files into both GLB tools.** In `tools\ClipEvents\ClipEvents.csproj` and
+- [x] **Step 2: Link both files into both GLB tools.** In `tools\ClipEvents\ClipEvents.csproj` and
   `tools\SpiderAxisCheck\SpiderAxisCheck.csproj`, after their `GlbReader.cs` line (`:19` in each):
   ```xml
   <Compile Include="..\..\src\Import\ImportRefused.cs" Link="ImportRefused.cs" />
@@ -131,14 +131,14 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
     pre-existing breakage this slice does not own — and reports nothing about `Json` or `JsonWriter`; every
     existing gate line still PASS. `tools\Package` is untouched here: `Package.cs` does not use `Json` yet.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Import\Json.cs src\Import\GlbReader.cs src\Import\GlbCodec.cs tests\ObjCodecTests\ObjCodecTests.csproj tools\ClipEvents\ClipEvents.csproj tools\SpiderAxisCheck\SpiderAxisCheck.csproj && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "refactor(import): Json and JsonWriter move to their own file, where every project that needs them can link it"`
 
 ---
 
 ### Task 2: `AtomicFile`, and the arms that prove the `.bak` and the temp
 
-- [ ] **Step 1: Write the failing gate.** Create `tests\ObjCodecTests\ManifestTests.cs`:
+- [x] **Step 1: Write the failing gate.** Create `tests\ObjCodecTests\ManifestTests.cs`:
   ```csharp
   using System;
   using System.IO;
@@ -219,7 +219,7 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
     (`SourceImport.cs`, `Package.cs`, `ModGate.cs` are linked). A missing type is a compile error, and that
     counts as the failing gate.
 
-- [ ] **Step 2: Implement `AtomicFile`.** Create `src\IO\AtomicFile.cs`:
+- [x] **Step 2: Implement `AtomicFile`.** Create `src\IO\AtomicFile.cs`:
   ```csharp
   using System;
   using System.IO;
@@ -275,16 +275,16 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `MANIFEST PASS, 6 check(s) - atomic write` among all-green output.
 
-- [ ] **Step 3: Build.** Run `dotnet build -c Release` → `0 Error(s)` (the 1 known CS0649 warning stays).
+- [x] **Step 3: Build.** Run `dotnet build -c Release` → `0 Error(s)` (the 1 known CS0649 warning stays).
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\IO\AtomicFile.cs tests\ObjCodecTests\ManifestTests.cs tests\ObjCodecTests\ObjCodecTests.csproj tests\ObjCodecTests\Program.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "feat(io): AtomicFile - one copy of the tmp-then-swap write, with a unique temp and the .bak the manifest saves need"`
 
 ---
 
 ### Task 3: `Manifest` + `ReplaceRow` (read only)
 
-- [ ] **Step 1: Write the failing gate.** In `ManifestTests.Run()`, inside the `try`, after the AtomicFile arm:
+- [x] **Step 1: Write the failing gate.** In `ManifestTests.Run()`, inside the `try`, after the AtomicFile arm:
   ```csharp
   // ---- Manifest_LoadsKnownAndUnknownTree: the case "\{[^{}]*\}" cannot read at all.
   const string tree =
@@ -314,7 +314,7 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
   - Expected: **FAIL to compile** — `error CS0246: The type or namespace name 'Manifest' could not be found
     (are you missing a using directive or an assembly reference?)`, repeated per use.
 
-- [ ] **Step 2: Implement.** Create `src\Project\Manifest.cs`:
+- [x] **Step 2: Implement.** Create `src\Project\Manifest.cs`:
   ```csharp
   using System;
   using System.Collections.Generic;
@@ -483,16 +483,16 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `MANIFEST PASS, 12 check(s) - atomic write` (the sentence is renamed in Task 11).
 
-- [ ] **Step 3: Build.** `dotnet build -c Release` → `0 Error(s)`.
+- [x] **Step 3: Build.** `dotnet build -c Release` → `0 Error(s)`.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Project\Manifest.cs tests\ObjCodecTests\ManifestTests.cs tests\ObjCodecTests\ObjCodecTests.csproj && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "feat(project): Manifest reads ppcontent.json as a facade over the real tree, nested rows included"`
 
 ---
 
 ### Task 4: `ManifestFile.Load` — bytes, strict UTF-8, BOM, newline, fingerprint, root spans
 
-- [ ] **Step 1: Write the failing gate.** Append inside the `try`:
+- [x] **Step 1: Write the failing gate.** Append inside the `try`:
   ```csharp
   // ---- ManifestFile.Load, the strict boundary
   string path = Path.Combine(dir, "ppcontent.json");
@@ -582,7 +582,7 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
   - Expected: **FAIL to compile** — `error CS0246: The type or namespace name 'ManifestFile' could not be
     found (are you missing a using directive or an assembly reference?)`.
 
-- [ ] **Step 2: Implement.** Append to `src\Project\Manifest.cs` inside the namespace, adding
+- [x] **Step 2: Implement.** Append to `src\Project\Manifest.cs` inside the namespace, adding
   `using System.Security.Cryptography;`, `using System.Text;`, `using Morgott.ContentTool.IO;` at the top:
   ```csharp
       /// <summary>
@@ -749,16 +749,16 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `MANIFEST PASS, 21 check(s) - atomic write`.
 
-- [ ] **Step 3: Build.** `dotnet build -c Release` → `0 Error(s)`.
+- [x] **Step 3: Build.** `dotnet build -c Release` → `0 Error(s)`.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Project\Manifest.cs tests\ObjCodecTests\ManifestTests.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "feat(project): ManifestFile.Load keeps the bytes, the BOM, the newline and a string-aware span of every root member"`
 
 ---
 
 ### Task 5: validation — V4, V5, V6, V7 and their exact refusals
 
-- [ ] **Step 1: Write the failing gate.** Append inside the `try`:
+- [x] **Step 1: Write the failing gate.** Append inside the `try`:
   ```csharp
   // ---- Manifest_RefusesInvalidReplaceRows: V4, V5, V6, each with E3's wording.
   // NOT named `bad`: Task 4's `catch (InvalidDataException bad)` blocks sit in a nested scope of this
@@ -808,7 +808,7 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
     and no accessible extension method 'Validate' accepting a first argument of type 'Manifest' could be
     found`.
 
-- [ ] **Step 2: Implement.** Add to `Manifest`:
+- [x] **Step 2: Implement.** Add to `Manifest`:
   ```csharp
           /// <summary>V4/V5/V6/V7 over every row, existing and pending, before a byte moves. V4 and V5 are
           /// today's rule at ContentProject.cs:404-416 unchanged; V6 is new only because the read side can
@@ -857,16 +857,16 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `MANIFEST PASS, 28 check(s) - atomic write`.
 
-- [ ] **Step 3: Build.** `dotnet build -c Release` → `0 Error(s)`.
+- [x] **Step 3: Build.** `dotnet build -c Release` → `0 Error(s)`.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Project\Manifest.cs tests\ObjCodecTests\ManifestTests.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "feat(project): Manifest.Validate refuses a row or a duplicate target with ContentProject's own wording"`
 
 ---
 
 ### Task 6: `AddMeshReplacement` and the splice — the byte-preservation gate
 
-- [ ] **Step 1: Write the failing gate.** Append inside the `try`:
+- [x] **Step 1: Write the failing gate.** Append inside the `try`:
   ```csharp
   // ---- Manifest_AppendsMeshWithoutCollateralRewrite: the whole point of the slice.
   string add = Path.Combine(dir, "add.json");
@@ -1009,7 +1009,7 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
   - Expected: **FAIL to compile** — `error CS1061: 'Manifest' does not contain a definition for
     'AddMeshReplacement'` and `error CS1061: 'ManifestFile' does not contain a definition for 'Save'`.
 
-- [ ] **Step 2: Implement `AddMeshReplacement`.** Add to `Manifest`:
+- [x] **Step 2: Implement `AddMeshReplacement`.** Add to `Manifest`:
   ```csharp
           /// <summary>Queue ONE mesh row. Add only - editing or removing a row is design §2, and the wizard
           /// needs neither. The row is a flat object of three string members, so the in-game JsonUtility read
@@ -1028,7 +1028,7 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
           }
   ```
 
-- [ ] **Step 3: Implement `Save` and the splice.** Add to `ManifestFile`:
+- [x] **Step 3: Implement `Save` and the splice.** Add to `ManifestFile`:
   ```csharp
           /// <summary>Splice every pending row into the "replace" value span and commit. Everything outside
           /// that span - a nested map inside an existing row included - is byte-identical by construction.</summary>
@@ -1158,9 +1158,9 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `MANIFEST PASS, 43 check(s) - atomic write`.
 
-- [ ] **Step 4: Build.** `dotnet build -c Release` → `0 Error(s)`.
+- [x] **Step 4: Build.** `dotnet build -c Release` → `0 Error(s)`.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Project\Manifest.cs tests\ObjCodecTests\ManifestTests.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "feat(project): ManifestFile.Save splices one replace row and leaves every other byte alone"`
 
 ---
@@ -1169,7 +1169,7 @@ Nothing below can be written twice, so the move comes first: `Manifest.cs` is th
 
 The guard landed inside `Save` in Task 6; this task proves it and proves what is left on disk.
 
-- [ ] **Step 1: Write the gate.** Append inside the `try`:
+- [x] **Step 1: Write the gate.** Append inside the `try`:
   ```csharp
   // ---- Manifest_RefusesConcurrentEdit: V8/E5. The author's own edit wins, always.
   string race = Path.Combine(dir, "race.json");
@@ -1195,12 +1195,12 @@ The guard landed inside `Save` in Task 6; this task proves it and proves what is
     `MANIFEST FAILURE: the refusal happened before AtomicFile ran, ...`, meaning the SHA check sits in the
     wrong place.
 
-- [ ] **Step 2: If it failed, fix `Save`'s ORDER only.** The SHA check must sit after the E6 re-read and
+- [x] **Step 2: If it failed, fix `Save`'s ORDER only.** The SHA check must sit after the E6 re-read and
   before `AtomicFile.Write`, with no write of any kind ahead of it. No other change.
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `MANIFEST PASS, 46 check(s) - atomic write`.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Project\Manifest.cs tests\ObjCodecTests\ManifestTests.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "test(project): a manifest edited on disk between Load and Save refuses with E5 and keeps the author's bytes"`
 
 ---
@@ -1211,7 +1211,7 @@ The defect the slice exists for. **Name and `(string, List<string>)` signature a
 `tests\ObjCodecTests\RefusalCount.cs:57` invokes them by reflection off the built DLL, and that is the only
 gate this migration has.
 
-- [ ] **Step 1: Write the failing gate — behavioural, not compile-red.** In
+- [x] **Step 1: Write the failing gate — behavioural, not compile-red.** In
   `tests\ObjCodecTests\RefusalCount.cs`, after the "each refusal names WHICH array" check (`:69-72`) and
   BEFORE the `// ---- 1:` section, so the later `refusals.Count == 5` arm still holds — none of these four
   arms adds to the list:
@@ -1247,7 +1247,7 @@ gate this migration has.
     regex matches only the inner `{"x":1}`, so the call returns 0 rows. The fourth arm fails too once the
     first is fixed: today a primitive row throws the "declares" sentence instead.
 
-- [ ] **Step 2: Replace the regex body.** In `src\Project\ContentProject.cs`, replace `:385-435` (the whole
+- [x] **Step 2: Replace the regex body.** In `src\Project\ContentProject.cs`, replace `:385-435` (the whole
   `ParseReplace` body; the doc-comment at `:372-384` stays, minus its "reads the three flat string fields
   directly" sentence, which is no longer true):
   ```csharp
@@ -1303,7 +1303,7 @@ gate this migration has.
   - Run: `dotnet build -c Release`
   - Expected: `0 Error(s)` with the 1 known CS0649 warning.
 
-- [ ] **Step 3: Run the gate that actually exercises it.** `RefusalCount` reflects on the DLL just built, so
+- [x] **Step 3: Run the gate that actually exercises it.** `RefusalCount` reflects on the DLL just built, so
   step 2's build is its input.
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `REFUSAL-COUNT PASS, N check(s) - 5 refusals, 5 failures` with N four higher than before — the
@@ -1313,14 +1313,14 @@ gate this migration has.
   - Deferred, not closed here: **M7**, the in-game read path. `ContentProject.cs:7` imports `UnityEngine`, so
     `Load`/`LoadDeclared` run only inside the game — Task 12 closes it.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Project\ContentProject.cs tests\ObjCodecTests\RefusalCount.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "fix(project): ParseReplace reads the parsed tree, so a nested map in a row no longer breaks the row"`
 
 ---
 
 ### Task 9: `Package` onto the core, and the two projects that link `Package.cs` alone
 
-- [ ] **Step 1: Migrate `Package`.** In `src\Project\Package.cs`, replace `OwnBundle` (`:435-440`) and
+- [x] **Step 1: Migrate `Package`.** In `src\Project\Package.cs`, replace `OwnBundle` (`:435-440`) and
   `ReplaceTargets` (`:444-451`), and DELETE `Bundles` (`:453-456`):
   ```csharp
           /// <summary>The mod's OWN bundle: the "bundle" property of the ROOT object, as opposed to the ones
@@ -1357,7 +1357,7 @@ gate this migration has.
     `error CS0246: The type or namespace name 'Manifest' could not be found` and the same for `ReplaceRow`:
     `TargetPathTests.csproj:62` links `Package.cs` and nothing the new code needs.
 
-- [ ] **Step 2: Link the four files into both projects that compile `Package.cs` alone.** In
+- [x] **Step 2: Link the four files into both projects that compile `Package.cs` alone.** In
   `tests\TargetPathTests\TargetPathTests.csproj`, after the `Package.cs` line (`:62`):
   ```xml
   <Compile Include="..\..\src\Import\ImportRefused.cs" Link="ImportRefused.cs" />
@@ -1373,18 +1373,18 @@ gate this migration has.
   - Expected: last line `R0: ALL PASS`, exit 0 — with `S14-ownbundle`, `S14-order-blind` and
     `S14-order-packages` among the `PASS` lines; and `0 Error(s)` from the packager tool.
 
-- [ ] **Step 3: Build and re-run the other gate.**
+- [x] **Step 3: Build and re-run the other gate.**
   - Run: `dotnet build -c Release` then `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `0 Error(s)`; `PACKAGE-GATE PASS ...` and `MANIFEST PASS, 46 check(s)` green.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Project\Package.cs tests\TargetPathTests\TargetPathTests.csproj tools\Package\Package.csproj && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "refactor(project): Package reads its bundles off the parsed manifest instead of a depth heuristic"`
 
 ---
 
 ### Task 10: `AliasMap` and `ModelDoctor` onto `AtomicFile`, and the integral-schema fix
 
-- [ ] **Step 1: Write the failing gate.** In `tests\ObjCodecTests\AliasTests.cs`, after the empty-`bones` arm
+- [x] **Step 1: Write the failing gate.** In `tests\ObjCodecTests\AliasTests.cs`, after the empty-`bones` arm
   (`:138-143`):
   ```csharp
   // ---- AliasSidecar_SchemaMustBeIntegral: "1.5" used to cast to 1 and LOAD, so a sidecar written for a
@@ -1402,7 +1402,7 @@ gate this migration has.
   - Expected: `ALIAS FAILURE: a non-integral schema is refused and the sentence spells it as written: `
     followed by nothing — `1.5` loads clean today.
 
-- [ ] **Step 2: Fix the comparison and move the commit.** In `src\Import\AliasMap.cs` replace `:176-183`
+- [x] **Step 2: Fix the comparison and move the commit.** In `src\Import\AliasMap.cs` replace `:176-183`
   with:
   ```csharp
                   // (int) alone accepted 1.5 as 1, so a sidecar written for a schema this mod has never
@@ -1436,16 +1436,16 @@ gate this migration has.
   - `ModelDoctor` is a `Dev` panel that no offline gate reaches; its only gate here is the build. Its in-game
     check ("Write skel plan" still produces `<glb>.skel.json`) belongs to Task 12.
 
-- [ ] **Step 3: Build.** `dotnet build -c Release` → `0 Error(s)`.
+- [x] **Step 3: Build.** `dotnet build -c Release` → `0 Error(s)`.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Import\AliasMap.cs src\Dev\ModelDoctor.cs tests\ObjCodecTests\AliasTests.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "fix(import): a non-integral sidecar schema is refused, and two writers move onto AtomicFile"`
 
 ---
 
 ### Task 11: the offline gates, and the acceptance table walked
 
-- [ ] **Step 1: Name the arm honestly.** In `ManifestTests.Run()`, change the return to:
+- [x] **Step 1: Name the arm honestly.** In `ManifestTests.Run()`, change the return to:
   ```csharp
   return "MANIFEST PASS, " + checks + " check(s) - atomic write, nested rows, byte-preserving splice, " +
          "E3/E4/E5/E6/E8 refusals";
@@ -1453,7 +1453,7 @@ gate this migration has.
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: `MANIFEST PASS, 46 check(s) - atomic write, nested rows, byte-preserving splice, E3/E4/E5/E6/E8 refusals`.
 
-- [ ] **Step 2: Every build and both gates, from clean.**
+- [x] **Step 2: Every build and both gates, from clean.**
   - Run: `dotnet build -c Release` → `0 Error(s)`, 1 CS0649 warning.
   - Run: `dotnet build tools\Package\Package.csproj -c Release` → `0 Error(s)`; and
     `dotnet build tools\ClipEvents\ClipEvents.csproj -c Release`,
@@ -1464,7 +1464,7 @@ gate this migration has.
   - Run: `dotnet run --project tests\ObjCodecTests -c Release` → every line PASS, exit 0 (**M2**).
   - Run: `dotnet run --project tests\TargetPathTests -c Release` → last line `R0: ALL PASS`, exit 0 (**M3**).
 
-- [ ] **Step 3: Record the offline half of design §9.**
+- [x] **Step 3: Record the offline half of design §9.**
   - **M4** byte preservation on the BOM + CRLF fixture: `Manifest_AppendsMeshWithoutCollateralRewrite` (the
     `[` and `]` markers located independently in the before and after bytes, the old row asserted present as
     an unbroken run) + `Manifest_LoadsKnownAndUnknownTree` (the nested map read at all) + the `tricky.json`
@@ -1476,7 +1476,7 @@ gate this migration has.
   - **M7** and **M8** are NOT closed here. They are Task 12, and they are a REQUIRED ship gate — not an open
     item to hand off.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add tests\ObjCodecTests\ManifestTests.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "test(project): name what the manifest gate proves, and close the offline half of the acceptance table"`
 
 ---
@@ -1533,3 +1533,60 @@ line. `D:\PP-Instance3` is the automation install — never the user's own game.
 **Never write a `.claude\green-pending` sentinel for any step here.** Every commit above is explicit and BY
 PATH — the tree holds untracked `.zip` files and untracked import folders, so `git add -A` is forbidden
 throughout.
+
+---
+
+## Task 11 acceptance run - 2026-09-02, offline gates
+
+Real run only, on `main` at `48384c6` plus this task's own one-line arm rename. Every command below was
+run fresh from `E:\DEV\PhoenixPoint\ContentTool`; the lines are copied out of that run, not predicted.
+No game was touched — **M7** and **M8** are Task 12 and are recorded here as `pending`, not as passes.
+
+### The gates
+
+| # | Command | Last line | Exit |
+|---|---|---|---|
+| 1 | `dotnet build -c Release` | `Ошибок: 0` (`Предупреждений: 1` — the known `GlbCodec.cs(59,23) CS0649` on `SampledClip.Looping`) | 0 |
+| 2 | `dotnet run --project tests\ObjCodecTests -c Release` | `DEMO BANKS: ALL PASS, 6 check(s)`; every section line reads PASS, no line reads FAIL | 0 |
+| 3 | `dotnet run --project tests\TargetPathTests -c Release` | `R0: ALL PASS` (with `S14-ownbundle`, `S14-order-blind`, `S14-order-packages` all PASS) | 0 |
+| 4 | `dotnet build tools\Package\Package.csproj -c Release` | `Ошибок: 0`, `Предупреждений: 0` | 0 |
+| 5 | `dotnet build tools\ClipEvents\ClipEvents.csproj -c Release` | `Ошибок: 1` — `GlbReader.cs(6,27): error CS0234` on `Morgott.ContentTool.Bake`, and nothing else | 1 |
+| 6 | `dotnet build tools\SpiderAxisCheck\SpiderAxisCheck.csproj -c Release` | `Ошибок: 1` — the same single `GlbReader.cs(6,27) CS0234` | 1 |
+
+Rows 5 and 6 are the M1 measurement, not a regression: both projects carried **2** errors before this
+slice and leave it with **1**. Nothing in either error mentions `Json`, `JsonWriter`, `ImportCode` or
+`Manifest`, which is the whole claim — the migration did not widen their breakage.
+
+### The arms this slice owns, as the run actually printed them
+
+```
+REFUSAL-COUNT PASS, 16 check(s) - 5 refusals, 5 failures
+ALIAS PASS, 32 check(s) - simultaneous rename, untouched index tables, sidecar policy
+MANIFEST PASS, 53 check(s) - atomic write, nested rows, byte-preserving splice, E3/E4/E5/E6/E8 refusals
+PACKAGE-GATE PASS, 6 check(s)
+```
+
+**Deltas against this plan's own predictions.** The plan predicted `MANIFEST PASS, 46` (Task 9 step 4,
+Task 10 step 1, Task 11 step 1), `REFUSAL-COUNT ... four higher` and `ALIAS ... two higher`. The real
+counts are **53 / 16 / 32**. One reason for all three: review of each task added fixture arms beyond the
+ones the plan enumerated — the `tricky.json` non-ASCII/escaped-quote fixture and the deleted-file,
+null-replace, stale-`.tmp` and failed-commit arms among them (`ceafa8d`, `99b8589`, `b125995`). The
+predictions were written before those fixtures existed and were never revised; the arm SENTENCE is the
+contract, the integer is bookkeeping. Task 11 step 1 renamed that sentence, so the line now names what
+it proves instead of only `atomic write`.
+
+### Design §9 walked, row by row
+
+| id | Verdict | Evidence | Commit |
+|---|---|---|---|
+| M1 | PASS | gate rows 1, 4, 5, 6 above: `Ошибок: 0` for the mod and for `Package`; exactly one pre-existing `CS0234` for `ClipEvents` and `SpiderAxisCheck`, down from two | `80d9d16`, `48384c6` |
+| M2 | PASS | gate row 2: `dotnet run --project tests\ObjCodecTests -c Release`, every section PASS, exit 0 | whole slice |
+| M3 | PASS | gate row 3: `R0: ALL PASS`, exit 0, `S14-ownbundle` / `S14-order-blind` / `S14-order-packages` green after the `Package` migration | `dfa5488`, `80d9d16` |
+| M4 | PASS | `MANIFEST PASS, 53` covers `Manifest_AppendsMeshWithoutCollateralRewrite` (BOM + CRLF fixture, `[` and `]` located independently before and after, old row asserted as one unbroken byte run), `Manifest_LoadsKnownAndUnknownTree` (nested map read at all) and the `tricky.json` fixture | `b68029c`, `ef49e4f`, `85c6ed2` |
+| M5 | PASS | same arm line: `Manifest_RefusesConcurrentEdit` (E5, the external bytes survive) and `AtomicFile_WriteLeavesBakAndNoTmp` including the stale-temp and failed-commit arms | `3a2fa8c`, `ceafa8d`, `99b8589` |
+| M6 | PASS | E3 head and tail string-compared in Task 5's Validate arms; the `declares "replace"` sentence compared in full by Task 8's `Said("ParseReplace", "{\"replace\":[]}")` arm — both inside `MANIFEST PASS, 53` / `REFUSAL-COUNT PASS, 16` | `6986aed`, `428c1c9`, `b125995` |
+| M7 | **pending** | gated on Task 12 — `demos\CustomCreature` bakes, a tool-written row bakes, `Player.log` clean, Doctor "Write skel plan" — in game on `D:\PP-Instance3`. Not attempted here | — |
+| M8 | **pending** | gated on Task 12 — the owner's own eyes on the one-hunk diff of a hand-edited `ppcontent.json` | — |
+
+**The slice is not done.** Six of eight rows are closed offline; M7 and M8 are a REQUIRED ship gate, and
+the offline half being green is exactly the precondition for running them, not a substitute for it.
