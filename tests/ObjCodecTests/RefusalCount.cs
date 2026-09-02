@@ -70,6 +70,23 @@ internal static class RefusalCount
                         refusals[2].StartsWith("\"sounds\" row REFUSED", StringComparison.Ordinal) &&
                         refusals[3].StartsWith("\"publish\" row REFUSED", StringComparison.Ordinal),
             "each refusal names WHICH array the row came from: " + refusals[3]);
+
+        // ---- the TREE reader, on the shipped DLL: three shapes the regex read wrong, and the sentence.
+        checks += Check(Rows("ParseReplace",
+            "{\"replace\":[{\"bundle\":\"a.bundle\",\"asset\":\"Foo\",\"mesh\":\"body\"," +
+            "\"opts\":{\"x\":1}},{\"bundle\":\"b.bundle\",\"asset\":\"Bar]\",\"texture\":\"t\"}]}",
+            refusals) == 2 && refusals.Count == 4,
+            "a NESTED map in a row and a ']' inside a string leave BOTH rows readable, and refuse neither");
+        checks += Check(Threw("ParseReplace", "{\"replace\":[{\"bundle\":\"a.bundle\"}]}"),
+            "an incomplete row with no list to collect into still THROWS, exactly as before");
+        checks += Check(Said("ParseReplace", "{\"replace\":[]}") ==
+                        "ppcontent.json declares \"replace\" but no complete entry was read from it",
+            "and a declared-but-empty array throws THAT sentence, word for word");
+        checks += Check((Said("ParseReplace", "{\"replace\":[1]}") ?? "")
+                            .IndexOf("ARRAY OF ROWS", StringComparison.Ordinal) >= 0,
+            "a \"replace\" holding a primitive is a manifest this cannot read - with no list it THROWS, " +
+            "it does not report an empty project");
+
         checks += Check(Threw("ParsePublish", "{\"publish\":[{\"key\":\"c/d\"}]}"),
             "with no list to collect into (LoadDeclared, SoundReplace's S1 gate) the throw is unchanged");
 
@@ -105,6 +122,13 @@ internal static class RefusalCount
     {
         try { Call(method, json, null); return false; }
         catch (InvalidDataException) { return true; }
+    }
+
+    /// <summary>The sentence the parser THREW with no list to collect into, or null if it did not.</summary>
+    private static string Said(string method, string json)
+    {
+        try { Call(method, json, null); return null; }
+        catch (InvalidDataException refused) { return refused.Message; }
     }
 
     private static object Call(string method, object first, List<string> refusals)

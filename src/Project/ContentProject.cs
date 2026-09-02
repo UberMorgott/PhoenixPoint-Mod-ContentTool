@@ -375,9 +375,8 @@ namespace Morgott.ContentTool.Project
         /// NOT JsonUtility. It parses "id" and "bundle" from the same file happily but returns null
         /// for an array of custom classes here - measured twice, with the class nested+internal and
         /// then top-level+public exactly as Unity's own docs show (the deployed DLL was confirmed to
-        /// contain the top-level type, so it was not a stale build). Rather than keep guessing which
-        /// of nesting, accessibility or the private container it objects to, this reads the three
-        /// flat string fields directly. A declared entry can no longer parse to silence.
+        /// contain the top-level type, so it was not a stale build). A declared entry can no longer
+        /// parse to silence.
         /// </summary>
         /// <param name="refusals">Where an INCOMPLETE entry goes instead of ending the run. Null keeps
         /// the old throw, for the declaration-only load that has no refusal channel of its own: one
@@ -385,45 +384,42 @@ namespace Morgott.ContentTool.Project
         private static List<ShippedReplacement> ParseReplace(string json, List<string> refusals = null)
         {
             List<ShippedReplacement> list = new List<ShippedReplacement>();
-            Match arr = Regex.Match(json, "\"replace\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
-            if (!arr.Success) return list;
+            Manifest manifest;
+            try { manifest = Manifest.Parse(json); }
+            catch (InvalidDataException bad)
+            {
+                // Today's tolerance kept where there is a channel to say so - and ONLY there. Swallowing
+                // this into an empty list would report a manifest nothing can read as a project that
+                // replaces nothing, which is exactly the "refusal nobody counts" this gate exists for.
+                if (refusals == null) throw;
+                refusals.Add(bad.Message);
+                return list;
+            }
+            if (!manifest.Declares("replace")) return list;
             int marked = refusals == null ? 0 : refusals.Count;
 
-            foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
+            foreach (ReplaceRow row in manifest.Replace)
             {
-                ShippedReplacement r = new ShippedReplacement
+                // Exactly the rule the regex body asked of a raw match, asked of the parsed row instead:
+                // "bundle" and "asset" are required for every kind that LIVES in a bundle, and video does
+                // not - the cutscenes are loose files behind a side catalog, and a video entry with no
+                // "asset" names no shipped clip because it ADDS one (see ShippedReplacement.video). A
+                // non-string field is NOT refused here: the read side has always treated it as absent,
+                // and the refusal that follows from the missing kind already says so.
+                string kind = row.Kind;
+                bool needsBundle = kind != "video";
+                if (kind == null ||
+                    (needsBundle && (string.IsNullOrEmpty(row.Bundle) || string.IsNullOrEmpty(row.Asset))))
                 {
-                    bundle = Field(o.Value, "bundle"),
-                    asset = Field(o.Value, "asset"),
-                    texture = Field(o.Value, "texture"),
-                    material = Field(o.Value, "material"),
-                    mesh = Field(o.Value, "mesh"),
-                    clip = Field(o.Value, "clip"),
-                    video = Field(o.Value, "video")
-                };
-                int kinds = (string.IsNullOrEmpty(r.texture) ? 0 : 1) +
-                            (string.IsNullOrEmpty(r.material) ? 0 : 1) +
-                            (string.IsNullOrEmpty(r.mesh) ? 0 : 1) +
-                            (string.IsNullOrEmpty(r.clip) ? 0 : 1) +
-                            (string.IsNullOrEmpty(r.video) ? 0 : 1);
-                // "bundle" is required for every kind that LIVES in a bundle. Video does not: the
-                // cutscenes are loose files behind a side catalog, so a video entry that named one
-                // would be naming something that does not exist.
-                // ...and "asset" is required for everything but "video" too: a video entry with no
-                // "asset" names no shipped clip because it ADDS one (see ShippedReplacement.video).
-                bool needsBundle = string.IsNullOrEmpty(r.video);
-                if ((needsBundle && string.IsNullOrEmpty(r.bundle)) ||
-                    (needsBundle && string.IsNullOrEmpty(r.asset)) || kinds != 1)
-                {
-                    string why =
-                        "\"replace\" row REFUSED: every entry needs exactly one of \"texture\", \"material\", " +
-                        "\"mesh\", \"clip\" or \"video\", plus \"bundle\" and \"asset\" for everything but " +
-                        "\"video\" (a \"video\" entry with no \"asset\" ADDS a new clip); got " + o.Value +
-                        " - SKIPPED, this project's other rows still bake";
+                    string why = Manifest.RowRefusal(row);
                     if (refusals == null) throw new InvalidDataException(why);
                     refusals.Add(why); continue;
                 }
-                list.Add(r);
+                list.Add(new ShippedReplacement
+                {
+                    bundle = row.Bundle, asset = row.Asset, texture = row.Texture,
+                    material = row.Material, mesh = row.Mesh, clip = row.Clip, video = row.Video
+                });
             }
             if (list.Count == 0 && (refusals == null || refusals.Count == marked))
             {
