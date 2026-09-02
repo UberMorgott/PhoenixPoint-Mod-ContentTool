@@ -34,6 +34,8 @@
     <Compile Include="BinderFrozen.cs" />
     <Compile Include="DecisionGolden.cs" />
     <Compile Include="AliasTests.cs" />
+    <Compile Include="..\..\src\IO\AtomicFile.cs" Link="AtomicFile.cs" />
+    <Compile Include="ManifestTests.cs" />
     <Compile Include="PreflightTests.cs" />
     <!-- The PROTOTYPE CATALOG carries no UnityEngine type on purpose, so which rigs are one binding
          prototype - and that Crabman and Oilcrab are NOT, despite 34 shared names - is proven against
