@@ -12,5 +12,12 @@
          rule the offline gate measures have to be the same code, or the gate proves nothing about
          what ships. Deliberately free of UnityEngine types, same arrangement as tests\. -->
     <Compile Include="..\..\src\Project\Package.cs" Link="Package.cs" />
+    <!-- What Package now reads its bundles off: the manifest core, its JSON parser, the refusal that
+         parser throws, and the atomic write ManifestFile commits through. Same UnityEngine-free set
+         tests\TargetPathTests links, for the same reason. -->
+    <Compile Include="..\..\src\Import\ImportRefused.cs" Link="ImportRefused.cs" />
+    <Compile Include="..\..\src\Import\Json.cs" Link="Json.cs" />
+    <Compile Include="..\..\src\IO\AtomicFile.cs" Link="AtomicFile.cs" />
+    <Compile Include="..\..\src\Project\Manifest.cs" Link="Manifest.cs" />
   </ItemGroup>
 </Project>

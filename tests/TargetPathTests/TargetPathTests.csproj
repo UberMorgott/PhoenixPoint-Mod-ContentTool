@@ -60,6 +60,13 @@
          save that refuses after a gun has already been dialled in by eye. -->
     <Compile Include="..\..\src\Dev\BenchList.cs" Link="BenchList.cs" />
     <Compile Include="..\..\src\Project\Package.cs" Link="Package.cs" />
+    <!-- What Package now reads its bundles off: the manifest core, its JSON parser, the refusal that
+         parser throws, and the atomic write ManifestFile commits through. All four are deliberately
+         free of UnityEngine types, same arrangement as everything above. -->
+    <Compile Include="..\..\src\Import\ImportRefused.cs" Link="ImportRefused.cs" />
+    <Compile Include="..\..\src\Import\Json.cs" Link="Json.cs" />
+    <Compile Include="..\..\src\IO\AtomicFile.cs" Link="AtomicFile.cs" />
+    <Compile Include="..\..\src\Project\Manifest.cs" Link="Manifest.cs" />
     <Compile Include="..\..\src\Project\PatchCache.cs" Link="PatchCache.cs" />
   </ItemGroup>
 </Project>

@@ -80,10 +80,12 @@ namespace Morgott.ContentTool.Project
                        "shipped by accident.";
 
             string manifestText = File.ReadAllText(manifest);
-            // A MANIFEST NOBODY CAN READ IS A MOD THAT DOES NOTHING. Everything below only ever
-            // SCRAPES this text, so a zero-byte or half-typed file declares no rung, matches no
-            // regex, and sails through as a package that installs and sits there. The runtime reader
-            // is the one that would refuse it - on the player's machine, hours later.
+            // A MANIFEST NOBODY CAN READ IS A MOD THAT DOES NOTHING. A zero-byte or half-typed file
+            // declares no rung, matches no regex and parses into no bundle, so without this gate it
+            // sails through as a package that installs and sits there. The runtime reader is the one
+            // that would refuse it - on the player's machine, hours later. Balanced braces are all
+            // this check asks: it runs BEFORE OwnBundle/ReplaceTargets parse, and those two answer
+            // "nothing declared" for a manifest that is merely balanced rather than valid.
             if (manifestText.Trim().Length == 0 || Depth(manifestText, manifestText.Length) != 0)
                 return "REFUSED: " + manifest + " is EMPTY OR NOT VALID JSON - its braces and brackets " +
                        "do not close. ContentTool reads that file to learn what this mod replaces, " +
@@ -430,39 +432,40 @@ namespace Morgott.ContentTool.Project
             }
         }
 
-        /// <summary>The mod's OWN bundle: the "bundle" property of the ROOT object, as opposed to the
-        /// ones nested inside "replace" entries (the shipped targets).</summary>
+        /// <summary>The mod's OWN bundle: the "bundle" property of the ROOT object, as opposed to the ones
+        /// nested inside "replace" entries (the shipped targets). Read from the parsed tree, so property
+        /// ORDER cannot change the answer (S14-order-blind) and a "bundle" key inside any other nested
+        /// block is mistaken for neither.</summary>
         internal static string OwnBundle(string manifestText)
         {
-            foreach (Match m in Bundles(manifestText))
-                if (Depth(manifestText, m.Index) == 1) return m.Groups[1].Value;
-            return null;
+            try { return Manifest.Parse(manifestText).Bundle; }
+            catch (InvalidDataException) { return null; }
         }
 
-        /// <summary>The SHIPPED bundles the project declares as replacement targets - named in the
-        /// refusal, so an author who dropped one in sees why that particular file is the problem.</summary>
+        /// <summary>The SHIPPED bundles the project declares as replacement targets - named in the refusal,
+        /// so an author who dropped one in sees why that file is the problem. A manifest that will not
+        /// PARSE declares no target here; Package.cs:87 is a coarser gate that refuses only a manifest
+        /// whose braces and brackets do not close, not one that fails to parse.</summary>
         internal static List<string> ReplaceTargets(string manifestText)
         {
             List<string> targets = new List<string>();
-            foreach (Match m in Bundles(manifestText))
-                if (Depth(manifestText, m.Index) > 1 && !targets.Contains(m.Groups[1].Value))
-                    targets.Add(m.Groups[1].Value);
+            try
+            {
+                foreach (ReplaceRow row in Manifest.Parse(manifestText).Replace)
+                    if (!string.IsNullOrEmpty(row.Bundle) && !targets.Contains(row.Bundle))
+                        targets.Add(row.Bundle);
+            }
+            catch (InvalidDataException) { }
             return targets;
         }
 
-        private static MatchCollection Bundles(string manifestText)
-        {
-            return Regex.Matches(manifestText ?? "", "\"bundle\"\\s*:\\s*\"([^\"]+)\"");
-        }
-
         /// <summary>
-        /// How deeply nested the text at <paramref name="at"/> sits: 1 = a property of the root
-        /// object, 3 = a property of an object inside a root-level array.
+        /// How deeply nested the text at <paramref name="at"/> sits: 0 at the end of a balanced text.
         ///
-        /// Structural, because JSON property order is NOT significant: the runtime manifest reader
-        /// takes "bundle" and "replace" in either order, so a manifest that writes "replace" first is
-        /// the same manifest - and it used to make OwnBundle answer null and the packager refuse the
-        /// mod's own bundle as if it were the game's.
+        /// The ONE remaining caller is <see cref="Run"/>'s balanced-brace gate (`:87`), which runs before
+        /// anything parses and refuses a manifest whose braces and brackets do not close. The bundle
+        /// readers no longer use it: they read the parsed tree, where nesting is structure rather than a
+        /// count of characters.
         /// </summary>
         private static int Depth(string text, int at)
         {
