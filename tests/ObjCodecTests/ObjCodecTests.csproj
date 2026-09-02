@@ -35,6 +35,7 @@
     <Compile Include="DecisionGolden.cs" />
     <Compile Include="AliasTests.cs" />
     <Compile Include="..\..\src\IO\AtomicFile.cs" Link="AtomicFile.cs" />
+    <Compile Include="..\..\src\Project\Manifest.cs" Link="Manifest.cs" />
     <Compile Include="ManifestTests.cs" />
     <Compile Include="PreflightTests.cs" />
     <!-- The PROTOTYPE CATALOG carries no UnityEngine type on purpose, so which rigs are one binding
