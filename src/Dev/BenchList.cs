@@ -375,23 +375,6 @@ namespace Morgott.ContentTool.Dev
             return StripShown(screenW, screenH, panelW) ? StripHeight : 0f;
         }
 
-        /// <summary>
-        /// The strip's hit rectangle, in the mouse's own convention (y measured from the BOTTOM of the
-        /// screen, which is what <c>Input.mousePosition</c> hands over).
-        ///
-        /// It is the WHOLE BAND right of the panel and below the strip's top edge, not just the drawn
-        /// controls: a drag that begins on the scrub slider and wanders two pixels below it must not
-        /// suddenly become an orbit. The panel's own column is deliberately NOT in it - the panel wins
-        /// there, as it always has - and neither is anything above the band, which stays the gizmo's
-        /// and the orbit's.
-        /// </summary>
-        internal static bool OverStrip(float mouseX, float mouseY, float screenW, float screenH, float panelW)
-        {
-            if (!StripShown(screenW, screenH, panelW)) return false;
-            if (float.IsNaN(mouseX) || float.IsNaN(mouseY)) return false;
-            return mouseX > panelW && mouseY >= 0f && mouseY <= StripHeight;
-        }
-
         /// <summary>The same band in IMGUI's convention (y from the TOP): everything at or below this
         /// line belongs to the transport. <c>float.MaxValue</c> when there is no strip, so a caller can
         /// compare against it unconditionally.</summary>
@@ -679,13 +662,6 @@ namespace Morgott.ContentTool.Dev
             if (f < 0.25f) f = 0.25f;                 // a trackpad can hand over a huge notch count
             if (f > 4f) f = 4f;
             return Clamp(zoom * f, ZoomMin, ZoomMax);
-        }
-
-        /// <summary>Is the pointer over the 3D half of the screen? Mouse input must NEVER act while the
-        /// cursor is on the panel, or dragging a scrollbar would also swing the camera.</summary>
-        internal static bool OverScene(float mouseX, float panelW)
-        {
-            return mouseX > panelW;
         }
 
         // ================================================================ the drag gizmo's algebra

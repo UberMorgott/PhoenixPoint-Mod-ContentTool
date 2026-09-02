@@ -249,7 +249,7 @@ namespace Morgott.ContentTool.Dev
         private static bool advanced;
         /// <summary>
         /// The PREVIEW model scale: a multiplier on the pose the game itself chose for the displayed
-        /// character, and nothing else. It is a view knob exactly like <see cref="zoom"/> and
+        /// character, and nothing else. It is a view knob exactly like <see cref="view"/> and
         /// <see cref="lift"/> - it is written into no def, no manifest and no save, and Close puts
         /// <c>SceneRoot.localScale</c> back off the open-time snapshot regardless of it. Its one job is
         /// the judgement no number can make: is this foreign model the right SIZE next to a soldier.
@@ -311,14 +311,21 @@ namespace Morgott.ContentTool.Dev
         private static readonly List<Held> cameras = new List<Held>();
         private static Vector3 framePos; private static Quaternion frameRot;
         private static bool framed;
-        /// <summary>The two calibration knobs, remembered for the session and nowhere else. Framing is
-        /// an eyeball judgement - the algebra puts the unit inside the free region, it cannot know how
-        /// much air around him reads as "well framed" - so zoom and lift are nudged live.</summary>
-        private static float zoom = BenchList.ZoomDefault, lift = 0f;
-        /// <summary>The orbit the mouse drives, as offsets ON TOP of the bay's own authored look
-        /// direction: yaw about world up, pitch about the camera's own right. Both are knobs like
-        /// zoom and lift, and RESET VIEW puts all four back.</summary>
-        private static float yaw, pitch;
+        /// <summary>The lift knob, remembered for the session and nowhere else. Framing is an eyeball
+        /// judgement - the algebra puts the unit inside the free region, it cannot know how much air
+        /// around him reads as "well framed" - so it is nudged live, in RADII.</summary>
+        private static float lift = 0f;
+        /// <summary>
+        /// THE VIEW ITSELF: yaw about world up, pitch about the camera's own right, and zoom as the
+        /// framing margin, all as offsets ON TOP of the bay's own authored look direction. One instance,
+        /// shared by every tab, because there is one camera and one viewport however many tabs are drawn
+        /// into the panel beside it.
+        ///
+        /// Its values are DAMPED (OrbitCamera.Tick, driven from Arm.Update), so every gesture writes a
+        /// target and the pose eases toward it. Nothing outside Arm may write them: RESET VIEW goes
+        /// through Reset, the panel's buttons through WheelAt, the mouse through OrbitBy.
+        /// </summary>
+        private static readonly OrbitCamera view = new OrbitCamera();
         private static float frameRadius;
         /// <summary>
         /// ============ THE FREE CAMERA, AND WHY IT IS ONE VECTOR ============
@@ -527,7 +534,7 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         private static string ResetView()
         {
-            zoom = BenchList.ZoomDefault; lift = 0f; yaw = 0f; pitch = 0f; pan = Vector3.zero;
+            view.Reset(); lift = 0f; pan = Vector3.zero;
             // The preview scale is a view knob like the four above, so RESET VIEW puts it back with
             // them. The transform it multiplies is re-asserted by the next Posed, and by Close either
             // way.
@@ -752,7 +759,7 @@ namespace Morgott.ContentTool.Dev
                 BenchList.Frame(frameRadius, cam.fieldOfView, Screen.width, Screen.height,
                                 PanelWidth,
                                 BenchList.StripReserve(Screen.width, Screen.height, PanelWidth),
-                                zoom, out distance, out lateral, out vertical);
+                                view.Zoom, out distance, out lateral, out vertical);
 
                 // THE ORBIT. The bay's authored look direction is still the starting point - the angle
                 // an artist chose for this very scene - and the mouse adds a yaw about world up and a
@@ -760,7 +767,8 @@ namespace Morgott.ContentTool.Dev
                 // "aim point, minus forward times distance", turning the rotation IS orbiting the
                 // camera around the unit: the aim point never moves, so the model stays the centre.
                 Quaternion look = bay.CameraLookFrom != null ? bay.CameraLookFrom.rotation : Original(cam);
-                Quaternion rot = Quaternion.Euler(0f, yaw, 0f) * look * Quaternion.Euler(pitch, 0f, 0f);
+                Quaternion rot = Quaternion.Euler(0f, view.Yaw, 0f) * look *
+                                 Quaternion.Euler(view.Pitch, 0f, 0f);
                 Vector3 fwd = rot * Vector3.forward, right = rot * Vector3.right, up = rot * Vector3.up;
                 // lift is in RADII, not metres - the same press has to mean the same thing on a soldier
                 // and on something three times his size. The pan is already in metres and in world
@@ -801,6 +809,26 @@ namespace Morgott.ContentTool.Dev
             pan -= (frameRot * Vector3.right) * (dxPixels * mpp) +
                    (frameRot * Vector3.up) * (dyPixels * mpp);
             Reframe();
+        }
+
+        /// <summary>
+        /// The other half of a wheel notch: the PIVOT's own step toward the point under the cursor, so
+        /// that point does not slide out from under it as the camera comes in. The metres come from
+        /// <see cref="OrbitCamera.ZoomShift"/>; the only thing done here is turning them into a world
+        /// offset with the camera's own right and up, exactly as <see cref="PanBy"/> does.
+        ///
+        /// It is called ONCE PER FRAME with the zoom step that frame actually took, not once per notch,
+        /// because the zoom is damped: the pivot has to travel over the same frames the distance shrinks
+        /// over. <c>frameDist</c> is the distance the LAST Reframe computed, which is why this runs
+        /// before the Reframe that follows it and not after.
+        /// </summary>
+        private static void ZoomAnchor(float before, float after)
+        {
+            if (cam == null || !framed || Math.Abs(after - before) < 1e-6f) return;
+            float right, up;
+            OrbitCamera.ZoomShift(before, after, view.AnchorX, view.AnchorY,
+                                  frameDist, cam.fieldOfView, Screen.height, out right, out up);
+            pan += (frameRot * Vector3.right) * right + (frameRot * Vector3.up) * up;
         }
 
         /// <summary>
@@ -1295,6 +1323,15 @@ namespace Morgott.ContentTool.Dev
         /// because <see cref="Fly"/> runs from Update and the IMGUI focus API may only be called inside
         /// OnGUI - out of context it throws, the Update guard swallows it, and flying never runs.</summary>
         private static bool typing;
+        /// <summary>Whether any IMGUI control held <c>hotControl</c> during the LAST OnGUI pass, i.e.
+        /// "some control has grabbed the mouse and this drag is its". It is the gate that lets a control
+        /// DRAWN OVER the viewport - a gizmo handle, the Doctor's future overlay buttons - keep a drag
+        /// the rect test would otherwise hand to the camera.
+        ///
+        /// One frame old on purpose, and that is safe here but not everywhere: Unity runs every Update
+        /// before any OnGUI, so on the frame of a PRESS nothing has claimed hotControl yet. That is
+        /// exactly why FitGizmo is also asked directly (WouldGrab) at the press - see Mouse().</summary>
+        private static bool guiHot;
         /// <summary>The two def lists are pickers: used once, then in the way. Each folds itself shut
         /// the moment something is picked from it, and its header re-opens it.</summary>
         private static bool unitsOpen = true, weaponsOpen = true;
@@ -1409,8 +1446,8 @@ namespace Morgott.ContentTool.Dev
             {
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("view", GUILayout.Width(40f));
-                if (GUILayout.Button("in"))      { zoom = BenchList.Wheel(zoom, 1f); Reframe(); }
-                if (GUILayout.Button("out"))     { zoom = BenchList.Wheel(zoom, -1f); Reframe(); }
+                if (GUILayout.Button("in"))      view.WheelAt(1f, 0f, 0f);
+                if (GUILayout.Button("out"))     view.WheelAt(-1f, 0f, 0f);
                 if (GUILayout.Button("up"))      { lift = BenchList.Clamp(lift - BenchList.LiftStep,
                                                                          BenchList.LiftMin, BenchList.LiftMax); Reframe(); }
                 if (GUILayout.Button("down"))    { lift = BenchList.Clamp(lift + BenchList.LiftStep,
@@ -1470,13 +1507,13 @@ namespace Morgott.ContentTool.Dev
                 GUILayout.Label(
                     (FitGizmo.Live ? "ARROWS on the gun = move it, RINGS = turn it about that axis (Esc " +
                                      "cancels; a dimmed handle is edge-on to the camera). " : "handles OFF. ") +
-                    "drag = orbit, wheel = zoom, right-drag = turn the model, MIDDLE-drag = pan, " +
-                    "WASD/QE (Shift = faster) = fly." +
+                    "MIDDLE-drag = orbit (Alt+left too), SHIFT+middle = pan, wheel = zoom at the " +
+                    "cursor, F = frame, Home = reset, WASD/QE (Shift = faster) = fly." +
                     (advanced
-                        ? "  x" + zoom.ToString("0.00", CultureInfo.InvariantCulture) +
+                        ? "  x" + view.Zoom.ToString("0.00", CultureInfo.InvariantCulture) +
                           " lift " + lift.ToString("0.00", CultureInfo.InvariantCulture) +
-                          " yaw " + yaw.ToString("0", CultureInfo.InvariantCulture) +
-                          " pitch " + pitch.ToString("0", CultureInfo.InvariantCulture) +
+                          " yaw " + view.Yaw.ToString("0", CultureInfo.InvariantCulture) +
+                          " pitch " + view.Pitch.ToString("0", CultureInfo.InvariantCulture) +
                           " r " + frameRadius.ToString("0.00", CultureInfo.InvariantCulture) + "m"
                         : ""));
         }
@@ -1763,8 +1800,8 @@ namespace Morgott.ContentTool.Dev
         {
             private bool inputBroken;
             private float lastX, lastY;
-            /// <summary>Whether the drag in progress began on the 3D half. See <see cref="Mouse"/>.</summary>
-            private bool dragging;
+            /// <summary>Which gesture the drag in progress is, latched at the press. See <see cref="Mouse"/>.</summary>
+            private ViewGesture gesture;
 
             /// <summary>The toggle press. Both halves matter: the key must not be one the game already
             /// answers to - or the press does two things and only one of them is ours - and it must be
@@ -1813,6 +1850,12 @@ namespace Morgott.ContentTool.Dev
                     if (!open || bay == null || bay.SceneRoot == null) return;
                     Mouse();
                     Fly();
+                    // THE ONE PLACE THE VIEW IS RECOMPUTED for the mouse: everything above only wrote
+                    // targets. ZoomAnchor runs first because it needs the distance the LAST Reframe
+                    // computed, and Reframe is about to replace it; and both run only when something
+                    // actually moved, so a settled camera costs one subtraction a frame.
+                    float wasZoom = view.Zoom;
+                    if (view.Tick(Time.deltaTime)) { ZoomAnchor(wasZoom, view.Zoom); Reframe(); }
                 }
                 catch (Exception ex)
                 {
@@ -1827,87 +1870,78 @@ namespace Morgott.ContentTool.Dev
             /// <summary>
             /// ============ THE MOUSE, AND THE ONE PLACE IT IS ALLOWED TO ACT ============
             ///
-            /// Left-drag ORBITS THE CAMERA around the unit, wheel zooms, right-drag still turns the
-            /// model itself. The keyboard knobs in the panel are untouched and remain the fallback -
-            /// they are also the only way to work if a build has legacy Input disabled.
+            /// The 3D-editor scheme, identical on every tab: MIDDLE-drag orbits about the focus point,
+            /// SHIFT+MIDDLE pans, the wheel zooms TOWARD THE CURSOR, ALT+LEFT orbits for a mouse with no
+            /// middle button, and the LEFT button is left alone so it can PICK - FitGizmo's handles
+            /// today, the Doctor's skeleton overlay in slice 2. Right-drag no longer turns the model:
+            /// orbiting answers the same question ("how does the far side look") without a second piece
+            /// of state for RESET VIEW to put back, and the bay's own SceneRoot rotation is now touched
+            /// by nothing but Close and RESET VIEW.
             ///
-            /// EVERY branch is gated on <see cref="BenchList.OverScene"/>, i.e. on the pointer being on
-            /// the 3D half of the screen. Without it, dragging the panel's own scrollbar or holding a
-            /// repeat button would swing the camera at the same time, and a wheel over the weapon list
-            /// would scroll the list AND zoom.
+            /// THREE GATES, and all three are load-bearing:
+            ///   - the pointer is inside the VIEWPORT RECT (OrbitCamera.InViewport: right of the panel,
+            ///     above the transport strip), or dragging the panel's own scrollbar would swing the
+            ///     camera and a wheel over the weapon list would scroll the list AND zoom;
+            ///   - no floating list is under it (FitAnim.OverList) - the clip list opens UPWARD out of
+            ///     the strip and over the scene, so its pixels are not the viewport's;
+            ///   - no IMGUI control holds hotControl (guiHot, latched at the end of OnGUI), which is how
+            ///     a control drawn OVER the viewport says "this drag is mine".
             ///
-            /// Both drags accumulate through <see cref="BenchList"/>'s clamped helpers, so neither can
-            /// walk the view somewhere there is no way back from - which is the whole lesson of the
-            /// unbounded 'lift' this replaces.
+            /// WHICH GESTURE is decided once, at the press (OrbitCamera.Classify), and held for the
+            /// whole drag: a drag that changed its mind because Shift was let go half way through is a
+            /// camera that jumps. That latch is also what keeps a drag begun on the panel from grabbing
+            /// the camera when the pointer wanders over the model.
+            ///
+            /// Nothing here moves the view. Every gesture writes a TARGET and Arm.Update's one
+            /// OrbitCamera.Tick walks the live values toward it, which is the whole of the easing.
             /// </summary>
             private void Mouse()
             {
-                // A FOURTH REGION. The order is panel -> transport strip -> gizmo -> orbit, and the
-                // strip is subtracted here for the same reason the panel is: a drag on the scrub
-                // slider that wanders a pixel below it must move the clip, never the camera.
-                bool over = BenchList.OverScene(Input.mousePosition.x, PanelWidth) &&
-                            !BenchList.OverStrip(Input.mousePosition.x, Input.mousePosition.y,
-                                                 Screen.width, Screen.height, PanelWidth) &&
-                            // A FIFTH REGION, and only while it exists: the clip list opens UPWARD out
-                            // of the strip and over the scene, so without this a click on a clip would
-                            // pick the clip AND start an orbit.
-                            !FitAnim.OverList(Input.mousePosition.x, Input.mousePosition.y);
+                float mx = Input.mousePosition.x, my = Input.mousePosition.y;
+                bool over = OrbitCamera.InViewport(mx, my, Screen.width, Screen.height, PanelWidth) &&
+                            !FitAnim.OverList(mx, my) && !guiHot;
 
                 float wheel = Input.mouseScrollDelta.y;
                 if (over && Mathf.Abs(wheel) > 0.01f)
                 {
-                    zoom = BenchList.Wheel(zoom, wheel);
-                    Reframe();
+                    // The anchor is the cursor's offset from the centre of the FREE REGION, because that
+                    // is the point Reframe aims at - the lateral and vertical offsets it computes are
+                    // exactly what puts the aim point in the middle of the part of the screen the panel
+                    // and the strip do not cover.
+                    view.WheelAt(wheel,
+                                 mx - (PanelWidth + Screen.width) * 0.5f,
+                                 my - (BenchList.StripReserve(Screen.width, Screen.height, PanelWidth) +
+                                       Screen.height) * 0.5f);
                 }
 
-                if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) ||
-                    Input.GetMouseButtonDown(2))
+                if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(2))
                 {
                     // THE GIZMO GETS FIRST REFUSAL ON A LEFT PRESS, and it has to be ASKED rather than
                     // consulted through FitGizmo.Owns: Unity runs every Update before any OnGUI, so on
-                    // the frame of the press the handles have not claimed hotControl yet and Owns is
-                    // still false. Without this, a press on an arrow started an orbit AND a drag, and
-                    // the model swung while the gun was being moved.
-                    dragging = over && !(Input.GetMouseButtonDown(0) &&
-                                         FitGizmo.WouldGrab(Input.mousePosition.x, Input.mousePosition.y));
+                    // the frame of the press the handles have not claimed hotControl yet and Owns - like
+                    // guiHot - is still false.
+                    gesture = OrbitCamera.Classify(
+                        over, Input.GetMouseButton(0), Input.GetMouseButton(2),
+                        Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt),
+                        Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift),
+                        FitGizmo.WouldGrab(mx, my));
                     // Clicking the model is how a user says "I am done typing" - IMGUI will not work
                     // that out on its own, and a filter that keeps the keyboard keeps the fly keys.
                     if (over) dropFocus = true;
-                    lastX = Input.mousePosition.x;
-                    lastY = Input.mousePosition.y;
+                    lastX = mx; lastY = my;
                 }
                 // And for every frame AFTER the press, the latched claim is the answer.
-                if (FitGizmo.Owns) { dragging = false; return; }
-                if (!Input.GetMouseButton(0) && !Input.GetMouseButton(1) && !Input.GetMouseButton(2))
-                { dragging = false; return; }
-                // A drag that STARTED on the panel keeps its grip there even when the pointer wanders
-                // over the model - otherwise letting go of a scrollbar past the panel edge would snap
-                // the camera round.
-                if (!dragging) return;
+                if (FitGizmo.Owns) { gesture = ViewGesture.None; return; }
+                if (!Input.GetMouseButton(0) && !Input.GetMouseButton(2))
+                { gesture = ViewGesture.None; return; }
+                if (gesture == ViewGesture.None) return;
 
-                float dx = Input.mousePosition.x - lastX, dy = Input.mousePosition.y - lastY;
-                lastX = Input.mousePosition.x;
-                lastY = Input.mousePosition.y;
+                float dx = mx - lastX, dy = my - lastY;
+                lastX = mx; lastY = my;
                 if (Mathf.Abs(dx) < 0.01f && Mathf.Abs(dy) < 0.01f) return;
 
-                // MIDDLE-DRAG PANS, and it is asked before the other two: it moves the pivot with the
-                // camera, which is the only gesture that gets a zoomed-in view off the inside of the
-                // body and onto the gun.
-                if (Input.GetMouseButton(2)) { PanBy(dx, dy); return; }
-
-                if (Input.GetMouseButton(1))
-                {
-                    // The bay's own SceneRoot is what the game itself turns (GeoSquadBayReference
-                    // remembers SceneDefaultRotation off it), and both Close and RESET VIEW put the
-                    // rotation back. Kept because turning the MODEL and orbiting the CAMERA answer
-                    // different questions - "how does the far side look" versus "how does it look from
-                    // over there" - and they no longer fight: separate buttons, separate state.
-                    bay.SceneRoot.Rotate(Vector3.up, -dx * 0.4f, Space.World);
-                    return;
-                }
-                yaw = BenchList.Orbit(yaw, dx);
-                pitch = BenchList.Tilt(pitch, dy);
-                Reframe();
+                if (gesture == ViewGesture.Pan) { PanBy(dx, dy); return; }
+                view.OrbitBy(dx, dy);
             }
 
             /// <summary>The computed pose, re-asserted after everything else has had its turn. LATE
@@ -1988,6 +2022,8 @@ namespace Morgott.ContentTool.Dev
                     // AFTER the panel, and outside its area: the strip is its own region and IMGUI
                     // areas do not nest.
                     FitAnim.Draw(PanelWidth);
+                    // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.
+                    guiHot = GUIUtility.hotControl != 0;
                 }
                 catch (Exception ex)
                 {

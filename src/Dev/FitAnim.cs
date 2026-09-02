@@ -498,7 +498,7 @@ namespace Morgott.ContentTool.Dev
                             " / " + length.ToString("0.00", CultureInfo.InvariantCulture) + "s",
                             GUILayout.Width(90f));
             // The scrub. Dragging it takes IMGUI's hotControl like any other control, and the band it
-            // sits in is refused to the orbit and to the gizmo (BenchList.OverStrip), so a drag here
+            // sits in is refused to the orbit and to the gizmo (OrbitCamera.InViewport), so a drag here
             // can never also swing the camera.
             float v = GUILayout.HorizontalSlider(t, 0f, 1f);
             if (Math.Abs(v - t) > 1e-5f) { t = BenchList.Normalized(v); playing = false; }
