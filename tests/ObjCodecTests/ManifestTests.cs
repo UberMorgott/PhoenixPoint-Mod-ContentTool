@@ -268,6 +268,25 @@ internal static class ManifestTests
             checks += Check(Holds(trickyNow, headWas) && Holds(trickyNow, tailWas) &&
                             Holds(trickyNow, utf8.GetBytes("\"Fo\\\"o\"")),
                             "everything before and after the array - the two-byte 'e-acute' included - is byte-identical");
+
+            // ---- Manifest_RefusesConcurrentEdit: V8/E5. The author's own edit wins, always.
+            string race = Path.Combine(dir, "race.json");
+            File.WriteAllBytes(race, Bytes(false, Crlf.Replace("\r\n", "\n")));
+            ManifestFile held = ManifestFile.Load(race);
+            byte[] external = Bytes(false, Crlf.Replace("\r\n", "\n").Replace("\"swatch\"", "\"swatch2\""));
+            File.WriteAllBytes(race, external);
+            held.Manifest.AddMeshReplacement("b.bundle", "Torso", "torso");
+            string raced = null;
+            try { held.Save(); }
+            catch (IOException clash) { raced = clash.Message; }
+            checks += Check(raced == "'" + race + "' changed on disk since it was loaded, so nothing was " +
+                                     "written - reload it and add the row again",
+                            "E5 verbatim, and it names the path: " + raced);
+            checks += Check(Same(File.ReadAllBytes(race), external),
+                            "the EXTERNAL bytes are what remains - the tool did not overwrite a live edit");
+            checks += Check(Temps(dir).Length == 0 && !File.Exists(race + ".bak"),
+                            "the refusal happened before AtomicFile ran, so there is neither a temp nor a .bak");
+
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "MANIFEST PASS, " + checks + " check(s) - atomic write";
