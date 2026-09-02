@@ -39,6 +39,7 @@
          prototype - and that Crabman and Oilcrab are NOT, despite 34 shared names - is proven against
          the live 2551-transform census here instead of by baking a mesh onto the wrong creature. -->
     <Compile Include="..\..\src\Doctor\PrototypeCatalog.cs" Link="PrototypeCatalog.cs" />
+    <Compile Include="..\..\src\Doctor\PrototypeTarget.cs" Link="PrototypeTarget.cs" />
     <Compile Include="CatalogTests.cs" />
     <Compile Include="MaterialBake.cs" />
     <Compile Include="MaterialTweakFixture.cs" />

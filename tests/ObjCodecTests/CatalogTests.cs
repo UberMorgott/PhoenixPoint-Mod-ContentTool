@@ -171,7 +171,35 @@ internal static class CatalogTests
         checks += Check(PrototypeCatalog.Search(all, "crab zzz").Count == 0,
                         "'crab zzz' finds nothing - every token has to match");
 
+        // ---- WHAT THE DOCTOR ACTUALLY VERIFIES AGAINST. Replace reads the LIVE renderer's own bone
+        // list (a Human head slot measured 21 of the rig's 124), Extend reads the prototype's
+        // bindable set - and a duplicated name blocks only the slot that really references it, so
+        // the Armadillo's second 'light' never costs its turret a verdict.
+        PrototypeRecord armadillo = Find(all, "VEH_NJ_Armadillo_Rig_Ready");
+        var extend = new PrototypeTarget { Record = armadillo, Mode = VerifyMode.Extend };
+        checks += Check(extend.BoneNames() == armadillo.BindableBones,
+                        "Extend verifies against the prototype's bindable bones");
+        checks += Check(extend.BlockingAmbiguous(new[] { "Root", "Hips" }).Count == 0,
+                        "a slot that never names 'light' is not blocked by it");
+        checks += Check(Only(extend.BlockingAmbiguous(new[] { "Root", "light" }), "light"),
+                        "a slot that DOES name 'light' is blocked by it");
+        var replace = new PrototypeTarget
+        {
+            Record = armadillo,
+            Mode = VerifyMode.Replace,
+            Live = new RigTarget { BoneNames = new[] { "Root", "light" } }
+        };
+        checks += Check(replace.BoneNames().Count == 2 && replace.BoneNames()[1] == "light",
+                        "Replace verifies against the live renderer's own bone list, never the whole rig");
+        checks += Check(new PrototypeTarget { Record = armadillo, Mode = VerifyMode.Replace }.BoneNames() == null,
+                        "a Replace target with no renderer offers no bone list to fabricate one from");
+
         return "CATALOG PASS, " + checks + " check(s) - 37 rigs, 36 binding prototypes, off the live census";
+    }
+
+    private static bool Only(IList<string> names, string one)
+    {
+        return names.Count == 1 && names[0] == one;
     }
 
     private static IList<PrototypeBone> Bones(IList<RigScan> rigs, string rigName)

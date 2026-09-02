@@ -103,7 +103,52 @@ internal static class BinderFrozen
         checks += Check(new ImportRefusedException(ImportCode.NoNormals, "x") is FormatException,
                         "a refusal is still a FormatException, so every existing catch keeps working");
 
+        // ---- EXTEND: a partial body part is legitimate, so a rig bone the file does not use is not
+        // a defect. Nothing else moves - an added bone is still an added bone.
+        IList<BindingIssue> ext = SkinCompatibility.Analyze(Model(new[] { "Root" }),
+                                                            new[] { "Root", "Neck" }, 0, true);
+        checks += Check(ext.Count == 0, "Extend accepts a strict subset of the rig: " + Codes(ext));
+        IList<BindingIssue> extAdds = SkinCompatibility.Analyze(Model(new[] { "Root", "Hand" }),
+                                                                new[] { "Root" }, 0, true);
+        checks += Check(extAdds.Count == 1 && extAdds[0].Code == BindCode.ExtraBone,
+                        "Extend still refuses a bone the rig does not have: " + Codes(extAdds));
+        // ---- and REPLACE is byte-identical to what it was before this task.
+        IList<BindingIssue> rep = SkinCompatibility.Analyze(Model(new[] { "Root" }),
+                                                            new[] { "Root", "Neck" }, 0, false);
+        checks += Check(rep.Count == 1 && rep[0].Code == BindCode.MissingBone,
+                        "Replace still requires every live bone: " + Codes(rep));
+
+        // ---- EXT_* joints in the FILE. The game skips them (Addon.cs:1208), so a weighted one
+        // loses its weights silently and an unweighted one is only noise.
+        SkinnedModel weighted = Model(new[] { "Root", "EXT_Grip" });
+        IList<BindingIssue> hot = SkinCompatibility.Analyze(weighted, new[] { "Root" }, 0, true);
+        checks += Check(Has(hot, BindCode.ExtJointWeighted),
+                        "a WEIGHTED EXT_ joint is reported: " + Codes(hot));
+        SkinnedModel cold = Model(new[] { "Root", "EXT_Grip" });
+        for (int i = 0; i < cold.Weights.Length; i++) if (cold.Joints[i] == 1) cold.Weights[i] = 0f;
+        IList<BindingIssue> mild = SkinCompatibility.Analyze(cold, new[] { "Root" }, 0, true);
+        checks += Check(Has(mild, BindCode.ExtJointUnused) && !Has(mild, BindCode.ExtJointWeighted),
+                        "an UNWEIGHTED EXT_ joint is only noted: " + Codes(mild));
+        // ---- and the whole EXT_ policy is EXTEND-ONLY: on the Replace path an EXT_ bone the live
+        // renderer really lists is load-bearing (design section 3), so nothing new may fire there.
+        checks += Check(!Has(SkinCompatibility.Analyze(weighted, new[] { "Root", "EXT_Grip" }, 0, false),
+                             BindCode.ExtJointWeighted),
+                        "Replace still binds an EXT_ bone the renderer lists, without a new row");
+
         return "BINDER-FROZEN PASS, " + checks + " check(s) - the pre-refactor record of SkinBinder.Bind";
+    }
+
+    private static bool Has(IList<BindingIssue> issues, BindCode code)
+    {
+        for (int i = 0; i < issues.Count; i++) if (issues[i].Code == code) return true;
+        return false;
+    }
+
+    private static string Codes(IList<BindingIssue> issues)
+    {
+        var parts = new List<string>();
+        foreach (BindingIssue i in issues) parts.Add(i.Code.ToString());
+        return parts.Count == 0 ? "(none)" : string.Join(",", parts.ToArray());
     }
 
     private static string[] Split(string joined)
