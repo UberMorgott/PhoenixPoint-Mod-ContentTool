@@ -340,7 +340,8 @@ internal static class ManifestTests
                             "and every byte before the null's own value span is unchanged: " + nulledText);
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
-        return "MANIFEST PASS, " + checks + " check(s) - atomic write";
+        return "MANIFEST PASS, " + checks + " check(s) - atomic write, nested rows, byte-preserving splice, " +
+               "E3/E4/E5/E6/E8 refusals";
     }
 
     private static string[] Temps(string dir) { return Directory.GetFiles(dir, "*.tmp"); }
