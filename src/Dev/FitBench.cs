@@ -832,25 +832,46 @@ namespace Morgott.ContentTool.Dev
         }
 
         /// <summary>
-        /// WASD/QE fly, read raw from <c>UnityEngine.Input</c> like every other gesture here - the game
-        /// itself cannot hear any of it, because the bench holds
+        /// THE KEYBOARD: F frames, Home resets, WASD/QE fly. Read raw from <c>UnityEngine.Input</c> like
+        /// every other gesture here - the game itself cannot hear any of it, because the bench holds
         /// <c>InputController.IncDisableHandlersCalling</c> for as long as it is open (see
         /// <see cref="input"/>).
         ///
-        /// The one thing it MUST stand aside for is IMGUI's own keyboard: the panel has two text
-        /// filters, and typing "assault" into one of them would otherwise fly the camera on every 'a'
-        /// and 's'. <c>GUIUtility.keyboardControl</c> is non-zero exactly while a control has the
-        /// keyboard, which is the cheapest true answer to "is he typing".
+        /// The one thing it MUST stand aside for is IMGUI's own keyboard: the panel has two text filters
+        /// and a scale field, and typing "assault" into one of them would otherwise fly the camera on
+        /// every 'a' and 's' - and frame the view on every 'f'.
+        ///
+        /// HOME IS ASKED BEFORE THE framed GUARD, on purpose. It is the panic button, and the state it
+        /// exists to rescue - nothing on screen, no way back - is exactly the state in which there is no
+        /// frame to have. F is not: framing something that was never measured has no answer.
         /// </summary>
         private static void Fly()
         {
-            if (cam == null || !framed) return;
             // BY NAME, not by "is anything focused". IMGUI keeps keyboardControl on the text field long
             // after the pointer has left it - clicking the scene does not clear it - so a blanket
             // "keyboardControl != 0" guard switched flying off for the rest of the session the first
-            // time a filter was typed in. Only the two filters are allowed to eat these keys, and a
+            // time a filter was typed in. Only the three fields are allowed to eat these keys, and a
             // press on the scene drops their focus (see dropFocus).
             if (typing) return;
+
+            if (Input.GetKeyDown(KeyCode.Home))
+            {
+                message = ResetView();
+                ContentToolMain.Say(message);
+                return;
+            }
+            // F FRAMES. There is no selection to frame yet - the Doctor's skeleton overlay lands in
+            // slice 2 - so today it frames the whole measured model: the default margin back, the pan
+            // back to the measured centre, the orbit left exactly as it was dialled in. When the overlay
+            // ships, the selected bone's radius and centre are what FrameOn and pan are given instead;
+            // OrbitCamera.FrameZoom already takes both radii for that reason.
+            if (Input.GetKeyDown(KeyCode.F) && framed)
+            {
+                view.FrameOn(frameRadius, frameRadius);
+                Recentre();
+            }
+
+            if (cam == null || !framed) return;
             float strafe = (Input.GetKey(KeyCode.D) ? 1f : 0f) - (Input.GetKey(KeyCode.A) ? 1f : 0f);
             float rise = (Input.GetKey(KeyCode.E) ? 1f : 0f) - (Input.GetKey(KeyCode.Q) ? 1f : 0f);
             float fwd = (Input.GetKey(KeyCode.W) ? 1f : 0f) - (Input.GetKey(KeyCode.S) ? 1f : 0f);
