@@ -148,6 +148,11 @@
          than by interrupting a panel and hoping. -->
     <Compile Include="..\..\src\Import\SlimJob.cs" Link="SlimJob.cs" />
     <Compile Include="GlbSlimTests.cs" />
+    <!-- ZIP rewrites how the SAME curves are stored, so what it decides - which accessor is a flat
+         run it may touch, which curve never moves, what an int16 rotation key becomes - is proven
+         here on values rather than by weighing a rewritten file. -->
+    <Compile Include="..\..\src\Import\GlbZip.cs" Link="GlbZip.cs" />
+    <Compile Include="GlbZipTests.cs" />
     <!-- The binding CHECKS, lifted out of SkinBinder.Bind so the Doctor can list them instead of
          reading one thrown sentence. UnityEngine-free like the binder it came from. -->
     <!-- The stable CODE every refusal now carries, so a gate can assert the identity of a refusal

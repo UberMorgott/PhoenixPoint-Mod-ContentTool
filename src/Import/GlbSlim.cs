@@ -329,7 +329,7 @@ namespace Morgott.ContentTool.Import
         }
 
         /// <summary>Every bufferView an accessor reads, its sparse blocks included.</summary>
-        private static IEnumerable<int> AccessorViews(Dictionary<string, object> accessor)
+        internal static IEnumerable<int> AccessorViews(Dictionary<string, object> accessor)
         {
             int view = Int(accessor, "bufferView", -1);
             if (view >= 0) yield return view;
@@ -343,7 +343,7 @@ namespace Morgott.ContentTool.Import
         }
 
         /// <summary>Bytes one element of this accessor occupies. Zero for anything glTF does not define.</summary>
-        private static int ElementSize(Dictionary<string, object> accessor)
+        internal static int ElementSize(Dictionary<string, object> accessor)
         {
             int component;
             switch (Int(accessor, "componentType", 0))
@@ -372,22 +372,22 @@ namespace Morgott.ContentTool.Import
 
         private static void Add(HashSet<int> set, int value) { if (value >= 0) set.Add(value); }
 
-        private static object Get(Dictionary<string, object> map, string key) =>
+        internal static object Get(Dictionary<string, object> map, string key) =>
             map != null && map.TryGetValue(key, out object value) ? value : null;
 
-        private static Dictionary<string, object> Obj(object value) => value as Dictionary<string, object>;
+        internal static Dictionary<string, object> Obj(object value) => value as Dictionary<string, object>;
 
-        private static List<object> Arr(Dictionary<string, object> map, string key) => Get(map, key) as List<object>;
+        internal static List<object> Arr(Dictionary<string, object> map, string key) => Get(map, key) as List<object>;
 
-        private static string Str(Dictionary<string, object> map, string key) => Get(map, key) as string;
+        internal static string Str(Dictionary<string, object> map, string key) => Get(map, key) as string;
 
         /// <summary>An array index. Anything a C# array cannot be indexed by reads as absent.</summary>
-        private static int Int(Dictionary<string, object> map, string key, int fallback) =>
+        internal static int Int(Dictionary<string, object> map, string key, int fallback) =>
             Get(map, key) is double number && number >= 0 && number <= int.MaxValue ? (int)number : fallback;
 
         /// <summary>A byte size or offset. GLB spells these as uint32, so they outgrow int - and a
         /// count times an element size outgrows it twice over.</summary>
-        private static long Long(Dictionary<string, object> map, string key, long fallback) =>
+        internal static long Long(Dictionary<string, object> map, string key, long fallback) =>
             Get(map, key) is double number && number >= 0 && number <= uint.MaxValue ? (long)number : fallback;
     }
 }
