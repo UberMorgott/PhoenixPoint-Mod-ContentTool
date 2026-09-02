@@ -124,6 +124,10 @@
     <Compile Include="..\..\src\Bake\MeshRead.cs" Link="MeshRead.cs" />
     <Compile Include="..\..\src\Bake\LooseFiles.cs" Link="LooseFiles.cs" />
     <Compile Include="..\..\src\Import\GlbCodec.cs" Link="GlbCodec.cs" />
+    <!-- The lossless container - it interprets no glTF, so what it rewrites byte for byte is proven
+         here on the committed probes rather than by opening a rewritten file in the game. -->
+    <Compile Include="..\..\src\Import\GlbDocument.cs" Link="GlbDocument.cs" />
+    <Compile Include="GlbDocTests.cs" />
     <!-- The binding CHECKS, lifted out of SkinBinder.Bind so the Doctor can list them instead of
          reading one thrown sentence. UnityEngine-free like the binder it came from. -->
     <!-- The stable CODE every refusal now carries, so a gate can assert the identity of a refusal

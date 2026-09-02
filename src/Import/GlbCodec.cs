@@ -1239,6 +1239,44 @@ namespace Morgott.ContentTool.Import
         /// <summary>An explicit absent value. Only the sidecar uses it; glTF has no null anywhere.</summary>
         internal JsonWriter Null() { Comma(); text.Append("null"); separate = true; return this; }
 
+        /// <summary>Write a parsed JSON value: string, double, bool, null, or a collection
+        /// (Dictionary/List from Json.Parse). Integral doubles written as integers; fractional
+        /// doubles use G17 for exact round-trip on .NET Framework (R does not round-trip).</summary>
+        internal JsonWriter Val(object value)
+        {
+            if (value == null) return Null();
+            if (value is string word) return Val(word);
+            if (value is bool flag) return Val(flag);
+            if (value is double number) return Num(number);
+            if (value is Dictionary<string, object> members)
+            {
+                Obj();
+                foreach (KeyValuePair<string, object> member in members) { Key(member.Key); Val(member.Value); }
+                return EndObj();
+            }
+            if (value is List<object> items)
+            {
+                Arr();
+                foreach (object item in items) Val(item);
+                return EndArr();
+            }
+            throw new ArgumentException("a " + value.GetType().Name + " is not a JSON value");
+        }
+
+        /// <summary>A double that may be integral. Integral -> no decimal point; else G17.</summary>
+        internal JsonWriter Num(double value)
+        {
+            Comma();
+            // The long cast is the whole point of the integral arm, so it may only be taken where a
+            // long can hold the value - past that G17 writes the exponent form rather than a wrap.
+            bool integral = value == Math.Floor(value) && !double.IsInfinity(value) && Math.Abs(value) < 9.2e18;
+            text.Append(integral
+                ? ((long)value).ToString(CultureInfo.InvariantCulture)
+                : value.ToString("G17", CultureInfo.InvariantCulture));
+            separate = true;
+            return this;
+        }
+
         internal JsonWriter Vals(float[] values)
         {
             Arr();

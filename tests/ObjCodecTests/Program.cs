@@ -133,6 +133,7 @@ internal static class Program
         Console.WriteLine(DracoTests.Run());
         Console.WriteLine(AssetIndexTests.Run());
         Console.WriteLine(InspectTests.Run());
+        Console.WriteLine(GlbDocTests.Run());
         Console.WriteLine(MeshExtractTests.Run());
         Console.WriteLine(VideoExtractTests.Run());
         Console.WriteLine(VideoCatalogTests.Run());
