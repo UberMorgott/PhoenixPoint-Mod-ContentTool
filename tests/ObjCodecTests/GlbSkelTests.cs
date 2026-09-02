@@ -149,6 +149,17 @@ internal static class GlbSkelTests
               "a collapse and a non-identity insert on an animated bone are refused BY CLIP NAME, not '" +
               Printed(hoisted) + "' / '" + Printed(shifted) + "'");
 
+        // 18b. The other half of that refusal, found reviewing Task 3: a non-identity insert is
+        //      COMPENSATED on the child (L_child' = L_child * inverse(L_new)), so a mirroring local
+        //      inverts perfectly well and still leaves the child with a matrix no TRS can hold.
+        //      Validate has to ask that question, not just 'is it invertible' - a clean Validate is a
+        //      promise that Apply cannot throw. SpiderArmature/Root is the seam used because Root is
+        //      one of u8's few nodes no clip animates, so this arm is reached on its own.
+        var mirror = Insert("RootNode", "SpiderArmature", "Mirror", "Root", null);
+        mirror.Inserts[0].Scale = new double[] { -1, 1, 1 };
+        Refuses(u8doc, mirror, "an insert whose compensation mirrors the child",
+                "no translation/rotation/scale can hold");
+
         // --- Apply: the four phases, in ppskel's own order (convert:281, :285, :301, :316). Every
         // check below is one sentence of the invariant the port rests on - nothing is deleted,
         // nothing is reordered, nothing leaves skin.joints - stated numerically instead of argued.

@@ -588,11 +588,29 @@ namespace Morgott.ContentTool.Import
                 double[] local = Local(step);
                 if (!Same(local, Eye))
                 {
-                    if (Inverse(local) == null)
+                    double[] undo = Inverse(local);
+                    if (undo == null)
                     {
                         refusals.Add("the insert of '" + step.Name + "' has a transform that cannot be undone " +
                                      "(an axis is scaled to nothing), and the child's own local is compensated " +
                                      "with its inverse - so the model would collapse; give it a scale no axis zeroes");
+                        continue;
+                    }
+                    // Invertible is not enough: a MIRROR inverts perfectly and still leaves the child
+                    // with a matrix no TRS can hold, which Apply would only discover mid-write. The
+                    // collapse arm asks its composition the same question, and for the same reason - a
+                    // clean Validate is a promise that Apply cannot throw.
+                    // ponytail: read from the DOCUMENT, so a child that is itself a node an earlier
+                    // step appended is not composed here (there is no such local to read yet). Carry
+                    // the simulated locals the day a plan really stacks inserts down one chain.
+                    if (child < nodes.Count &&
+                        !Decompose(Mul(Trs(GlbSlim.Obj(nodes[child])), undo), out _, out _, out _))
+                    {
+                        refusals.Add("the insert of '" + step.Name + "' has a transform that would leave '" +
+                                     step.Child + "' with a local transform no translation/rotation/scale can " +
+                                     "hold (compensating for it mirrors or flattens the bone), so the result " +
+                                     "would not be the pose the file shows; give the new bone a transform with " +
+                                     "no negative or zero scale");
                         continue;
                     }
                     compensated.Add(child);
