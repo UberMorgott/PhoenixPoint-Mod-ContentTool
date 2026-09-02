@@ -247,6 +247,10 @@ namespace Morgott.ContentTool.Dev
         /// owns no Unity object, so unlike <see cref="doctor"/> it survives a close untouched apart
         /// from the run <see cref="Close"/> cancels.</summary>
         private static readonly SlimPanel slim = new SlimPanel();
+        /// <summary>The bay transaction the prototype picker selects through. Constructed in
+        /// <see cref="Open"/> and disposed by <see cref="Close"/>, which is where the squad bay's own
+        /// soldier is put back - see <see cref="PrototypeBaySession"/> for the ordering.</summary>
+        private static PrototypeBaySession proto;
         /// <summary>The numeric readouts are for the ten minutes an author spends dialling a weapon,
         /// not for the hour they spend looking at a model. Off by default, and session only - it is a
         /// view preference like <see cref="BenchList.InvertX"/>, written nowhere.</summary>
@@ -420,6 +424,11 @@ namespace Morgott.ContentTool.Dev
                 sceneScale = bay.SceneRoot != null ? bay.SceneRoot.localScale : Vector3.one;
                 platformScale = bay.CharBuilderPlatform != null ? bay.CharBuilderPlatform.localScale : Vector3.one;
                 bay.CharacterBuilder.OnCharacterRebuilded += Posed;
+                // Built here, BEFORE Pick/Show puts the bench's own unit on the platform, so the unit
+                // it snapshots on first use is still the one the bay was showing when we arrived.
+                proto = new PrototypeBaySession(bay.CharacterBuilder,
+                                                PrototypeBaySession.FindCycle(bay.CharacterBuilder),
+                                                GameUtl.GameComponent<SharedData>(), StillThere);
 
                 level.SceneReferences.ActivateScene(GeoSceneReferences.ActiveSceneReference.SquadBay);
                 if (lighting != null && level.View != null)
@@ -932,6 +941,15 @@ namespace Morgott.ContentTool.Dev
             // reported and retried by a second close, not swallowed, and NOT placed at the end where
             // the partial-failure return above would skip it.
             Step(failed, "the Model Doctor's preview meshes", () => { doctor.Dispose(); doctorTab = false; });
+            // THE BAY'S OWN SOLDIER. AFTER the Doctor has given the shipped meshes back - restoring
+            // first would rebuild the rig out from under the renderers it still has to un-swap - and
+            // BEFORE both FitAnim.Release, which plays a default state on the animator this restore
+            // replaces, and the '-= Posed' step, because the restore starts a rebuild of its own and
+            // the game's OWN handler (UIModuleActorCycle.OnCharacterRebuilded:435-473) is what finishes
+            // it, after this method has returned. The field is kept when the restore FAILED, so a
+            // second close retries exactly it - that is this method's whole bookkeeping contract.
+            Step(failed, "the squad bay's own soldier", () => {
+                if (proto != null) { proto.Dispose(); proto = null; } });
             // A trim in flight owns a temp file and a pool thread, neither of which the bench closing
             // has any business leaving running. The file on disk is safe either way - SlimJob only
             // ever swaps a finished temp into place.
@@ -1146,6 +1164,10 @@ namespace Morgott.ContentTool.Dev
                 // Open would list renderers that no longer exist. Set here, where the rebuild has
                 // just finished, and nulled by Dispose in Close.
                 doctor.Root = bay.CharacterBuilder.transform;
+                // BEFORE Handed and FitAnim.Bind: the Doctor has to see this rebuild's slot renderers
+                // in the same frame the rest of the pose is applied, or a prototype selection reads
+                // the renderers of whatever stood here previously.
+                if (proto != null) proto.Rebuilt();
                 AddonsManager manager = bay.CharacterBuilder.AddonsManager;
                 if (manager != null) manager.SetAutorefreshOnTagsChanged(true);
                 Handed(manager);
