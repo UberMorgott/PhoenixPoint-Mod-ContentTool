@@ -680,12 +680,16 @@ namespace Morgott.ContentTool.Dev
             if (rep == null)
                 return "no representative character def for '" + variant.Name + "' - nothing to build it from.";
 
+            // NOTHING MOVES UNTIL THE REBUILD IS ACTUALLY UNDER WAY. Show refuses while a previous
+            // rebuild is in flight (PrototypeBaySession.Show:114), and clearing first would have thrown
+            // away the targets the author is still looking at AND the pending variant that in-flight
+            // rebuild is going to be recorded as.
+            string failure = proto.Show(rep, Bodyparts(rep), null);
+            if (failure != null) return failure;
+            pendingRecord = record; pendingVariant = variant;
             slotTargets.Clear();
             shownVariant = null;
-            pendingRecord = record; pendingVariant = variant;
-            string failure = proto.Show(rep, Bodyparts(rep), null);
-            if (failure != null) { pendingRecord = null; pendingVariant = null; }
-            return failure;
+            return null;
         }
 
         /// <summary>One target per slot the shown variant declares - what the browser lists and what the

@@ -129,17 +129,15 @@ namespace Morgott.ContentTool.Dev
         {
             SkinnedMeshRenderer smr = target != null && target.Mode == VerifyMode.Replace
                 ? Resolve(target) : null;
-            if (smr != null) PickTarget(smr, target.Live.TransformPath);
-            else
-            {
-                Revert();
-                Renderer = null;
-                Target = null;
-                Restart();                             // bumps gen: an answer in flight is about the old pick
-            }
-            // AFTER: Restart reads Path and Target and nothing else, so the order is invisible to the
-            // worker - and PickTarget(smr, path) clears this field on the way through.
+            // BEFORE the renderer moves - the same reason PickTarget(smr, path) reverts first: the
+            // preview and its origin belong to the renderer being left behind.
+            Revert();
+            Renderer = smr;
+            Target = smr == null ? null : Snapshot(smr, target.Live.TransformPath);
+            // BEFORE Restart, because Restart now reads it: an Extend pick has no RigTarget at all and
+            // is still a job to run.
             Prototype = target;
+            Restart();
         }
 
         private SkinnedMeshRenderer Resolve(PrototypeTarget target)
@@ -263,9 +261,13 @@ namespace Morgott.ContentTool.Dev
         {
             gen++;
             Ready = null;
-            if (Path == null || Target == null) return;
+            if (Path == null || !Verifiable) return;
             Start(gen);
         }
+
+        /// <summary>Is there anything to hold the file against? A live renderer's snapshot, or a
+        /// prototype - which on the Extend path is a bone list and no renderer at all.</summary>
+        private bool Verifiable { get { return Target != null || Prototype != null; } }
 
         private void Start(int forGen)
         {
@@ -273,6 +275,7 @@ namespace Morgott.ContentTool.Dev
             running = true;
             string path = Path;
             RigTarget target = Target;
+            PrototypeTarget proto = Prototype;
             var map = new Dictionary<string, string>(aliases, StringComparer.Ordinal);
             ThreadPool.QueueUserWorkItem(delegate
             {
@@ -280,8 +283,13 @@ namespace Morgott.ContentTool.Dev
                 try
                 {
                     byte[] bytes = File.ReadAllBytes(path);
-                    job.Result = ReplacementPreflight.Run(bytes, path, target);
-                    ApplyLiveAliases(job.Result, bytes, map, target);
+                    // A LIVE SNAPSHOT WINS. Replace - picked from the browser or not - is judged against
+                    // the renderer as it is NOW, which is the shipped path unchanged and the one the
+                    // freshness check in Tick compares against. Only a pick with no renderer behind it
+                    // (Extend, or a slot the rebuild produced none for) goes the prototype way.
+                    job.Result = target != null ? ReplacementPreflight.Run(bytes, path, target)
+                                                : ReplacementPreflight.Run(bytes, path, proto);
+                    ApplyLiveAliases(job.Result, bytes, map, target, proto);
                 }
                 catch (Exception ex)
                 {
@@ -306,7 +314,8 @@ namespace Morgott.ContentTool.Dev
         /// and only while the author has an unsaved edit.
         /// </summary>
         private static void ApplyLiveAliases(ReplacementPreflightResult result, byte[] bytes,
-                                             Dictionary<string, string> map, RigTarget target)
+                                             Dictionary<string, string> map, RigTarget target,
+                                             PrototypeTarget proto)
         {
             if (result.Original == null || map.Count == 0) return;
             AliasMap live = AliasMap.Of(map);
@@ -323,14 +332,16 @@ namespace Morgott.ContentTool.Dev
                     report.Add(d.Code, d.Severity, d.Side, d.Message, d.Remedy, d.Subject);
             result.Model = model;
             result.Report = report;
-            // The SAME three arms the first pass took. Rebuilding them here is how a refusal ends up
-            // with a header and no reason under it.
-            ReplacementPreflight.Judge(result, model, target);
+            // The SAME arms the first pass took, and the same target it was judged against - a live
+            // snapshot when there is one, the prototype when there is not.
+            if (target != null) ReplacementPreflight.Judge(result, model, target);
+            else ReplacementPreflight.Judge(result, model, proto);
             foreach (string key in unused)
                 report.Add("AliasUnused", Severity.Warning, DiagnosticSide.Sidecar,
                            "the alias for '" + key + "' was ignored: this file has no bone of that name",
                            "Delete the row, or rename the bone in Blender to '" + key + "'.", key);
-            foreach (string key in live.OutputsNotIn(target.BoneNames))
+            foreach (string key in live.OutputsNotIn(target != null ? target.BoneNames
+                                                                   : ReplacementPreflight.BoneArray(proto)))
                 report.Add("AliasNotATargetBone", Severity.Warning, DiagnosticSide.Sidecar,
                            "the alias for '" + key + "' names a bone this model's skeleton does not have",
                            "Pick the target bone from the list instead of typing it.", key);
@@ -352,9 +363,11 @@ namespace Morgott.ContentTool.Dev
             {
                 running = false;
                 if (job.Gen != gen) continue;                          // stale: the author moved on
-                if (Target == null) continue;                          // Dispose ran while it was in flight
-                RigTarget now = Snapshot(Renderer, Target.TransformPath);
-                if (!now.SameAs(Target))
+                if (!Verifiable) continue;                             // Dispose ran while it was in flight
+                // An EXTEND report is about a bone list, not a renderer, so there is nothing under it
+                // that could have moved while it was being read.
+                RigTarget now = Target == null ? null : Snapshot(Renderer, Target.TransformPath);
+                if (now != null && !now.SameAs(Target))
                 {
                     // The report was made against a rig that no longer exists. It is not annotated and
                     // shown - it is thrown away and asked again, because a verdict about the previous
@@ -373,7 +386,7 @@ namespace Morgott.ContentTool.Dev
                                    Ready.Failure.StackTrace);
                 Seed();
             }
-            if (!running && Ready == null && Path != null && Target != null) Start(gen);
+            if (!running && Ready == null && Path != null && Verifiable) Start(gen);
 
             Intent intent;
             while (intents.TryDequeue(out intent))
@@ -389,6 +402,8 @@ namespace Morgott.ContentTool.Dev
             if (Ready == null) return "nothing to preview yet";
             if (Ready.Outcome == Outcome.Refused || Ready.Outcome == Outcome.NotRigged)
                 return "this file would not be written at all, so there is nothing to preview";
+            if (Renderer == null || Target == null)
+                return "there is no live renderer behind this target, so there is nothing to preview on";
 
             string stale = Stale();
             if (stale != null) { Restart(); return stale; }
@@ -619,7 +634,7 @@ namespace Morgott.ContentTool.Dev
             // drawn under a verdict that is not there yet is a message nobody ever sees.
             if (Message.Length > 0) GUILayout.Label(Message);
 
-            if (Path == null || Target == null) { GUILayout.Label(Hint()); return; }
+            if (Path == null || !Verifiable) { GUILayout.Label(Hint()); return; }
             if (Ready == null) { GUILayout.Label(Busy ? "reading..." : "queued..."); return; }
 
             GUILayout.Space(4f);
@@ -629,7 +644,9 @@ namespace Morgott.ContentTool.Dev
             // Shown whenever there is a map OR a reason to make one. Keying it on NearestBone alone hid
             // the table the moment an alias worked, which is exactly when the author wants to look at
             // what they mapped - and left no way to change or remove it.
-            if (Ready.Model != null && Target.BoneNames != null &&
+            // Replace only: the map's rows are built from MissingBone/ExtraBone, and Extend has no
+            // MissingBone by design - there would be nothing on the right-hand side to offer.
+            if (Ready.Model != null && Target != null && Target.BoneNames != null &&
                 (aliases.Count > 0 || Ready.Outcome == Outcome.NearestBone ||
                  (Ready.Source != null && Ready.Source.AliasesApplied > 0)))
                 BoneMap(col);
@@ -647,7 +664,9 @@ namespace Morgott.ContentTool.Dev
             // A target with bind poses but no bone list previews as NotRigged whatever the report said
             // (LiveMesh.Bind takes the empty-bones arm), so every press would be a mismatch. The button
             // says so rather than inviting one.
-            bool blind = Target.BoneNames == null;
+            // Extend has no renderer to put a mesh on at all - the same "nothing to bind onto" the
+            // bone-less target already says, and the same refusal to invent one.
+            bool blind = Target == null || Target.BoneNames == null;
             GUI.enabled = (Ready.Outcome == Outcome.ByName || Ready.Outcome == Outcome.NearestBone) &&
                           Ready.Report.Count(Severity.Blocking) == 0 && !blind;
             if (GUILayout.Button(blind ? "Preview - no live bones to bind onto" : "Preview",
@@ -721,16 +740,12 @@ namespace Morgott.ContentTool.Dev
         /// <summary>What to say when there is no verdict to draw yet, in the author's own terms.</summary>
         private string Hint()
         {
-            if (Prototype == null) return "pick a .glb and a prototype slot to see what the bake would do with them";
-            if (Prototype.Unavailable != null)
-                return Prototype.Unavailable + " - this slot produced no renderer, so there is nothing " +
-                       "to replace exactly; try Extend";
-            if (Prototype.Mode == VerifyMode.Extend)
-                return "Extend holds the file against the prototype's " +
-                       (Prototype.Record == null ? 0 : Prototype.Record.BindableBones.Count) +
-                       " bindable bone(s) - the report for it arrives with the prototype preflight";
+            // Both halves are needed for a verdict and neither implies the other, so the hint names
+            // exactly the one that is missing.
+            if (Path == null && !Verifiable)
+                return "pick a .glb and a prototype slot to see what the bake would do with them";
             return Path == null ? "pick a .glb to see what the bake would do with it"
-                                : "the slot's live renderer has gone - pick it again";
+                                : "pick a prototype slot to hold this file against - press Change";
         }
 
         // ------------------------------------------------------------------ the prototype browser

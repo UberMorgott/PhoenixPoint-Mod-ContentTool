@@ -31,18 +31,31 @@ internal static class CatalogTests
         "FallDown_AddonsManagerDef", "YuggothianDropped_ItemContainer_AddonsManagerDef"
     };
 
-    internal static string Run()
-    {
-        int checks = 0;
+    /// <summary>The catalog off the live census, built once. PREFLIGHT holds real Extend files against
+    /// these very rigs, so both gates read the same 2551 transforms rather than a bone list somebody
+    /// typed.</summary>
+    private static IList<PrototypeRecord> live;
 
+    internal static PrototypeRecord Live(string rigName)
+    {
+        if (live == null)
+        {
+            var rigs = new List<RigScan>();
+            var managers = new List<ManagerScan>();
+            Read(rigs, managers, null);
+            live = PrototypeCatalog.Build(rigs, managers);
+        }
+        return Find(live, rigName);
+    }
+
+    /// <summary>The census, parsed into the flat scan the catalog takes. Returns its <c>_meta</c>.</summary>
+    private static Dictionary<string, object> Read(List<RigScan> rigs, List<ManagerScan> managers,
+                                                   Dictionary<string, int> counts)
+    {
         string census = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
             @"..\..\..\..\..\internal-docs\research\rig-census-2026-09-02.json"));
         if (!File.Exists(census)) throw new Exception("CATALOG FAILURE: the rig census is missing at " + census);
         var root = (Dictionary<string, object>)Json.Parse(File.ReadAllText(census), 64);
-        var meta = (Dictionary<string, object>)root["_meta"];
-
-        var rigs = new List<RigScan>();
-        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (KeyValuePair<string, object> entry in root)
         {
             if (entry.Key == "_meta") continue;
@@ -59,14 +72,13 @@ internal static class CatalogTests
                     Path = (string)bone["path"]
                 });
             }
-            counts[scan.RigName] = (int)(double)body["count"];
+            if (counts != null) counts[scan.RigName] = (int)(double)body["count"];
             rigs.Add(scan);
         }
 
         // The manager side of the scan the game-side harvester will produce (task 4). Everything the
         // census knows: which manager sits on which rig. Plus the four rig-less ones, which the
         // census cannot list because it is keyed by rig.
-        var managers = new List<ManagerScan>();
         foreach (RigScan rig in rigs)
             foreach (string name in rig.Managers)
                 managers.Add(new ManagerScan { ManagerName = name, RigName = rig.RigName, HasRig = true });
@@ -74,6 +86,17 @@ internal static class CatalogTests
             managers.Add(new ManagerScan { ManagerName = name, HasRig = false });
         foreach (ManagerScan manager in managers)
             if (manager.ManagerName == "Human_AddonsManagerDef") manager.SlotNames.AddRange(HumanSlots);
+        return (Dictionary<string, object>)root["_meta"];
+    }
+
+    internal static string Run()
+    {
+        int checks = 0;
+
+        var rigs = new List<RigScan>();
+        var managers = new List<ManagerScan>();
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        Dictionary<string, object> meta = Read(rigs, managers, counts);
 
         checks += Check(rigs.Count == 37, "the census carries 37 rigs, not " + rigs.Count);
         checks += Check((int)(double)meta["distinctRigs"] == 37 && (int)(double)meta["transformsTotal"] == 2551,

@@ -36,8 +36,60 @@ namespace Morgott.ContentTool.Doctor
     {
         internal static ReplacementPreflightResult Run(byte[] bytes, string path, RigTarget target)
         {
+            return Core(bytes, path, target ?? new RigTarget(), null);
+        }
+
+        /// <summary>
+        /// THE PROTOTYPE ENTRY POINT. Replace is the very same run as above - the live slot renderer's
+        /// own snapshot, byte for byte what the bake will see - and Extend is the only new question:
+        /// the file held against the prototype's bindable bones, where a rig bone nothing uses is no
+        /// defect. A slot the rebuild produced no renderer for is refused OUTRIGHT rather than judged
+        /// against a bone list fabricated from the full rig, which is the one thing this picker exists
+        /// to stop.
+        /// </summary>
+        internal static ReplacementPreflightResult Run(byte[] bytes, string path, PrototypeTarget target)
+        {
+            if (target == null) return Run(bytes, path, (RigTarget)null);
+            if (target.Mode == VerifyMode.Replace && target.Unavailable != null)
+            {
+                var refused = new ReplacementPreflightResult
+                {
+                    Outcome = Outcome.Refused,
+                    Sha256 = AliasMap.Sha256(bytes ?? new byte[0])
+                };
+                refused.Report.Add("SlotVisualUnavailable", Severity.Blocking, DiagnosticSide.Target,
+                                   target.Unavailable + " - this slot's rebuild produced no renderer, so " +
+                                   "there is no bone list to be exact against",
+                                   "Ask this slot for Extend instead, or pick a slot the rebuild really produced.");
+                refused.Report.Outcome = Outcome.Refused;
+                return refused;
+            }
+            return Core(bytes, path, LiveOf(target), target);
+        }
+
+        /// <summary>The RigTarget a prototype pick is judged against: the live slot renderer on Replace,
+        /// and NOTHING at all on Extend, where no renderer exists and the bindable set is the target.
+        /// </summary>
+        private static RigTarget LiveOf(PrototypeTarget target)
+        {
+            return target.Mode == VerifyMode.Replace ? (target.Live ?? new RigTarget()) : null;
+        }
+
+        /// <summary>The prototype's bone names as the array the alias checks take. Null stays null - a
+        /// target with no list is never given a guessed one.</summary>
+        internal static string[] BoneArray(PrototypeTarget target)
+        {
+            IList<string> bones = target == null ? null : target.BoneNames();
+            if (bones == null) return null;
+            var names = new string[bones.Count];
+            bones.CopyTo(names, 0);
+            return names;
+        }
+
+        private static ReplacementPreflightResult Core(byte[] bytes, string path, RigTarget live,
+                                                       PrototypeTarget proto)
+        {
             var result = new ReplacementPreflightResult();
-            if (target == null) target = new RigTarget();
             try
             {
                 ReplacementSource source = GlbSource.ReadReplacement(bytes, path);
@@ -46,8 +98,12 @@ namespace Morgott.ContentTool.Doctor
                 result.Model = source.Model;
                 result.Original = source.Original;
                 result.Baked = ModelBuild.From(source.Model, "preflight");
-                Sidecar(result, source, target);
-                return Verdict(result, source, target);
+                Sidecar(result, source, live != null ? live.BoneNames : BoneArray(proto));
+                // The OUTCOME is computed from the model the BAKE would see. When a sidecar did not
+                // apply, that is the unaliased one - which is exactly what the bake will read from the
+                // same sidecar a moment later.
+                SkinnedModel effective = source.Aliases == null ? source.Original : source.Model;
+                return live != null ? Judge(result, effective, live) : Judge(result, effective, proto);
             }
             catch (ImportRefusedException refused)
             {
@@ -76,7 +132,8 @@ namespace Morgott.ContentTool.Doctor
 
         /// <summary>Everything the sidecar has to say, all of it a WARNING: ignoring a sidecar leaves a
         /// file that may still bind by name on its own, so a sidecar never decides the outcome.</summary>
-        private static void Sidecar(ReplacementPreflightResult result, ReplacementSource source, RigTarget target)
+        private static void Sidecar(ReplacementPreflightResult result, ReplacementSource source,
+                                    string[] targetBoneNames)
         {
             if (source.SidecarRefusal != null)
                 result.Report.Add(source.SidecarProblem == SidecarProblem.Stale ? "SidecarStale" : "SidecarInvalid",
@@ -87,19 +144,88 @@ namespace Morgott.ContentTool.Doctor
                                   "the alias for '" + key + "' was ignored: this file has no bone of that name",
                                   "Delete the row, or rename the bone in Blender to '" + key + "'.", key);
             if (source.Aliases == null) return;
-            foreach (string key in source.Aliases.OutputsNotIn(target.BoneNames))
+            foreach (string key in source.Aliases.OutputsNotIn(targetBoneNames))
                 result.Report.Add("AliasNotATargetBone", Severity.Warning, DiagnosticSide.Sidecar,
                                   "the alias for '" + key + "' names a bone this model's skeleton does not have",
                                   "Pick the target bone from the list instead of typing it.", key);
         }
 
-        private static ReplacementPreflightResult Verdict(ReplacementPreflightResult result,
-                                                          ReplacementSource source, RigTarget target)
+        /// <summary>
+        /// THE EXTEND VERDICT - a PARTIAL body part held against the prototype's bindable bones. Two
+        /// things are different from Replace and nothing else is:
+        ///
+        ///  * a rig bone the file does not use is no defect (Analyze's own extend arm suppresses
+        ///    MissingBone and never asks the bijection), because a hand does not carry the legs;
+        ///  * there is no nearest-bone fallback to degrade INTO. Replace loses the author's weights and
+        ///    still writes a mesh; nothing at all attaches a part whose joints do not resolve onto the
+        ///    rig. So every row blocks except <see cref="BindCode.ExtJointUnused"/>, the one that says
+        ///    nothing is lost.
+        ///
+        /// A Replace pick is handed straight back to the RigTarget arm, so the shipped path cannot move.
+        /// </summary>
+        internal static ReplacementPreflightResult Judge(ReplacementPreflightResult result,
+                                                        SkinnedModel effective, PrototypeTarget target)
         {
-            // The OUTCOME is computed from the model the BAKE would see. When a sidecar did not apply,
-            // that is the unaliased one - which is exactly what the bake will read from the same
-            // sidecar a moment later.
-            return Judge(result, source.Aliases == null ? source.Original : source.Model, target);
+            if (target == null || target.Mode == VerifyMode.Replace)
+                return Judge(result, effective, target == null ? new RigTarget() : (target.Live ?? new RigTarget()));
+
+            IList<string> bones = target.BoneNames();
+            bool armature = effective.JointNames.Count > 0;
+            bool names = bones != null && bones.Count > 0;
+            // A prototype rig HAS bind poses by construction, so "rigged" is simply "it has bones to
+            // bind onto" - there is no live mesh here whose bind-pose count could disagree with them.
+            IList<BindingIssue> issues = SkinCompatibility.Analyze(effective, bones, 0, true);
+            // A file joint named EXT_ is ALWAYS an "extra bone" too - the bindable set excludes every
+            // EXT_ name by construction - and saying both would put the design's rule out of reach: the
+            // ExtraBone row would block first, every time, and an unweighted attachment point could
+            // never be the warning it is meant to be. The ExtJoint* row is the precise one, so it is
+            // the only one.
+            for (int i = issues.Count - 1; i >= 0; i--)
+                if (issues[i].Code == BindCode.ExtraBone && PrototypeCatalog.IsAttachmentPoint(issues[i].Subject))
+                    issues.RemoveAt(i);
+            // An attachment point the file merely CARRIES costs nothing - it is not a reason for a
+            // verdict, so it is not what Decide is asked about. Everything else is.
+            BindingIssue first = null;
+            for (int i = 0; i < issues.Count && first == null; i++)
+                if (issues[i].Code != BindCode.ExtJointUnused) first = issues[i];
+            Outcome outcome = ReplacementDecision.Decide(armature, names, names, first);
+
+            if (outcome == Outcome.Refused)
+                result.Report.Add("SkinlessOntoRigged", Severity.Blocking, DiagnosticSide.File,
+                                  Bake.SkinFields.Skinless(target.Record == null ? "this model" : target.Record.DisplayName),
+                                  "In Blender give the mesh an Armature modifier with vertex groups, " +
+                                  "weight it to the bones the target already has, and export as .glb.");
+            else if (outcome == Outcome.NotRigged)
+                result.Report.Add("TargetNotRigged", Severity.Info, DiagnosticSide.Target,
+                                  "not rigged - this prototype lists no bindable bones", "");
+            else
+                foreach (BindingIssue issue in issues)
+                {
+                    Severity severity = issue.Code == BindCode.ExtJointUnused ? Severity.Warning : Severity.Blocking;
+                    result.Report.Add(issue.Code.ToString(), severity,
+                                      issue.Side == BindSide.Target ? DiagnosticSide.Target : DiagnosticSide.File,
+                                      issue.Message, Remedy.For(issue.Code), issue.Subject);
+                    if (severity == Severity.Blocking) outcome = Outcome.Refused;
+                }
+
+            // THE DUPLICATE RULE (design section 3). The bindable set is deduplicated, so Analyze cannot
+            // see an ambiguity at all - and it must block only the file that really names one, because
+            // the game matches by name and takes FirstOrDefault (Addon.cs:1202-1231). Which of the two
+            // transforms that is cannot be predicted, so no verdict about it would be honest; every
+            // other slot on the same rig stays perfectly usable.
+            foreach (string name in target.BlockingAmbiguous(effective.JointNames))
+            {
+                result.Report.Add("TargetBoneDuplicate", Severity.Blocking, DiagnosticSide.Target,
+                                  "this prototype's rig has more than one transform named '" + name +
+                                  "' and the game binds to the first one it finds, so where the file's bone " +
+                                  "of that name would land cannot be predicted",
+                                  "Move that influence onto a bone the rig names only once, and re-export.", name);
+                outcome = Outcome.Refused;
+            }
+
+            result.Outcome = outcome;
+            result.Report.Outcome = outcome;
+            return result;
         }
 
         /// <summary>
@@ -203,6 +329,8 @@ namespace Morgott.ContentTool.Doctor
                 case BindCode.ExtraBone: return "Map this bone to the one it stands for, or transfer its weights to its parent and delete it.";
                 case BindCode.NotBijective: return "Check the table above for a target bone chosen twice.";
                 case BindCode.InverseBindCount: return "Broken export - re-export from Blender rather than editing the file.";
+                case BindCode.ExtJointWeighted: return "In Blender move that influence onto a real bone - one whose name does not start with EXT_ - and re-export.";
+                case BindCode.ExtJointUnused: return "Nothing is lost. Delete the EXT_ bone in Blender if you want the file tidy.";
                 default: return "Broken export - re-export from Blender rather than editing the file.";
             }
         }
