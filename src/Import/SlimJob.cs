@@ -51,13 +51,16 @@ namespace Morgott.ContentTool.Import
         /// <param name="force">Override the mandatory-clip and rigged-character guards.</param>
         /// <param name="cancel">Cooperative cancellation, checked at every stage boundary.</param>
         /// <param name="publish">Progress sink; may be null, and is called on the calling thread.</param>
-        /// <exception cref="OperationCanceledException">The run was cancelled; nothing was written.</exception>
+        /// <exception cref="OperationCanceledException">The run was cancelled before the swap; nothing was written.
+        /// A cancel that lands after the swap is not one - the file is there, and the run returns like any other.</exception>
         /// <exception cref="InvalidOperationException">The guard refused; its words are the message.</exception>
         internal static string Execute(string src, string dst, HashSet<int> drop, bool force,
                                        CancellationToken cancel, Action<SlimProgress> publish)
         {
             if (drop == null) drop = new HashSet<int>();
-            string tmp = dst + ".ct_tmp";
+            string tmp = dst + "." + Guid.NewGuid().ToString("N") + ".ct_tmp";
+            bool swapped = false;
+            string done = null;
             try
             {
                 At(cancel, publish, 0, "Reading " + Path.GetFileName(src));
@@ -79,10 +82,16 @@ namespace Morgott.ContentTool.Import
                 // line, and whole again after it.
                 if (File.Exists(dst)) File.Replace(tmp, dst, null);
                 else File.Move(tmp, dst);
+                swapped = true;
 
-                string done = "dropped " + drop.Count + " of " + clips + " clip(s), " +
-                              (delta < 0 ? (-delta) + " B freed" : "no bytes freed");
+                done = "dropped " + drop.Count + " of " + clips + " clip(s), " +
+                       (delta < 0 ? (-delta) + " B freed" : "no bytes freed");
                 Publish(publish, new SlimProgress("Done", Stages.Length, Stages.Length, done));
+                return done;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!swapped) throw;
                 return done;
             }
             finally

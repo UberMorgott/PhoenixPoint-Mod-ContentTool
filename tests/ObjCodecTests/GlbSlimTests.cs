@@ -172,7 +172,7 @@ internal static class GlbSlimTests
             string source = Path.Combine(work, "u9.glb");
             File.WriteAllBytes(source, u9bytes);
             string target = Path.Combine(work, "out.glb");
-            string tmp = target + ".ct_tmp";
+            Func<bool> noTmp = () => Directory.GetFiles(work, "*.ct_tmp").Length == 0;
 
             // 19. The save REPLACES: the destination already holds a file, and what lands is the
             //     trimmed .glb whole - never bytes written over the ones that were there. A run that
@@ -185,7 +185,7 @@ internal static class GlbSlimTests
             SlimJob.Execute(source, target, new HashSet<int> { 2, 3 }, false, CancellationToken.None, seen.Add);
             string fresh = Path.Combine(work, "fresh.glb");
             SlimJob.Execute(source, fresh, new HashSet<int>(), false, CancellationToken.None, null);
-            Check(Same(File.ReadAllBytes(target), want) && !File.Exists(tmp) &&
+            Check(Same(File.ReadAllBytes(target), want) && noTmp() &&
                   Same(File.ReadAllBytes(source), u9bytes) && Same(File.ReadAllBytes(fresh), u9bytes),
                   "a run replaces the destination with the trimmed file, leaves no .ct_tmp behind and " +
                   "copies the source verbatim when nothing is dropped");
@@ -207,7 +207,7 @@ internal static class GlbSlimTests
             bool cancelled = false;
             try { SlimJob.Execute(source, target, new HashSet<int> { 2, 3 }, false, cts.Token, null); }
             catch (OperationCanceledException) { cancelled = true; }
-            Check(cancelled && Same(File.ReadAllBytes(target), landed) && !File.Exists(tmp),
+            Check(cancelled && Same(File.ReadAllBytes(target), landed) && noTmp(),
                   "a cancelled run throws, leaves the destination byte-identical and leaves no .ct_tmp");
 
             // 22. A refusal is the same story with a sentence attached: the guard's own words reach
@@ -216,8 +216,22 @@ internal static class GlbSlimTests
             try { SlimJob.Execute(source, target, new HashSet<int> { 0 }, false, CancellationToken.None, null); }
             catch (InvalidOperationException ex) { reported = ex.Message; }
             Check(reported == GlbSlim.Guard(GlbDocument.Load(u9bytes), new HashSet<int> { 0 }, false) &&
-                  reported != null && Same(File.ReadAllBytes(target), landed) && !File.Exists(tmp),
+                  reported != null && Same(File.ReadAllBytes(target), landed) && noTmp(),
                   "a refused run reports the guard's refusal verbatim and leaves the destination alone");
+
+            // 23. A cancel that lands AFTER the swap is a write, not a cancel: the file is already
+            //     in place, so the run returns its sentence instead of claiming it left things alone.
+            var late = new CancellationTokenSource();
+            string outcome = SlimJob.Execute(source, target, new HashSet<int> { 2, 3 }, false, late.Token,
+                delegate (SlimProgress p)
+                {
+                    if (p.Stage != "Done") return;
+                    late.Cancel();
+                    late.Token.ThrowIfCancellationRequested();
+                });
+            Check(outcome != null && outcome.StartsWith("dropped 2 of 4") &&
+                  Same(File.ReadAllBytes(target), want) && noTmp(),
+                  "a cancel arriving after the swap reports the write that happened and keeps the file");
         }
         finally { Directory.Delete(work, true); }
 
