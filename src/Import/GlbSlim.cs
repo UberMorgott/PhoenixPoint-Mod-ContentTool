@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Morgott.ContentTool.Import
@@ -62,7 +63,7 @@ namespace Morgott.ContentTool.Import
                 {
                     if (index < 0 || index >= accessors.Count) continue;
                     Dictionary<string, object> accessor = Obj(accessors[index]);
-                    row.AccessorBytes += Int(accessor, "count", 0) * (long)ElementSize(accessor);
+                    row.AccessorBytes += Long(accessor, "count", 0) * ElementSize(accessor);
                     if (!accessorClips.TryGetValue(index, out HashSet<int> clips))
                         accessorClips[index] = clips = new HashSet<int>();
                     clips.Add(i);
@@ -92,10 +93,232 @@ namespace Morgott.ContentTool.Import
             {
                 if (pair.Value.Count != 1 || outside.Contains(pair.Key)) continue;
                 if (pair.Key < 0 || pair.Key >= views.Count) continue;
-                foreach (int clip in pair.Value) rows[clip].ExclusiveBytes += Int(Obj(views[pair.Key]), "byteLength", 0);
+                foreach (int clip in pair.Value) rows[clip].ExclusiveBytes += Long(Obj(views[pair.Key]), "byteLength", 0);
             }
             return rows;
         }
+
+        /// <summary>
+        /// Pre-flight check before a trim. Returns null when the trim is safe, else the refusal to
+        /// show the user. Refuses when a dropped clip is mandatory, or the file is a rigged
+        /// character with a clip library - both overridable with force - and, force or not, when
+        /// something other than an accessor or an image owns buffer data, because a trim would cut
+        /// that loose without ever seeing it.
+        /// </summary>
+        internal static string Guard(GlbDocument doc, HashSet<int> dropIndices, bool force)
+        {
+            List<object> accessors = Arr(doc.Json, "accessors") ?? Empty;
+            List<object> images = Arr(doc.Json, "images") ?? Empty;
+            int named = BufferViewKeys(doc.Json);
+            if (named != accessors.Count + images.Count)
+                return "this .glb names a bufferView " + named + " times where its " + accessors.Count +
+                       " accessor(s) and " + images.Count + " image(s) account for " +
+                       (accessors.Count + images.Count) + ". Something the trim does not walk owns " +
+                       "buffer data here - a sparse accessor, Draco or meshopt compression, an unknown " +
+                       "extension - and trimming would cut it loose. Refusing.";
+            foreach (object view in Arr(doc.Json, "bufferViews") ?? Empty)
+                if (Int(Obj(view), "buffer", 0) != 0)
+                    return "this .glb keeps a bufferView in a buffer other than the BIN chunk, and a " +
+                           "trim only knows how to compact BIN. Refusing.";
+            if (force) return null;
+
+            List<object> animations = Arr(doc.Json, "animations") ?? Empty;
+            foreach (int index in dropIndices)
+            {
+                if (index < 0 || index >= animations.Count) continue;
+                string name = Str(Obj(animations[index]), "name") ?? "";
+                if (IsMandatory(name))
+                    return "\"" + name + "\" reads as a mandatory action clip, and a creature that " +
+                           "loses one stops moving in game. Tick force to drop it anyway.";
+            }
+            if (animations.Count > 30 && (Arr(doc.Json, "skins") ?? Empty).Count > 0)
+                return "this .glb carries a skin and " + animations.Count + " clips, so it is a rigged " +
+                       "character rather than a prop, and dropping clips from one is how a soldier ends " +
+                       "up T-posing. Tick force to trim it anyway.";
+            return null;
+        }
+
+        /// <summary>
+        /// Drop the clips at dropIndices, remove the accessors and bufferViews nothing needs any
+        /// more, compact BIN and remap every index that moved. Sets Dirty - unless there was nothing
+        /// to do, in which case the document is left untouched so it still writes verbatim. Returns
+        /// the BIN byte delta (negative = saved).
+        /// </summary>
+        internal static long Trim(GlbDocument doc, HashSet<int> dropIndices)
+        {
+            List<object> animations = Arr(doc.Json, "animations") ?? Empty;
+            List<object> accessors = Arr(doc.Json, "accessors") ?? Empty;
+            List<object> views = Arr(doc.Json, "bufferViews") ?? Empty;
+            List<object> images = Arr(doc.Json, "images") ?? Empty;
+
+            var survivors = new List<object>();
+            for (int i = 0; i < animations.Count; i++)
+                if (!dropIndices.Contains(i)) survivors.Add(animations[i]);
+
+            var keepAccessor = new HashSet<int>();
+            AccessorSlots(doc.Json, survivors, index => { keepAccessor.Add(index); return index; });
+            var keepView = new HashSet<int>();
+            for (int i = 0; i < accessors.Count; i++)
+            {
+                if (!keepAccessor.Contains(i)) continue;
+                foreach (int view in AccessorViews(Obj(accessors[i]))) keepView.Add(view);
+            }
+            foreach (object image in images) Add(keepView, Int(Obj(image), "bufferView", -1));
+
+            int[] accessorMap = Remap(accessors, keepAccessor, out List<object> newAccessors);
+            int[] viewMap = Remap(views, keepView, out List<object> newViews);
+            if (survivors.Count == animations.Count &&
+                newAccessors.Count == accessors.Count && newViews.Count == views.Count) return 0;
+
+            long delta = newViews.Count == views.Count ? 0 : Compact(doc, newViews);
+
+            Replace(doc.Json, "animations", survivors);
+            Replace(doc.Json, "accessors", newAccessors);
+            Replace(doc.Json, "bufferViews", newViews);
+            AccessorSlots(doc.Json, survivors, index => accessorMap[index]);
+            foreach (object accessor in newAccessors)
+            {
+                Dictionary<string, object> map = Obj(accessor);
+                Move(map, "bufferView", viewMap);
+                Dictionary<string, object> sparse = Obj(Get(map, "sparse"));
+                if (sparse == null) continue;
+                Move(Obj(Get(sparse, "indices")), "bufferView", viewMap);
+                Move(Obj(Get(sparse, "values")), "bufferView", viewMap);
+            }
+            foreach (object image in images) Move(Obj(image), "bufferView", viewMap);
+            doc.Dirty = true;
+            return delta;
+        }
+
+        /// <summary>Rebuild BIN out of the surviving bufferViews, in order, 4-byte aligned, and move
+        /// each view's byteOffset onto its new home. Returns the byte delta.</summary>
+        private static long Compact(GlbDocument doc, List<object> views)
+        {
+            byte[] old = doc.Bin ?? new byte[0];
+            long total = 0;
+            foreach (object view in views) total = Aligned(total) + Long(Obj(view), "byteLength", 0);
+            total = Aligned(total);
+            if (total > int.MaxValue)
+                throw new InvalidOperationException("a trimmed BIN chunk of " + total + " bytes does not " +
+                                                    "fit an array; this .glb is beyond what the tool handles");
+
+            var bin = new byte[total];
+            int at = 0;
+            foreach (object view in views)
+            {
+                Dictionary<string, object> map = Obj(view);
+                long from = Long(map, "byteOffset", 0), length = Long(map, "byteLength", 0);
+                if (from < 0 || length < 0 || from + length > old.Length)
+                    throw new InvalidOperationException("a bufferView of this .glb reads bytes " + from +
+                                                        ".." + (from + length) + " of a " + old.Length +
+                                                        "-byte BIN chunk; the file is malformed");
+                at = (int)Aligned(at);
+                Buffer.BlockCopy(old, (int)from, bin, at, (int)length);
+                map["byteOffset"] = (double)at;
+                at += (int)length;
+            }
+            doc.Bin = bin;
+            List<object> buffers = Arr(doc.Json, "buffers");
+            if (buffers != null && buffers.Count > 0) Obj(buffers[0])["byteLength"] = (double)bin.Length;
+            return bin.Length - (long)old.Length;
+        }
+
+        /// <summary>Kept entries in file order, plus old index -> new index (-1 when dropped).</summary>
+        private static int[] Remap(List<object> entries, HashSet<int> keep, out List<object> kept)
+        {
+            var map = new int[entries.Count];
+            kept = new List<object>();
+            for (int i = 0; i < entries.Count; i++)
+            {
+                map[i] = -1;
+                if (!keep.Contains(i)) continue;
+                map[i] = kept.Count;
+                kept.Add(entries[i]);
+            }
+            return map;
+        }
+
+        /// <summary>Every place core glTF names an accessor, handed to visit to read or to rewrite.</summary>
+        // ponytail: core-spec slots only - mesh primitives (attributes, indices, morph targets),
+        // skins and animation samplers. An extension that names an accessor of its own is invisible
+        // here; upgrade path = a per-extension slot table the day a file needs one.
+        private static void AccessorSlots(Dictionary<string, object> json, List<object> animations,
+                                          Func<int, int> visit)
+        {
+            foreach (object mesh in Arr(json, "meshes") ?? Empty)
+                foreach (object primitive in Arr(Obj(mesh), "primitives") ?? Empty)
+                {
+                    Dictionary<string, object> p = Obj(primitive);
+                    Move(p, "indices", visit);
+                    MoveAll(Obj(Get(p, "attributes")), visit);
+                    foreach (object target in Arr(p, "targets") ?? Empty) MoveAll(Obj(target), visit);
+                }
+            foreach (object skin in Arr(json, "skins") ?? Empty)
+                Move(Obj(skin), "inverseBindMatrices", visit);
+            foreach (object animation in animations)
+                foreach (object sampler in Arr(Obj(animation), "samplers") ?? Empty)
+                {
+                    Move(Obj(sampler), "input", visit);
+                    Move(Obj(sampler), "output", visit);
+                }
+        }
+
+        /// <summary>Recursive count of every "bufferView" key anywhere in the document.</summary>
+        private static int BufferViewKeys(object node)
+        {
+            int count = 0;
+            if (node is Dictionary<string, object> map)
+                foreach (KeyValuePair<string, object> pair in map)
+                {
+                    if (pair.Key == "bufferView") count++;
+                    count += BufferViewKeys(pair.Value);
+                }
+            else if (node is List<object> items)
+                foreach (object item in items) count += BufferViewKeys(item);
+            return count;
+        }
+
+        private static void Move(Dictionary<string, object> map, string key, int[] indexMap) =>
+            Move(map, key, index => indexMap[index]);
+
+        private static void Move(Dictionary<string, object> map, string key, Func<int, int> visit)
+        {
+            int index = Int(map, key, -1);
+            if (index < 0) return;
+            map[key] = (double)Moved(visit, index);
+        }
+
+        private static void MoveAll(Dictionary<string, object> map, Func<int, int> visit)
+        {
+            if (map == null) return;
+            foreach (string key in new List<string>(map.Keys))
+            {
+                int index = Int(map, key, -1);
+                if (index >= 0) map[key] = (double)Moved(visit, index);
+            }
+        }
+
+        private static int Moved(Func<int, int> visit, int index)
+        {
+            int moved = visit(index);
+            if (moved < 0)
+                throw new InvalidOperationException("this .glb still names accessor " + index +
+                                                    " after the trim decided nothing needs it; refusing " +
+                                                    "to write a file with a dangling reference");
+            return moved;
+        }
+
+        /// <summary>Reassign an array, or drop the key when the trim emptied it - glTF has no empty arrays.</summary>
+        private static void Replace(Dictionary<string, object> json, string key, List<object> values)
+        {
+            if (!json.ContainsKey(key)) return;
+            if (values.Count == 0) json.Remove(key);
+            else json[key] = values;
+        }
+
+        private static long Aligned(long offset) => offset + (4 - offset % 4) % 4;
+
+        private static readonly List<object> Empty = new List<object>();
 
         /// <summary>Case-insensitive substring match against the mandatory action tokens.</summary>
         private static bool IsMandatory(string name)
@@ -158,7 +381,13 @@ namespace Morgott.ContentTool.Import
 
         private static string Str(Dictionary<string, object> map, string key) => Get(map, key) as string;
 
+        /// <summary>An array index. Anything a C# array cannot be indexed by reads as absent.</summary>
         private static int Int(Dictionary<string, object> map, string key, int fallback) =>
-            Get(map, key) is double number ? (int)number : fallback;
+            Get(map, key) is double number && number >= 0 && number <= int.MaxValue ? (int)number : fallback;
+
+        /// <summary>A byte size or offset. GLB spells these as uint32, so they outgrow int - and a
+        /// count times an element size outgrows it twice over.</summary>
+        private static long Long(Dictionary<string, object> map, string key, long fallback) =>
+            Get(map, key) is double number && number >= 0 && number <= uint.MaxValue ? (long)number : fallback;
     }
 }
