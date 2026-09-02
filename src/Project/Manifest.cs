@@ -153,6 +153,50 @@ namespace Morgott.ContentTool.Project
         /// ParseReplace's "declares but no complete entry" sentence turns on.</summary>
         internal bool Declares(string key) { return root.ContainsKey(key); }
 
+        /// <summary>V4/V5/V6/V7 over every row, existing and pending, before a byte moves. V4 and V5 are
+        /// today's rule at ContentProject.cs:404-416 unchanged; V6 is new only because the read side can
+        /// afford to treat `"mesh": 5` as an absent mesh and the WRITE side cannot hand the author back a
+        /// file whose row nothing can read.</summary>
+        /// <exception cref="InvalidDataException">E3 for a row, E4 for a duplicated target.</exception>
+        internal void Validate()
+        {
+            var seen = new List<string>();
+            foreach (ReplaceRow row in rows)
+            {
+                string kind = row.Kind;
+                bool needsBundle = kind != "video";
+                if (kind == null || row.HasNonStringField() ||
+                    (needsBundle && (string.IsNullOrEmpty(row.Bundle) || string.IsNullOrEmpty(row.Asset))))
+                    throw new InvalidDataException(RowRefusal(row));
+
+                // A "video" row with no "asset" ADDS a clip rather than replacing one, so two of them are
+                // two additions, not a collision. Only a NAMED target can be claimed twice.
+                if (string.IsNullOrEmpty(row.Asset) || string.IsNullOrEmpty(row.Bundle)) continue;
+                // Lowercased rather than compared with OrdinalIgnoreCase because List<string>.Contains has
+                // no comparer overload; the fold is the one ProjectBake.cs:1534 uses for bundles.
+                string key = row.Bundle.ToLowerInvariant() + "\u0000" + row.Asset + "\u0000" + kind;
+                if (seen.Contains(key))
+                    throw new InvalidDataException(
+                        "ppcontent.json already replaces \"" + row.Asset + "\" in \"" + row.Bundle +
+                        "\" with a " + kind + ", so a second row for the same target was NOT written - " +
+                        "edit the existing row instead");
+                seen.Add(key);
+            }
+        }
+
+        /// <summary>E3, the SENTENCE verbatim from ContentProject.cs:419-422. The row inside it is spelled
+        /// by JsonWriter from the PARSED row rather than by a raw regex match, so its spacing and key order
+        /// may differ from the file's - and a nested member shows up in the sentence at all, which the old
+        /// "\{[^{}]*\}" match could never manage (design §7).</summary>
+        internal static string RowRefusal(ReplaceRow row)
+        {
+            return "\"replace\" row REFUSED: every entry needs exactly one of \"texture\", \"material\", " +
+                   "\"mesh\", \"clip\" or \"video\", plus \"bundle\" and \"asset\" for everything but " +
+                   "\"video\" (a \"video\" entry with no \"asset\" ADDS a new clip); got " +
+                   new JsonWriter().Val(row.Tree).ToString() +
+                   " - SKIPPED, this project's other rows still bake";
+        }
+
         private string Str(string key)
         {
             object value;

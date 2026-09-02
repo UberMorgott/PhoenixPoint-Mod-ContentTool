@@ -127,6 +127,49 @@ internal static class ManifestTests
                 "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"pa\\\"th\": \"x\", \"replace\": [] }"));
             checks += Check(ManifestFile.Load(quoted).Manifest.Root.ContainsKey("pa\"th"),
                             "and an escaped quote inside a KEY neither ends the key nor collides with anything");
+
+            // ---- Manifest_RefusesInvalidReplaceRows: V4, V5, V6, each with E3's wording.
+            // NOT named `bad`: Task 4's `catch (InvalidDataException bad)` blocks sit in a nested scope of this
+            // same try, and a later outer local of that name is CS0136.
+            string[] rejects =
+            {
+                "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\" }",
+                "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": \"m\", \"clip\": \"c\" }",
+                "{ \"bundle\": \"a.bundle\", \"mesh\": \"m\" }",
+                "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": { \"file\": \"m\" } }",
+                "{ \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": \"m\", \"clip\": null }"
+            };
+            foreach (string reject in rejects)
+            {
+                Manifest one = Manifest.Parse(
+                    "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " + reject + " ] }");
+                string said = null;
+                try { one.Validate(); }
+                catch (InvalidDataException refused) { said = refused.Message; }
+                checks += Check(said != null &&
+                                said.StartsWith("\"replace\" row REFUSED: every entry needs exactly one of",
+                                                StringComparison.Ordinal) &&
+                                said.EndsWith("- SKIPPED, this project's other rows still bake", StringComparison.Ordinal),
+                                "E3 verbatim for " + reject + " -> " + said);
+            }
+
+            // ---- Manifest_RefusesDuplicateMeshTarget: V7, bundle case-blind, asset verbatim.
+            Manifest twice = Manifest.Parse(
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [" +
+                " { \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": \"one\" }," +
+                " { \"bundle\": \"A.BUNDLE\", \"asset\": \"Foo\", \"mesh\": \"two\" } ] }");
+            string dup = null;
+            try { twice.Validate(); }
+            catch (InvalidDataException refused) { dup = refused.Message; }
+            checks += Check(dup == "ppcontent.json already replaces \"Foo\" in \"A.BUNDLE\" with a mesh, so a second " +
+                                   "row for the same target was NOT written - edit the existing row instead",
+                            "E4 names the asset, the bundle and the kind: " + dup);
+            Manifest apart = Manifest.Parse(
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [" +
+                " { \"bundle\": \"a.bundle\", \"asset\": \"Foo\", \"mesh\": \"one\" }," +
+                " { \"bundle\": \"a.bundle\", \"asset\": \"foo\", \"texture\": \"two\" } ] }");
+            apart.Validate();
+            checks += Check(true, "a different asset CASE and a different kind are different targets - assets fold nowhere");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "MANIFEST PASS, " + checks + " check(s) - atomic write";
