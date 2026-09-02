@@ -1654,6 +1654,9 @@ namespace Morgott.ContentTool.Dev
                 // other tab: an author on the Doctor should not have to go to FIT and back to reach
                 // the file utilities. Design §6 puts them under Advanced, and this is where they are.
                 advanced = GUILayout.Toggle(advanced, " Advanced (file utilities)");
+                // The prototype the Doctor is holding is what a SKEL run verifies against. Handed down
+                // rather than looked up: the panel never picks a prototype, it only reports on one.
+                slim.Target = doctor.Prototype;
                 if (advanced) slim.Draw(BenchList.ContentWidth(w));
                 GUILayout.EndScrollView();
                 GUILayout.EndArea();

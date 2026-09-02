@@ -420,6 +420,48 @@ internal static class GlbSkelTests
         Check(alone.Ok && inHand.Sentence() == alone.Sentence(),
               "the written file answers for itself: '" + alone.Sentence() + "' vs '" + inHand.Sentence() + "'");
 
+        // --- The bridge from the Doctor's bone map to a plan. The sidecar and a rename plan say the
+        // same fact from two sides, and the flow is one-directional: aliases -> plan -> baked .glb.
+
+        // 44. Every live alias becomes one rename, and NOTHING else is invented: the Doctor knows
+        //     which bones are misnamed and nothing at all about hierarchy (design §9).
+        var mapped = new Dictionary<string, string>(StringComparer.Ordinal)
+            { { "hip", "Spine_1" }, { "head", "Neck" } };
+        SkelPlan bridged = Morgott.ContentTool.Doctor.SkelPlanFromMap.Of(null, mapped, "rig");
+        Check(bridged.Root == "rig" && bridged.Renames.Count == 2 &&
+              bridged.Renames[0].From == "hip" && bridged.Renames[0].To == "Spine_1" &&
+              bridged.Renames[1].From == "head" && bridged.Renames[1].To == "Neck" &&
+              bridged.Collapses.Count == 0 && bridged.Inserts.Count == 0 && bridged.Create.Count == 0,
+              "the bone map becomes renames and nothing else: " + Printed(bridged));
+
+        // 45. And it validates and applies AS WRITTEN, against the file the aliases were made for -
+        //     which is the only claim worth making about a plan a button produced.
+        GlbDocument bridging = Doc("u9_probe.glb");
+        IList<string> onThePlan = GlbSkel.Validate(bridging, bridged, null);
+        GlbSkel.Stats bridgedStats = GlbSkel.Apply(bridging, bridged);
+        Check(onThePlan.Count == 0 && bridgedStats.Renamed == 2 &&
+              GlbSkel.Verify(bridging, "rig", Words("Spine_1", "Neck"), null).Ok,
+              "a plan written from the bone map validates by construction and binds by name: " +
+              Printed(onThePlan));
+
+        // 46. An alias the REPORT itself flagged is left out: AliasUnused says the file has no bone of
+        //     that name, AliasNotATargetBone says the rig has no such bone (ReplacementPreflight.cs:143,
+        //     :148, Subject = the FILE bone). Either is a rename Validate would refuse, and a plan that
+        //     arrives pre-refused is worse than a short one. A Doctor with nothing to say writes an
+        //     empty plan rather than throwing inside OnGUI.
+        var flagged = new List<Morgott.ContentTool.Doctor.Diagnostic>
+        {
+            new Morgott.ContentTool.Doctor.Diagnostic { Code = "AliasUnused", Subject = "hip" },
+            new Morgott.ContentTool.Doctor.Diagnostic { Code = "AliasNotATargetBone", Subject = "head" },
+            new Morgott.ContentTool.Doctor.Diagnostic { Code = "MissingBone", Subject = "Spine_1" },
+        };
+        mapped["tail"] = "Tail_1";
+        SkelPlan pruned = Morgott.ContentTool.Doctor.SkelPlanFromMap.Of(flagged, mapped, null);
+        SkelPlan emptied = Morgott.ContentTool.Doctor.SkelPlanFromMap.Of(flagged, null, null);
+        Check(pruned.Renames.Count == 1 && pruned.Renames[0].From == "tail" &&
+              pruned.Renames[0].To == "Tail_1" && pruned.Root == null && emptied.Renames.Count == 0,
+              "a flagged alias is dropped and an empty map is an empty plan: " + Printed(pruned));
+
         // --- The job. Nothing below re-tests GlbSkel: what is on trial is the file on disk, which is
         // only ever replaced by a finished, verified temp - the same swap Execute and Zip keep
         // (SlimJob.cs:88-89, :172-173), because a rewrite the author cannot undo is a rewrite nobody ran.

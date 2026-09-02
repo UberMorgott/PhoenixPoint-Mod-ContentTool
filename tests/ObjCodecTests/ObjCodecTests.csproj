@@ -155,6 +155,7 @@
          is a graph and a 4x4 composition. Both are proven on values here, because a wrong local
          matrix produces a file that loads perfectly and stands in the wrong place. -->
     <Compile Include="..\..\src\Import\GlbSkel.cs" Link="GlbSkel.cs" />
+    <Compile Include="..\..\src\Doctor\SkelPlanFromMap.cs" Link="SkelPlanFromMap.cs" />
     <Compile Include="GlbSkelTests.cs" />
     <!-- ZIP rewrites how the SAME curves are stored, so what it decides - which accessor is a flat
          run it may touch, which curve never moves, what an int16 rotation key becomes - is proven

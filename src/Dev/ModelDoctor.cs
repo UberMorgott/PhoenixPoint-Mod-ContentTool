@@ -24,7 +24,7 @@ namespace Morgott.ContentTool.Dev
     /// </summary>
     internal sealed class ModelDoctor
     {
-        private enum Intent { Preview, Revert, Save }
+        private enum Intent { Preview, Revert, Save, SkelPlan }
 
         private readonly ConcurrentQueue<Intent> intents = new ConcurrentQueue<Intent>();
         /// <summary>Navigation and alias edits the DRAW pass asked for. OnGUI runs twice per frame
@@ -228,6 +228,7 @@ namespace Morgott.ContentTool.Dev
             if (what == "preview") intents.Enqueue(Intent.Preview);
             else if (what == "revert") intents.Enqueue(Intent.Revert);
             else if (what == "save") intents.Enqueue(Intent.Save);
+            else if (what == "skelplan") intents.Enqueue(Intent.SkelPlan);
         }
 
         /// <summary>
@@ -398,6 +399,7 @@ namespace Morgott.ContentTool.Dev
             {
                 if (intent == Intent.Preview) Message = DoPreview();
                 else if (intent == Intent.Revert) Message = Revert();
+                else if (intent == Intent.SkelPlan) Message = DoWriteSkelPlan();
                 else Message = DoSave();
             }
         }
@@ -487,6 +489,58 @@ namespace Morgott.ContentTool.Dev
                 return "saved " + aliases.Count + " alias(es) to " + AliasMap.SidecarPathOf(Path);
             }
             catch (Exception ex) { return "could not save: " + ex.Message; }
+        }
+
+        /// <summary>
+        /// THE BONE MAP, BAKED INTO THE FILE INSTEAD OF PARKED BESIDE IT. The sidecar and a rename plan
+        /// carry the same fact - file bone -> game bone - and the flow between them is one-directional:
+        /// aliases become a plan, SKEL writes the names into the .glb, and the sidecar is then
+        /// unnecessary for every bone it renamed (it is sha256-guarded, AliasMap.cs:189-195, so the
+        /// rewrite makes it Stale anyway). A baked file binds on BOTH import routes; a sidecar only
+        /// reaches the replacement read (AliasMap.cs:20-23).
+        ///
+        /// RENAMES ONLY. This panel knows which bones are misnamed and nothing about hierarchy, so it
+        /// writes no collapse, no insert and no create - design §9 forbids the guess.
+        /// </summary>
+        private string DoWriteSkelPlan()
+        {
+            if (Path == null || Ready == null) return "there is nothing to write a plan from yet";
+            if (aliases.Count == 0) return "the bone map is empty, so there is nothing to rename";
+            try
+            {
+                SkelPlan plan = SkelPlanFromMap.Of(Ready.Report.Rows, aliases, RootOf(Path));
+                if (plan.Renames.Count == 0)
+                    return "every alias in this map is one the report itself flagged, so a plan built " +
+                           "from it would be refused - fix the rows above first";
+                string path = SkelPlan.PlanPathOf(Path);
+                File.WriteAllText(path, plan.ToJson());
+                return "wrote " + plan.Renames.Count + " rename(s) to " + path +
+                       " - open Advanced > SKEL to apply it";
+            }
+            catch (Exception ex) { return "could not write the plan: " + ex.Message; }
+        }
+
+        /// <summary>The file's ONE scene root, or null when it has none or several. A plan's Root is
+        /// what PP's paths are measured from and Validate refuses one that names no node; u9_probe.glb
+        /// ships THREE roots, so "assume there is one" is not a hypothetical mistake.</summary>
+        private static string RootOf(string glbPath)
+        {
+            try
+            {
+                List<object> nodes = GlbSkel.Nodes(GlbDocument.Load(glbPath));
+                string why;
+                int[] parents = GlbSkel.Parents(nodes, out why);
+                if (parents == null) return null;
+                string only = null;
+                for (int i = 0; i < parents.Length; i++)
+                {
+                    if (parents[i] >= 0) continue;
+                    if (only != null) return null;
+                    only = GlbSlim.Str(GlbSlim.Obj(nodes[i]), "name");
+                }
+                return only;
+            }
+            catch (Exception) { return null; }
         }
 
         private string DropSidecar()
@@ -1187,6 +1241,11 @@ namespace Morgott.ContentTool.Dev
             // and a map AliasMap.Of refuses would be refused again by the loader about to read it.
             GUI.enabled = canSave;
             if (GUILayout.Button("Save aliases", GUILayout.Width(110f))) Enqueue("save");
+            // The same map, baked INTO the file instead of parked beside it. Offered whenever the map
+            // has anything in it - including a map already saved to a sidecar, which is exactly the
+            // state an author is in when they decide to bake it.
+            GUI.enabled = aliases.Count > 0;
+            if (GUILayout.Button("Write skel plan", GUILayout.Width(120f))) Enqueue("skelplan");
             GUI.enabled = true;
             if (GUILayout.Button("Copy report", GUILayout.Width(100f)))
                 GUIUtility.systemCopyBuffer = PlainTextOf(Ready, Path, Target);

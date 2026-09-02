@@ -46,12 +46,22 @@ namespace Morgott.ContentTool.Dev
         private bool force;
         private bool inPlace;
 
-        /// <summary>false = SLIM (drop clips), true = ZIP (rewrite how the same curves are stored).
-        /// One panel rather than two because every field around the middle block - the browser, the
-        /// intent queue, the progress trio, the writes line - is the same panel either way. It is
-        /// changed only in the intent drain, because the two modes draw different control COUNTS and
-        /// rule 1 above is what that costs.</summary>
-        private bool zipMode;
+        /// <summary>Which run this panel is set up for: drop clips, rewrite how the same curves are
+        /// stored, or rename the bones onto a prototype's. One panel rather than three because every
+        /// field around the middle block - the browser, the intent queue, the progress trio, the writes
+        /// line - is the same panel whichever run is chosen. It is changed only in the intent drain,
+        /// because the three modes draw different control COUNTS and rule 1 above is what that costs.</summary>
+        private enum Mode { Slim, Zip, Skel }
+        private Mode mode;
+
+        /// <summary>The .skelplan.json a SKEL run applies, and the sentence describing it. Null while
+        /// there is no plan that PARSES - the RUN button is off until there is one, because a run that
+        /// starts with an unreadable plan can only end in a refusal.</summary>
+        private string planPath;
+        private string planLine = "no plan yet";
+        /// <summary>The prototype the Doctor has selected, handed down by the bench each frame. Read
+        /// for the closing Verify and for nothing else - the panel never picks a prototype.</summary>
+        internal Doctor.PrototypeTarget Target;
         private bool collapse = true;
         private bool quantise = true;
         /// <summary>What a zip would work on, counted off the JSON when the file is picked: rotation
@@ -70,7 +80,8 @@ namespace Morgott.ContentTool.Dev
         private SlimProgress shownProgress;
         private string shownResult = "";
         private bool shownRunning;
-        private bool shownZip;
+        private Mode shownMode;
+        private IList<string> shownTarget;
 
         /// <summary>Draws the panel. Called from the bench inside the Doctor tab, under Advanced.</summary>
         internal void Draw(float width)
@@ -95,12 +106,16 @@ namespace Morgott.ContentTool.Dev
                 shownProgress = progress;
                 shownResult = result ?? "";
                 shownRunning = running;
-                shownZip = zipMode;
+                shownMode = mode;
+                shownTarget = Target == null ? null : Target.BoneNames();
             }
 
             GUILayout.Space(6f);
-            GUILayout.Label(shownZip ? "GLB ZIP - shrink the animation without dropping a clip"
-                                     : "GLB SLIM - drop animation clips this model will never play");
+            GUILayout.Label(shownMode == Mode.Skel
+                            ? "GLB SKEL - rename this model's bones onto the prototype's"
+                            : shownMode == Mode.Zip
+                              ? "GLB ZIP - shrink the animation without dropping a clip"
+                              : "GLB SLIM - drop animation clips this model will never play");
 
             GUILayout.BeginHorizontal();
             GUI.enabled = !shownRunning;
@@ -113,20 +128,34 @@ namespace Morgott.ContentTool.Dev
             // The mode decides how many controls the block below emits, so the press only ENQUEUES -
             // flipping it here would make the repaint pass lay out a different panel than the Layout
             // pass counted, which is rule 1 in the remark above.
+            GUILayout.BeginHorizontal();
             GUI.enabled = !shownRunning;
-            bool wantZip = GUILayout.Toggle(shownZip, " ZIP (rewrite curves, keep every clip)");
+            bool onSlim = GUILayout.Toggle(shownMode == Mode.Slim, " SLIM (drop clips)", GUILayout.Width(140f));
+            bool onZip = GUILayout.Toggle(shownMode == Mode.Zip, " ZIP (rewrite curves)", GUILayout.Width(160f));
+            bool onSkel = GUILayout.Toggle(shownMode == Mode.Skel, " SKEL (rename bones)", GUILayout.Width(160f));
             GUI.enabled = true;
-            if (wantZip != shownZip) intents.Enqueue(delegate { zipMode = wantZip; });
+            GUILayout.EndHorizontal();
+            Mode want = shownMode;
+            if (onSlim && shownMode != Mode.Slim) want = Mode.Slim;
+            else if (onZip && shownMode != Mode.Zip) want = Mode.Zip;
+            else if (onSkel && shownMode != Mode.Skel) want = Mode.Skel;
+            if (want != shownMode) { Mode picked = want; intents.Enqueue(delegate { Switch(picked); }); }
 
-            if (shownZip) Options(); else Clips(width);
+            if (shownMode == Mode.Skel) SkelOptions();
+            else if (shownMode == Mode.Zip) Options();
+            else Clips(width);
 
             GUILayout.BeginHorizontal();
             GUI.enabled = !shownRunning;
-            // No force in ZIP mode: it overrides the mandatory-clip and rigged-character arms, and a
+            // No force outside SLIM: it overrides the mandatory-clip and rigged-character arms, and a
             // run that drops no clip cannot reach either of them.
-            if (!shownZip) force = GUILayout.Toggle(force, " force (drop mandatory clips too)", GUILayout.Width(220f));
+            if (shownMode == Mode.Slim)
+                force = GUILayout.Toggle(force, " force (drop mandatory clips too)", GUILayout.Width(220f));
             inPlace = GUILayout.Toggle(inPlace, " overwrite in place", GUILayout.Width(150f));
-            GUI.enabled = !shownRunning && sourcePath != null && census.Length > 0;
+            // A file with no clips is a perfectly good skeleton to rewrite, so SKEL asks for a plan
+            // instead of a census.
+            GUI.enabled = !shownRunning && sourcePath != null &&
+                          (shownMode == Mode.Skel ? planPath != null : census.Length > 0);
             bool run = GUILayout.Button("RUN", GUILayout.Width(70f));
             GUI.enabled = shownRunning;
             bool stop = GUILayout.Button("CANCEL", GUILayout.Width(80f));
@@ -140,7 +169,7 @@ namespace Morgott.ContentTool.Dev
             // rule 1 above, broken in the one place it costs a wedged panel.
             GUILayout.Label("writes: " + (sourcePath == null ? "-"
                                           : Path.GetFileName(inPlace ? sourcePath
-                                                             : Beside(sourcePath, shownZip ? "zip" : "slim"))));
+                                                             : Beside(sourcePath, Tag(shownMode)))));
             Bar();
             GUILayout.Label("result: " + (shownResult.Length == 0 ? "-" : shownResult));
         }
@@ -199,6 +228,33 @@ namespace Morgott.ContentTool.Dev
                             Bytes(animBytes) + " of animation - no clip is dropped");
         }
 
+        /// <summary>SKEL has no per-clip choice either: what it needs is a PLAN, and the plan lives
+        /// beside the file under a name both sides spell the same way (SkelPlan.PlanPathOf). The two
+        /// labels below are FIELDS computed in the intent drain rather than facts re-read here - a
+        /// label that read the disk mid-layout would answer differently in the two passes of one frame.
+        ///
+        /// ponytail: no file dialog for the plan. GlbFileBrowser lists .glb and nothing else, and the
+        /// Doctor writes the plan to exactly one place - beside the source. "Plan..." re-reads that
+        /// place. Give the browser an extension when a plan ever legitimately lives somewhere else.</summary>
+        private void SkelOptions()
+        {
+            GUILayout.BeginHorizontal();
+            GUI.enabled = !shownRunning && sourcePath != null;
+            if (GUILayout.Button("Plan...", GUILayout.Width(90f)))
+                intents.Enqueue(delegate { SeedPlan(sourcePath); });
+            GUI.enabled = true;
+            GUILayout.Label("plan: " + BenchList.Elide(planPath == null ? "-" : Path.GetFileName(planPath), 40));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label(planLine);
+            // The prototype is the Doctor's, not this panel's. Without one the rewrite still happens -
+            // it just claims nothing about binding, which is the honest thing for a verify with no
+            // question to ask.
+            GUILayout.Label(shownTarget == null || shownTarget.Count == 0
+                ? "no prototype selected - the run will rewrite but claim nothing about binding"
+                : "verifies against the Doctor's prototype, " + shownTarget.Count + " bone(s), BY NAME");
+        }
+
         /// <summary>The stage line and a plain box grown to the fraction done. No texture, no widget:
         /// a Box with a width is a bar in every skin the game might be wearing.</summary>
         private void Bar()
@@ -243,6 +299,49 @@ namespace Morgott.ContentTool.Dev
                 result = Path.GetFileName(path) + " could not be read: " +
                          ex.GetType().Name + " - " + ex.Message;
             }
+            // Outside the try: a .glb the container reader refuses is exactly the kind of file SKEL
+            // exists for, and its plan is still worth offering.
+            SeedPlan(path);
+        }
+
+        /// <summary>Switching the run also re-reads the plan, because the plan belongs to the FILE and
+        /// the author reaches SKEL by pressing the toggle, not by picking the file again.</summary>
+        private void Switch(Mode picked)
+        {
+            mode = picked;
+            if (picked == Mode.Skel) SeedPlan(sourcePath);
+        }
+
+        /// <summary>Read the plan sitting beside this .glb, if there is one. planPath is left NULL for
+        /// anything that will not parse - the sentence says why and the RUN button stays off, because
+        /// a run that starts with an unreadable plan can only end in a refusal the author has already
+        /// been told about.</summary>
+        private void SeedPlan(string glbPath)
+        {
+            planPath = null;
+            if (glbPath == null) { planLine = "pick a .glb first"; return; }
+            string beside = SkelPlan.PlanPathOf(glbPath);
+            if (!File.Exists(beside))
+            {
+                planLine = "no " + Path.GetFileName(beside) + " yet - the Model Doctor's " +
+                           "'Write skel plan' writes one from the bone map";
+                return;
+            }
+            try
+            {
+                string why;
+                SkelPlan plan = SkelPlan.Parse(File.ReadAllText(beside), out why);
+                if (plan == null) { planLine = why; return; }
+                planPath = beside;
+                planLine = plan.Renames.Count + " rename, " + plan.Collapses.Count + " collapse, " +
+                           plan.Inserts.Count + " insert, " + plan.Create.Count + " create" +
+                           (string.IsNullOrEmpty(plan.Root) ? " - no root named" : " - root '" + plan.Root + "'");
+            }
+            catch (Exception ex)
+            {
+                // Same rule as Pick: this runs inside OnGUI, where a throw tears the bench panel down.
+                planLine = Path.GetFileName(beside) + " could not be read: " + ex.Message;
+            }
         }
 
         private void Run()
@@ -257,7 +356,20 @@ namespace Morgott.ContentTool.Dev
             Action<SlimProgress> onProgress = delegate(SlimProgress p) { progress = p; };
             Action<string> onComplete = delegate(string r) { result = r; running = false; };
 
-            if (zipMode)
+            if (mode == Mode.Skel)
+            {
+                progress = new SlimProgress("Queued", 0, 6, "waiting for a worker");
+                // Names, not paths: on a Replace target the prototype's PATHS are the whole rig's and a
+                // slot renderer holds a small subset of it, so asking the path question here would
+                // report a good rename as a wall of missing paths. GlbSkel.Verify asks the two apart
+                // for exactly this reason; the gate asks both.
+                SlimJob.StartSkel(sourcePath, inPlace ? sourcePath : Beside(sourcePath, "skel"), planPath,
+                                  Target == null ? null : Target.BoneNames(), null,
+                                  cts, onProgress, onComplete);
+                return;
+            }
+
+            if (mode == Mode.Zip)
             {
                 progress = new SlimProgress("Queued", 0, 6, "waiting for a worker");
                 SlimJob.StartZip(sourcePath, inPlace ? sourcePath : Beside(sourcePath, "zip"),
@@ -279,9 +391,14 @@ namespace Morgott.ContentTool.Dev
 
         // ------------------------------------------------------------------ small change
 
+        private static string Tag(Mode mode)
+        {
+            return mode == Mode.Skel ? "skel" : mode == Mode.Zip ? "zip" : "slim";
+        }
+
         /// <summary>The sibling a non-destructive run writes: <c>foo.glb</c> -> <c>foo.slim.glb</c>,
-        /// or <c>foo.zip.glb</c>. The tag says which run made it, so the two never overwrite each
-        /// other's output.</summary>
+        /// <c>foo.zip.glb</c> or <c>foo.skel.glb</c>. The tag says which run made it, so no two ever
+        /// overwrite each other's output.</summary>
         private static string Beside(string path, string tag)
         {
             string dir = Path.GetDirectoryName(path) ?? "";
