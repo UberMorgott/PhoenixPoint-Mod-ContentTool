@@ -74,8 +74,175 @@ internal static class GlbZipTests
               packed[3] == -32767,
               "Pack quantises to +-32767 and clamps past it, never emitting -32768");
 
+        // --- the rewrite, against the files ppzip.py was MEASURED on (2026-09-02) ---
+
+        // 9. The shrink case: one clip, exclusive views, one rotation curve. ppzip lands on 2,212 B.
+        GlbDocument fold = GlbDocument.Load(Fixture("u8_rootfold.glb"));
+        GlbZip.Stats foldStats = GlbZip.Zip(fold, true, true);
+        byte[] foldOut = fold.Write();
+        Check(foldOut.Length < 2240 && foldStats.Quantised == 1 && Names(fold) == "RootDrive",
+              "u8_rootfold.glb zips to " + foldOut.Length + " B (ppzip: 2212) with its one rotation " +
+              "quantised and its clip kept");
+
+        // 10. The GROWTH case, and it is not a bug to chase: 278 accessors in 5 shared bufferViews,
+        //     so the dense keys the rewrite replaces cannot be freed and the file gets BIGGER. The
+        //     job refuses the swap; this gate only pins the number.
+        GlbDocument spider = GlbDocument.Load(Fixture("u8_probe.glb"));
+        GlbZip.Stats spiderStats = GlbZip.Zip(spider, true, true);
+        byte[] spiderOut = spider.Write();
+        Check(spiderOut.Length > 349468 && spiderStats.Quantised == 137 &&
+              Names(spider) == "Spider_Attack,Spider_Death,Spider_Idle,Spider_Jump,Spider_Walk",
+              "u8_probe.glb keeps its 5 clips, quantises 137 rotations and GROWS to " + spiderOut.Length +
+              " B (ppzip: 377256)");
+
+        // 11. The file ppzip CRASHES on (struct.error, offset 380 of a 380-byte buffer): accessor 8 is
+        //     the output of Walk, of walk AND of Hold, so ppzip rewrites it three times and re-reads it
+        //     out of the stale blob. Here a shared output is left exactly as it is.
+        byte[] u9bytes = System.IO.File.ReadAllBytes(Fixture("u9_probe.glb"));
+        GlbDocument before9 = GlbDocument.Load(u9bytes);
+        byte[] held = Slice(before9, GlbSlim.Int(Sampler(before9, "Hold", 0), "output", -1));
+        long heldCount = Count(before9, GlbSlim.Int(Sampler(before9, "Hold", 0), "output", -1));
+        GlbDocument u9 = GlbDocument.Load(u9bytes);
+        GlbZip.Stats u9Stats = GlbZip.Zip(u9, true, true);
+        Dictionary<string, object> walk = Sampler(u9, "Walk", 0);
+        Dictionary<string, object> walkOut = Accessor(u9, GlbSlim.Int(walk, "output", -1));
+        Check(Names(u9) == "Walk,walk,Morphs,Hold" && u9Stats.Shared >= 1 &&
+              GlbSlim.Int(walkOut, "componentType", 0) == 5126 &&
+              GlbSlim.Long(walkOut, "count", 0) == heldCount,
+              "u9_probe.glb finishes with all 4 clips, and the output 3 clips share keeps float32 and " +
+              "its " + heldCount + " keys");
+
+        // 12. And the STEP sampler that shares it is still STEP, byte for byte.
+        Dictionary<string, object> hold = Sampler(u9, "Hold", 0);
+        Check(GlbSlim.Str(hold, "interpolation") == "STEP" &&
+              Same(Slice(u9, GlbSlim.Int(hold, "output", -1)), held),
+              "the STEP sampler of Hold keeps its interpolation and its bytes");
+
+        // 13-15. The three refusals. The first two the shipped key-count guard already makes; the
+        //        third is the new one, and without it u10_probe passes and is silently invalidated -
+        //        EXT_meshopt_compression keeps its own byteOffset inside the view's extension block,
+        //        which Compact does not move.
+        Check(Refusal("u12_norm.glb") != null,
+              "the Draco file is refused - 1 bufferView key against 5 accessors");
+        Check(Refusal("u12_probe.glb") != null && Refusal("u12_uv.glb") != null,
+              "the other two Draco files are refused too");
+        string meshopt = Refusal("u10_probe.glb");
+        Check(meshopt != null && meshopt.Contains("extension"),
+              "a bufferView carrying an extensions block is refused by name, not compacted out from under it");
+
+        // 16. Two constant curves reading the same key times get ONE 2-key input between them, not
+        //     one each (ppzip.py:181-188).
+        GlbDocument shared = GlbDocument.Load(Shared());
+        GlbZip.Stats sharedStats = GlbZip.Zip(shared, true, true);
+        int first = GlbSlim.Int(Sampler(shared, "Clip", 0), "input", -1);
+        int third = GlbSlim.Int(Sampler(shared, "Clip", 2), "input", -1);
+        Check(sharedStats.Collapsed == 2 && first == third &&
+              GlbSlim.Long(Accessor(shared, first), "count", 0) == 2 &&
+              GlbSlim.Str(Accessor(shared, first), "type") == "SCALAR",
+              "two constant curves sharing one input accessor collapse onto a single new 2-key input");
+
+        // 17. A clip whose EVERY curve is constant is left dense. GlbReader picks a clip's rate from
+        //     the coarsest rate every key time lands on and derives its LENGTH from it, so collapsing
+        //     the last dense channel would let the rate drop and the clip come out LONGER.
+        GlbDocument solo = GlbDocument.Load(Synthetic());
+        Dictionary<string, object> clip = GlbSlim.Obj(GlbSlim.Arr(solo.Json, "animations")[0]);
+        GlbSlim.Arr(clip, "samplers").RemoveAt(1);
+        GlbSlim.Arr(clip, "channels").RemoveAt(1);
+        GlbZip.Stats soloStats = GlbZip.Zip(solo, true, false);
+        float[] times = GlbZip.ReadFloats(solo, GlbSlim.Int(Sampler(solo, "Clip", 0), "input", -1));
+        Check(soloStats.Collapsed == 0 && times != null &&
+              Same(times, new[] { 0f, 0.25f, 0.5f, 0.75f }, 0f),
+              "a wholly constant clip keeps its 4 key times, so its frame rate cannot drift");
+
+        // 18. The document the rewrite hands on is internally consistent: BIN grew, the buffer says so,
+        //     and the writer knows to re-serialise the JSON rather than echo the original chunk.
+        Check(fold.Dirty &&
+              GlbSlim.Long(GlbSlim.Obj(GlbSlim.Arr(fold.Json, "buffers")[0]), "byteLength", -1) == fold.Bin.Length,
+              "a zipped document is Dirty and its buffer's byteLength is the BIN chunk it actually got");
+
         return "GLB-ZIP PASS, " + checks + " check(s)";
     }
+
+    /// <summary>Whether the pre-flight refuses this fixture at all - zip reaches it with force, since
+    /// it drops no clip and neither the mandatory nor the rigged-character arm can apply.</summary>
+    private static string Refusal(string name) =>
+        GlbSlim.Guard(GlbDocument.Load(Fixture(name)), new HashSet<int>(), true);
+
+    /// <summary>ppzip's fixture with a THIRD channel: two constant curves reading the same key times,
+    /// which is the shape the input dedup exists for, plus the moving curve that keeps collapse on.</summary>
+    private static byte[] Shared()
+    {
+        byte[] bin = Concat(Bytes(0f, 0.25f, 0.5f, 0.75f), Bytes(0f, 0.25f), Bytes(Still), Bytes(Moving),
+                            Bytes(Still));
+        return Glb("{\"asset\":{\"version\":\"2.0\"}," +
+                   "\"buffers\":[{\"byteLength\":" + bin.Length + "}]," +
+                   "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":16}," +
+                                    "{\"buffer\":0,\"byteOffset\":16,\"byteLength\":8}," +
+                                    "{\"buffer\":0,\"byteOffset\":24,\"byteLength\":64}," +
+                                    "{\"buffer\":0,\"byteOffset\":88,\"byteLength\":32}," +
+                                    "{\"buffer\":0,\"byteOffset\":120,\"byteLength\":64}]," +
+                   "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"SCALAR\"," +
+                                   "\"min\":[0],\"max\":[0.75]}," +
+                                  "{\"bufferView\":1,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\"," +
+                                   "\"min\":[0],\"max\":[0.25]}," +
+                                  "{\"bufferView\":2,\"componentType\":5126,\"count\":4,\"type\":\"VEC4\"}," +
+                                  "{\"bufferView\":3,\"componentType\":5126,\"count\":2,\"type\":\"VEC4\"}," +
+                                  "{\"bufferView\":4,\"componentType\":5126,\"count\":4,\"type\":\"VEC4\"}]," +
+                   "\"nodes\":[{},{},{}]," +
+                   "\"animations\":[{\"name\":\"Clip\"," +
+                     "\"samplers\":[{\"input\":0,\"output\":2},{\"input\":1,\"output\":3}," +
+                                   "{\"input\":0,\"output\":4}]," +
+                     "\"channels\":[{\"sampler\":0,\"target\":{\"node\":0,\"path\":\"rotation\"}}," +
+                                   "{\"sampler\":1,\"target\":{\"node\":1,\"path\":\"rotation\"}}," +
+                                   "{\"sampler\":2,\"target\":{\"node\":2,\"path\":\"rotation\"}}]}]}", bin);
+    }
+
+    /// <summary>Every clip name in file order - the list a rewrite must never shorten.</summary>
+    private static string Names(GlbDocument doc)
+    {
+        var names = new List<string>();
+        foreach (object animation in GlbSlim.Arr(doc.Json, "animations") ?? new List<object>())
+            names.Add(GlbSlim.Str(GlbSlim.Obj(animation), "name") ?? "");
+        return string.Join(",", names.ToArray());
+    }
+
+    private static Dictionary<string, object> Sampler(GlbDocument doc, string clip, int index)
+    {
+        foreach (object animation in GlbSlim.Arr(doc.Json, "animations") ?? new List<object>())
+            if (GlbSlim.Str(GlbSlim.Obj(animation), "name") == clip)
+                return GlbSlim.Obj(GlbSlim.Arr(GlbSlim.Obj(animation), "samplers")[index]);
+        return null;
+    }
+
+    private static Dictionary<string, object> Accessor(GlbDocument doc, int index) =>
+        GlbSlim.Obj(GlbSlim.Arr(doc.Json, "accessors")[index]);
+
+    private static long Count(GlbDocument doc, int accessor) =>
+        GlbSlim.Long(Accessor(doc, accessor), "count", 0);
+
+    /// <summary>The bytes an accessor reads: its view's slice, offset by its own byteOffset. Compared
+    /// by VALUE and not by index, because Trim renumbers everything it keeps.</summary>
+    private static byte[] Slice(GlbDocument doc, int index)
+    {
+        Dictionary<string, object> accessor = Accessor(doc, index);
+        Dictionary<string, object> view =
+            GlbSlim.Obj(GlbSlim.Arr(doc.Json, "bufferViews")[GlbSlim.Int(accessor, "bufferView", -1)]);
+        int at = (int)(GlbSlim.Long(view, "byteOffset", 0) + GlbSlim.Long(accessor, "byteOffset", 0));
+        var slice = new byte[GlbSlim.Long(accessor, "count", 0) * GlbSlim.ElementSize(accessor)];
+        Buffer.BlockCopy(doc.Bin, at, slice, 0, slice.Length);
+        return slice;
+    }
+
+    private static bool Same(byte[] a, byte[] b)
+    {
+        if (a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+        return true;
+    }
+
+    private static string Fixture(string name) =>
+        System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                                          @"..\..\..\..\..\lib\" + name));
 
     /// <summary>ppzip.py:211-238's own fixture: 4 still quaternion keys and one moving 2-key curve,
     /// 4 bufferViews, 4 accessors, one clip with two rotation channels.</summary>

@@ -117,9 +117,18 @@ namespace Morgott.ContentTool.Import
                        "buffer data here - a sparse accessor, Draco or meshopt compression, an unknown " +
                        "extension - and trimming would cut it loose. Refusing.";
             foreach (object view in Arr(doc.Json, "bufferViews") ?? Empty)
+            {
+                // The extension is asked about FIRST because it is the root reason: a meshopt view
+                // sits in a fallback buffer BECAUSE it is compressed, and naming the compression tells
+                // the user something the buffer index does not.
+                if (Get(Obj(view), "extensions") != null)
+                    return "this .glb keeps a bufferView behind an extension (EXT_meshopt_compression writes its " +
+                           "own byteOffset inside that block), and moving the view would leave that offset pointing " +
+                           "at the old bytes. Refusing.";
                 if (Int(Obj(view), "buffer", 0) != 0)
                     return "this .glb keeps a bufferView in a buffer other than the BIN chunk, and a " +
                            "trim only knows how to compact BIN. Refusing.";
+            }
             if (force) return null;
 
             List<object> animations = Arr(doc.Json, "animations") ?? Empty;
