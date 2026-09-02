@@ -611,3 +611,100 @@ in it.** Everything here runs against `D:\PP-Instance3` with
   uses (`2026-09-02-glb-slim-plan.md:441-471`): install, build stamps, fixture, one row per action
   with expected / observed / verdict, screenshot paths, and any observation that is not a defect.
   Present the screenshots to the owner for the visual check that closes the slice.
+
+---
+
+## Task 6 acceptance run - 2026-09-02, `D:\PP-Instance3`
+
+Real run only, every figure read off the running game. Install `D:\PP-Instance3`, profile
+`76561197996210593`, PPBridge `build=46b377c2`, `ContentTool.dll` written 2026-09-02 16:20:11 by
+`.\deploy.ps1 -PPRoot 'D:\PP-Instance3'` off HEAD `1fc51c8` (offline gates first: `GLB-ZIP PASS,
+36 check(s)`, `GLB-SKEL PASS, 49 check(s)`, `dotnet build -c Release` 0 errors). Instance3's
+`aa\catalog.json` was verified still the restored copy - 1,670,824 B, identical size and timestamp to
+`catalog.json.ct-backup` - before anything was launched. `D:\PP-Instance2` and the user's own Steam
+install were never deployed to, connected to, launched or killed.
+
+The game was launched by hand (`PhoenixPointWin64.exe -mods`; PPCLI `run`/`batch` stop the game they
+launch), the gate waited for with `connect state`, the geoscape reached with
+`.\ppcli.ps1 plan .\plans\start-campaign.json '{"difficultyIndex":1}'` and the bench opened with
+`.\ppcli.ps1 connect console '{"command":"ct_bench","args":["open"]}'` - every PPCLI call carrying
+`-PPRoot 'D:\PP-Instance3' -ProfileId 76561197996210593`.
+
+IMGUI cannot be clicked through PPCLI, so the panel was driven on its own seams:
+`AccessTools.Field(typeof(FitBench), "doctorTab" / "advanced" / "slim" / "doctor")`, then
+`SlimPanel.Pick(path)` / `SlimPanel.Run()` and the private fields `mode`, `inPlace`, `result`,
+`running`, `census`, `rotations`, `animBytes`. **The private `Mode` enum is reachable**: PPCLI's own
+`{"$enum":"Zip","type":"Morgott.ContentTool.Dev.SlimPanel+Mode"}` envelope converts for
+`FieldInfo.SetValue`, where a bare JSON value would not.
+
+### The matrix
+
+| # | Action | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| 1 | ZIP `lib\u8_rootfold.glb` (copied to the scratchpad) | smaller output, `reads back as 1 clip(s)`, source untouched, no `.ct_tmp` | `0 curve(s) collapsed, 1 rotation(s) as int16, 0 left alone, 0 shared; 2240 B -> 2212 B (-1,3%); reads back as 1 clip(s)`. Sibling `u8_rootfold.zip.glb` **2,212 B** - the exact figure `tools\ppzip.py` measures - source still 2,240 B, 0 `.ct_tmp` | PASS |
+| 2 | ZIP `lib\u8_probe.glb` | refused as "would grow", nothing written | `would grow by 27788 B (349468 B -> 377256 B), so nothing was written - this .glb interleaves animation with mesh data in shared bufferViews, and the old keys cannot be freed`. **377,256 B is ppzip's own measured growth, to the byte.** No sibling written | PASS |
+| 3 | ZIP `lib\u12_norm.glb` (Draco) | the guard's refusal, nothing written | `this .glb names a bufferView 1 times where its 5 accessor(s) and 0 image(s) account for 5. Something the trim does not walk owns buffer data here - a sparse accessor, Draco or meshopt compression, an unknown extension - and trimming would cut it loose. Refusing.` No sibling, 0 `.ct_tmp` | PASS |
+| 4 | ZIP a REAL rigged model - `demos\CustomCreature\Content\Models\cyborg_spider.glb` (1,481,244 B, 7 clips, 329 rotation channels, 495 KB of animation) | smaller, every clip back | `269 curve(s) collapsed, 329 rotation(s) as int16, 0 left alone, 0 shared; 1481244 B -> 1130496 B (-23,7%); reads back as 7 clip(s)`. ppzip on the same file: 269 collapsed / 329 quantised / 1,130,808 B - the same passes, the C# output 312 B smaller | PASS |
+| 5 | the zipped file into the Doctor | a VERDICT, not a refusal | `spider.zip.glb` against the live `cyborg_spider_skin` renderer (49 bones): **BY NAME**, **0** diagnostic rows - `1226 verts, 1552 tris, 49 joints, 3 influence(s)/vertex` | PASS |
+| 6 | bind it (Preview) | the zipped mesh on the prototype's rig | `preview: skinned BY NAME onto the target's own 49 bones, carrying the file's own weights (bind poses from the shipped mesh, 49 joints matched, order remapped; vertex 708 is shared, weight0=0.333)` | PASS |
+| 7 | play one of the STANDING CREATURE's clips on it | it moves | transport bound **30** clips off the creature's own controller; `FitAnim.Select("cyborg_spider_spider_walk")` -> `chosen` 29, `playing` true -> `t` **0.2858** then **0.8040**, strip reading `PAUSE  0.13 / 0.29s`, `loop` on. Two mid-clip screenshots, the skeleton overlay all green (`skeleton: by name`) over the zipped mesh | PASS |
+| 8 | close | the bench leaves cleanly | `ct_bench closed - the screen you came from was never left, so it is still there.`, `FitAnim.Driving` false | PASS |
+
+### Two deviations from step 3/5 as written, both forced and both recorded
+
+1. **The "verdict + preview + animate" half of step 5 was done on `cyborg_spider.glb`, not on
+   `u8_rootfold.glb`.** `u8_rootfold.glb` is a 2,240 B synthetic with one rotation curve and no
+   skinned mesh, so it has nothing for the Doctor to bind and nothing to look at. The shrink /
+   growth / guard cases stay on the fixtures the plan names (rows 1-3); the binding claim is made on
+   a real rigged model zipped by the same run (rows 4-7), which is the only way that claim means
+   anything.
+2. **The clips played are the PROTOTYPE's, exactly as step 5's own deviation note says.** `FitAnim`
+   catalogues the clips the GAME would play for the character standing there
+   (`src\Dev\FitAnim.cs:120-155`); an imported `.glb`'s own clips only reach a rig through the bake.
+   So the proof is: the zipped mesh binds BY NAME onto the rig, and the rig's own clip drives it.
+   The VALUES of the zipped curves are proven by Task 3's offline pose gate, and their survival by
+   the `Verify` stage's `reads back as 7 clip(s)`.
+
+### Observation that is not a zip defect - the prototype picker, for the owner
+
+`FitBench.ShowPrototype` was used first, so that the Doctor could be pointed at a prototype SLOT
+target. On this install it never produced one for the mod creature:
+
+- showing the prototype the bay is ALREADY displaying fires no `AddonsCharacterBuilder.OnCharacterRebuilded`,
+  so `Posed` -> `Retarget` (`src\Dev\FitBench.cs:1351-1359`) never runs and `pendingVariant` is left
+  set - `SlotTargets()` stays empty and the panel shows `prototype -` with nothing to pick;
+- going Human -> `ct_creature_morgott.demo.customcreature` swapped the bay's `AddonsManagerDef`
+  correctly but ALSO fired no callback, so the same thing happened;
+- calling `Posed()` by hand did consume it, and both of that variant's 2 slots then reported
+  `Unavailable = "slot visual unavailable"` with `BoneNames().Count == 0`.
+
+So the Doctor was pointed at the live renderer through its own
+`ModelDoctor.PickTarget(SkinnedMeshRenderer, transformPath)` seam - the very renderer a slot target
+would have snapshotted (`FitBench.Retarget:758`). Nothing in the ZIP port is involved. **Owner: this
+is a prototype-picker gap (slice 1/2), reported not fixed.**
+
+### `Player.log`
+
+**0** occurrences of `Getting control ... in a group with only ...` and **0** ContentTool exceptions
+across the whole run (`...LocalLow\Snapshot Games Inc\Phoenix Point\Player.log`, 1,619 lines, copied
+to the scratchpad as `pp3-acceptance.log`). The 75 exception lines are all third-party and all
+predate the bench: 12 `ArgumentException: Mesh can not have more than 65000 vertices` from
+`UnityEngine.UI.Text.UpdateGeometry` (a UGUI text growing past the vertex cap) and 3
+`AddressableAssets.InvalidKeyException` from the WeaponAdd demo's own prefab keys at mod-load time.
+
+### Screenshots
+
+`C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\e31d205c-b842-452c-8655-3d543056001d\scratchpad\shots\`
+
+`zip-01-options.png` (ZIP mode, both passes ticked, the census line), `zip-02-rootfold-result.png`,
+`zip-03-probe-would-grow.png`, `zip-04-draco-refused.png`, `zip-05-spider-result.png`,
+`zip-06-doctor-verdict-byname.png`, `zip-07-preview-bound.png`, `zip-08-anim-mid-a.png` /
+`zip-09-anim-mid-b.png` (the walk clip mid-play on the zipped mesh).
+
+### Still the owner's to check, in game, by eye
+
+1. the zipped model looks identical to the unzipped one at rest and mid-clip - 0.002 degrees is the
+   arithmetic claim, his eye is the acceptance;
+2. the walk cycle is SMOOTH (this run sampled `t` twice, it did not watch it);
+3. the result sentence is readable where it lands in the panel - see the SKEL plan's own note about
+   a multi-line result running off the bottom of the window.

@@ -858,3 +858,82 @@ the file reloaded, and the verdict read **BY NAME**.
 - **No rest-pose work, no re-binding, no unit rescaling.** That is `ppskel.py:360-370`'s own NEXT
   LEVER and it is `ppretarget`, which design §9 marks DO NOT PORT. A model converted by SKEL will
   BIND; whether it LOOKS right is the separate problem those lines describe.
+
+---
+
+## Task 7 acceptance run - 2026-09-02, `D:\PP-Instance3`
+
+Real run only. Same session, same install and same discipline as the ZIP plan's Task 6 section
+(`internal-docs\planning\2026-09-02-glb-zip-plan.md`): `D:\PP-Instance3`, profile
+`76561197996210593`, PPBridge `build=46b377c2`, `ContentTool.dll` written 2026-09-02 16:20:11 off
+HEAD `1fc51c8`, offline gates `GLB-SKEL PASS, 49 check(s)` / `GLB-ZIP PASS, 36 check(s)` first.
+`D:\PP-Instance2` and the user's own install were never touched. The panel and the Doctor were driven
+on their own seams (`AccessTools.Field(typeof(SlimPanel), "mode" / "planPath" / "inPlace")`,
+`SlimPanel.Pick` / `Run`, `ModelDoctor.PickFile` / `PickTarget` / `SetAlias` / `Enqueue("skelplan")`),
+because PPCLI cannot click IMGUI.
+
+### The fixture
+
+`spider_broken.glb` - a copy of `demos\CustomCreature\Content\Models\cyborg_spider.glb` (1,481,244 B,
+59 nodes, 49 skin joints, 7 clips) with **three joints renamed in the glTF JSON chunk, byte-length
+preserving so every BIN offset is untouched**: `body_02` -> `bdoy_02`, `back_03` -> `bcak_03`,
+`popa_04` -> `ppoa_04`. It was chosen over `lib\u9_probe.glb` and the APOCD torso for one reason: the
+target it is held against is the LIVE renderer that this very file produced, so a clean **BY NAME**
+verdict is actually reachable after the rename - which is the whole claim of the port. Against a
+Human torso slot the APOCD Heavy torso is NEAREST-BONE before and after any rename (15 bones the
+Heavy part genuinely lacks), so it can never show the transition.
+
+Target: the bay creature's own `cyborg_spider_skin` renderer, 49 bones, picked through
+`ModelDoctor.PickTarget(smr, "cyborg_spider(Clone)/cyborg_spider_skin")` - see the ZIP section's
+"Observation that is not a zip defect" for why a prototype SLOT target was not available on this
+install.
+
+### The matrix
+
+| # | Action | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| 1 | load the misnamed file in the Doctor | **NEAREST-BONE**, a Missing/Extra pair per renamed joint | `Outcome = NearestBone`, **6** rows: `MissingBone body_02`, `MissingBone back_03`, `MissingBone popa_04`, `ExtraBone bdoy_02`, `ExtraBone bcak_03`, `ExtraBone ppoa_04` | PASS |
+| 2 | `SetAlias` the three rows | the verdict resolves through the alias map | after the third assign `Outcome = ByName`, 0 rows - the preflight re-ran itself on each `SetAlias` | PASS |
+| 3 | "Write skel plan" (`ModelDoctor` intent `SkelPlan`) | `<name>.skelplan.json` beside the source, one rename per alias | `wrote 3 rename(s) to ...\accept\spider_broken.glb.skelplan.json - open Advanced > SKEL to apply it`; 191 B on disk, verbatim: `{"schema":1,"root":"Sketchfab_model","renames":[{"from":"bdoy_02","to":"body_02"},{"from":"bcak_03","to":"back_03"},{"from":"ppoa_04","to":"popa_04"}],"collapses":[],"inserts":[],"create":[]}`. `root` is the file's single scene root, and no `To` is decorated, so it validates by construction | PASS |
+| 4 | panel mode SKEL, in place, RUN | the rename count and a clean run; source rewritten, no `.ct_tmp` | `planLine` read `3 rename, 0 collapse, 0 insert, 0 create - root 'Sketchfab_model'`; result `renamed 3, collapsed 0, inserted 0, created 0; no prototype was selected, so nothing is claimed about binding`. File 1,481,244 -> **1,480,764 B**, sha256 `5D0EC546...` -> `165544D2...`, 0 `.ct_tmp` | PASS |
+| 5 | reload the converted file | **BY NAME**, and **no sidecar** | `Outcome = ByName`, **0** rows, `ModelDoctor.aliases` **0**, and no `*.aliases.json` exists anywhere beside the file - the rename is IN the file, nothing on disk is helping it | PASS |
+| 6 | RUN the same plan a second time | refused by name, nothing written | `this file has no bone called 'bdoy_02', so the rename to 'body_02' cannot be applied; check the spelling against the file's own bone list - the Doctor's bone map prints it` - plus, per rename, `this file already has a bone called 'body_02', so renaming 'bdoy_02' onto it would leave two bones with one name and the game would bind the wrong one; pick a name nothing in the file carries`. Six refusals for three renames, sha256 unchanged at `165544D2...`, 0 `.ct_tmp`. Check 34 reproduced in game | PASS |
+| 7 | the BIN invariant, cross-checked off the artifact | `doc.Bin` byte-identical | the converted file's BIN chunk: **1,206,800 B**, sha256 `AD5D14D5D7582EC952E57756FCABB628A381D44F97E0A6D6D3F83A73D1373DDE` - byte-identical to `cyborg_spider.glb`'s own BIN. `nodes` 59, `skins[0].joints` 49, `animations` 7, all unchanged; `body_02`/`back_03`/`popa_04` present, `bdoy_02`/`bcak_03`/`ppoa_04` gone | PASS |
+| 8 | close | the bench leaves cleanly | `ct_bench closed - the screen you came from was never left, so it is still there.`, `FitAnim.Driving` false | PASS |
+
+### Observations that are not defects
+
+- **The closing Verify claimed nothing, and said so.** `SlimPanel.Run`'s SKEL arm passes
+  `Target == null ? null : Target.BoneNames()` and `SlimPanel.Target` is fed `doctor.Prototype`
+  (`src\Dev\FitBench.cs:1659`) - a `PrototypeTarget`. This run's Doctor target was a live RENDERER,
+  not a prototype, so `targetNames` was null and the sentence ended `no prototype was selected, so
+  nothing is claimed about binding`. That is the honest answer the plan asks for, and the binding
+  claim was made the only way it can be: by reloading the artifact into the Doctor (row 5).
+- **A multi-line refusal runs off the bottom of the panel.** Row 6 returns six sentences on six
+  lines; the panel's `result:` label starts at the window's last visible row, so only its first line
+  is readable in game (`skel-07-second-run-refused.png`). The sentence is complete in the field - it
+  is the panel that has no room. Owner call whether the result line deserves a scroll view.
+
+### `Player.log`
+
+**0** `Getting control ... in a group with only ...` and **0** ContentTool exceptions across the
+whole session (1,619 lines; copy kept as `pp3-acceptance.log` in the scratchpad). All 75 exception
+lines are third-party and predate the bench - 12 UGUI `Mesh can not have more than 65000 vertices`
+and 3 `AddressableAssets.InvalidKeyException` from the WeaponAdd demo's own prefab keys.
+
+### Screenshots
+
+`C:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\e31d205c-b842-452c-8655-3d543056001d\scratchpad\shots\`
+
+`skel-01-nearest-bone.png`, `skel-02-aliases.png`, `skel-03-plan-written.png`,
+`skel-04-panel-skel-mode.png` (SKEL mode, the plan line, "overwrite in place"),
+`skel-05-run-result.png`, `skel-06-reload-byname.png`, `skel-07-second-run-refused.png`,
+`skel-08-before-close.png`, `skel-09-after-close.png`.
+
+### Still the owner's to check, in game, by eye
+
+1. the converted model deforms exactly as the original does under the rig's own clips (the run
+   proves the NAMES bind; the eye proves nothing moved);
+2. the SKEL result sentence, and whether a multi-line refusal needs room in the panel;
+3. that an in-place SKEL over a file that DOES have an alias sidecar really removes it - this run
+   had no sidecar to remove, so that arm (Task 6 step 3) is still unexercised in game.
