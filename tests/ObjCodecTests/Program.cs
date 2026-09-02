@@ -120,6 +120,7 @@ internal static class Program
         Console.WriteLine(AliasTests.Run());
         Console.WriteLine(PreflightTests.Run());
         Console.WriteLine(CatalogTests.Run());
+        Console.WriteLine(OverlayTests.Run());
         Console.WriteLine(MaterialBake.Run());
         Console.WriteLine(MaterialTweakFixture.Run());
         Console.WriteLine(ClipRoundTrip.Run());

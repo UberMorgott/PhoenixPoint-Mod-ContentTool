@@ -4,6 +4,7 @@ using Base.Core;
 using Base.Defs;
 using Morgott.ContentTool.Doctor;
 using PhoenixPoint.Common.Core;
+using PhoenixPoint.Common.Entities;
 using PhoenixPoint.Common.Entities.Addons;
 using PhoenixPoint.Common.Entities.Characters;
 using PhoenixPoint.Tactical.Entities;
@@ -46,6 +47,12 @@ namespace Morgott.ContentTool.Dev
         /// <c>UnitDisplayData</c> needs, which the name-only scan DTOs cannot carry.</summary>
         private readonly Dictionary<string, TacCharacterDef> representatives =
             new Dictionary<string, TacCharacterDef>(StringComparer.Ordinal);
+        /// <summary>The live clips behind <see cref="ManagerScan.ClipNames"/>, by manager name - what the
+        /// transport binds when a variant's own anim actions catalogue nothing. They live HERE and not on
+        /// <see cref="PrototypeVariant"/>, which stays UnityEngine-free, exactly as the representative
+        /// <c>TacCharacterDef</c>s already do.</summary>
+        private readonly Dictionary<string, AnimationClip[]> clipsByManager =
+            new Dictionary<string, AnimationClip[]>(StringComparer.Ordinal);
         /// <summary>The one line Task 7 diffs against the fixture. Always set, even on failure.</summary>
         internal string Census = "";
 
@@ -53,6 +60,14 @@ namespace Morgott.ContentTool.Dev
         {
             TacCharacterDef d;
             return defName != null && representatives.TryGetValue(defName, out d) ? d : null;
+        }
+
+        /// <summary>The resolved clip objects for one variant, in the order its ClipNames list carries
+        /// them. Null when the manager was never scanned - shaped exactly like Representative.</summary>
+        internal AnimationClip[] Clips(string managerName)
+        {
+            AnimationClip[] clips;
+            return managerName != null && clipsByManager.TryGetValue(managerName, out clips) ? clips : null;
         }
 
         /// <summary>Never throws: this is called from a GUI loop and its result is cached even when it
@@ -183,11 +198,13 @@ namespace Morgott.ContentTool.Dev
             scan.SlotNames.Sort(StringComparer.Ordinal);
         }
 
-        /// <summary>The clip catalogue, deduplicated by name. The anim-actions def is the answer when
-        /// it has any actions; when it has NONE - the shipped state of Crabman_AnimActionsDef - the
-        /// controller on the rig prefab is, which is the very controller CommonCharacterUtils.cs:41-42
-        /// copies onto the live rig.</summary>
-        private static void ReadClips(TacCharacterDef rep, AddonsManagerDef m, ManagerScan scan)
+        /// <summary>The two CANDIDATE clip lists, gathered and handed to
+        /// <see cref="PrototypeCatalog.ResolveClips"/> - which one wins, and the dedup, are that pure
+        /// rule's business and are proven offline. The anim-actions arm is the def's own clips
+        /// (<c>GetAllClips</c> is TacActorAnimActionBaseDef's abstract member,
+        /// <c>TacActorAnimActionBaseDef.cs:12</c>); the controller arm is the very controller
+        /// CommonCharacterUtils.cs:41-42 copies onto the live rig.</summary>
+        private void ReadClips(TacCharacterDef rep, AddonsManagerDef m, ManagerScan scan)
         {
             TacActorAnimActionsDef anim = null;
             try { anim = rep.GetAnimActionDef(); } catch (Exception) { }
@@ -202,28 +219,64 @@ namespace Morgott.ContentTool.Dev
             catch (Exception) { }
             scan.ControllerName = controller == null ? null : controller.name;
 
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            if (anim != null && anim.AnimActions != null && anim.AnimActions.Length > 0)
+            var character = m as CharacterAddonsManagerDef;
+            AnimationClip pose = character == null ? null : character.PreviewPoseClip;
+            scan.PreviewPoseClip = pose == null ? null : pose.name;
+
+            var fromActions = new List<AnimationClip>();
+            if (anim != null && anim.AnimActions != null)
             {
-                Clip(seen, scan.ClipNames, anim.DefaultActionClip);
-                Clip(seen, scan.ClipNames, anim.DefaultReactionClip);
+                fromActions.Add(anim.DefaultActionClip);
+                fromActions.Add(anim.DefaultReactionClip);
                 foreach (TacActorAnimActionBaseDef action in anim.AnimActions)
                 {
                     if (action == null) continue;
                     AnimationClip[] clips = null;
                     try { clips = action.GetAllClips(); } catch (Exception) { }
-                    if (clips == null) continue;
-                    foreach (AnimationClip clip in clips) Clip(seen, scan.ClipNames, clip);
+                    if (clips != null) fromActions.AddRange(clips);
                 }
             }
-            if (scan.ClipNames.Count > 0 || controller == null) return;
-            try { foreach (AnimationClip clip in controller.animationClips) Clip(seen, scan.ClipNames, clip); }
+
+            var fromController = new List<AnimationClip>();
+            try { if (controller != null) fromController.AddRange(controller.animationClips); }
             catch (Exception) { }
+
+            PrototypeCatalog.ClipSource source;
+            IList<string> names = PrototypeCatalog.ResolveClips(Names(fromActions), Names(fromController),
+                                                               out source);
+            scan.ClipNames.AddRange(names);
+            scan.ClipSource = source == PrototypeCatalog.ClipSource.Controller
+                                  ? scan.ControllerName + " (controller)"
+                                  : source == PrototypeCatalog.ClipSource.AnimActions
+                                        ? scan.AnimActionsDef + " (anim actions)"
+                                        : null;
+            clipsByManager[scan.ManagerName] =
+                Objects(source == PrototypeCatalog.ClipSource.Controller ? fromController : fromActions, names);
         }
 
-        private static void Clip(HashSet<string> seen, List<string> into, AnimationClip clip)
+        /// <summary>The candidate names, positionally as they came: a null clip is a null name, which
+        /// ResolveClips drops exactly as it drops any null entry.</summary>
+        private static IList<string> Names(List<AnimationClip> clips)
         {
-            if (clip != null && seen.Add(clip.name)) into.Add(clip.name);
+            var names = new List<string>(clips.Count);
+            foreach (AnimationClip clip in clips) names.Add(clip == null ? null : clip.name);
+            return names;
+        }
+
+        /// <summary>The live clip behind each resolved name, first occurrence winning - the same one the
+        /// dedup kept, so ClipNames[i] and Clips(manager)[i] are the same clip.</summary>
+        private static AnimationClip[] Objects(List<AnimationClip> clips, IList<string> names)
+        {
+            var byName = new Dictionary<string, AnimationClip>(StringComparer.Ordinal);
+            foreach (AnimationClip clip in clips)
+                if (clip != null && !byName.ContainsKey(clip.name)) byName[clip.name] = clip;
+            var kept = new List<AnimationClip>(names.Count);
+            foreach (string name in names)
+            {
+                AnimationClip clip;
+                if (byName.TryGetValue(name, out clip)) kept.Add(clip);
+            }
+            return kept.ToArray();
         }
 
         /// <summary>The line Task 7 holds against the fixture: the five totals with the census's own

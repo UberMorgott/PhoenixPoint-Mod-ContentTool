@@ -29,6 +29,7 @@ namespace Morgott.ContentTool.Doctor
         internal string ManagerName, RigName, RootMotionNode, ResourcePath;
         internal string RepresentativeCharacter;      // a TacCharacterDef name - what the bay rebuild needs
         internal string BodyStateDef, AnimActionsDef, ControllerName;
+        internal string ClipSource, PreviewPoseClip;  // which list answered, and the def's own pose
         internal List<string> SlotNames = new List<string>();
         internal List<string> ClipNames = new List<string>();  // already deduplicated by the harvester
         internal bool HasRig;
@@ -51,6 +52,13 @@ namespace Morgott.ContentTool.Doctor
         /// which is the shipped state of Crabman_AnimActionsDef - the controller's own
         /// animationClips, deduplicated by name.</summary>
         internal List<string> Clips = new List<string>();
+        /// <summary>The controller or def name the Clips list came from, plus which one answered -
+        /// e.g. "HumanoidAnimatorLOC (controller)". Labelled, never used as identity: Human and
+        /// Crabman both carry HumanoidAnimatorLOC (slice 0(d)).</summary>
+        internal string ClipSource;
+        /// <summary>The variant's own preview pose, when the def carries one (design open question 6:
+        /// Acheron's is null and 43 are unchecked). Null means "start on clip 0, paused".</summary>
+        internal string PreviewPoseClip;
     }
 
     internal sealed class PrototypeRecord
@@ -193,7 +201,9 @@ namespace Morgott.ContentTool.Doctor
                     RepresentativeCharacter = manager.RepresentativeCharacter,
                     BodyStateDef = manager.BodyStateDef,
                     AnimActionsDef = manager.AnimActionsDef,
-                    ControllerName = manager.ControllerName
+                    ControllerName = manager.ControllerName,
+                    ClipSource = manager.ClipSource,
+                    PreviewPoseClip = manager.PreviewPoseClip
                 };
                 foreach (string slot in manager.SlotNames)
                     variant.Slots.Add(new PrototypeSlot { SlotDefName = slot });
@@ -218,6 +228,34 @@ namespace Morgott.ContentTool.Doctor
                 }
             }
             return records;
+        }
+
+        /// <summary>Which list answered. Shown in the transport's label, because a clip list does NOT
+        /// identify a prototype - Human and Crabman both carry HumanoidAnimatorLOC (slice 0(d)).</summary>
+        internal enum ClipSource { None, AnimActions, Controller }
+
+        /// <summary>THE CLIP CATALOGUE, §7: the variant's TacActorAnimActionsDef first; when that yields
+        /// NOTHING - the shipped state of Crabman_AnimActionsDef, AnimActions.Count == 0 - the
+        /// controller's own animationClips. Deduplicated by name, ORDINAL (two Unity clips may differ
+        /// only in case and the transport looks them up by name), first-seen order kept. Null is empty,
+        /// and nothing anywhere is ClipSource.None rather than a throw: a rig-less variant is normal.</summary>
+        internal static IList<string> ResolveClips(IList<string> fromActions, IList<string> fromController,
+                                                   out ClipSource source)
+        {
+            IList<string> resolved = Distinct(fromActions);
+            if (resolved.Count > 0) { source = ClipSource.AnimActions; return resolved; }
+            resolved = Distinct(fromController);
+            source = resolved.Count > 0 ? ClipSource.Controller : ClipSource.None;
+            return resolved;
+        }
+
+        private static IList<string> Distinct(IList<string> names)
+        {
+            var kept = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; names != null && i < names.Count; i++)
+                if (names[i] != null && seen.Add(names[i])) kept.Add(names[i]);
+            return kept;
         }
 
         /// <summary>Case-insensitive token-AND over SearchTerms: every whitespace-delimited token must
