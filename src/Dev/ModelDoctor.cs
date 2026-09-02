@@ -382,6 +382,7 @@ namespace Morgott.ContentTool.Dev
                     continue;
                 }
                 Ready = job.Result;
+                AutoOpenMap();
                 // §7: the REPORT says what happened in the author's words, and the exception behind it
                 // goes to the log - the one place a stack trace helps and the only place it belongs.
                 if (Ready.Failure != null)
@@ -1423,6 +1424,24 @@ namespace Morgott.ContentTool.Dev
         /// SHOWN as a suggestion: nothing is ever applied on the author's behalf, because a wrong bone
         /// quietly chosen for them is the exact failure this whole panel exists to end.
         /// </summary>
+        /// <summary>
+        /// Section 6: the map is collapsed for a BY NAME verdict and opened for a name mismatch. Run
+        /// ONCE per report, at the one moment a new one lands - never from the draw - so an author who
+        /// closes it keeps it closed until the next verdict actually says something new. It only ever
+        /// opens: a report that needs no map leaves an open one open, because the author opened it.
+        /// </summary>
+        private void AutoOpenMap()
+        {
+            if (mapOpen || Ready == null || Ready.Report == null) return;
+            if (Ready.Outcome != Outcome.NearestBone)
+            {
+                bool extra = false;
+                foreach (Diagnostic d in Ready.Report.Rows) if (d.Code == "ExtraBone") { extra = true; break; }
+                if (!extra) return;
+            }
+            mapOpen = true;
+        }
+
         private void BoneMap(float col)
         {
             GUILayout.BeginHorizontal();

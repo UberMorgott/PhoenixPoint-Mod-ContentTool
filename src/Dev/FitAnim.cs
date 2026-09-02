@@ -47,6 +47,9 @@ namespace Morgott.ContentTool.Dev
         private static GameObject rig;
         private static float savedSpeed = 1f;
         private static bool took;
+        /// <summary>Whose skeleton the header row's [Skeleton] toggle switches, or null on the FIT tab.
+        /// Latched by <see cref="Draw"/> on the Layout pass; see the remark there.</summary>
+        private static ModelDoctor doctor;
 
         // ---- what it can play: one table in two arrays ----
         private static readonly List<string> names = new List<string>();
@@ -384,9 +387,15 @@ namespace Morgott.ContentTool.Dev
         /// It draws NOTHING when there is no room for it (<see cref="BenchList.StripShown"/>), and then
         /// it costs no height either.
         /// </summary>
-        internal static void Draw(float panelWidth)
+        /// <param name="owner">The Doctor whose <see cref="ModelDoctor.Skeleton"/> the header row's
+        /// [Skeleton] toggle reads and writes, or null on the FIT tab - where the row keeps exactly its
+        /// current shape. LATCHED on the Layout pass, like every other thing in this file that decides
+        /// how many controls exist: the tab toggle flips mid-pass, and a control that appears on a
+        /// Repaint the Layout pass never counted is the group-imbalance error.</param>
+        internal static void Draw(float panelWidth, ModelDoctor owner)
         {
             float w = Screen.width, h = Screen.height;
+            if (Event.current.type == EventType.Layout) doctor = owner;
             if (!BenchList.StripShown(w, h, panelWidth)) return;
 
             if (backdrop == null)
@@ -406,7 +415,15 @@ namespace Morgott.ContentTool.Dev
                 // chosen < 0 with a catalogue in hand means playback threw and let the rig go - the note
                 // says what, and indexing -1 in here would take the whole panel down with it.
                 if (clips.Count == 0 || chosen < 0)
+                {
+                    // The toggle rides along even here: a prototype whose variant resolved no clips at
+                    // all still has a skeleton to show, and a toggle only reachable when something plays
+                    // is a toggle the clip-less prototypes never get.
+                    GUILayout.BeginHorizontal();
+                    Skeleton();
                     GUILayout.Label("animation: " + (note ?? "nothing bound yet."));
+                    GUILayout.EndHorizontal();
+                }
                 else { Clips(); Controls(); }
             }
             finally { GUILayout.EndArea(); }
@@ -474,17 +491,30 @@ namespace Morgott.ContentTool.Dev
             return i >= 0 && i < source.Count ? source[i] : "";
         }
 
+        /// <summary>Section 6's <c>[Skeleton]</c> control, drawn from the ONE place that owns the state -
+        /// the Doctor's own field. Nothing at all on the FIT tab, where there is no overlay to toggle.
+        /// </summary>
+        private static void Skeleton()
+        {
+            if (doctor == null) return;
+            doctor.Skeleton = GUILayout.Toggle(doctor.Skeleton, " Skeleton", GUILayout.Width(86f));
+        }
+
         private static void Clips()
         {
             AnimationClip clip = Cur;
+            // Section 6's header row, in its order: [Skeleton] Clip v  < >  Loop.
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("<", GUILayout.Width(28f))) Hop(-1);
-            if (GUILayout.Button(">", GUILayout.Width(28f))) Hop(1);
-            // The arrows STAY - they are one click for "the next one" - and the same count that used to
-            // be a dead label is now the handle that opens the whole catalogue.
+            Skeleton();
+            // The same count that used to be a dead label is the handle that opens the whole catalogue,
+            // and the arrows STAY beside it - they are one click for "the next one".
             if (GUILayout.Button((listOpen ? "v " : "^ ") + (chosen + 1) + "/" + clips.Count,
                                  GUILayout.Width(72f)))
                 listOpen = !listOpen;
+            if (GUILayout.Button("<", GUILayout.Width(28f))) Hop(-1);
+            if (GUILayout.Button(">", GUILayout.Width(28f))) Hop(1);
+            // Loop belongs to this row per section 6; the row below it is the scrubber and the speed.
+            loop = GUILayout.Toggle(loop, " loop", GUILayout.Width(60f));
             // The name the DEF asked for, plus who answered it. [MOD] = the clip on screen came out of a
             // content mod's bundle; [game*] = the game itself swapped it (the weapon's hand count does
             // exactly that); nothing = the shipped clip, played as shipped.
@@ -525,7 +555,6 @@ namespace Morgott.ContentTool.Dev
             float length = Cur == null ? 0f : Cur.length;
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(playing ? "PAUSE" : "PLAY", GUILayout.Width(70f))) playing = !playing;
-            loop = GUILayout.Toggle(loop, " loop", GUILayout.Width(60f));
             if (GUILayout.Button("x" + speed.ToString("0.##", CultureInfo.InvariantCulture),
                                  GUILayout.Width(58f)))
                 speed = BenchList.NextSpeed(speed);

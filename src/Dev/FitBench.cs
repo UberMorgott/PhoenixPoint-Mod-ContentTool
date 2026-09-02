@@ -2278,7 +2278,9 @@ namespace Morgott.ContentTool.Dev
                     Draw();
                     // AFTER the panel, and outside its area: the strip is its own region and IMGUI
                     // areas do not nest.
-                    FitAnim.Draw(PanelWidth);
+                    // The Doctor goes with it ONLY on its own tab: the strip's header row carries §6's
+                    // [Skeleton] toggle there, and nothing at all on FIT.
+                    FitAnim.Draw(PanelWidth, doctorTab ? doctor : null);
                     // AFTER the strip, so the strip's own pixels are already the strip's, and after the
                     // panel, so the inspector it draws sits on top of the scene rather than under it.
                     // It takes no hotControl: a joint pick is a click, and a bare left press is
