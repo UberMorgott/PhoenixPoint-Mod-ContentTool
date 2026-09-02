@@ -287,6 +287,40 @@ internal static class ManifestTests
             checks += Check(Temps(dir).Length == 0 && !File.Exists(race + ".bak"),
                             "the refusal happened before AtomicFile ran, so there is neither a temp nor a .bak");
 
+            // ---- Manifest_RefusesWhenTheFileIsGone: the E5 guard reads the destination, so a file DELETED
+            // since Load must reach the author as that same refusal, not as a bare FileNotFoundException.
+            string vanished = Path.Combine(dir, "vanished.json");
+            File.WriteAllBytes(vanished, Bytes(false, Crlf.Replace("\r\n", "\n")));
+            ManifestFile ghost = ManifestFile.Load(vanished);
+            ghost.Manifest.AddMeshReplacement("b.bundle", "Torso", "torso");
+            File.Delete(vanished);
+            string gone = null;
+            try { ghost.Save(); }
+            catch (IOException clash) { gone = clash.Message; }
+            checks += Check(gone == "'" + vanished + "' changed on disk since it was loaded, so nothing was " +
+                                    "written - reload it and add the row again",
+                            "a file deleted since Load refuses with E5 too: " + gone);
+            checks += Check(!File.Exists(vanished) && Temps(dir).Length == 0 && !File.Exists(vanished + ".bak"),
+                            "and nothing was put in its place - no file, no temp, no .bak");
+
+            // ---- Manifest_SplicesAcceptedNullReplace: Load reads `"replace": null` as "no rows", so Save
+            // must BUILD the array; handing that span to LastElement splices inside the word and yields
+            // "nul,...l", which only E6 then catches.
+            string nulled = Path.Combine(dir, "nulled.json");
+            const string nullText = "{ \"id\": \"x\", \"bundle\": \"b\", \"replace\": null }";
+            File.WriteAllBytes(nulled, Bytes(false, nullText));
+            ManifestFile blanked = ManifestFile.Load(nulled);
+            blanked.Manifest.AddMeshReplacement("a.bundle", "Foo", "body");
+            blanked.Save();
+            string nulledText = File.ReadAllText(nulled);
+            checks += Check(ManifestFile.Load(nulled).Manifest.Replace.Count == 1 &&
+                            ManifestFile.Load(nulled).Manifest.Replace[0].Kind == "mesh",
+                            "an accepted \"replace\": null becomes an array holding exactly the added row: " +
+                            nulledText);
+            checks += Check(nulledText.StartsWith(
+                                nullText.Substring(0, nullText.IndexOf("null", StringComparison.Ordinal)),
+                                StringComparison.Ordinal),
+                            "and every byte before the null's own value span is unchanged: " + nulledText);
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "MANIFEST PASS, " + checks + " check(s) - atomic write";

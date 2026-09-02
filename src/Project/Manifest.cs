@@ -316,8 +316,14 @@ namespace Morgott.ContentTool.Project
             }
 
             // E5, immediately before the commit: the last moment a concurrent edit is still recoverable by
-            // the author simply reloading.
-            if (!string.Equals(Sha256(File.ReadAllBytes(Path)), sha, StringComparison.Ordinal))
+            // the author simply reloading. A file DELETED since Load is that same case - the destination is
+            // no longer what was read - so it is refused with E5 rather than escaping as the raw
+            // FileNotFoundException, which names no remedy and reads like a bug in this tool.
+            string now;
+            try { now = Sha256(File.ReadAllBytes(Path)); }
+            catch (FileNotFoundException) { now = null; }
+            catch (DirectoryNotFoundException) { now = null; }
+            if (!string.Equals(now, sha, StringComparison.Ordinal))
                 throw new IOException("'" + Path + "' changed on disk since it was loaded, so nothing was " +
                                       "written - reload it and add the row again");
 
@@ -353,6 +359,19 @@ namespace Morgott.ContentTool.Project
                 return text.Substring(0, at) + "," + newline + "  \"replace\": [" + newline + "    " +
                        added.ToString().Replace(newline, newline + "    ") + newline + "  ]" +
                        text.Substring(at);
+            }
+
+            if (span.End - span.Start == 4 &&
+                string.CompareOrdinal(text, span.Start, "null", 0, 4) == 0)
+            {
+                // (d) `"replace": null`, which the Manifest ctor accepts as "no rows": there is no array to
+                // splice INTO, so the value span becomes a freshly built one. Same indentation rule as the
+                // empty-array arm, and every byte on either side of the span is copied as it stands.
+                string outer = IndentOf(text, span.Start);
+                string body = outer + "  ";
+                return text.Substring(0, span.Start) + "[" + newline + body +
+                       added.ToString().Replace(newline, newline + body) + newline + outer + "]" +
+                       text.Substring(span.End);
             }
 
             int stop;
