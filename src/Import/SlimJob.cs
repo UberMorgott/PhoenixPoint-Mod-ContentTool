@@ -42,6 +42,10 @@ namespace Morgott.ContentTool.Import
         /// one does any work, and the last of them is the only one that touches the destination.</summary>
         private static readonly string[] Stages = { "Load", "Census", "Guard", "Trim", "Write" };
 
+        /// <summary>The zip run's six checkpoints. Verify is last and reads the file back through the
+        /// game's own importer, because "it still animates" is the only question worth answering.</summary>
+        private static readonly string[] ZipStages = { "Load", "Plan", "Guard", "Zip", "Write", "Verify" };
+
         /// <summary>
         /// Run the whole pipeline and return the sentence to show the author.
         /// </summary>
@@ -63,20 +67,20 @@ namespace Morgott.ContentTool.Import
             string done = null;
             try
             {
-                At(cancel, publish, 0, "Reading " + Path.GetFileName(src));
+                At(cancel, publish, Stages, 0, "Reading " + Path.GetFileName(src));
                 GlbDocument doc = GlbDocument.Load(src);
 
-                At(cancel, publish, 1, "Listing clips");
+                At(cancel, publish, Stages, 1, "Listing clips");
                 int clips = GlbSlim.Census(doc).Count;
 
-                At(cancel, publish, 2, "Checking what a trim would touch");
+                At(cancel, publish, Stages, 2, "Checking what a trim would touch");
                 string refusal = GlbSlim.Guard(doc, drop, force);
                 if (refusal != null) throw new InvalidOperationException(refusal);
 
-                At(cancel, publish, 3, "Dropping " + drop.Count + " of " + clips + " clip(s)");
+                At(cancel, publish, Stages, 3, "Dropping " + drop.Count + " of " + clips + " clip(s)");
                 long delta = GlbSlim.Trim(doc, drop);
 
-                At(cancel, publish, 4, "Writing " + Path.GetFileName(dst));
+                At(cancel, publish, Stages, 4, "Writing " + Path.GetFileName(dst));
                 doc.Write(tmp);
                 // The swap, not a write onto the destination: whatever was there is whole until this
                 // line, and whole again after it.
@@ -102,6 +106,126 @@ namespace Morgott.ContentTool.Import
                 try { if (File.Exists(tmp)) File.Delete(tmp); }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        /// <summary>
+        /// The zip run: load, plan, guard, rewrite, save, read back. Same shape and same guarantees as
+        /// <see cref="Execute"/> - pure, no thread affinity, and the destination is only ever touched
+        /// by the swap of a finished .ct_tmp.
+        /// </summary>
+        /// <param name="constant">Collapse curves that never move to two endpoint keys.</param>
+        /// <param name="quantise">Store rotation outputs as normalized int16.</param>
+        /// <exception cref="OperationCanceledException">Cancelled before the swap; nothing was written.</exception>
+        /// <exception cref="InvalidOperationException">The guard refused; its words are the message.</exception>
+        internal static string Zip(string src, string dst, bool constant, bool quantise,
+                                   CancellationToken cancel, Action<SlimProgress> publish)
+        {
+            string tmp = dst + "." + Guid.NewGuid().ToString("N") + ".ct_tmp";
+            bool swapped = false;
+            string done = null;
+            try
+            {
+                At(cancel, publish, ZipStages, 0, "Reading " + Path.GetFileName(src));
+                GlbDocument doc = GlbDocument.Load(src);
+                long was = new FileInfo(src).Length;
+
+                At(cancel, publish, ZipStages, 1, "Reading every sampler");
+                At(cancel, publish, ZipStages, 2, "Checking what a rewrite would touch");
+                // force, because zip drops no clip: neither the mandatory-clip nor the
+                // rigged-character arm can apply to it, and what is left is the sparse / Draco /
+                // foreign-buffer / view-extension refusal, which does.
+                string refusal = GlbSlim.Guard(doc, new HashSet<int>(), true);
+                if (refusal != null) throw new InvalidOperationException(refusal);
+
+                At(cancel, publish, ZipStages, 3, "Rewriting the curves");
+                GlbZip.Stats stats = GlbZip.Zip(doc, constant, quantise);
+
+                At(cancel, publish, ZipStages, 4, "Writing " + Path.GetFileName(dst));
+                doc.Write(tmp);
+                long now = new FileInfo(tmp).Length;
+
+                // A REWRITE THAT MAKES THE FILE BIGGER IS NOT A SAVE. On a .glb whose animation shares
+                // bufferViews with mesh data the old keys cannot be freed, so the new ones are added to
+                // them and the file grows (lib\u8_probe.glb, +7.9%). Report it and leave the
+                // destination alone; the finally below takes the temp with it.
+                if (now >= was)
+                {
+                    done = "would grow by " + (now - was) + " B (" + was + " B -> " + now + " B), so " +
+                           "nothing was written - this .glb interleaves animation with mesh data in " +
+                           "shared bufferViews, and the old keys cannot be freed";
+                    Publish(publish, new SlimProgress("Done", ZipStages.Length, ZipStages.Length, done));
+                    return done;
+                }
+
+                if (File.Exists(dst)) File.Replace(tmp, dst, null);
+                else File.Move(tmp, dst);
+                swapped = true;
+
+                done = stats.Collapsed + " curve(s) collapsed, " + stats.Quantised + " rotation(s) as " +
+                       "int16, " + stats.Skipped + " left alone, " + stats.Shared + " shared; " + was +
+                       " B -> " + now + " B (-" + ((was - now) * 100f / was).ToString("0.#") + "%)";
+
+                At(cancel, publish, ZipStages, 5, "Reading " + Path.GetFileName(dst) + " back");
+                done += "; " + ReadBack(dst);
+                Publish(publish, new SlimProgress("Done", ZipStages.Length, ZipStages.Length, done));
+                return done;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!swapped) throw;
+                return done;
+            }
+            finally
+            {
+                // Same best-effort delete as Execute, for the same reason.
+                try { if (File.Exists(tmp)) File.Delete(tmp); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        /// <summary>Zip on the pool, exactly as <see cref="Start"/> runs Execute. Both callbacks land
+        /// on the WORKER thread.</summary>
+        internal static void StartZip(string src, string dst, bool constant, bool quantise,
+                                      CancellationTokenSource cts, Action<SlimProgress> onProgress,
+                                      Action<string> onComplete)
+        {
+            CancellationToken cancel = cts == null ? CancellationToken.None : cts.Token;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string result;
+                try
+                {
+                    result = Zip(src, dst, constant, quantise, cancel, onProgress);
+                }
+                catch (OperationCanceledException)
+                {
+                    result = "cancelled - " + Path.GetFileName(dst) + " was left alone";
+                }
+                catch (Exception ex)
+                {
+                    result = ex.Message;
+                }
+                if (onComplete != null) onComplete(result);
+            });
+        }
+
+        /// <summary>The written file back through the GAME'S OWN importer, which is the only reader
+        /// whose opinion matters: a rewrite that produces a file the game cannot animate has failed,
+        /// however small it is. A failure here is REPORTED and not thrown - the swap already happened,
+        /// so the author needs the sentence, not a stack trace over a file that is already there.</summary>
+        private static string ReadBack(string path)
+        {
+            try
+            {
+                var clips = new List<SampledClip>();
+                GlbReader.Read(File.ReadAllBytes(path), clips);
+                return "reads back as " + clips.Count + " clip(s)";
+            }
+            catch (Exception ex)
+            {
+                return "but it does not read back: " + ex.Message;
             }
         }
 
@@ -136,11 +260,13 @@ namespace Morgott.ContentTool.Import
             });
         }
 
-        /// <summary>A stage boundary: refuse to start it when the run is cancelled, then say so.</summary>
-        private static void At(CancellationToken cancel, Action<SlimProgress> publish, int stage, string message)
+        /// <summary>A stage boundary: refuse to start it when the run is cancelled, then say so. The
+        /// table is a parameter because the two runs have different checkpoints and the same rule.</summary>
+        private static void At(CancellationToken cancel, Action<SlimProgress> publish, string[] stages,
+                               int stage, string message)
         {
             cancel.ThrowIfCancellationRequested();
-            Publish(publish, new SlimProgress(Stages[stage], stage, Stages.Length, message));
+            Publish(publish, new SlimProgress(stages[stage], stage, stages.Length, message));
         }
 
         private static void Publish(Action<SlimProgress> publish, SlimProgress snapshot)

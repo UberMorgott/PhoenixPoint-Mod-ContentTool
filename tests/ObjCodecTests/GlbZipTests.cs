@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
+using System.Threading;
 using Morgott.ContentTool.Import;
 
 /// <summary>
@@ -243,6 +245,73 @@ internal static class GlbZipTests
         GlbZip.Stats junkStats = GlbZip.Zip(junk, true, true);
         Check(junkStats.Skipped >= 1 && junkStats.Quantised <= 1 && Names(junk) == "Clip",
               "an accessor whose type glTF does not define is skipped, not divided by");
+
+        // --- the job around the rewrite: stages, cancel, the atomic swap and the read-back ---
+        //
+        // Everything below runs in a temp directory on a COPY of a fixture, so a gate that goes wrong
+        // cannot rewrite a file the repo committed.
+
+        string work = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ct_zip_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(work);
+        try
+        {
+            string source = System.IO.Path.Combine(work, "u8_rootfold.glb");
+            byte[] sourceBytes = File.ReadAllBytes(Fixture("u8_rootfold.glb"));
+            File.WriteAllBytes(source, sourceBytes);
+            Func<bool> noTmp = () => Directory.GetFiles(work, "*.ct_tmp").Length == 0;
+
+            // 30. The shrink case end to end: the destination is a NEW smaller file and the source is
+            //     the file it was - a rewrite the author cannot undo is a rewrite nobody ran.
+            string target = System.IO.Path.Combine(work, "out.glb");
+            var seen = new List<SlimProgress>();
+            string sentence = SlimJob.Zip(source, target, true, true, CancellationToken.None, seen.Add);
+            Check(File.Exists(target) && new FileInfo(target).Length < sourceBytes.Length &&
+                  Same(File.ReadAllBytes(source), sourceBytes) && sentence.Contains("reads back as 1 clip(s)"),
+                  "a zip run writes a smaller sibling, leaves the source alone and says the file still " +
+                  "imports: " + sentence);
+
+            // 31. Cancel: nothing is created at all. The swap is the only line that touches the
+            //     destination and a cancel is seen at the stage boundary before it.
+            string never = System.IO.Path.Combine(work, "never.glb");
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+            bool cancelled = false;
+            try { SlimJob.Zip(source, never, true, true, cts.Token, null); }
+            catch (OperationCanceledException) { cancelled = true; }
+            Check(cancelled && !File.Exists(never) && Same(File.ReadAllBytes(source), sourceBytes),
+                  "a cancelled zip throws, creates no destination and leaves the source byte-identical");
+
+            // 32. And no half-written temp is left for the next run to trip over, whichever way the
+            //     run ended.
+            Check(noTmp(), "no .ct_tmp survives a completed or a cancelled run");
+
+            // 33. The bar the panel draws: one snapshot per checkpoint, never past its total, ending
+            //     ON it with the sentence to show.
+            bool orderly = seen.Count >= 6 && seen[seen.Count - 1].Stage == "Done" &&
+                           seen[seen.Count - 1].Done == seen[0].Total;
+            for (int i = 0; i < seen.Count; i++)
+                orderly &= seen[i].Done <= seen[i].Total && seen[i].Total == seen[0].Total &&
+                           !string.IsNullOrEmpty(seen[i].Stage) && (i == 0 || seen[i].Done >= seen[i - 1].Done);
+            Check(orderly, "the zip publishes " + seen.Count + " orderly snapshots and finishes on Done");
+
+            // 34. THE GROWTH CASE IS A REFUSAL TO WRITE. u8_probe.glb interleaves its animation with
+            //     mesh data in shared bufferViews, so the dense keys cannot be freed and the rewrite
+            //     ADDS to them (ppzip measures +7.9%). A bigger file is not a save.
+            string grown = System.IO.Path.Combine(work, "grown.glb");
+            string growth = SlimJob.Zip(Fixture("u8_probe.glb"), grown, true, true, CancellationToken.None, null);
+            Check(growth != null && growth.Contains("would grow") && !File.Exists(grown) && noTmp(),
+                  "a rewrite that would make the file bigger is reported and not written: " + growth);
+
+            // 35. And a file the pre-flight refuses never reaches the rewrite: the guard's own words,
+            //     nothing on disk.
+            string refused = System.IO.Path.Combine(work, "refused.glb");
+            string reported = null;
+            try { SlimJob.Zip(Fixture("u12_norm.glb"), refused, true, true, CancellationToken.None, null); }
+            catch (InvalidOperationException ex) { reported = ex.Message; }
+            Check(reported != null && reported == Refusal("u12_norm.glb") && !File.Exists(refused) && noTmp(),
+                  "a refused zip reports the guard verbatim and writes nothing");
+        }
+        finally { Directory.Delete(work, true); }
 
         return "GLB-ZIP PASS, " + checks + " check(s)" +
                (tiffany == null ? "\n  (skipped local\\PpFit\\Content\\Models\\tiffany_ppfit.glb - not present)" : "");
