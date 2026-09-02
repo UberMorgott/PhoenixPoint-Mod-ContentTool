@@ -137,6 +137,7 @@
          so the whole extract -> glb -> read-back round trip is proven here, not in a game session. -->
     <Compile Include="..\..\src\Bake\MeshRead.cs" Link="MeshRead.cs" />
     <Compile Include="..\..\src\Bake\LooseFiles.cs" Link="LooseFiles.cs" />
+    <Compile Include="..\..\src\Import\Json.cs" Link="Json.cs" />
     <Compile Include="..\..\src\Import\GlbCodec.cs" Link="GlbCodec.cs" />
     <!-- The lossless container - it interprets no glTF, so what it rewrites byte for byte is proven
          here on the committed probes rather than by opening a rewritten file in the game. -->

@@ -17,6 +17,8 @@
     <Compile Include="..\..\src\Import\MeshBuild.cs" Link="MeshBuild.cs" />
     <Compile Include="..\..\src\Import\GlbCodec.cs" Link="GlbCodec.cs" />
     <Compile Include="..\..\src\Import\GlbReader.cs" Link="GlbReader.cs" />
+    <Compile Include="..\..\src\Import\ImportRefused.cs" Link="ImportRefused.cs" />
+    <Compile Include="..\..\src\Import\Json.cs" Link="Json.cs" />
     <Compile Include="..\..\src\Import\Meshopt.cs" Link="Meshopt.cs" />
     <Compile Include="..\..\src\Import\Draco.cs" Link="Draco.cs" />
     <Compile Include="..\..\src\Import\MaterialCodec.cs" Link="MaterialCodec.cs" />
