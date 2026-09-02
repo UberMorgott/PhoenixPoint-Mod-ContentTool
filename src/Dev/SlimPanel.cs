@@ -82,6 +82,7 @@ namespace Morgott.ContentTool.Dev
         private bool shownRunning;
         private Mode shownMode;
         private IList<string> shownTarget;
+        private static GUIStyle wrapped;
 
         /// <summary>Draws the panel. Called from the bench inside the Doctor tab, under Advanced.</summary>
         internal void Draw(float width)
@@ -171,7 +172,9 @@ namespace Morgott.ContentTool.Dev
                                           : Path.GetFileName(inPlace ? sourcePath
                                                              : Beside(sourcePath, Tag(shownMode)))));
             Bar();
-            GUILayout.Label("result: " + (shownResult.Length == 0 ? "-" : shownResult));
+            if (wrapped == null) wrapped = new GUIStyle(GUI.skin.label) { wordWrap = true };
+            GUILayout.Label("result: " + (shownResult.Length == 0 ? "-" : shownResult), wrapped,
+                            GUILayout.MaxWidth(width));
         }
 
         /// <summary>Cancels a run in flight and closes the browser. The file on disk is safe either
