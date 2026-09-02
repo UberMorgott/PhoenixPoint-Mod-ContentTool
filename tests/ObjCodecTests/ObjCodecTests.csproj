@@ -35,6 +35,11 @@
     <Compile Include="DecisionGolden.cs" />
     <Compile Include="AliasTests.cs" />
     <Compile Include="PreflightTests.cs" />
+    <!-- The PROTOTYPE CATALOG carries no UnityEngine type on purpose, so which rigs are one binding
+         prototype - and that Crabman and Oilcrab are NOT, despite 34 shared names - is proven against
+         the live 2551-transform census here instead of by baking a mesh onto the wrong creature. -->
+    <Compile Include="..\..\src\Doctor\PrototypeCatalog.cs" Link="PrototypeCatalog.cs" />
+    <Compile Include="CatalogTests.cs" />
     <Compile Include="MaterialBake.cs" />
     <Compile Include="MaterialTweakFixture.cs" />
     <Compile Include="ClipRoundTrip.cs" />
@@ -133,6 +138,10 @@
          shared-bufferView case where dropping one frees nothing - is proven on the committed probes
          here rather than by trimming a file and weighing it. -->
     <Compile Include="..\..\src\Import\GlbSlim.cs" Link="GlbSlim.cs" />
+    <!-- The run around the trim: the cancel path and the atomic swap are plain file work with no
+         UnityEngine in them, so what a cancelled or refused run leaves on disk is proven here rather
+         than by interrupting a panel and hoping. -->
+    <Compile Include="..\..\src\Import\SlimJob.cs" Link="SlimJob.cs" />
     <Compile Include="GlbSlimTests.cs" />
     <!-- The binding CHECKS, lifted out of SkinBinder.Bind so the Doctor can list them instead of
          reading one thrown sentence. UnityEngine-free like the binder it came from. -->

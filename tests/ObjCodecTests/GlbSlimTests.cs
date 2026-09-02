@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using Morgott.ContentTool.Import;
 
 /// <summary>
@@ -16,8 +17,13 @@ using Morgott.ContentTool.Import;
 /// surviving accessor and image reads, before and after - an index remap that is off by one still
 /// produces a file that loads, and only a byte comparison catches it.
 ///
-/// Falsified by counting a shared bufferView as exclusive (the u8 census arm goes red), or by
-/// compacting BIN without remapping bufferView indices (the survivor-bytes arm goes red).
+/// The job arm asks the question a user only gets to ask once: when a run is cancelled or refused,
+/// is the file they pointed at still the file they had? Every one of those checks reads the
+/// destination bytes back and looks for the temp file the run should have cleaned up.
+///
+/// Falsified by counting a shared bufferView as exclusive (the u8 census arm goes red), by
+/// compacting BIN without remapping bufferView indices (the survivor-bytes arm goes red), or by
+/// writing straight to the destination instead of through a temp (the cancel arm goes red).
 /// </summary>
 internal static class GlbSlimTests
 {
@@ -156,6 +162,64 @@ internal static class GlbSlimTests
                   "a real export trimmed of nothing comes back byte-identical, image bytes included");
         }
         else skipped = " (SKIPPED the real-world arms - no " + Apocd + ")";
+
+        // --- the job around it: progress, cancel, atomic save ---
+
+        string work = Path.Combine(Path.GetTempPath(), "ct_slim_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(work);
+        try
+        {
+            string source = Path.Combine(work, "u9.glb");
+            File.WriteAllBytes(source, u9bytes);
+            string target = Path.Combine(work, "out.glb");
+            string tmp = target + ".ct_tmp";
+
+            // 19. The save REPLACES: the destination already holds a file, and what lands is the
+            //     trimmed .glb whole - never bytes written over the ones that were there. A run that
+            //     drops nothing copies the source verbatim, so the safe case stays byte-exact.
+            GlbDocument expect = GlbDocument.Load(u9bytes);
+            GlbSlim.Trim(expect, new HashSet<int> { 2, 3 });
+            byte[] want = expect.Write();
+            File.WriteAllBytes(target, new byte[] { 1, 2, 3 });
+            var seen = new List<SlimProgress>();
+            SlimJob.Execute(source, target, new HashSet<int> { 2, 3 }, false, CancellationToken.None, seen.Add);
+            string fresh = Path.Combine(work, "fresh.glb");
+            SlimJob.Execute(source, fresh, new HashSet<int>(), false, CancellationToken.None, null);
+            Check(Same(File.ReadAllBytes(target), want) && !File.Exists(tmp) &&
+                  Same(File.ReadAllBytes(source), u9bytes) && Same(File.ReadAllBytes(fresh), u9bytes),
+                  "a run replaces the destination with the trimmed file, leaves no .ct_tmp behind and " +
+                  "copies the source verbatim when nothing is dropped");
+
+            // 20. Progress: one snapshot per stage, never running backwards, never past its total,
+            //     and ending ON it - a bar the panel can draw without arithmetic of its own.
+            bool orderly = seen.Count > 0 && seen[seen.Count - 1].Done == seen[0].Total;
+            for (int i = 0; i < seen.Count; i++)
+                orderly &= seen[i].Total == seen[0].Total && seen[i].Done <= seen[i].Total &&
+                           !string.IsNullOrEmpty(seen[i].Stage) && !string.IsNullOrEmpty(seen[i].Message) &&
+                           (i == 0 || seen[i].Done >= seen[i - 1].Done);
+            Check(orderly, "progress snapshots arrive in order, never exceed their total and finish at it");
+
+            // 21. Cancel: the destination is exactly the file it was, and no half-written temp is
+            //     left for the next run to trip over.
+            byte[] landed = File.ReadAllBytes(target);
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+            bool cancelled = false;
+            try { SlimJob.Execute(source, target, new HashSet<int> { 2, 3 }, false, cts.Token, null); }
+            catch (OperationCanceledException) { cancelled = true; }
+            Check(cancelled && Same(File.ReadAllBytes(target), landed) && !File.Exists(tmp),
+                  "a cancelled run throws, leaves the destination byte-identical and leaves no .ct_tmp");
+
+            // 22. A refusal is the same story with a sentence attached: the guard's own words reach
+            //     the caller, and nothing on disk moved.
+            string reported = null;
+            try { SlimJob.Execute(source, target, new HashSet<int> { 0 }, false, CancellationToken.None, null); }
+            catch (InvalidOperationException ex) { reported = ex.Message; }
+            Check(reported == GlbSlim.Guard(GlbDocument.Load(u9bytes), new HashSet<int> { 0 }, false) &&
+                  reported != null && Same(File.ReadAllBytes(target), landed) && !File.Exists(tmp),
+                  "a refused run reports the guard's refusal verbatim and leaves the destination alone");
+        }
+        finally { Directory.Delete(work, true); }
 
         return "SLIM PASS, " + checks + " check(s)" + skipped;
     }
