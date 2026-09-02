@@ -243,6 +243,10 @@ namespace Morgott.ContentTool.Dev
         /// meshes back and puts the shipped ones on again.</summary>
         private static readonly ModelDoctor doctor = new ModelDoctor();
         private static bool doctorTab;
+        /// <summary>The file utilities that sit under the Doctor's Advanced toggle (design §6). It
+        /// owns no Unity object, so unlike <see cref="doctor"/> it survives a close untouched apart
+        /// from the run <see cref="Close"/> cancels.</summary>
+        private static readonly SlimPanel slim = new SlimPanel();
         /// <summary>The numeric readouts are for the ten minutes an author spends dialling a weapon,
         /// not for the hour they spend looking at a model. Off by default, and session only - it is a
         /// view preference like <see cref="BenchList.InvertX"/>, written nowhere.</summary>
@@ -928,6 +932,10 @@ namespace Morgott.ContentTool.Dev
             // reported and retried by a second close, not swallowed, and NOT placed at the end where
             // the partial-failure return above would skip it.
             Step(failed, "the Model Doctor's preview meshes", () => { doctor.Dispose(); doctorTab = false; });
+            // A trim in flight owns a temp file and a pool thread, neither of which the bench closing
+            // has any business leaving running. The file on disk is safe either way - SlimJob only
+            // ever swaps a finished temp into place.
+            Step(failed, "the slim panel", slim.Dispose);
             // The animator BEFORE the rebuild callback goes: it puts the speed back and plays the
             // default state, and both need the builder this callback still points at.
             Step(failed, "the animator's speed and the weapon's idle pose", FitAnim.Release);
@@ -1419,6 +1427,11 @@ namespace Morgott.ContentTool.Dev
             if (doctorTab)
             {
                 doctor.Draw(BenchList.ContentWidth(w));
+                // The SAME toggle the fit side uses, drawn again here because that one lives on the
+                // other tab: an author on the Doctor should not have to go to FIT and back to reach
+                // the file utilities. Design §6 puts them under Advanced, and this is where they are.
+                advanced = GUILayout.Toggle(advanced, " Advanced (file utilities)");
+                if (advanced) slim.Draw(BenchList.ContentWidth(w));
                 GUILayout.EndScrollView();
                 GUILayout.EndArea();
                 if (leaving) message = Close();
