@@ -59,6 +59,11 @@ namespace Morgott.ContentTool.Dev
         internal string Path;
         internal SkinnedMeshRenderer Renderer;
         internal RigTarget Target;
+        /// <summary>The PROTOTYPE the author picked - record, variant, slot and mode - or null when
+        /// nothing has been picked from the browser. The verdict is still computed from
+        /// <see cref="Target"/>; this is what the header names and what the preflight will be pointed
+        /// at once it takes a prototype.</summary>
+        internal PrototypeTarget Prototype;
         internal ReplacementPreflightResult Ready;
         internal string Message = "";
 
@@ -104,9 +109,45 @@ namespace Morgott.ContentTool.Dev
             // left behind; changing it first strands them - the next preview destroys a mesh still
             // assigned to the old renderer, and a later Revert puts the old model's mesh on the new one.
             Revert();
+            Prototype = null;                          // an arbitrary renderer is not a prototype pick
             Renderer = smr;
             Target = Snapshot(smr, transformPath);
             Restart();
+        }
+
+        /// <summary>
+        /// THE PICK THE BROWSER MAKES. A prototype target is not a function of who is on the stand: the
+        /// bay was rebuilt as this variant, and this slot's renderer is the one that rebuild produced.
+        ///
+        /// The live renderer is found back through <see cref="Root"/> and the snapshot's own transform
+        /// path - the same path <c>SeamSwap.RelativePath</c> wrote against the same root - so the
+        /// freshness check in <see cref="Tick"/> and the preview both keep working. A slot that
+        /// produced none, and the Extend path, carry no renderer at all and say so rather than being
+        /// given a target fabricated from the full hierarchy.
+        /// </summary>
+        internal void PickTarget(PrototypeTarget target)
+        {
+            SkinnedMeshRenderer smr = target != null && target.Mode == VerifyMode.Replace
+                ? Resolve(target) : null;
+            if (smr != null) PickTarget(smr, target.Live.TransformPath);
+            else
+            {
+                Revert();
+                Renderer = null;
+                Target = null;
+                Restart();                             // bumps gen: an answer in flight is about the old pick
+            }
+            // AFTER: Restart reads Path and Target and nothing else, so the order is invisible to the
+            // worker - and PickTarget(smr, path) clears this field on the way through.
+            Prototype = target;
+        }
+
+        private SkinnedMeshRenderer Resolve(PrototypeTarget target)
+        {
+            if (target == null || target.Live == null || root == null) return null;
+            if (string.IsNullOrEmpty(target.Live.TransformPath)) return null;
+            Transform found = root.Find(target.Live.TransformPath);
+            return found == null ? null : found.GetComponent<SkinnedMeshRenderer>();
         }
 
         internal void SetAlias(string fileBone, string targetBone)
@@ -480,9 +521,28 @@ namespace Morgott.ContentTool.Dev
         private readonly GlbFileBrowser browser = new GlbFileBrowser();
         private Vector2 rowScroll;
         private bool mapOpen;
-        private bool targetsOpen;
         private string boneOpen;
-        private SkinnedMeshRenderer[] candidates = new SkinnedMeshRenderer[0];
+
+        // ---- the prototype browser. EVERY field here is read by the draw and written ONLY by Refresh
+        // (which runs on the Layout pass) or by an edit the draw enqueued (which runs in Tick, i.e. in
+        // Update, before the next Layout). Nothing that decides how many controls exist may move
+        // between the Layout pass and the Repaint pass that follows it.
+        private bool browserOpen;
+        private string query = "";
+        private string queried;                        // the text `shown` was filtered for
+        private IList<PrototypeRecord> all = new PrototypeRecord[0];
+        private IList<PrototypeRecord> seen;           // the list `shown` was filtered FROM, by reference
+        private IList<PrototypeRecord> shown = new PrototypeRecord[0];
+        private readonly List<string> groups = new List<string>();
+        private readonly HashSet<string> openGroups = new HashSet<string>(StringComparer.Ordinal);
+        /// <summary>The group states a search auto-expanded over, put back when the box is cleared.
+        /// Null while no search is filtering anything.</summary>
+        private HashSet<string> beforeSearch;
+        private string openRecord;                     // the record whose variants are listed
+        private Vector2 browserScroll;
+        private IList<PrototypeTarget> slots = new PrototypeTarget[0];
+        private PrototypeVariant standing;
+        private bool protoBusy;
 
         private Transform root;
 
@@ -517,9 +577,8 @@ namespace Morgott.ContentTool.Dev
                 root = value;
                 Renderer = null;
                 Target = null;
+                Prototype = null;
                 Ready = null;
-                candidates = new SkinnedMeshRenderer[0];
-                targetsOpen = false;
                 gen++;                                     // an answer in flight is about the old actor
             }
         }
@@ -531,6 +590,8 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal void Draw(float width)
         {
+            if (Event.current.type == EventType.Layout) Refresh();
+
             // Open is tested BEFORE Draw and the frame ends there: the browser reorders its own recents
             // during the mouse pass, so a second Draw in the same frame lays out a different list.
             if (browser.Open)
@@ -539,33 +600,26 @@ namespace Morgott.ContentTool.Dev
                 if (picked != null) { string p = picked; edits.Enqueue(delegate { PickFile(p); }); }
                 return;
             }
+            // The prototype browser TAKES THE WHOLE CONTENT AREA rather than expanding inline: it is a
+            // 36-prototype tree with its own scroll, and half a report behind it is a report nobody can
+            // read anyway. browserOpen only ever moves in an edit, so the area cannot change mid-frame.
+            if (browserOpen) { Browse(); return; }
 
             float col = Mathf.Max(120f, (width - 80f) * 0.45f);
 
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Browse...", GUILayout.Width(90f)))
-                browser.Show(Path == null ? "" : System.IO.Path.GetDirectoryName(Path));
-            GUILayout.Label("source: " + BenchList.Elide(Path == null ? "-" : System.IO.Path.GetFileName(Path), 40));
-            if (Ready != null && Ready.Source != null && Ready.Source.AliasesApplied > 0)
-                GUILayout.Label("ALIASES ACTIVE (" + Ready.Source.AliasesApplied + ")");
-            GUILayout.EndHorizontal();
+            Header();
             if (Ready != null && Ready.Baked != null && Ready.Baked.Mesh != null)
                 GUILayout.Label("   " + Ready.Baked.Mesh.VertexCount + " verts, " +
                                 Ready.Baked.Mesh.IndexCount / 3 + " tris, " +
                                 (Ready.Model == null ? 0 : Ready.Model.JointNames.Count) + " joints, " +
                                 Ready.Baked.Influences + " influence(s)/vertex");
 
-            Targets();
             // ABOVE the early returns. What the last press did is most worth reading exactly when the
             // panel has nothing else to show - a refused preview restarts the report, and a message
             // drawn under a verdict that is not there yet is a message nobody ever sees.
             if (Message.Length > 0) GUILayout.Label(Message);
 
-            if (Path == null || Target == null)
-            {
-                GUILayout.Label("pick a .glb and a skinned mesh to see what the bake would do with them");
-                return;
-            }
+            if (Path == null || Target == null) { GUILayout.Label(Hint()); return; }
             if (Ready == null) { GUILayout.Label(Busy ? "reading..." : "queued..."); return; }
 
             GUILayout.Space(4f);
@@ -610,42 +664,232 @@ namespace Morgott.ContentTool.Dev
             GUILayout.EndHorizontal();
         }
 
-        /// <summary>The target block: what is picked, and the renderers on the stand to pick from. The
-        /// list is taken once when it opens - GetComponentsInChildren allocates, and a panel that calls
-        /// it twice a frame forever is a garbage collection the author feels as a stutter.</summary>
-        private void Targets()
+        /// <summary>
+        /// ONE LINE: source, prototype, mode, role, slot - section 6 of the picker design. What the
+        /// verdict below is ABOUT, said in the order it was decided, so the author never has to open
+        /// the browser to find out what they are looking at.
+        /// </summary>
+        private void Header()
         {
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button((targetsOpen ? "v " : "> ") + "Change", GUILayout.Width(90f)))
+            GUILayout.Label("source " + BenchList.Elide(Path == null ? "-" : System.IO.Path.GetFileName(Path), 22),
+                            GUILayout.Width(180f));
+            if (GUILayout.Button("Browse...", GUILayout.Width(80f)))
+                browser.Show(Path == null ? "" : System.IO.Path.GetDirectoryName(Path));
+            GUILayout.Label("|", GUILayout.Width(8f));
+            GUILayout.Label("prototype " + BenchList.Elide(Prototype == null || Prototype.Record == null
+                                                           ? "-" : Prototype.Record.DisplayName, 18),
+                            GUILayout.Width(160f));
+            if (GUILayout.Button("Change", GUILayout.Width(70f))) edits.Enqueue(delegate { browserOpen = true; });
+            GUILayout.Label("|", GUILayout.Width(8f));
+            // The mode is a TOGGLE and not a label: Replace and Extend answer two different questions
+            // about the same slot, and swapping between them is the comparison the author came for.
+            GUI.enabled = Prototype != null;
+            if (GUILayout.Button(Prototype == null ? "Replace/Extend" : Prototype.Mode.ToString(),
+                                 GUILayout.Width(100f)))
             {
-                targetsOpen = !targetsOpen;
-                candidates = targetsOpen && Root != null
-                    ? Root.GetComponentsInChildren<SkinnedMeshRenderer>(true) : new SkinnedMeshRenderer[0];
+                PrototypeTarget pick = Prototype;
+                edits.Enqueue(delegate { Flip(pick); });
             }
-            GUILayout.Label(Target == null
-                ? "target: -"
-                : "target: " + BenchList.Elide(Target.TransformPath, 34) + "  (" +
-                  (Target.BoneNames == null ? 0 : Target.BoneNames.Length) + " bones, mesh '" +
-                  BenchList.Elide(Target.MeshName, 20) + "')");
+            GUI.enabled = true;
+            GUILayout.Label("|", GUILayout.Width(8f));
+            GUILayout.Label(BenchList.Elide(Prototype == null || Prototype.Variant == null
+                                            ? "-" : Prototype.Variant.Name, 18), GUILayout.Width(120f));
+            GUILayout.Label("|", GUILayout.Width(8f));
+            GUILayout.Label(BenchList.Elide(Prototype == null ? "-" : Prototype.SlotDefName ?? "-", 22));
+            if (Ready != null && Ready.Source != null && Ready.Source.AliasesApplied > 0)
+                GUILayout.Label("ALIASES (" + Ready.Source.AliasesApplied + ")");
             GUILayout.EndHorizontal();
-            if (!targetsOpen) return;
+        }
 
-            if (candidates.Length == 0) GUILayout.Label("   nothing on the stand carries a skinned mesh");
-            foreach (SkinnedMeshRenderer r in candidates)
+        /// <summary>Swap the mode of the picked slot and ask again. Refused for a slot that produced no
+        /// renderer: Replace has nothing to be exact ABOUT there, and inventing a bone list from the
+        /// full rig is the one thing the whole picker exists to stop.</summary>
+        private void Flip(PrototypeTarget pick)
+        {
+            if (pick == null || !ReferenceEquals(pick, Prototype)) return;
+            VerifyMode next = pick.Mode == VerifyMode.Replace ? VerifyMode.Extend : VerifyMode.Replace;
+            if (next == VerifyMode.Replace && pick.Unavailable != null)
             {
-                if (r == null) continue;
-                string path = SeamSwap.RelativePath(root, r.transform);
-                if (!GUILayout.Button("   " + BenchList.Elide(path.Length == 0 ? r.name : path, BenchList.NameChars) +
-                                      "  (" + (r.bones == null ? 0 : r.bones.Length) + " bones)")) continue;
-                SkinnedMeshRenderer chosen = r;
-                string chosenPath = path;
-                Transform from = root;                     // the actor this renderer was chosen off
+                Message = pick.Unavailable + " - Replace has no live renderer to verify against";
+                return;
+            }
+            pick.Mode = next;
+            PickTarget(pick);
+        }
+
+        /// <summary>What to say when there is no verdict to draw yet, in the author's own terms.</summary>
+        private string Hint()
+        {
+            if (Prototype == null) return "pick a .glb and a prototype slot to see what the bake would do with them";
+            if (Prototype.Unavailable != null)
+                return Prototype.Unavailable + " - this slot produced no renderer, so there is nothing " +
+                       "to replace exactly; try Extend";
+            if (Prototype.Mode == VerifyMode.Extend)
+                return "Extend holds the file against the prototype's " +
+                       (Prototype.Record == null ? 0 : Prototype.Record.BindableBones.Count) +
+                       " bindable bone(s) - the report for it arrives with the prototype preflight";
+            return Path == null ? "pick a .glb to see what the bake would do with it"
+                                : "the slot's live renderer has gone - pick it again";
+        }
+
+        // ------------------------------------------------------------------ the prototype browser
+
+        /// <summary>
+        /// EVERYTHING THE BROWSER LAYS OUT, decided once per frame on the Layout pass. IMGUI runs OnGUI
+        /// again for the Repaint with the layout it cached here, so a list that is recomputed - or a
+        /// rebuild that finishes - between the two passes is "you are pushing more GUIElements now"
+        /// every frame afterwards. Reading it ONCE is also why the search filter runs on a keystroke
+        /// and not on a frame.
+        /// </summary>
+        private void Refresh()
+        {
+            slots = FitBench.SlotTargets();
+            standing = FitBench.ShownVariant();
+            protoBusy = FitBench.PrototypeBusy;
+            // The bay was rebuilt as somebody else, so a pick from the previous variant is about a slot
+            // that no longer exists. Enqueued rather than done here: PickTarget reverts a preview, and
+            // mutating a renderer inside OnGUI is what Tick exists to avoid.
+            if (Prototype != null && !ReferenceEquals(Prototype.Variant, standing))
+                edits.Enqueue(delegate { PickTarget((PrototypeTarget)null); });
+
+            if (!browserOpen) return;
+            all = FitBench.Prototypes();               // harvested here and nowhere else: FIRST open only
+            if (queried == query && ReferenceEquals(seen, all)) return;
+
+            bool was = queried != null && queried.Length > 0, now = query.Length > 0;
+            queried = query;
+            seen = all;
+            shown = PrototypeCatalog.Search(all, query);
+
+            // A search AUTO-EXPANDS what it matched, and clearing it puts back exactly the groups the
+            // author had open before they started typing.
+            if (now)
+            {
+                if (!was) beforeSearch = new HashSet<string>(openGroups, StringComparer.Ordinal);
+                openGroups.Clear();
+                foreach (PrototypeRecord r in shown) openGroups.Add(r.Category);
+            }
+            else if (was)
+            {
+                openGroups.Clear();
+                if (beforeSearch != null) foreach (string c in beforeSearch) openGroups.Add(c);
+                beforeSearch = null;
+            }
+
+            groups.Clear();
+            foreach (PrototypeRecord r in shown) if (!groups.Contains(r.Category)) groups.Add(r.Category);
+            groups.Sort(StringComparer.Ordinal);
+        }
+
+        /// <summary>Category -&gt; prototype -&gt; variant -&gt; slot, over the whole content area. Every
+        /// press enqueues; nothing that decides a control's existence is written here.</summary>
+        private void Browse()
+        {
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("< Back", GUILayout.Width(70f))) edits.Enqueue(delegate { browserOpen = false; });
+            GUILayout.Label("search", GUILayout.Width(46f));
+            query = GUILayout.TextField(query ?? "", GUILayout.Width(220f));
+            GUILayout.Label(shown.Count + " of " + all.Count + " prototype(s)" +
+                            (protoBusy ? "   rebuilding..." : ""));
+            GUILayout.EndHorizontal();
+            if (Message.Length > 0) GUILayout.Label(Message);
+
+            browserScroll = GUILayout.BeginScrollView(browserScroll);
+            if (all.Count == 0)
+                GUILayout.Label("   no prototypes were found - the catalogue is read off DefRepository " +
+                                "when the bench opens in a geoscape campaign");
+            else if (shown.Count == 0) GUILayout.Label("   nothing matches '" + query + "'");
+            foreach (string category in groups)
+            {
+                bool open = openGroups.Contains(category);
+                if (GUILayout.Button((open ? "v " : "> ") + category + "   (" + CountIn(category) + ")"))
+                {
+                    string c = category;
+                    edits.Enqueue(delegate { if (!openGroups.Remove(c)) openGroups.Add(c); });
+                }
+                if (!open) continue;
+                foreach (PrototypeRecord r in shown) if (r.Category == category) Record(r);
+            }
+            GUILayout.EndScrollView();                 // closed on EVERY path out of this method
+        }
+
+        private int CountIn(string category)
+        {
+            int n = 0;
+            foreach (PrototypeRecord r in shown) if (r.Category == category) n++;
+            return n;
+        }
+
+        private void Record(PrototypeRecord r)
+        {
+            bool open = r.Id == openRecord;
+            if (GUILayout.Button("   " + (open ? "v " : "> ") + BenchList.Elide(r.DisplayName, 26) +
+                                 "   " + r.BindableBones.Count + " bindable bone(s), " +
+                                 r.Variants.Count + " variant(s)" +
+                                 (r.Warning == null ? "" : "   [duplicate bone names]")))
+            {
+                string id = open ? null : r.Id;
+                edits.Enqueue(delegate { openRecord = id; });
+            }
+            if (!open) return;
+            foreach (PrototypeVariant v in r.Variants) Variant(r, v);
+        }
+
+        private void Variant(PrototypeRecord r, PrototypeVariant v)
+        {
+            bool here = ReferenceEquals(v, standing);
+            GUILayout.BeginHorizontal();
+            // Refused while a rebuild is in flight: two overlapping rebuilds leave the bay showing a
+            // mix of two prototypes and neither slot list is worth reading.
+            GUI.enabled = !protoBusy;
+            if (GUILayout.Button((here ? "      * " : "        ") + BenchList.Elide(v.Name, 24) +
+                                 "   " + v.Slots.Count + " slot(s)", GUILayout.Width(340f)))
+            {
+                PrototypeRecord rec = r; PrototypeVariant var = v;
                 edits.Enqueue(delegate
                 {
-                    if (ReferenceEquals(root, from)) PickTarget(chosen, chosenPath);
+                    string failed = FitBench.ShowPrototype(rec, var);
+                    Message = failed ?? ("standing " + var.Name + " on the platform...");
                 });
-                targetsOpen = false;
             }
+            GUI.enabled = true;
+            GUILayout.Label(here ? (protoBusy ? "rebuilding..." : "on the platform") : "");
+            GUILayout.EndHorizontal();
+            if (!here) return;
+            foreach (PrototypeTarget t in slots) Slot(t);
+        }
+
+        /// <summary>One slot row, and the two questions that can be asked of it. A slot the rebuild
+        /// produced no renderer for offers only Extend - and says why - rather than a Replace verdict
+        /// against a bone list nothing measured.</summary>
+        private void Slot(PrototypeTarget t)
+        {
+            bool chosen = ReferenceEquals(t, Prototype);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label((chosen ? "           > " : "             ") +
+                            BenchList.Elide(t.SlotDefName ?? "(slot)", 26), GUILayout.Width(260f));
+            GUI.enabled = t.Unavailable == null;
+            if (GUILayout.Button(chosen && t.Mode == VerifyMode.Replace ? "[Replace]" : "Replace",
+                                 GUILayout.Width(90f))) Choose(t, VerifyMode.Replace);
+            GUI.enabled = true;
+            if (GUILayout.Button(chosen && t.Mode == VerifyMode.Extend ? "[Extend]" : "Extend",
+                                 GUILayout.Width(90f))) Choose(t, VerifyMode.Extend);
+            GUILayout.Label(t.Unavailable ?? ((t.Live == null || t.Live.BoneNames == null
+                                               ? 0 : t.Live.BoneNames.Length) + " live bone(s)"));
+            GUILayout.EndHorizontal();
+        }
+
+        private void Choose(PrototypeTarget t, VerifyMode mode)
+        {
+            PrototypeTarget pick = t;
+            VerifyMode m = mode;
+            edits.Enqueue(delegate
+            {
+                pick.Mode = m;
+                PickTarget(pick);
+                browserOpen = false;                   // the pick was the point; the report is behind it
+            });
         }
 
         /// <summary>
@@ -818,9 +1062,20 @@ namespace Morgott.ContentTool.Dev
             root = null;
             Renderer = null;
             Target = null;
+            Prototype = null;
             Ready = null;
-            candidates = new SkinnedMeshRenderer[0];
-            targetsOpen = false;
+            browserOpen = false;
+            query = "";
+            queried = null;
+            seen = null;
+            all = new PrototypeRecord[0];
+            shown = new PrototypeRecord[0];
+            slots = new PrototypeTarget[0];
+            standing = null;
+            groups.Clear();
+            openGroups.Clear();
+            beforeSearch = null;
+            openRecord = null;
             aliases.Clear();
             seeded.Clear();
             seededFor = null;
