@@ -1270,9 +1270,15 @@ namespace Morgott.ContentTool.Import
             // The long cast is the whole point of the integral arm, so it may only be taken where a
             // long can hold the value - past that G17 writes the exponent form rather than a wrap.
             bool integral = value == Math.Floor(value) && !double.IsInfinity(value) && Math.Abs(value) < 9.2e18;
-            text.Append(integral
-                ? ((long)value).ToString(CultureInfo.InvariantCulture)
-                : value.ToString("G17", CultureInfo.InvariantCulture));
+            if (integral) text.Append(((long)value).ToString(CultureInfo.InvariantCulture));
+            else
+            {
+                // Shortest-round-trip on .NET Framework: G15 when it survives a re-parse, else G17.
+                string brief = value.ToString("G15", CultureInfo.InvariantCulture);
+                text.Append(double.Parse(brief, CultureInfo.InvariantCulture) == value
+                    ? brief
+                    : value.ToString("G17", CultureInfo.InvariantCulture));
+            }
             separate = true;
             return this;
         }

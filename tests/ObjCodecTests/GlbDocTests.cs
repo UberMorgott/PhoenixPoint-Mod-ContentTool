@@ -76,6 +76,14 @@ internal static class GlbDocTests
         Check(string.Join(",", before.ToArray()) == string.Join(",", after.ToArray()),
               "the root key order survives a dirty round trip");
 
+        // 12. Numbers are spelled shortest-round-trip: no G17 noise, nothing lost either.
+        string third = new JsonWriter().Num(0.1 + 0.2).ToString();
+        Check(new JsonWriter().Num(-0.70710678).ToString() == "-0.70710678" &&
+              third == "0.30000000000000004" &&
+              double.Parse(third, System.Globalization.CultureInfo.InvariantCulture) == 0.1 + 0.2 &&
+              SameValue(GlbDocument.Load(rewritten).Json, doc9.Json),
+              "fractional numbers are written shortest-round-trip and survive a dirty rewrite exactly");
+
         return "GLB-DOC PASS, " + checks + " check(s)";
     }
 
@@ -83,6 +91,25 @@ internal static class GlbDocTests
     private static byte[] Chunk(byte[] glb) => Copy(Skip(glb, 20), (int)U32(glb, 12));
 
     private static string Canonical(Dictionary<string, object> json) => new JsonWriter().Val(json).ToString();
+
+    /// <summary>Structural equality of two parsed JSON trees; numbers compared as doubles, not as spelling.</summary>
+    private static bool SameValue(object a, object b)
+    {
+        if (a is Dictionary<string, object> da && b is Dictionary<string, object> db)
+        {
+            if (da.Count != db.Count) return false;
+            foreach (KeyValuePair<string, object> m in da)
+                if (!db.ContainsKey(m.Key) || !SameValue(m.Value, db[m.Key])) return false;
+            return true;
+        }
+        if (a is List<object> la && b is List<object> lb)
+        {
+            if (la.Count != lb.Count) return false;
+            for (int i = 0; i < la.Count; i++) if (!SameValue(la[i], lb[i])) return false;
+            return true;
+        }
+        return Equals(a, b);
+    }
 
     private static string Fixture(string name) =>
         Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
