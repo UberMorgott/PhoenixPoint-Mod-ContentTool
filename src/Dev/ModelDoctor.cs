@@ -722,6 +722,9 @@ namespace Morgott.ContentTool.Dev
         private static readonly int PickHint = "Morgott.ContentTool.BonePick".GetHashCode();
 
         private const float InspectorWidth = 380f;
+        /// <summary>The inspector's own label style: NO word wrap, so a row is exactly the 18 px the
+        /// box was measured with. Built once, on the first draw - GUI.skin is null outside OnGUI.</summary>
+        private static GUIStyle oneLine;
         private static readonly Color PickedRing = new Color(1f, 1f, 1f, 0.85f);
         /// <summary>The halo behind a joint the armed row may take - alias yellow, because that is the
         /// colour it will BECOME.</summary>
@@ -1036,7 +1039,12 @@ namespace Morgott.ContentTool.Dev
                 // live one: the button above flips it mid-frame, and reading it here would lay out a
                 // different number of labels than the Layout pass counted.
                 if (!shownOpen) return;
-                for (int i = 0; i < inspectorLines.Count; i++) GUILayout.Label(inspectorLines[i]);
+                // ONE LINE PER ROW, or the box is the wrong height. The built-in label style word-wraps,
+                // and a single wrapped 'path' pushed 'binds', 'rest' and 'current' clean out of an area
+                // measured at 18 px a row - three of the seven rows were invisible on Instance3.
+                if (oneLine == null) oneLine = new GUIStyle(GUI.skin.label) { wordWrap = false };
+                for (int i = 0; i < inspectorLines.Count; i++)
+                    GUILayout.Label(inspectorLines[i], oneLine, GUILayout.Height(18f));
             }
             finally { GUILayout.EndArea(); }
         }
@@ -1061,7 +1069,7 @@ namespace Morgott.ContentTool.Dev
                 if (e.Value == bone) return e.Key + "   (alias)";
             if (Ready != null && Ready.Model != null && Ready.Model.JointNames != null)
                 foreach (string j in Ready.Model.JointNames)
-                    if (j != null && SkinBinder.Plain(j) == bone) return j + "   (by name)";
+                    if (BoneOverlay.MatchesByName(bone, j)) return j + "   (by name)";
             return "-";
         }
 
