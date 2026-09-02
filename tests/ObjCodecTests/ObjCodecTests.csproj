@@ -129,6 +129,11 @@
          here on the committed probes rather than by opening a rewritten file in the game. -->
     <Compile Include="..\..\src\Import\GlbDocument.cs" Link="GlbDocument.cs" />
     <Compile Include="GlbDocTests.cs" />
+    <!-- The census reads the container's JSON and no glTF model, so what a clip COSTS - and the
+         shared-bufferView case where dropping one frees nothing - is proven on the committed probes
+         here rather than by trimming a file and weighing it. -->
+    <Compile Include="..\..\src\Import\GlbSlim.cs" Link="GlbSlim.cs" />
+    <Compile Include="GlbSlimTests.cs" />
     <!-- The binding CHECKS, lifted out of SkinBinder.Bind so the Doctor can list them instead of
          reading one thrown sentence. UnityEngine-free like the binder it came from. -->
     <!-- The stable CODE every refusal now carries, so a gate can assert the identity of a refusal
