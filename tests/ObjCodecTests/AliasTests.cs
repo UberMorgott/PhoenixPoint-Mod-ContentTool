@@ -142,6 +142,30 @@ internal static class AliasTests
                             why.IndexOf("onto one", StringComparison.Ordinal) < 0,
                             "an empty sidecar says it is EMPTY, not that it collides: " + why);
 
+            // ---- AliasSidecar_SchemaMustBeIntegral: "1.5" used to cast to 1 and LOAD, so a sidecar written
+            // for a schema this mod has never seen applied itself as if it were schema 1.
+            File.WriteAllText(AliasMap.SidecarPathOf(glb),
+                              "{\"schema\":1.5,\"source\":{\"sha256\":\"" + sha + "\"},\"bones\":{\"A\":\"Root\"}}");
+            checks += Check(AliasMap.LoadSidecar(glb, sha, out why) == null && why != null &&
+                            why.IndexOf("1.5", StringComparison.Ordinal) >= 0,
+                            "a non-integral schema is refused and the sentence spells it as written: " + why);
+            // A value no integer type can hold: (int) wrapped it, so the refusal used to name a number the
+            // file does not contain.
+            File.WriteAllText(AliasMap.SidecarPathOf(glb),
+                              "{\"schema\":1e30,\"source\":{\"sha256\":\"" + sha + "\"},\"bones\":{\"A\":\"Root\"}}");
+            checks += Check(AliasMap.LoadSidecar(glb, sha, out why) == null && why != null &&
+                            why.IndexOf("1E+30", StringComparison.Ordinal) >= 0,
+                            "an out-of-range schema is refused and spelled as written: " + why);
+            File.WriteAllText(AliasMap.SidecarPathOf(glb),
+                              "{\"schema\":1,\"source\":{\"sha256\":\"" + sha + "\"},\"bones\":{\"A\":\"Root\"}}");
+            checks += Check(AliasMap.LoadSidecar(glb, sha, out why) != null, "and the real schema still loads");
+
+            // The commit is AtomicFile's now: a SUCCESSFUL save leaves no temp beside the model either.
+            AliasMap.SaveSidecar(glb, sha, bytes.Length,
+                                 new Dictionary<string, string> { { "A", "Root" } });
+            checks += Check(Directory.GetFiles(dir, "*.tmp").Length == 0,
+                            "a successful sidecar write leaves no *.tmp beside the model");
+
             // ---- a failed write leaves no half-map beside the model.
             string blocked = Path.Combine(dir, "y.glb");
             File.WriteAllBytes(blocked, bytes);

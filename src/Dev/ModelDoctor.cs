@@ -2,9 +2,11 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Threading;
 using Morgott.ContentTool.Doctor;
 using Morgott.ContentTool.Import;
+using Morgott.ContentTool.IO;
 using UnityEngine;
 
 namespace Morgott.ContentTool.Dev
@@ -513,7 +515,7 @@ namespace Morgott.ContentTool.Dev
                     return "every alias in this map is one the report itself flagged, so a plan built " +
                            "from it would be refused - fix the rows above first";
                 string path = SkelPlan.PlanPathOf(Path);
-                File.WriteAllText(path, plan.ToJson());
+                AtomicFile.WriteText(path, plan.ToJson(), new UTF8Encoding(false));
                 return "wrote " + plan.Renames.Count + " rename(s) to " + path +
                        " - open Advanced > SKEL to apply it";
             }

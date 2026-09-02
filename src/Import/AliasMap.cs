@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using Morgott.ContentTool.IO;
 
 namespace Morgott.ContentTool.Import
 {
@@ -173,9 +174,15 @@ namespace Morgott.ContentTool.Import
 
                 object schema;
                 double declared = root.TryGetValue("schema", out schema) && schema is double d ? d : 0;
-                if ((int)declared != Schema)
+                // (int) alone accepted 1.5 as 1, so a sidecar written for a schema this mod has never
+                // seen applied itself. Compared as a DOUBLE and spelled with "R", both for the same
+                // reason: no integer cast can be trusted here - it turns 1.5 into 1 and a huge value
+                // into a wrapped one, and the refusal for 1.5 would then read "declares schema 1 but
+                // this mod reads 1".
+                if (declared != Math.Floor(declared) || declared != Schema)
                 {
-                    why = "'" + path + "' declares schema " + ((int)declared).ToString(CultureInfo.InvariantCulture) +
+                    why = "'" + path + "' declares schema " +
+                          declared.ToString("R", CultureInfo.InvariantCulture) +
                           " but this mod reads " + Schema.ToString(CultureInfo.InvariantCulture) +
                           ", so its aliases were NOT applied";
                     problem = SidecarProblem.Invalid;
@@ -220,14 +227,13 @@ namespace Morgott.ContentTool.Import
         }
 
         /// <summary>
-        /// Writes the sidecar through a temporary file: File.Move when creating, File.Replace when
-        /// updating (File.Replace fails outright if the destination does not exist), so a crash
-        /// mid-write cannot leave half a map beside the model.
+        /// Writes the sidecar through AtomicFile: a temp beside the destination, then the swap, so a
+        /// crash mid-write cannot leave half a map beside the model. The TEXT is still built here,
+        /// by hand - only the commit moved.
         /// </summary>
         internal static void SaveSidecar(string glbPath, string sha256, long bytes, IDictionary<string, string> map)
         {
             string path = SidecarPathOf(glbPath);
-            string tmp = path + ".tmp";
             var sb = new StringBuilder();
             sb.Append("{\n  \"schema\": ").Append(Schema.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\n  \"source\": { \"sha256\": \"").Append(sha256).Append("\", \"bytes\": ")
@@ -242,19 +248,7 @@ namespace Morgott.ContentTool.Import
             }
             sb.Append(first ? "}" : "\n  }").Append("\n}\n");
 
-            File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(false));
-            try
-            {
-                if (File.Exists(path)) File.Replace(tmp, path, null);
-                else File.Move(tmp, path);
-            }
-            catch (Exception)
-            {
-                // The write failed, so the caller must hear about it - but a half-written map must not
-                // be left sitting beside the model where the next run finds it.
-                try { File.Delete(tmp); } catch (Exception) { }
-                throw;
-            }
+            AtomicFile.WriteText(path, sb.ToString(), new UTF8Encoding(false));
         }
 
         private static string Escape(string s)
