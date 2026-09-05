@@ -189,13 +189,56 @@ namespace Morgott.ContentTool.Bake
         {
             if (stage == "Validate") return StartValidate(on);
             if (stage == "Bake") return StartBake(on);
+            if (stage == "Apply") return StartApply(on);
             if (stage == "Package") return StartPackage(on);
-            // ponytail: Apply and Verify have no segmented producer yet - Route7.ApplyProject's structured
-            // overload and 4.4's read-back producer are two separate pieces of work, neither budgeted here
-            // (Task 5 is the coordinator, the seam and the pump). This says so instead of inventing a
-            // verdict for a stage nothing ran.
-            // Wire them where their panel rows land, and delete this line with the last of them.
+            // ponytail: Verify has no segmented producer yet - 4.4's read-back producer is its own piece of
+            // work, not budgeted here. This says so instead of inventing a verdict for a stage nothing ran.
+            // Delete this line with it.
             return "Lifecycle: " + stage + " is not wired to the dashboard yet.";
+        }
+
+        /// <summary>
+        /// MAIN, then WORKER (the freshness observation), then a PARKED MAIN segment: <c>Route7.ApplyRoot</c>
+        /// mounts bundles and touches the claim ledger from end to end and yields nowhere, so it is Unity
+        /// work that BLOCKS a frame - §5's A3, the same policy as the bake at <see cref="StartBake"/>.
+        ///
+        /// BY ROOT, NEVER BY NAME. The panel bound a canonical root (a name resolves through
+        /// <c>ContentToolMain.ProjectDir</c>, and a duplicate name resolves to the wrong folder), which is
+        /// the whole reason <c>ApplyRoot</c> exists.
+        ///
+        /// THE DISPOSITION CLASSIFIES, NEVER THE TEXT (design:361). `Resident` is a PASS that needs a
+        /// restart - S1 - and `Refused` is VOID, not a failure. No automatic Uninstall, and `ApplyRoot` is
+        /// called exactly ONCE per run.
+        /// </summary>
+        internal static string StartApply(Captured on)
+        {
+            long id = Run.Begin("Apply");
+            if (id == 0) return StageText.R26(Run.Latest.Stage);
+            Worker(delegate
+            {
+                Observe(on);                                   // A1 revalidate, on a worker
+                Park(delegate
+                {
+                    string line;
+                    // Task 6 draws a row per target; the seam carries one verdict, so the list is asked for
+                    // here rather than parsed back out of the log later (TargetInstall's whole point).
+                    IList<Route7.TargetInstall> targets;
+                    Route7.ApplyDisposition how;
+                    try { line = Route7.ApplyRoot(on.Root, null, out targets, out how); }
+                    catch (Exception ex)
+                    {
+                        Finish(id, "ct_route7 apply THREW: " + ex.Message, BakeDisposition.Failed);
+                        return;
+                    }
+                    BakeDisposition d = how == Route7.ApplyDisposition.BakeFailed ? BakeDisposition.Failed
+                                      : how == Route7.ApplyDisposition.Refused ? BakeDisposition.Refused
+                                      : BakeDisposition.Success;
+                    // Trailing observation FIRST, like the bake (:177): the completion is published with the
+                    // freshness this very run produced, never with the one it started from.
+                    Worker(delegate { Observe(on); Finish(id, line, d); });
+                }, true);
+            });
+            return null;
         }
 
         /// <summary>

@@ -392,6 +392,23 @@ internal static class LifecycleTests
                         { Selection = LifecycleState.Selection.Ok, WriteOutsideRoots = true }) == StageText.R34(),
                         "legacy on-disk patching is R36 and a write outside the apply path or author " +
                         "output is R34 - design:198");
+        // THE ORDER IS THE POINT, not just the two sentences: an installation still carrying an older
+        // ContentTool's on-disk edit is answered BEFORE anything about where this apply would write, and
+        // both outrank the retry hint - the author is told the oldest blocking fact first.
+        checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, LegacyDiskActive = true,
+                          WriteOutsideRoots = true, ProjectId = "morgott.demo",
+                          RetryHint = "'ct_route7 apply Demo'." }) == StageText.R36(),
+                        "R36 outranks R34 and R29 when all three hold");
+        checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, WriteOutsideRoots = true,
+                          ProjectId = "morgott.demo", RetryHint = "'ct_route7 apply Demo'." }) ==
+                        StageText.R34(),
+                        "R34 outranks R29 - a write outside the roots is refused before a retry is offered");
+        checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo" }) == null,
+                        "neither field set admits Apply - R36 and R34 are facts the caller measured, " +
+                        "never a default");
 
         // ---- The ONE freshness observation. Route7.cs:308-:310 computes `fresh && Directory.Exists(patched)`
         // and then clears it for every declared copy that is absent; `HaveAll` IS that expression and

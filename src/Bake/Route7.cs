@@ -380,9 +380,21 @@ namespace Morgott.ContentTool.Bake
         private static string ApplyProject(string projectName, string forBundle,
                                            out IList<TargetInstall> targets, out ApplyDisposition how)
         {
+            return ApplyRoot(ContentToolMain.ProjectDir(projectName), forBundle, out targets, out how);
+        }
+
+        /// <summary>
+        /// THE SAME APPLY, entered by the project's canonical ROOT instead of by a name. Every overload above
+        /// resolves <c>ContentToolMain.ProjectDir</c> first, which is a NAME LOOKUP by construction (the game
+        /// console eats backslashes) - and the dashboard binds a full path it already resolved, where a
+        /// duplicate name would answer with the wrong folder. Same claim, taken once, in the same place:
+        /// there is no second apply path here, only a second door onto this one.
+        /// </summary>
+        internal static string ApplyRoot(string projectRoot, string forBundle,
+                                         out IList<TargetInstall> targets, out ApplyDisposition how)
+        {
             targets = new List<TargetInstall>();
             how = ApplyDisposition.Refused;
-            string projectRoot = ContentToolMain.ProjectDir(projectName);
             Morgott.ContentTool.Project.ContentProject project =
                 Morgott.ContentTool.Project.ContentProject.Load(projectRoot);
 
