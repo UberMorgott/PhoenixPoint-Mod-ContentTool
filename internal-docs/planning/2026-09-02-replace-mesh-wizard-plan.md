@@ -2201,7 +2201,7 @@ this plan deliberately spells none, because a stale command line in a plan is wo
   the `px_heavy_assets_all.bundle` pairs the hand-written `Wizard.ApocDesignation\ppcontent.json` names are out of
   the wizard's reach today. Not a defect of this slice; a scope note for whatever adds armour-set choice.
 
-  **OPEN GAP 1 — hashed extract joints — FIXED, `9eb14f7`.** The sentence above ("an extract cannot be fed
+  **OPEN GAP 1 — hashed extract joints — FIXED, `a2aee68`.** The sentence above ("an extract cannot be fed
   back by name at all") no longer holds: `MeshRead.Skin` now names the joints off the SkinnedMeshRenderer that uses
   the mesh (`SkinFields.BoneNames`, whose `m_Bones` is index-for-index with `m_BindPose` — the bake writes both off
   one loop counter, `SkinFields.cs:400/451/462`), plumbed through `BundleBaker.ReadMesh(…, out boneNames)`;
