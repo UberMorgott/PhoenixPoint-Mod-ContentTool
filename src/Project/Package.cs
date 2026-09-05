@@ -75,9 +75,7 @@ namespace Morgott.ContentTool.Project
                 return "REFUSED: there is no " + manifest + ". That file is what tells ContentTool " +
                        "what this mod replaces, publishes or adds.";
             if (Directory.Exists(outDir) && Directory.GetFileSystemEntries(outDir).Length > 0)
-                return "REFUSED: " + outDir + " already holds files. Name a folder that does not exist " +
-                       "yet - a package is built from nothing, so no leftover of a previous run can be " +
-                       "shipped by accident.";
+                return Bake.StageText.PackageRefused(outDir);    // ONE copy of the refusal, in StageText
 
             string manifestText = File.ReadAllText(manifest);
             // A MANIFEST NOBODY CAN READ IS A MOD THAT DOES NOTHING. A zero-byte or half-typed file
@@ -177,7 +175,7 @@ namespace Morgott.ContentTool.Project
             long bytes = 0;
             foreach (string f in files) bytes += new FileInfo(Path.Combine(outDir, f)).Length;
             ok = true;
-            return "PACKAGED " + files.Count + " file(s), " + bytes + " B into " + outDir +
+            return Bake.StageText.S7(files.Count, bytes, outDir) +      // ONE copy of S7, in StageText
                    (dropped.Count == 0 ? "" :
                     "\nLEFT BEHIND " + dropped.Count + " source file(s), " + saved + " B: " +
                     string.Join(", ", dropped.ToArray()) + " - ct_sound bake already turned each of " +

@@ -162,7 +162,7 @@ namespace Morgott.ContentTool.Bake
                 Clips(log, entries, c.Key, at);
             }
 
-            return ReadBackResult.Of(entries.ToArray());
+            return ReadBackResult.Of(null, entries.ToArray());   // no terminal line: the caller composes it
         }
 
         /// <summary>The clip arms stay where they are - `Curves` would have to be RENAMED to move (there is

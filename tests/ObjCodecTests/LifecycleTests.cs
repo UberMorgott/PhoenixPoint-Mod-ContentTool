@@ -10,10 +10,13 @@ using Morgott.ContentTool.IO;
 /// failure count plus a log cannot tell the two apart and the panel would print PASS over a row nothing
 /// proved. The carrier answers structurally, without anyone reading text.
 ///
-/// G2 - the wording. Every string here was COPIED FROM DISK at the file:line named on the arm, or, where the
-/// design invents one, from `2026-09-05-lifecycle-dashboard-design.md:365`-`:407`. The existing producers
-/// (`ModelDoctor` S1/S2, `Route7` R29/R35) now COMPOSE their line through StageText rather than owning a
-/// second copy of it, so this gate compares the formatter against disk while the producer IS the formatter.
+/// G2 - the wording, frozen against `2026-09-05-lifecycle-dashboard-design.md:365`-`:407`. EVERY producer now
+/// composes through StageText - `ModelDoctor` (S1/S2), `Route7` (R29/R35), `ProjectBake` (S4/S5 and the three
+/// bake special cases) and `Package` (S7, the already-holds refusal) - so there is no second copy on disk to
+/// compare against, and a literal re-typed here would only be this file agreeing with itself. What the arms
+/// below are is a WORDING FREEZE: an accidental reword fails them, and the design line is the authority.
+/// The S4/S5 and bake-special-case arms were dropped outright when `ProjectBake` joined (Task 2) - their
+/// wording is now proven by W18's console/dashboard parity row, in game, against the real producer.
 ///
 /// G3 - `Tail`, moved here out of `ModelDoctor` (it was private static in a file no test can link). Its
 /// current semantics are FROZEN, not fixed: the trailing empty element from AppendLine is dropped before the
@@ -27,17 +30,17 @@ internal static class LifecycleTests
         string nl = Environment.NewLine;
 
         // ---- G1 carrier: an all-VOID read-back is NOT a PASS, and nobody reads text to find out.
-        ReadBackResult allVoid = ReadBackResult.Of(
+        ReadBackResult allVoid = ReadBackResult.Of(null,
             GateEntry.Void("P4", "mesh_a", "P4 VOID mesh 'mesh_a' was not read back"),
             GateEntry.Void("P4-bytes", "mesh_a", "P4-bytes VOID mesh 'mesh_a' has no readable buffers"));
         checks += Check(allVoid.Failed == 0 && allVoid.MandatoryVoid("mesh_a", RowKind.Mesh),
                         "zero failures with a mandatory VOID is VOID, never S6");
-        checks += Check(allVoid.Void == 2 && allVoid.Passed == 0 && allVoid.Entries.Count == 2,
+        checks += Check(allVoid.Void == 2 && allVoid.Passed == 0 && allVoid.Entries.Length == 2,
                         "the counts are structured, not parsed out of the log");
 
         // A mesh row needs BOTH P4 and P4-bytes; P5/P6 may be VOID (a skinless or same-order source has
         // nothing to measure - ProjectBake.cs:1832, :1939), and that must not sink the row.
-        ReadBackResult meshOk = ReadBackResult.Of(
+        ReadBackResult meshOk = ReadBackResult.Of(null,
             GateEntry.Pass("P4", "mesh_a", "P4 mesh 'mesh_a' read back"),
             GateEntry.Pass("P4-bytes", "mesh_a", "P4-bytes 12 vertices"),
             GateEntry.Void("P5", "mesh_a", "P5 VOID no bind poses"),
@@ -46,81 +49,74 @@ internal static class LifecycleTests
                         "P5/P6 VOID on a proven mesh row is allowed - only P4 and P4-bytes are mandatory");
         checks += Check(meshOk.Passed == 2 && meshOk.Void == 2 && meshOk.Failed == 0,
                         "pass/void/fail are counted apart");
-        checks += Check(ReadBackResult.Of(
+        checks += Check(ReadBackResult.Of(null,
                             GateEntry.Pass("P4", "mesh_a", "x"),
                             GateEntry.Void("P4-bytes", "mesh_a", "y")).MandatoryVoid("mesh_a", RowKind.Mesh),
                         "one mandatory gate VOID is enough - P4-bytes is not optional");
         // A gate that never ran is not a proof either: absence and VOID are the same answer here.
-        checks += Check(ReadBackResult.Of(GateEntry.Pass("P4", "mesh_a", "x"))
+        checks += Check(ReadBackResult.Of(null, GateEntry.Pass("P4", "mesh_a", "x"))
                             .MandatoryVoid("mesh_a", RowKind.Mesh),
                         "a mandatory gate with NO entry at all is VOID, not an implied pass");
         checks += Check(meshOk.MandatoryVoid("mesh_b", RowKind.Mesh),
                         "another target's proofs never satisfy this target");
-        checks += Check(ReadBackResult.Of(
+        checks += Check(ReadBackResult.Of(null,
                             GateEntry.Pass("P1", "tex_a", "x"),
                             GateEntry.Void("P1-ctl-shipped", "tex_a", "y")).MandatoryVoid("tex_a", RowKind.Texture) &&
-                        !ReadBackResult.Of(
+                        !ReadBackResult.Of(null,
                             GateEntry.Pass("P1", "tex_a", "x"),
                             GateEntry.Pass("P1-ctl-shipped", "tex_a", "y")).MandatoryVoid("tex_a", RowKind.Texture),
                         "a texture row needs P1 AND P1-ctl-shipped");
-        checks += Check(ReadBackResult.Of(GateEntry.Void("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material) &&
-                        !ReadBackResult.Of(GateEntry.Pass("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material),
+        checks += Check(ReadBackResult.Of(null, GateEntry.Void("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material) &&
+                        !ReadBackResult.Of(null, GateEntry.Pass("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material),
                         "a material row needs P3");
-        ReadBackResult failed = ReadBackResult.Of(GateEntry.Fail("P4", "mesh_a", "P4 FAILED mesh 'mesh_a'"));
+        ReadBackResult failed = ReadBackResult.Of(null, GateEntry.Fail("P4", "mesh_a", "P4 FAILED mesh 'mesh_a'"));
         checks += Check(failed.Failed == 1 && failed.Entries[0].Outcome == GateOutcome.Fail &&
                         failed.Entries[0].Gate == "P4" && failed.Entries[0].Target == "mesh_a" &&
                         failed.Entries[0].Line == "P4 FAILED mesh 'mesh_a'",
                         "an entry carries the gate id, the target key and the producer's exact line");
         ReadBackResult terminal = ReadBackResult.Of("ct_project: ALL PASS - D:\\x\\Dist\\a.bundle");
-        checks += Check(terminal.Entries.Count == 0 && ReadBackResult.Of().Terminal == null &&
+        checks += Check(terminal.Entries.Length == 0 && ReadBackResult.Of(null).Terminal == null &&
                         terminal.Terminal == "ct_project: ALL PASS - D:\\x\\Dist\\a.bundle",
                         "the terminal line rides along verbatim, never recomposed by the panel");
         BakeResult bake = new BakeResult(3, 1, "ct_project: 3 FAILURE(S)");
         checks += Check(bake.Failed == 3 && bake.PatchFailed == 1 && bake.Terminal == "ct_project: 3 FAILURE(S)",
-                        "BakeResult keeps failed and patchFailed apart - patchFailed alone authorises publication");
+                        "BakeResult keeps failed and patchFailed apart - patchFailed alone authorises " +
+                        "publication; Task 3 returns one from Run and gives it a disposition (plan:143, :420)");
 
         // ---- G2 wording: the exact strings, from ONE producer.
         checks += Check(StageText.S1("Replace_Rifle", "px_equipment_assets_all.bundle", false) ==
                         "applied - restart the game and enable 'Replace_Rifle' in the mod manager. " +
                         "Phoenix Point already loaded px_equipment_assets_all.bundle.",
-                        "S1 is ModelDoctor.cs:710-712 verbatim");
+                        "S1 - design:379, composed for ModelDoctor.cs:710");
         checks += Check(StageText.S1("Replace_Rifle", "px_equipment_assets_all.bundle", true) ==
                         StageText.S1("Replace_Rifle", "px_equipment_assets_all.bundle", false) +
                         " This session keeps showing your Doctor preview.",
-                        "S1 appends the preview sentence iff HasPreview - ModelDoctor.cs:712");
+                        "S1 appends the preview sentence iff HasPreview - design:379");
         checks += Check(StageText.S2("px_equipment_assets_all.bundle") ==
                         "applied and redirected LIVE - px_equipment_assets_all.bundle now loads from the " +
                         "patched copy on the next load",
-                        "S2 is ModelDoctor.cs:714-715 verbatim");
+                        "S2 - design:380, composed for ModelDoctor.cs:712");
         checks += Check(StageText.S3("Replace_Rifle") == "Validate: PASS - 'Replace_Rifle'.",
                         "S3 is NEW - design:381");
-        checks += Check(StageText.S4("D:\\x\\Dist\\a.bundle") == "ct_project: ALL PASS - D:\\x\\Dist\\a.bundle",
-                        "S4 is ProjectBake.cs:405 verbatim");
-        checks += Check(StageText.S5(3) == "ct_project: 3 FAILURE(S)", "S5 is ProjectBake.cs:406 verbatim");
+        // S4/S5 and the three bake special cases have no arm here on purpose: ProjectBake composes them
+        // through StageText (`:128`-`:133`, `:402`), so a literal re-typed here would compare this file with
+        // itself. W18 proves that wording against the real producer, in game.
         checks += Check(StageText.S6("Replace_Rifle", 2, 2) ==
                         "Verify: PASS - load-back gates passed; 2 of 2 declared target(s) served from this " +
                         "project's copies for 'Replace_Rifle'.",
                         "S6 is NEW - design:384");
+        checks += Check(StageText.S6("Replace_Rifle", 1, 2) ==
+                        "Verify: VOID - only 1 of 2 declared target(s) are served from this project's " +
+                        "copies for 'Replace_Rifle'; the target(s) named above are unproven." &&
+                        StageText.S6("Replace_Rifle", 0, 2).StartsWith("Verify: VOID"),
+                        "a half-served census is VOID - design:384, 'any target missing -> VOID', never PASS");
         checks += Check(StageText.S7(4, 1234L, "D:\\out") == "PACKAGED 4 file(s), 1234 B into D:\\out",
-                        "S7 is Package.cs:180 verbatim");
+                        "S7 - design:385, composed for Package.cs:178");
         checks += Check(StageText.PackageRefused("D:\\out") ==
                         "REFUSED: D:\\out already holds files. Name a folder that does not exist yet - a " +
                         "package is built from nothing, so no leftover of a previous run can be shipped by " +
                         "accident.",
-                        "the Package refusal is Package.cs:78-80 verbatim");
-        checks += Check(StageText.BakeNothingToBake() ==
-                        "nothing to bake - put .png/.jpg under Content\\Textures\\, .glb under " +
-                        "Content\\Models\\ or .wav under Content\\Audio\\",
-                        "bake special case 1 is ProjectBake.cs:128-129 verbatim");
-        checks += Check(StageText.BakeNoOwnBundle() ==
-                        "ct_project: ALL PASS - this project has no bundle of its own; the patched copy(ies) " +
-                        "above are the whole output",
-                        "bake special case 2 is ProjectBake.cs:131-132 verbatim");
-        checks += Check(StageText.BakeNothingPatched(2) ==
-                        "ct_project: ALL PASS - nothing needed patching: none of this project's 2 " +
-                        "replacement(s) names a shipped bundle, so no copy was written - the video row(s) " +
-                        "above are served live by ct_video",
-                        "bake special case 3 is ProjectBake.cs:133-135 verbatim");
+                        "the Package refusal is composed for Package.cs:77");
         checks += Check(StageText.R25() == "Lifecycle: select a ContentMods project.", "R25 - design:365");
         checks += Check(StageText.R26("Bake") == "Lifecycle: busy running Bake.", "R26 - design:366");
         checks += Check(StageText.R27() ==
@@ -136,7 +132,7 @@ internal static class LifecycleTests
         checks += Check(StageText.R29("morgott.demo", "'ct_route7 apply Demo'.") ==
                         "'morgott.demo' failed to bake earlier in this session - not baking it again. Fix " +
                         "the lines it printed, then 'ct_route7 apply Demo'.",
-                        "R29 is Route7.cs:130-132 verbatim, RetryHint passed in from :158");
+                        "R29 - design:369, composed for Route7.cs:130, RetryHint passed in from :158");
         checks += Check(StageText.R30("Replace_Rifle") == "Verify: VOID - restart required for 'Replace_Rifle'.",
                         "R30 - design:370");
         checks += Check(StageText.R31("Bake") == "Lifecycle: Bake cancelled; later stages were not run.",
@@ -151,17 +147,18 @@ internal static class LifecycleTests
         checks += Check(StageText.R35(2) ==
                         "NOT APPLIED: patching the shipped bundle(s) reported 2 failure(s), named in the " +
                         "P0/REFUSED line(s) above; nothing was installed and no copy was marked current.",
-                        "R35 is Route7.cs:349-351 verbatim");
+                        "R35 - design:375, composed for Route7.cs:348");
         checks += Check(StageText.R36() == "Lifecycle: Apply blocked while legacy disk patching is active.",
                         "R36 - design:376");
         checks += Check(StageText.R37("D:\\x\\Dist") ==
                         "ct_project: 'D:\\x\\Dist' is already being written by another run - nothing was " +
                         "baked. Wait for it to finish, then bake again.",
-                        "R37 - design:377, a PRODUCER guard: the console verb and the checkbox print it too");
+                        "R37 - design:377, NO PRODUCER YET: ProjectBake.cs:69 / ContentToolMain.cs:480 / " +
+                        "Route7.cs:341 must call it when Task 3 lands the guard");
         checks += Check(StageText.R38("a.bundle") ==
                         "ct_project: 'a.bundle' is being served to the game right now, so it was not " +
                         "rewritten - restart the game and bake again.",
-                        "R38 - design:378, also a producer guard");
+                        "R38 - design:378, no producer yet either - Task 3 Step 4");
         checks += Check(StageText.ValidateFailed("the manifest is not JSON") ==
                         "Validate: FAIL - the manifest is not JSON" &&
                         StageText.VerifyFailed("the copy vanished") == "Verify: FAIL - the copy vanished",

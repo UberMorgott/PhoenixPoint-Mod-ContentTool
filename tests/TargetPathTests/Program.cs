@@ -1840,7 +1840,11 @@ internal static class Program
     {
         string src = SrcRoot();
         string file = src == null ? null : Path.Combine(src, "Bake", "ProjectBake.cs");
-        string text = file != null && File.Exists(file) ? File.ReadAllText(file) : null;
+        // The CONDITION is still ProjectBake's; the WORDING moved to StageText (one producer per sentence),
+        // so the arm reads both files or it measures half the rule and reports a regression that is a move.
+        string words = src == null ? null : Path.Combine(src, "Bake", "StageText.cs");
+        string text = file != null && File.Exists(file) && File.Exists(words)
+            ? File.ReadAllText(file) + File.ReadAllText(words) : null;
 
         Check("S17-video-only", text != null && ClaimsOnlyWhatWasPatched(text),
             "the bake's success line and its 'ct_route7 apply' line are both keyed on a bundle having " +
@@ -1916,8 +1920,8 @@ internal static class Program
     /// <summary>Both claims gated on a bundle actually having been patched, not on a row count.</summary>
     private static bool ClaimsOnlyWhatWasPatched(string text)
     {
-        return Regex.IsMatch(text, "patchedBundles\\s*>\\s*0\\s*\\?\\s*\"ct_project: ALL PASS - this " +
-                                   "project has no bundle")
+        return Regex.IsMatch(text, "patchedBundles\\s*>\\s*0\\s*\\?\\s*(\"ct_project: ALL PASS - this " +
+                                   "project has no bundle|StageText\\.BakeNoOwnBundle)")
                && Regex.IsMatch(text, "if\\s*\\(copies\\.Count\\s*>\\s*0\\)\\s*log\\.AppendLine\\(\"copies ready in ");
     }
 

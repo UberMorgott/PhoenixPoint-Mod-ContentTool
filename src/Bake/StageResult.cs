@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Text;
 
 namespace Morgott.ContentTool.Bake
@@ -58,7 +57,10 @@ namespace Morgott.ContentTool.Bake
     internal sealed class ReadBackResult
     {
         internal readonly int Failed, Passed, Void;
-        internal readonly IList<GateEntry> Entries;
+        /// <summary>The measurements themselves. Handed out as the ARRAY it is: an <c>IList</c> over an array
+        /// has a settable indexer, so a caller could overwrite a FAIL entry through a field the class calls
+        /// readonly.</summary>
+        internal readonly GateEntry[] Entries;
         /// <summary>The terminal console line the producer would print, VERBATIM - the panel shows this, it
         /// never composes its own sentence out of the counts.</summary>
         internal readonly string Terminal;
@@ -79,11 +81,9 @@ namespace Morgott.ContentTool.Bake
                 else Void++;
         }
 
-        internal static ReadBackResult Of(params GateEntry[] entries)
-        {
-            return new ReadBackResult(null, entries ?? new GateEntry[0]);
-        }
-
+        /// <summary>ONE factory, and the terminal line is always passed - explicitly <c>null</c> where there
+        /// is none. A second <c>Of(params GateEntry[])</c> overload made <c>Of(null)</c> ambiguous (CS0121),
+        /// and every <c>Of(entries)</c> call silently produced a result whose <c>Terminal</c> was null.</summary>
         internal static ReadBackResult Of(string terminal, params GateEntry[] entries)
         {
             return new ReadBackResult(terminal, entries ?? new GateEntry[0]);
@@ -114,7 +114,12 @@ namespace Morgott.ContentTool.Bake
 
     /// <summary>A bake's two counts kept APART, plus its terminal line. <c>PatchFailed</c> alone authorises
     /// patch-cache publication; an unrelated import failure still shows in <c>Failed</c> and still fails the
-    /// row (ProjectBake.cs:403-406, Route7.cs:342).</summary>
+    /// row (ProjectBake.cs:403-406, Route7.cs:342).
+    ///
+    /// Filled by Task 3, which is what it is here for: the plan has `Run` return one beside its two `out`
+    /// counts (2026-09-05-lifecycle-dashboard-plan.md:143) and gives it a disposition
+    /// (Success/Refused/Cancelled/Failed, Step 3b `:420`) - R37 and R38 return with ZERO counts, which no
+    /// pair of ints can tell apart from a clean bake.</summary>
     internal sealed class BakeResult
     {
         internal readonly int Failed, PatchFailed;
@@ -134,7 +139,8 @@ namespace Morgott.ContentTool.Bake
     internal static class StageResult
     {
         /// <summary>The last few lines of a bake log, for the panel. Lifted VERBATIM out of
-        /// ModelDoctor.cs:745, which was private static in a file no offline gate can link (JsonUtility and
+        /// src\Dev\ModelDoctor.cs, where it was `:745` before this commit moved it (the note left behind at
+        /// `:735` marks the spot); it was private static in a file no offline gate can link (JsonUtility and
         /// friends). Its semantics are FROZEN here, not fixed.
         ///
         /// THE TRAILING EMPTY ELEMENT IS DISCARDED BEFORE THE COUNT. ApplyProject ends in AppendLine, so

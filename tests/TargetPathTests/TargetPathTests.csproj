@@ -60,6 +60,10 @@
          save that refuses after a gun has already been dialled in by eye. -->
     <Compile Include="..\..\src\Dev\BenchList.cs" Link="BenchList.cs" />
     <Compile Include="..\..\src\Project\Package.cs" Link="Package.cs" />
+    <!-- And the ONE verdict formatter Package now composes its S7 and its already-holds refusal through
+         (with the carrier its Freshness enum lives in). Both UnityEngine-free, same arrangement. -->
+    <Compile Include="..\..\src\Bake\StageResult.cs" Link="StageResult.cs" />
+    <Compile Include="..\..\src\Bake\StageText.cs" Link="StageText.cs" />
     <!-- What Package now reads its bundles off: the manifest core, its JSON parser, the refusal that
          parser throws, and the atomic write ManifestFile commits through. All four are deliberately
          free of UnityEngine types, same arrangement as everything above. -->

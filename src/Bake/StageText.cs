@@ -10,10 +10,9 @@ namespace Morgott.ContentTool.Bake
     /// S4/S5 and the three bake special cases are now COMPOSED here for ProjectBake too (it calls S4, S5,
     /// BakeNothingToBake, BakeNoOwnBundle and BakeNothingPatched at :125-133 and :400), so bake's console
     /// line and the panel's row are the same string and cannot drift apart.
-    /// S7 and the Package refusal stay read-only quotations of a producer this slice does not own -
-    /// Package.cs is on the plan's "NOT modified" list, so it keeps composing its own line and the
-    /// dashboard forwards it verbatim; the copy here is what the panel needs to RECOGNISE, never to
-    /// substitute.
+    /// S7 and the Package refusal are composed here too: `Package.Run` calls them (src\Project\Package.cs:77
+    /// and :178), which cost two Compile lines in tools\Package and tests\TargetPathTests and removed the
+    /// last pair of strings that existed twice. Package appends its own LEFT BEHIND tail to S7.
     ///
     /// No string here is ever PARSED to classify an outcome. The outcome comes from the carrier.</summary>
     internal static class StageText
@@ -23,7 +22,7 @@ namespace Morgott.ContentTool.Bake
         internal const string Ready = "Ready.";
 
         // ---- S: the success lines. --------------------------------------------------------------------
-        /// <summary>Apply PASS / Resident. ModelDoctor.cs:710-712, and called from there.</summary>
+        /// <summary>Apply PASS / Resident. Called from src\Dev\ModelDoctor.cs:710.</summary>
         internal static string S1(string name, string bundle, bool hasPreview)
         {
             return "applied - restart the game and enable '" + name + "' in the mod manager. " +
@@ -31,7 +30,7 @@ namespace Morgott.ContentTool.Bake
                    (hasPreview ? " This session keeps showing your Doctor preview." : "");
         }
 
-        /// <summary>Apply PASS / Redirected. ModelDoctor.cs:714-715, and called from there.</summary>
+        /// <summary>Apply PASS / Redirected. Called from src\Dev\ModelDoctor.cs:712.</summary>
         internal static string S2(string bundle)
         {
             return "applied and redirected LIVE - " + bundle + " now loads from the patched copy " +
@@ -48,20 +47,31 @@ namespace Morgott.ContentTool.Bake
         internal static string S5(int failures) { return "ct_project: " + failures + " FAILURE(S)"; }
 
         /// <summary>Verify PASS. NEW. Says how many of the DECLARED targets this project's own copies serve -
-        /// a per-target census, never BundleLive.Holds, which passes on one matching claim.</summary>
+        /// a per-target census, never BundleLive.Holds, which passes on one matching claim.
+        ///
+        /// A SHORTFALL CANNOT COME OUT AS PASS. design:384 - "any target missing -> VOID" - so the census is
+        /// the pass condition, and this function refuses to word "1 of 2 ... PASS". The unserved targets are
+        /// NAMED by the producer's own per-target refusals, which are preserved beside this line, never
+        /// aggregated into it.</summary>
         internal static string S6(string name, int served, int declared)
         {
-            return "Verify: PASS - load-back gates passed; " + served + " of " + declared +
-                   " declared target(s) served from this project's copies for '" + name + "'.";
+            return served == declared
+                ? "Verify: PASS - load-back gates passed; " + served + " of " + declared +
+                  " declared target(s) served from this project's copies for '" + name + "'."
+                : "Verify: VOID - only " + served + " of " + declared +
+                  " declared target(s) are served from this project's copies for '" + name +
+                  "'; the target(s) named above are unproven.";
         }
 
-        /// <summary>Package PASS. Quotes Package.cs:180; that producer appends its own LEFT BEHIND tail.</summary>
+        /// <summary>Package PASS. Called from src\Project\Package.cs:178, which appends its own LEFT BEHIND
+        /// tail to it.</summary>
         internal static string S7(int files, long bytes, string outDir)
         {
             return "PACKAGED " + files + " file(s), " + bytes + " B into " + outDir;
         }
 
-        /// <summary>Quotes Package.cs:78-80. Package.Run stays the sole authority on WHEN it fires.</summary>
+        /// <summary>Called from src\Project\Package.cs:77. Package.Run stays the sole authority on WHEN it
+        /// fires.</summary>
         internal static string PackageRefused(string outDir)
         {
             return "REFUSED: " + outDir + " already holds files. Name a folder that does not exist " +
@@ -90,8 +100,10 @@ namespace Morgott.ContentTool.Bake
                    "written - the video row(s) above are served live by ct_video";
         }
 
-        // ---- R: the refusals. R25-R36 are dashboard guards; R37 and R38 are PRODUCER guards, so the
-        // console verb and the mod-manager checkbox print them too.
+        // ---- R: the refusals. R25-R36 are dashboard guards. R37 and R38 are meant to be PRODUCER guards,
+        // but NO PRODUCER EMITS THEM YET - design:377/:378 mark both NEW and Task 3 lands them:
+        // ProjectBake.cs:69 (the claim), ContentToolMain.cs:480 (the console verb) and Route7.cs:341 (the
+        // mod-manager checkbox) must call these when the guards land. Until then they are formatter-only.
         internal static string R25() { return "Lifecycle: select a ContentMods project."; }
 
         internal static string R26(string stage) { return "Lifecycle: busy running " + stage + "."; }

@@ -19,5 +19,9 @@
     <Compile Include="..\..\src\Import\Json.cs" Link="Json.cs" />
     <Compile Include="..\..\src\IO\AtomicFile.cs" Link="AtomicFile.cs" />
     <Compile Include="..\..\src\Project\Manifest.cs" Link="Manifest.cs" />
+    <!-- And the ONE verdict formatter Package composes its S7 and its already-holds refusal through
+         (with the carrier its Freshness enum lives in). UnityEngine-free, same reason as above. -->
+    <Compile Include="..\..\src\Bake\StageResult.cs" Link="StageResult.cs" />
+    <Compile Include="..\..\src\Bake\StageText.cs" Link="StageText.cs" />
   </ItemGroup>
 </Project>
