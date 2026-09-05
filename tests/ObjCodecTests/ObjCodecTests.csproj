@@ -50,6 +50,12 @@
     <Compile Include="..\..\src\Bake\OutputClaim.cs" Link="OutputClaim.cs" />
     <Compile Include="..\..\src\Bake\LifecycleState.cs" Link="LifecycleState.cs" />
     <Compile Include="..\..\src\Bake\Publication.cs" Link="Publication.cs" />
+    <!-- And the RECEIPT that publication writes last. PatchCache is plain System.IO (its stamps are
+         path/size/mtime and one SHA-1 of the manifest, which is why TargetPathTests already links it),
+         so B1's whole claim - the key is the PRE-IMPORT one, and a source saved during the import reads
+         STALE next time rather than fresh - is measured here on real files. Sha1 comes with it. -->
+    <Compile Include="..\..\src\Project\TargetPath.cs" Link="TargetPath.cs" />
+    <Compile Include="..\..\src\Project\PatchCache.cs" Link="PatchCache.cs" />
     <Compile Include="LifecycleTests.cs" />
     <Compile Include="PreflightTests.cs" />
     <!-- The PROTOTYPE CATALOG carries no UnityEngine type on purpose, so which rigs are one binding

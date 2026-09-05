@@ -21,6 +21,11 @@ internal static class PackageGate
     /// <summary>Shaped exactly like ProjectScaffold.CreateNew's leftover: Guid.ToString("N") + ".tmp".</summary>
     private static readonly string OwnTemp = Guid.NewGuid().ToString("N") + ".tmp";
 
+    /// <summary>The tool's OTHER temp shape: the SIBLING temp every atomic write streams beside the file
+    /// it will replace - '&lt;the real name&gt;.&lt;guid&gt;.tmp' (AtomicFile.Publish:56). A bake that threw
+    /// mid-serialization leaves one of these, full size, in the author's own Dist\.</summary>
+    private static readonly string SiblingTemp = "x.bundle." + Guid.NewGuid().ToString("N") + ".tmp";
+
     private const string Meta =
         "{ \"ID\": \"com.test.Mod\", \"Dependencies\": [ \"com.morgott.ContentTool\" ], \"AssemblyName\": \"\" }";
 
@@ -58,6 +63,11 @@ internal static class PackageGate
                             !File.Exists(Path.Combine(root, "leftover-out", "Content", OwnTemp)) &&
                             File.Exists(Path.Combine(root, "leftover-out", "Content", "artist-recovery.tmp")),
                 "a killed press's <guid>.tmp is not staged into the package, an author's own .tmp is");
+            // AND THE SIBLING SHAPE, which is the one a THROWN BAKE leaves: 'MyMod.bundle.<guid>.tmp' in
+            // Dist\, hundreds of megabytes of it, staged verbatim by the same CopyDir.
+            checks += Check(!File.Exists(Path.Combine(root, "leftover-out", "Content", SiblingTemp)),
+                "a thrown bake's '<name>.bundle.<guid>.tmp' is not staged either - the GUID is the " +
+                "signature wherever it sits in the name");
 
             return "PACKAGE-GATE PASS, " + checks + " check(s)";
         }
@@ -78,6 +88,7 @@ internal static class PackageGate
         File.WriteAllText(Path.Combine(project, "Content", "a.png"), "x");
         File.WriteAllText(Path.Combine(project, "Content", OwnTemp), "x");
         File.WriteAllText(Path.Combine(project, "Content", "artist-recovery.tmp"), "x");
+        File.WriteAllText(Path.Combine(project, "Content", SiblingTemp), "x");
         if (sound != null)
         {
             string replace = Path.Combine(project, "Content\\Audio\\Replace");

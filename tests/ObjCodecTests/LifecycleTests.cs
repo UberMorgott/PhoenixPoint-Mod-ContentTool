@@ -5,6 +5,7 @@ using System.Text;
 using Morgott.ContentTool.Bake;
 using Morgott.ContentTool.Import;
 using Morgott.ContentTool.IO;
+using Morgott.ContentTool.Project;
 
 /// <summary>The lifecycle dashboard's CARRIER and its one verdict formatter.
 ///
@@ -256,14 +257,15 @@ internal static class LifecycleTests
         checks += Check(StageResult.Tail(wide, 1) == wide, "one very long line comes back whole");
 
         checks += OneSwap();
+        checks += KeyCapture();
         checks += Ordering();
         checks += Ownership();
         checks += Admission();
         checks += Cancelling();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
-               "one file swap, the publication ordering, one output owner, the admission table, " +
-               "the cancel contract";
+               "one file swap, the pre-import receipt, the publication ordering, one output owner, " +
+               "the admission table, the cancel contract";
     }
 
     /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per
@@ -628,6 +630,25 @@ internal static class LifecycleTests
                             "a publication with no key to write still INVALIDATES the old one - a failed " +
                             "bake's copies can never be read as the receipt's");
 
+            // ---- THE EXIT B5 NEVER SEES. A BundleBaker.Write or a read-back gate that THROWS walks out
+            // of Patch with every streamed temp - a full-size clone each - still in PatchedDir, under a
+            // GUID name nothing prunes. The producer sweeps its own ledger with the SAME call the
+            // refusals above make, which is why Discard is internal; this arm drives that call in the
+            // shape ProjectBake's catch uses it.
+            File.WriteAllBytes(a, fresh); File.WriteAllBytes(b, fresh);
+            IList<KeyValuePair<string, string>> streamed = Pair(dir, old, a, b);
+            bool rethrew = false;
+            try
+            {
+                try { throw new InvalidOperationException("BundleBaker.Write"); }
+                catch (Exception) { Publication.Discard(streamed, 0); throw; }
+            }
+            catch (InvalidOperationException) { rethrew = true; }
+            checks += Check(rethrew && Temps(dir) == 0 &&
+                            Same(File.ReadAllBytes(a), fresh) && Same(File.ReadAllBytes(b), fresh),
+                            "a throw before B5 sweeps every temp the run streamed, rethrows the " +
+                            "producer's own exception, and leaves the previous copies byte-identical");
+
             // ---- THE HOLDER'S BYTES ARE UNTOUCHED BY A COMPETING ADMISSION, and the claim survives it.
             string[] owned = { dir };
             string refusal;
@@ -646,6 +667,62 @@ internal static class LifecycleTests
                             "the claim is released in a finally - an exception inside the run cannot leak it");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
+        return checks;
+    }
+
+    /// <summary>
+    /// B1 - THE RECEIPT IS THE PRE-IMPORT KEY, and that is what makes a mid-bake save cost a re-bake
+    /// instead of serving a stale copy forever.
+    ///
+    /// `ProjectBake.Bake` captures it before `ContentProject.Load` and hands it down unchanged
+    /// (ProjectBake.cs, Patch's `key` parameter); the two production pieces that decide the outcome -
+    /// `PatchCache.Key`/`Fresh` and the ordering in `Publication.Run` - are both linked here, so the
+    /// composed claim is measured on real files rather than argued about. What stays out of reach offline
+    /// is only WHERE `Bake` calls it, which the compiler now enforces: `Patch` has no way to compute one.
+    ///
+    /// The arm's own falsification is the FIRST check: a key that did not move when the source changed
+    /// would make every other line here pass for no reason.
+    /// </summary>
+    private static int KeyCapture()
+    {
+        int checks = 0;
+        string root = Path.Combine(Path.GetTempPath(), "ct_key_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "Content"));
+        try
+        {
+            string source = Path.Combine(root, "Content", "swatch.png");
+            string[] noShipped = new string[0];
+            File.WriteAllText(Path.Combine(root, "ppcontent.json"),
+                              "{ \"id\": \"morgott.demo\", \"bundle\": \"demo.bundle\" }");
+            File.WriteAllBytes(source, new byte[] { 1 });
+
+            // ---- B1, before the import reads a byte.
+            string before = PatchCache.Key(root, noShipped);
+            // ---- the author saves that texture WHILE Load is importing it. The copies this bake
+            // publishes carry the pixels Load already read; this file no longer holds them.
+            File.WriteAllBytes(source, new byte[] { 2, 2 });
+            string after = PatchCache.Key(root, noShipped);
+            checks += Check(before != after,
+                            "a source saved during the import moves the key - which is what makes the " +
+                            "CAPTURE ORDER decide whether the receipt tells the truth");
+
+            string dest = Path.Combine(root, "demo.bundle");
+            string tmp = dest + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllBytes(tmp, new byte[] { 7, 7 });
+            string message;
+            List<KeyValuePair<string, string>> work = new List<KeyValuePair<string, string>>
+            { new KeyValuePair<string, string>(tmp, dest) };
+            checks += Check(Publication.Run(work, PatchCache.KeyPath(root), before, null, null,
+                                            out message) == PublishOutcome.Published &&
+                            File.ReadAllText(PatchCache.KeyPath(root)).Trim() == before,
+                            "B5 writes the key it was HANDED, verbatim - it never recomputes one, so the " +
+                            "receipt cannot describe a source this run did not read");
+            checks += Check(!PatchCache.Fresh(root, after) && PatchCache.Fresh(root, before),
+                            "so the NEXT observation reads STALE and costs one re-bake - the safe " +
+                            "direction; a key taken after the import would have stamped the new file's " +
+                            "hash over the old file's pixels and read FRESH forever");
+        }
+        finally { try { Directory.Delete(root, true); } catch (Exception) { } }
         return checks;
     }
 

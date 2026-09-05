@@ -108,6 +108,15 @@ namespace Morgott.ContentTool.Bake
             // ALWAYS a pump, never null downstream: with no token and no callback its checkpoints are two
             // no-ops, so the console verb and the checkbox take exactly the path they took before.
             LoadPump pump = new LoadPump(cancel, onPhase);
+            // ---- B1. THE RECEIPT THIS RUN'S OUTPUT WILL ANSWER TO, captured BEFORE Load imports a
+            // single source. Load READS every file under Content\ (:363), so a key taken after it
+            // describes files this bake may not carry: an author who saves a texture while the import
+            // runs gets the NEW file's stamp stamped over the OLD pixels Patch wrote, and the receipt
+            // then reads FRESH over a stale copy - permanently, silently, which is the one failure this
+            // whole receipt exists to prevent. Captured here it can only miss the other way: the copy
+            // carries bytes newer than its key, the next Observe says STALE and it costs one re-bake.
+            // Route7 captured it before the bake for the same reason (Route7.cs:406).
+            string cacheKey = CacheKey(projectRoot);
             ContentProject p;
             // A CANCEL IS NOT A CRASH. Load throws OperationCanceledException at its own checkpoints because
             // that is the only way out of a nested importer; reporting it as "ct_project THREW" would tell
@@ -129,7 +138,7 @@ namespace Morgott.ContentTool.Bake
             // EVERY path, exception included: an unhandled throw out of the bake is reported by ct_project
             // as "ct_project THREW" and the run ends - with the claim left standing, every later press in
             // that session would be refused for a run that is long over.
-            try { return Baked(p, pump); }
+            try { return Baked(p, pump, cacheKey); }
             catch (OperationCanceledException)
             {
                 return new BakeResult(0, 0, StageText.BakeCancelled(p.Id), BakeDisposition.Cancelled);
@@ -137,9 +146,42 @@ namespace Morgott.ContentTool.Bake
             finally { if (!claimHeld) OutputClaim.Release(dirs); }
         }
 
+        /// <summary>One temp this run streamed, deleted because the run is over. Best effort and silent,
+        /// the same contract as <see cref="Publication.Discard"/>: the exception the caller is about to see
+        /// is never this one.</summary>
+        private static void Sweep(string temp)
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch (Exception) { }
+        }
+
+        /// <summary>
+        /// B1's key, from the DECLARATION alone - the manifest, the stamps of every file under Content\
+        /// and of every shipped bundle the project names. <c>LoadDeclared</c>, not <c>Load</c>: this runs
+        /// BEFORE the import, and decoding the author's textures to learn which bundles they name would
+        /// run the whole import twice.
+        ///
+        /// The census is <c>Route7.Observe</c>'s, term for term (Route7.cs:124-:136): video rows carry no
+        /// bundle at all and a second spelling of one bundle is the SAME target - an Ordinal dedup here
+        /// would stamp one file twice and produce a key the checkbox's own observation can never match.
+        /// </summary>
+        private static string CacheKey(string projectRoot)
+        {
+            List<string> shipped = new List<string>(), declared = new List<string>();
+            foreach (ShippedReplacement r in ContentProject.LoadDeclared(projectRoot).Replace)
+            {
+                if (!string.IsNullOrEmpty(r.video)) continue;
+                if (declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) continue;
+                declared.Add(r.bundle);
+                shipped.Add(BakeSelfCheck.ShippedBundlePath(r.bundle));
+            }
+            return Project.PatchCache.Key(projectRoot, shipped);
+        }
+
         /// <summary>The bake itself, under someone's claim. Private because <see cref="Bake"/> is what owns
         /// the directories this writes into, and a caller that reached here directly would own none.</summary>
-        private static BakeResult Baked(ContentProject p, LoadPump pump)
+        /// <param name="cacheKey">B1's receipt, taken by <see cref="Bake"/> before the sources were
+        /// imported and passed down UNCHANGED - never recomputed here.</param>
+        private static BakeResult Baked(ContentProject p, LoadPump pump, string cacheKey)
         {
             StringBuilder log = new StringBuilder();
             // The FIRST cooperative boundary, before a byte is written: a run cancelled while it was still
@@ -192,7 +234,7 @@ namespace Morgott.ContentTool.Bake
                 // failures, disposition Refused, and Apply reads the disposition rather than the counts.
                 string live;
                 PublishOutcome published;
-                int refused = Patch(p, log, pump, out live, out published);
+                int refused = Patch(p, log, pump, cacheKey, out live, out published);
                 if (live != null) return new BakeResult(0, 0, log.Append(live).ToString(), BakeDisposition.Refused);
                 // R38 AT B5 IS THE SAME ANSWER AS R38 AT ENTRY - a claim can arrive while the bake runs, and
                 // the boundary asks again with the temps already written. Nothing was published either way.
@@ -234,9 +276,11 @@ namespace Morgott.ContentTool.Bake
             // serialization: a bake that threw, or was cancelled, in between left the author with no bundle
             // at all and a "deleted stale" line as the only trace. Streamed into a sibling temp and
             // published in one swap instead, so the previous bundle stands until this one is whole.
-            // ponytail: no finally around the serialization to sweep this temp - a throw out of BundleBaker
-            // is already "ct_project THREW" and one orphaned .tmp beside Dist is a file, not a blocker
-            // (AtomicFile.cs:10). Wrap it if a crashing importer ever litters somebody's Dist.
+            // THE TEMP IS SWEPT ON BOTH THROWING PATHS. It was left behind on purpose once - "one orphaned
+            // .tmp beside Dist is a file, not a blocker" - and it is a blocker: Package copies Dist WHOLE
+            // (Package.cs:100 CopyDir), so a bake that threw mid-serialization put a full-size
+            // '<name>.bundle.<guid>.tmp' inside the player's package. Two windows, and only two: the file
+            // does not exist until baker.Write creates it, and it is gone the instant Publish swaps it.
             string outTmp = outPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             string outIdentity = null;
             // Indeterminate on purpose: AssetsTools serialization and the compression that follows it report
@@ -426,13 +470,17 @@ namespace Morgott.ContentTool.Bake
 
                 // The bundle is renamed to the project id, so an already-loaded bundle cannot
                 // masquerade as this one.
-                baker.Write(outTmp, p.Id.ToLowerInvariant().Replace('.', '_'));
+                try { baker.Write(outTmp, p.Id.ToLowerInvariant().Replace('.', '_')); }
+                catch (Exception) { Sweep(outTmp); throw; }
                 outIdentity = baker.WrittenIdentity;
             }
             // B5 for Dist: one swap, published as soon as the writer is closed - the same instant the file
             // used to appear at its final path, so the gates below still read this run's bundle and the log
             // reads exactly as it did.
-            AtomicFile.Publish(outTmp, outPath);
+            // Publish KEEPS a temp whose swap threw - it is not the swap's to throw away - but this run is
+            // over and the temp is ours, exactly as Publication.Discard treats the patched copies'.
+            try { AtomicFile.Publish(outTmp, outPath); }
+            catch (Exception) { Sweep(outTmp); throw; }
             log.AppendLine("WROTE " + outPath + " " + new FileInfo(outPath).Length + " B as " + outIdentity);
 
             // Read off the written FILE before the engine opens it - Unity holds a bundle open after
@@ -1619,7 +1667,11 @@ namespace Morgott.ContentTool.Bake
         /// <param name="published">how the B5 boundary ended. <c>Refused</c> and <c>Cancelled</c> published
         /// nothing and carry no count; <c>Failed</c> published part of the set and is counted like any other
         /// patch failure, which is what withholds the receipt and forbids an install until a repair bake.</param>
-        private static int Patch(ContentProject p, StringBuilder log, LoadPump pump,
+        /// <param name="key">B1's receipt, captured by <see cref="Bake"/> BEFORE the import and handed
+        /// down unchanged (see its note). Recomputing it here - which is what this used to do - reads the
+        /// sources AFTER Load already imported them, so a source saved during the import is stamped as
+        /// though these copies carried it.</param>
+        private static int Patch(ContentProject p, StringBuilder log, LoadPump pump, string key,
                                  out string liveRefusal, out PublishOutcome published)
         {
             int failures = 0;
@@ -1629,185 +1681,199 @@ namespace Morgott.ContentTool.Bake
             if (liveRefusal != null) return 0;
             Directory.CreateDirectory(outDir);
             List<KeyValuePair<string, string>> copies = new List<KeyValuePair<string, string>>();
-            // ---- B1: the receipt this run's output will answer to, captured BEFORE a byte is written.
-            // Captured, not recomputed at B5: a source edited while the bake ran would otherwise be stamped
-            // as though this output carried it, and the copies are a mix. Stamping the OLD key over a
-            // changed source reads STALE next time and costs one re-bake - the safe direction of the same
-            // uncertainty. Route7.Observe is the one observation, so the key here and the key the checkbox
-            // compares against are the same expression (Route7.cs:119).
-            string key = Route7.Observe(p, p.Root).Key;
             // ---- B2's ledger: the sibling temp each copy was streamed into, and the copy it replaces.
             List<KeyValuePair<string, string>> pending = new List<KeyValuePair<string, string>>();
 
             List<string> targets = Bundles(p);
-            for (int b = 0; b < targets.Count; b++)
+            // EVERY TEMP THIS LOOP STREAMED IS SWEPT ON A THROW. A BundleBaker.Write or a read-back gate
+            // that throws walks out of Patch, out of Run and out of the command - and every full-size
+            // clone already in `pending` stays in PatchedDir forever, under a GUID name nothing prunes.
+            // B5 discards its own temps on every refusal it states; this is the same rule for the exit it
+            // cannot state.
+            try
             {
-                string bundleFile = targets[b];
-                // A cooperative boundary between bundles, and the one place in the bake with a REAL
-                // denominator. Not inside a bundle: a BundleBaker pass is a single AssetsTools call and no
-                // token interrupts it. `break`, not `throw` - the temps written so far are B5's to discard.
-                if (pump.Cancel.IsCancellationRequested) break;
-                pump.Say("patching " + bundleFile, b, targets.Count);
-                string shipped = BakeSelfCheck.ShippedBundlePath(bundleFile);
-                // THE BUNDLE NAME ITSELF IS A ROW'S FIELD, so a typo in it is a bad row and not a
-                // broken tool: BundleBaker's constructor throws FileNotFoundException on a path that
-                // does not exist, and that throw escaped Run as "ct_project THREW" - no summary, no
-                // line naming the row, and every OTHER bundle of the project unpatched. Same rule one
-                // level up from the per-row refusals below (3a4fb5b): say it, count it, keep going.
-                if (!File.Exists(shipped))
+                for (int b = 0; b < targets.Count; b++)
                 {
-                    log.AppendLine("P0 REFUSED \"bundle\": \"" + bundleFile + "\" is not a bundle this game " +
-                                   "ships - no file at " + shipped + " - check the spelling and list the " +
-                                   "real names with: ct_list bundles");
-                    failures++; continue;
-                }
-                string copy = Path.Combine(outDir, bundleFile);
-                // B2. The copy is streamed into a UNIQUE SIBLING temp and published at B5, never written
-                // over the file the game may be about to load: a bake that fails, throws or is cancelled
-                // after this point leaves the previous copy whole instead of half-replaced.
-                string copyTmp = copy + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                List<ImportedTexture> want = new List<ImportedTexture>();
-                List<KeyValuePair<string, string>> mats = new List<KeyValuePair<string, string>>();
-                List<KeyValuePair<string, ImportedMesh>> meshes = new List<KeyValuePair<string, ImportedMesh>>();
-                List<KeyValuePair<string, ShippedReplacement>> clips =
-                    new List<KeyValuePair<string, ShippedReplacement>>();
-                using (BundleBaker baker = new BundleBaker(shipped, p.Id))
-                {
-                    // EVERY REFUSAL BELOW IS `failures++; continue;`, NEVER A RETURN. Returning out of
-                    // here abandoned the remaining replacements in this bundle AND every bundle after
-                    // it, skipped baker.Write so the copy was never produced at all, and still reported
-                    // "1 FAILURE(S)" - one count for any number of replacements that silently did not
-                    // happen. Measured on a project whose first of four rows was a skinless mesh onto a
-                    // rigged target: the other two meshes were never patched and the texture refusal was
-                    // never printed. Same rule as the source importers (9a3747b, c74658f) - reported and
-                    // skipped, and the count says how many. WHAT THE PLAYER THEN GETS IS THIS RUN'S
-                    // COPY, partial: the rows that succeeded, over the shipped data everywhere a row
-                    // was refused. It is NOT the previous bake's copy - this one overwrites it - which
-                    // is what the line after Write says out loud rather than leaving to be discovered.
-                    int refusedHere = failures;
-                    foreach (ShippedReplacement r in p.Replace)
+                    string bundleFile = targets[b];
+                    // A cooperative boundary between bundles, and the one place in the bake with a REAL
+                    // denominator. Not inside a bundle: a BundleBaker pass is a single AssetsTools call and no
+                    // token interrupts it. `break`, not `throw` - the temps written so far are B5's to discard.
+                    if (pump.Cancel.IsCancellationRequested) break;
+                    pump.Say("patching " + bundleFile, b, targets.Count);
+                    string shipped = BakeSelfCheck.ShippedBundlePath(bundleFile);
+                    // THE BUNDLE NAME ITSELF IS A ROW'S FIELD, so a typo in it is a bad row and not a
+                    // broken tool: BundleBaker's constructor throws FileNotFoundException on a path that
+                    // does not exist, and that throw escaped Run as "ct_project THREW" - no summary, no
+                    // line naming the row, and every OTHER bundle of the project unpatched. Same rule one
+                    // level up from the per-row refusals below (3a4fb5b): say it, count it, keep going.
+                    if (!File.Exists(shipped))
                     {
-                        if (!string.Equals(r.bundle, bundleFile, StringComparison.OrdinalIgnoreCase)) continue;
-
-                        // Asked by EVERY arm below before it writes: the target is resolved by NAME and
-                        // every Replace* call THREW on a name the shipped bundle does not hold, which
-                        // took the whole bake down with it (see MissingTarget).
-                        string gone;
-
-                        if (!string.IsNullOrEmpty(r.material))
-                        {
-                            string[] kv = r.material.Split('=');
-                            float v;
-                            if (kv.Length != 2 || !float.TryParse(kv[1], NumberStyles.Float,
-                                                                 CultureInfo.InvariantCulture, out v))
-                            {
-                                log.AppendLine("P3 REFUSED \"material\": \"" + r.material + "\" is not <property>=<number>");
-                                failures++; continue;
-                            }
-                            gone = baker.WhyNot(AssetClassID.Material, r.asset);
-                            if (gone != null) { MissingTarget(log, "P3", bundleFile, r.asset, AssetClassID.Material, gone); failures++; continue; }
-                            baker.ReplaceMaterialFloat(r.asset, kv[0], v);
-                            mats.Add(new KeyValuePair<string, string>(r.asset, kv[0] + "=" +
-                                     v.ToString(CultureInfo.InvariantCulture)));
-                            log.AppendLine("patch " + bundleFile + ": material '" + r.asset + "' " + r.material);
-                            continue;
-                        }
-
-                        if (!string.IsNullOrEmpty(r.clip))
-                        {
-                            uint attribute;
-                            float k;
-                            string why = ParseClipEdit(r.clip, out attribute, out k);
-                            if (why != null)
-                            {
-                                log.AppendLine("P7 REFUSED \"clip\": \"" + r.clip + "\" " + why);
-                                failures++; continue;
-                            }
-                            gone = baker.WhyNot(AssetClassID.AnimationClip, r.asset);
-                            if (gone != null) { MissingTarget(log, "P7", bundleFile, r.asset, AssetClassID.AnimationClip, gone); failures++; continue; }
-                            string walked = baker.ReplaceClipCurves(r.asset, attribute, k);
-                            clips.Add(new KeyValuePair<string, ShippedReplacement>(r.asset, r));
-                            log.AppendLine("patch " + bundleFile + ": clip '" + r.asset + "' " + r.clip +
-                                           " - " + walked);
-                            continue;
-                        }
-
-                        if (!string.IsNullOrEmpty(r.mesh))
-                        {
-                            ImportedMesh im = FindMesh(p, r.mesh);
-                            if (im == null)
-                            {
-                                log.AppendLine("P4 REFUSED '" + r.mesh + "' is not a .obj or .glb under Content\\Meshes\\" +
-                                               Elsewhere(p, r.mesh, "Meshes"));
-                                failures++; continue;
-                            }
-                            gone = baker.WhyNot(AssetClassID.Mesh, r.asset);
-                            if (gone != null) { MissingTarget(log, "P4", bundleFile, r.asset, AssetClassID.Mesh, gone); failures++; continue; }
-                            string refusal, mapping;
-                            bool suspect;
-                            string how = baker.ReplaceMesh(r.asset, im.Name, im.Baked, im.Model,
-                                                           out refusal, out mapping, out suspect,
-                                                           im.AliasesApplied, im.SidecarPath, im.SidecarRefusal,
-                                                           im.UnusedAliasKeys);
-                            if (refusal != null)
-                            {
-                                // The ignored sidecar rides on 'how' when there is one; a refusal has
-                                // no 'how', and that is the one path where it would go unsaid.
-                                log.AppendLine("P4 REFUSED '" + im.Name + "' -> " + refusal +
-                                               (im.SidecarRefusal == null ? "" : " (sidecar ignored: " + im.SidecarRefusal + ")"));
-                                failures++; continue;
-                            }
-                            meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));
-                            log.AppendLine("patch " + bundleFile + ": mesh '" + r.asset + "' <- " + im.Name +
-                                           " " + im.Baked.Describe() + " - skinned " + how);
-                            // Reported and counted, never fatal - the file is legal, just probably not
-                            // what its author meant, so the bake stands and the run does not say ALL PASS.
-                            if (mapping != null) log.AppendLine((suspect ? "P4 WARN " : "P4 materials ") + mapping);
-                            if (suspect) failures++;
-                            continue;
-                        }
-
-                        ImportedTexture t = Find(p, r.texture);
-                        if (t == null)
-                        {
-                            log.AppendLine("P1 REFUSED '" + r.texture + "' is not a .png/.jpg under Content\\Textures\\" +
-                                           Elsewhere(p, r.texture, "Textures"));
-                            failures++; continue;
-                        }
-                        gone = baker.WhyNot(AssetClassID.Texture2D, r.asset);
-                        if (gone != null) { MissingTarget(log, "P1", bundleFile, r.asset, AssetClassID.Texture2D, gone); failures++; continue; }
-                        baker.ReplaceTexture2D(r.asset, t.Width, t.Height, t.Rgba32);
-                        want.Add(t);
-                        log.AppendLine("patch " + bundleFile + ": '" + r.asset + "' <- " + t.Name +
-                                       " " + t.Width + "x" + t.Height);
+                        log.AppendLine("P0 REFUSED \"bundle\": \"" + bundleFile + "\" is not a bundle this game " +
+                                       "ships - no file at " + shipped + " - check the spelling and list the " +
+                                       "real names with: ct_list bundles");
+                        failures++; continue;
                     }
-                    baker.Write(copyTmp, null);   // identity kept: the copy stands in for the shipped file
-                    // The FINAL path is what the line names - that is where these bytes are going, and the
-                    // temp's name is a GUID nobody can act on.
-                    log.AppendLine("WROTE " + copy + " " + new FileInfo(copyTmp).Length + " B as " +
-                                   baker.WrittenIdentity + " (shipped source is " + new FileInfo(shipped).Length + " B)");
-                    refusedHere = failures - refusedHere;
-                    if (refusedHere > 0)
-                        log.AppendLine("PARTIAL " + bundleFile + ": " + refusedHere + " row(s) above were " +
-                                       "REFUSED and the copy was rewritten anyway - what the game loads is " +
-                                       "THIS run's file, the rows that worked over the shipped data " +
-                                       "everywhere a row did not. The previous copy is gone; fix the rows " +
-                                       "named above and bake again to get all of them.");
-                }
+                    string copy = Path.Combine(outDir, bundleFile);
+                    // B2. The copy is streamed into a UNIQUE SIBLING temp and published at B5, never written
+                    // over the file the game may be about to load: a bake that fails, throws or is cancelled
+                    // after this point leaves the previous copy whole instead of half-replaced.
+                    string copyTmp = copy + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    List<ImportedTexture> want = new List<ImportedTexture>();
+                    List<KeyValuePair<string, string>> mats = new List<KeyValuePair<string, string>>();
+                    List<KeyValuePair<string, ImportedMesh>> meshes = new List<KeyValuePair<string, ImportedMesh>>();
+                    List<KeyValuePair<string, ShippedReplacement>> clips =
+                        new List<KeyValuePair<string, ShippedReplacement>>();
+                    using (BundleBaker baker = new BundleBaker(shipped, p.Id))
+                    {
+                        // EVERY REFUSAL BELOW IS `failures++; continue;`, NEVER A RETURN. Returning out of
+                        // here abandoned the remaining replacements in this bundle AND every bundle after
+                        // it, skipped baker.Write so the copy was never produced at all, and still reported
+                        // "1 FAILURE(S)" - one count for any number of replacements that silently did not
+                        // happen. Measured on a project whose first of four rows was a skinless mesh onto a
+                        // rigged target: the other two meshes were never patched and the texture refusal was
+                        // never printed. Same rule as the source importers (9a3747b, c74658f) - reported and
+                        // skipped, and the count says how many. WHAT THE PLAYER THEN GETS IS THIS RUN'S
+                        // COPY, partial: the rows that succeeded, over the shipped data everywhere a row
+                        // was refused. It is NOT the previous bake's copy - this one overwrites it - which
+                        // is what the line after Write says out loud rather than leaving to be discovered.
+                        int refusedHere = failures;
+                        foreach (ShippedReplacement r in p.Replace)
+                        {
+                            if (!string.Equals(r.bundle, bundleFile, StringComparison.OrdinalIgnoreCase)) continue;
 
-                // THE LOAD-BACK GATES ARE A PRODUCER OF THEIR OWN NOW (ReadBack.cs): `ct_route7 verify`
-                // asks the same one about a copy that is already on disk, so a second implementation of
-                // "did the patch land" cannot exist to disagree with this one. The lines, their order and
-                // the count are what they were inline - a VOID is still UNCOUNTED here - and the structured
-                // entries are what let a caller tell an all-VOID read-back from a pass.
-                //
-                // B3: THE GATES READ THE TEMP, not the copy - the file that is about to be published is the
-                // one worth measuring, and nothing has been replaced yet. The one visible consequence is the
-                // P4-bytes VOID diagnostic (ReadBack.cs:121), which names the file it could not read
-                // buffers in: on that arm alone it now prints the temp's path instead of the copy's.
-                failures += ReadBack.Run(log, bundleFile, shipped, copyTmp, want, mats, meshes, clips).Failed;
-                pending.Add(new KeyValuePair<string, string>(copyTmp, copy));
-                copies.Add(new KeyValuePair<string, string>(bundleFile, copy.Replace('\\', '/')));
+                            // Asked by EVERY arm below before it writes: the target is resolved by NAME and
+                            // every Replace* call THREW on a name the shipped bundle does not hold, which
+                            // took the whole bake down with it (see MissingTarget).
+                            string gone;
+
+                            if (!string.IsNullOrEmpty(r.material))
+                            {
+                                string[] kv = r.material.Split('=');
+                                float v;
+                                if (kv.Length != 2 || !float.TryParse(kv[1], NumberStyles.Float,
+                                                                     CultureInfo.InvariantCulture, out v))
+                                {
+                                    log.AppendLine("P3 REFUSED \"material\": \"" + r.material + "\" is not <property>=<number>");
+                                    failures++; continue;
+                                }
+                                gone = baker.WhyNot(AssetClassID.Material, r.asset);
+                                if (gone != null) { MissingTarget(log, "P3", bundleFile, r.asset, AssetClassID.Material, gone); failures++; continue; }
+                                baker.ReplaceMaterialFloat(r.asset, kv[0], v);
+                                mats.Add(new KeyValuePair<string, string>(r.asset, kv[0] + "=" +
+                                         v.ToString(CultureInfo.InvariantCulture)));
+                                log.AppendLine("patch " + bundleFile + ": material '" + r.asset + "' " + r.material);
+                                continue;
+                            }
+
+                            if (!string.IsNullOrEmpty(r.clip))
+                            {
+                                uint attribute;
+                                float k;
+                                string why = ParseClipEdit(r.clip, out attribute, out k);
+                                if (why != null)
+                                {
+                                    log.AppendLine("P7 REFUSED \"clip\": \"" + r.clip + "\" " + why);
+                                    failures++; continue;
+                                }
+                                gone = baker.WhyNot(AssetClassID.AnimationClip, r.asset);
+                                if (gone != null) { MissingTarget(log, "P7", bundleFile, r.asset, AssetClassID.AnimationClip, gone); failures++; continue; }
+                                string walked = baker.ReplaceClipCurves(r.asset, attribute, k);
+                                clips.Add(new KeyValuePair<string, ShippedReplacement>(r.asset, r));
+                                log.AppendLine("patch " + bundleFile + ": clip '" + r.asset + "' " + r.clip +
+                                               " - " + walked);
+                                continue;
+                            }
+
+                            if (!string.IsNullOrEmpty(r.mesh))
+                            {
+                                ImportedMesh im = FindMesh(p, r.mesh);
+                                if (im == null)
+                                {
+                                    log.AppendLine("P4 REFUSED '" + r.mesh + "' is not a .obj or .glb under Content\\Meshes\\" +
+                                                   Elsewhere(p, r.mesh, "Meshes"));
+                                    failures++; continue;
+                                }
+                                gone = baker.WhyNot(AssetClassID.Mesh, r.asset);
+                                if (gone != null) { MissingTarget(log, "P4", bundleFile, r.asset, AssetClassID.Mesh, gone); failures++; continue; }
+                                string refusal, mapping;
+                                bool suspect;
+                                string how = baker.ReplaceMesh(r.asset, im.Name, im.Baked, im.Model,
+                                                               out refusal, out mapping, out suspect,
+                                                               im.AliasesApplied, im.SidecarPath, im.SidecarRefusal,
+                                                               im.UnusedAliasKeys);
+                                if (refusal != null)
+                                {
+                                    // The ignored sidecar rides on 'how' when there is one; a refusal has
+                                    // no 'how', and that is the one path where it would go unsaid.
+                                    log.AppendLine("P4 REFUSED '" + im.Name + "' -> " + refusal +
+                                                   (im.SidecarRefusal == null ? "" : " (sidecar ignored: " + im.SidecarRefusal + ")"));
+                                    failures++; continue;
+                                }
+                                meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));
+                                log.AppendLine("patch " + bundleFile + ": mesh '" + r.asset + "' <- " + im.Name +
+                                               " " + im.Baked.Describe() + " - skinned " + how);
+                                // Reported and counted, never fatal - the file is legal, just probably not
+                                // what its author meant, so the bake stands and the run does not say ALL PASS.
+                                if (mapping != null) log.AppendLine((suspect ? "P4 WARN " : "P4 materials ") + mapping);
+                                if (suspect) failures++;
+                                continue;
+                            }
+
+                            ImportedTexture t = Find(p, r.texture);
+                            if (t == null)
+                            {
+                                log.AppendLine("P1 REFUSED '" + r.texture + "' is not a .png/.jpg under Content\\Textures\\" +
+                                               Elsewhere(p, r.texture, "Textures"));
+                                failures++; continue;
+                            }
+                            gone = baker.WhyNot(AssetClassID.Texture2D, r.asset);
+                            if (gone != null) { MissingTarget(log, "P1", bundleFile, r.asset, AssetClassID.Texture2D, gone); failures++; continue; }
+                            baker.ReplaceTexture2D(r.asset, t.Width, t.Height, t.Rgba32);
+                            want.Add(t);
+                            log.AppendLine("patch " + bundleFile + ": '" + r.asset + "' <- " + t.Name +
+                                           " " + t.Width + "x" + t.Height);
+                        }
+                        baker.Write(copyTmp, null);   // identity kept: the copy stands in for the shipped file
+                        // LEDGERED THE INSTANT IT EXISTS, not after the read-back gates. Those gates throw
+                        // (AssetsTools does, on a file it cannot parse), and a temp written but not yet
+                        // listed is one the catch below cannot sweep - a full-size clone left in
+                        // PatchedDir under a GUID name nothing prunes. B5 reads this list in the same
+                        // order either way.
+                        pending.Add(new KeyValuePair<string, string>(copyTmp, copy));
+                        // The FINAL path is what the line names - that is where these bytes are going, and the
+                        // temp's name is a GUID nobody can act on.
+                        log.AppendLine("WROTE " + copy + " " + new FileInfo(copyTmp).Length + " B as " +
+                                       baker.WrittenIdentity + " (shipped source is " + new FileInfo(shipped).Length + " B)");
+                        refusedHere = failures - refusedHere;
+                        if (refusedHere > 0)
+                            log.AppendLine("PARTIAL " + bundleFile + ": " + refusedHere + " row(s) above were " +
+                                           "REFUSED and the copy was rewritten anyway - what the game loads is " +
+                                           "THIS run's file, the rows that worked over the shipped data " +
+                                           "everywhere a row did not. The previous copy is gone; fix the rows " +
+                                           "named above and bake again to get all of them.");
+                    }
+
+                    // THE LOAD-BACK GATES ARE A PRODUCER OF THEIR OWN NOW (ReadBack.cs): `ct_route7 verify`
+                    // asks the same one about a copy that is already on disk, so a second implementation of
+                    // "did the patch land" cannot exist to disagree with this one. The lines, their order and
+                    // the count are what they were inline - a VOID is still UNCOUNTED here - and the structured
+                    // entries are what let a caller tell an all-VOID read-back from a pass.
+                    //
+                    // B3: THE GATES READ THE TEMP, not the copy - the file that is about to be published is the
+                    // one worth measuring, and nothing has been replaced yet. The one visible consequence is the
+                    // P4-bytes VOID diagnostic (ReadBack.cs:121), which names the file it could not read
+                    // buffers in: on that arm alone it now prints the temp's path instead of the copy's.
+                    failures += ReadBack.Run(log, bundleFile, shipped, copyTmp, want, mats, meshes, clips).Failed;
+                    copies.Add(new KeyValuePair<string, string>(bundleFile, copy.Replace('\\', '/')));
+                }
+            }
+            catch (Exception)
+            {
+                // ONLY THIS RUN'S TEMPS: the ledger holds exactly what the loop above streamed, B5 has
+                // not seen it yet, and the copies themselves are untouched - a throw here leaves the
+                // player's previous copies whole, which is the whole point of B2.
+                Publication.Discard(pending, 0);
+                throw;
             }
 
             // ---- B4 and B5. Cancellation is answered here and nowhere later; past this point the

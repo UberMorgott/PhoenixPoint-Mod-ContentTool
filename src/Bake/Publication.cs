@@ -60,7 +60,10 @@ namespace Morgott.ContentTool.Bake
 
             // ---- R38, per destination, before the first swap. All or nothing: a run that refused its
             // second target must not have replaced its first, or the "no partial bake to explain" promise
-            // is void for exactly the case it was written for.
+            // is void for exactly the case it was written for. Today no caller can see a verdict change
+            // between its own probe and this one - claims are taken and released on the main thread, and
+            // this runs on it too - so the re-probe is cheap defence against a future off-main publisher,
+            // never a race it currently closes.
             if (live != null)
                 foreach (KeyValuePair<string, string> c in work)
                 {
@@ -118,8 +121,13 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>The temps this run owns and nobody else knows the name of. Best effort: a temp that
-        /// survives is a file, not a corruption, and the exception the caller needs is never this one.</summary>
-        private static void Discard(IList<KeyValuePair<string, string>> work, int from)
+        /// survives is a file, not a corruption, and the exception the caller needs is never this one.
+        ///
+        /// INTERNAL because B2's own producer needs it for the exit B5 never sees: a throw out of
+        /// <c>BundleBaker.Write</c> or a read-back gate leaves every streamed temp behind (ProjectBake.cs,
+        /// Patch's catch), and a second spelling of "delete what this run streamed" would drift from the
+        /// one the refusals above use.</summary>
+        internal static void Discard(IList<KeyValuePair<string, string>> work, int from)
         {
             for (int i = from; i < work.Count; i++)
                 try { File.Delete(work[i].Key); } catch (Exception) { }

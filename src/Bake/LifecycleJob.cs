@@ -65,7 +65,22 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static Captured Capture(string projectRoot)
         {
-            ContentProject.Declared d = ContentProject.LoadDeclared(projectRoot);
+            ContentProject.Declared d;
+            // A MISSING, UNREADABLE OR HALF-TYPED ppcontent.json IS A REFUSAL, NOT AN EXCEPTION OUT OF THE
+            // PANEL. LoadDeclared throws for all three (ContentProject.cs:340, :344, and JsonUtility for a
+            // malformed row), and this runs on MAIN under the dashboard's Bake press - the throw would have
+            // escaped past every counter into the caller's frame, with no run begun and nothing said. Same
+            // shape as the R38 verdict below: carried as a string, reported by StartBake as Refused.
+            try { d = ContentProject.LoadDeclared(projectRoot); }
+            catch (Exception ex)
+            {
+                return new Captured
+                {
+                    Root = projectRoot,
+                    LiveRefusal = "ct_project: " + projectRoot + " could not be read - " + ex.Message +
+                                  " - fix ppcontent.json and press Bake again."
+                };
+            }
             List<string> declared = new List<string>();
             foreach (ShippedReplacement r in d.Replace)
             {
@@ -187,6 +202,23 @@ namespace Morgott.ContentTool.Bake
             });
         }
 
-        private static void Park(Action body) { parked = body; }
+        /// <summary>Set ONCE by the bench's own Update, which is the only thing that calls
+        /// <see cref="Tick"/>. Until it is, a parked segment would sit in <see cref="parked"/> for the rest
+        /// of the session with the seam busy and the panel showing "Running" over a bake nobody will ever
+        /// run - a hang with no symptom to grep for. Task 5 registers it.</summary>
+        /// (`= false` is not decoration: nothing assigns this until Task 5 does, and an uninitialised
+        /// field would be CS0649 - a NEW build warning over a field whose whole point is to be false.)
+        internal static bool PumpRegistered = false;
+
+        /// <summary>MAIN SEGMENT, handed to the pump. A worker calls this, so the throw below lands in
+        /// <see cref="Worker"/>'s catch and the run ends FAILED with that sentence - loudly, at once,
+        /// instead of parking work nothing drains.</summary>
+        private static void Park(Action body)
+        {
+            if (!PumpRegistered)
+                throw new InvalidOperationException("no lifecycle pump registered — FitBench.Update must " +
+                                                    "call LifecycleJob.Tick");
+            parked = body;
+        }
     }
 }

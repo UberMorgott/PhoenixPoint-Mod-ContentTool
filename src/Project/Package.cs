@@ -528,12 +528,23 @@ namespace Morgott.ContentTool.Project
         ///
         /// THE EXTENSION ALONE IS NOT THE SIGNATURE. Authors and their tools write .tmp files too; a folder
         /// holding only "artist-recovery.tmp" is someone's work, and reading it as empty moved the scaffold
-        /// into it. The GUID is what makes the name this tool's.</summary>
+        /// into it. The GUID is what makes the name this tool's.
+        ///
+        /// BOTH SHAPES THE TOOL WRITES. The scaffold's is the GUID alone; every SIBLING TEMP - the bake's
+        /// own Dist bundle and each patched copy - is '&lt;the real name&gt;.&lt;guid&gt;.tmp', because a temp
+        /// must be a sibling of the file it will replace (AtomicFile.Publish:56). Only the first was
+        /// recognised, so a bake that threw mid-serialization left a full-size
+        /// 'MyMod.bundle.&lt;guid&gt;.tmp' in Dist\ and CopyDir staged it into the release.</summary>
         internal static bool IsOwnTemp(string path)
         {
+            if (!string.Equals(Path.GetExtension(path), ".tmp", StringComparison.OrdinalIgnoreCase))
+                return false;
+            string stem = Path.GetFileNameWithoutExtension(path);
             Guid ours;
-            return string.Equals(Path.GetExtension(path), ".tmp", StringComparison.OrdinalIgnoreCase) &&
-                   Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out ours);
+            if (Guid.TryParseExact(stem, "N", out ours)) return true;
+            int cut = stem.Length - 32;
+            if (cut <= 0 || stem[cut - 1] != '.') return false;
+            return Guid.TryParseExact(stem.Substring(cut), "N", out ours);
         }
 
         private static void CopyDir(string from, string to)
