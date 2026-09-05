@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security;
 using System.Text;
 using Morgott.ContentTool.Import;
 
@@ -88,10 +89,19 @@ namespace Morgott.ContentTool.Project
                 return mods == null ? null : Path.Combine(mods.FullName, name);
             }
             // Narrow on purpose: only the exceptions a PATH can raise mean "no root". Anything else -
-            // an OOM, a security refusal - is a real failure and must not come back as a tidy null.
-            catch (Exception bad) when (bad is ArgumentException || bad is NotSupportedException ||
-                                        bad is PathTooLongException || bad is IOException)
+            // an OOM, a stack overflow - is a real failure and must not come back as a tidy null. The two
+            // refusal arms are in the set because Path.GetFullPath documents BOTH on net472, and a ModDir
+            // this process may not resolve is "no root" exactly the way an unspellable one is.
+            catch (Exception bad) when (PathFailure(bad))
             { return null; }
+        }
+
+        /// <summary>The one set of exceptions that means "this path cannot be resolved", shared by
+        /// <see cref="RootOf"/> and the press so the two can never drift apart.</summary>
+        private static bool PathFailure(Exception bad)
+        {
+            return bad is ArgumentException || bad is NotSupportedException || bad is PathTooLongException ||
+                   bad is IOException || bad is SecurityException || bad is UnauthorizedAccessException;
         }
 
         /// <summary>ModDir made absolute with its trailing separator off. Directory.GetParent("...\Mods\
@@ -141,8 +151,7 @@ namespace Morgott.ContentTool.Project
             DirectoryInfo mods = null;
             if (!string.IsNullOrEmpty(modDir))
                 try { modDir = Normalized(modDir); mods = Directory.GetParent(modDir); }
-                catch (Exception bad) when (bad is ArgumentException || bad is NotSupportedException ||
-                                            bad is PathTooLongException || bad is IOException)
+                catch (Exception bad) when (PathFailure(bad))
                 { }
             if (mods == null)
                 throw new InvalidDataException("ContentTool's own mod folder is not known, so there is nowhere " +
@@ -174,9 +183,13 @@ namespace Morgott.ContentTool.Project
             result.Created = !File.Exists(result.ManifestPath);
 
             // R2. Only a folder that already declares itself a project may be added to; anything else with
-            // files in it belongs to someone, and this tool does not move into it.
+            // files in it belongs to someone, and this tool does not move into it. A CreateNew leftover is
+            // NOT someone's: the root is made first and the manifest template is written into it through a
+            // temp, so a press killed between that temp and its Move leaves a .tmp alone in a folder with no
+            // ppcontent.json - the exact shape this scan refuses. Counting it would make the crash lock the
+            // author out of the very press that caused it, on every retry, forever.
             if (result.Created && Directory.Exists(result.Root) &&
-                (Directory.GetFiles(result.Root).Length != 0 ||
+                (Occupied(result.Root) ||
                  Directory.GetDirectories(result.Root).Length != 0))
                 throw new InvalidDataException("'" + result.Root + "' already exists, is not empty, and " +
                                                "holds no ppcontent.json, so it is not a ContentTool project " +
@@ -231,39 +244,7 @@ namespace Morgott.ContentTool.Project
             // safely stops the press before a meta is written beside it.
             ManifestFile file = ManifestFile.Load(result.ManifestPath);
             string id = file.Manifest.Id;
-            if (File.Exists(result.MetaPath))
-            {
-                // R13. An existing meta is never rewritten and never trusted: PACKAGE'S own validator says
-                // whether a player would end up with a working mod, so the wizard and the packager cannot
-                // disagree. stagedFiles is null on purpose - nothing is staged yet, and that null is what
-                // switches off MetaRefusal's AssemblyName arm (Package.cs:324).
-                // MetaRefusal is REGEX-based, so an unclosed object that happens to hold a matching "ID" and
-                // "Dependencies" sails through it while the game's own reader refuses the file. The strict
-                // reader this codebase already has runs first; no second parser is grown for it.
-                string text = File.ReadAllText(result.MetaPath);
-                string said;
-                try
-                {
-                    said = Json.Parse(text, 64) is Dictionary<string, object>
-                               ? Package.MetaRefusal(text, null)
-                               : "meta.json is not a JSON object.";
-                }
-                // Json's own sentence ends in advice meant for a glTF ("re-export it rather than editing
-                // it by hand", Json.cs:142-145), which is wrong for a file the author is expected to fix
-                // by hand; only the POSITION and the CAUSE it names carry over to a meta.json.
-                catch (FormatException bad)
-                {
-                    string why = bad.Message;
-                    int glb = why.LastIndexOf("; re-export", StringComparison.Ordinal);
-                    if (glb > 0) why = why.Substring(0, glb);
-                    int at = why.IndexOf("at character ", StringComparison.Ordinal);
-                    said = "meta.json did not read as JSON " + (at > 0 ? why.Substring(at) : why) + ".";
-                }
-                if (said != null)
-                    throw new InvalidDataException("'" + result.MetaPath + "' already exists but is not a " +
-                                                   "mod this project can ship: " + said + " - fix that file, " +
-                                                   "or ship into another project");
-            }
+            MetaMustBeShippable(result.MetaPath);
 
             // IDEMPOTENT REUSE, not a refusal. A row that is EXACTLY this one is what the PREVIOUS press
             // left, and every "fix it and press Ship again" in the design walks straight into it - reading
@@ -304,8 +285,11 @@ namespace Morgott.ContentTool.Project
             // THE META LAST, because it is the file that turns a folder into a MOD the manager lists. An R6
             // refusal or a failed Save above leaves the press with nothing added, and a meta.json written
             // before that decision would hand the author a mod id for a project that gained no row.
-            if (!File.Exists(result.MetaPath))
-                CreateNew(result.MetaPath, new UTF8Encoding(false).GetBytes(Meta(id)));
+            // A false here is the Move losing a race: SOMEONE ELSE'S meta.json is at that path now, and it
+            // never passed the gate above. The winner is judged by the same rule rather than shipped unseen.
+            if (!File.Exists(result.MetaPath) &&
+                !CreateNew(result.MetaPath, new UTF8Encoding(false).GetBytes(Meta(id))))
+                MetaMustBeShippable(result.MetaPath);
 
             // THE POST-CONDITION, asserted rather than assumed: this is what makes `ct_project <name>` and
             // `ct_route7 apply <name>` find the folder that was just written (ContentMods.Sibling:128).
@@ -314,6 +298,43 @@ namespace Morgott.ContentTool.Project
                 throw new IOException("'" + result.Root + "' was written but ContentMods.ProjectDir still does " +
                                       "not resolve '" + name + "' to it, so a bake would read the wrong folder");
             return result;
+        }
+
+        /// <summary>R13, asked wherever a meta.json this press did not write ends up at that path - the one
+        /// that was already there, and the one that WON the create race below. An existing meta is never
+        /// rewritten and never trusted: PACKAGE'S own validator says whether a player would end up with a
+        /// working mod, so the wizard and the packager cannot disagree. stagedFiles is null on purpose -
+        /// nothing is staged yet, and that null is what switches off MetaRefusal's AssemblyName arm
+        /// (Package.cs:324).
+        /// MetaRefusal is REGEX-based, so an unclosed object that happens to hold a matching "ID" and
+        /// "Dependencies" sails through it while the game's own reader refuses the file. The strict reader
+        /// this codebase already has runs first; no second parser is grown for it.</summary>
+        private static void MetaMustBeShippable(string metaPath)
+        {
+            if (!File.Exists(metaPath)) return;
+            string text = File.ReadAllText(metaPath);
+            string said;
+            try
+            {
+                said = Json.Parse(text, 64) is Dictionary<string, object>
+                           ? Package.MetaRefusal(text, null)
+                           : "meta.json is not a JSON object.";
+            }
+            // Json's own sentence ends in advice meant for a glTF ("re-export it rather than editing
+            // it by hand", Json.cs:142-145), which is wrong for a file the author is expected to fix
+            // by hand; only the POSITION and the CAUSE it names carry over to a meta.json.
+            catch (FormatException bad)
+            {
+                string why = bad.Message;
+                int glb = why.LastIndexOf("; re-export", StringComparison.Ordinal);
+                if (glb > 0) why = why.Substring(0, glb);
+                int at = why.IndexOf("at character ", StringComparison.Ordinal);
+                said = "meta.json did not read as JSON " + (at > 0 ? why.Substring(at) : why) + ".";
+            }
+            if (said != null)
+                throw new InvalidDataException("'" + metaPath + "' already exists but is not a " +
+                                               "mod this project can ship: " + said + " - fix that file, " +
+                                               "or ship into another project");
         }
 
         /// <summary>The code-free content mod's meta.json, shaped like the shipped demo
@@ -365,9 +386,16 @@ namespace Morgott.ContentTool.Project
         /// in the SAME directory (a cross-volume Move is a copy, not a rename), and File.Move with no
         /// overwrite flag is the stdlib's own atomic create-or-throw. Anything that is not that collision -
         /// a full disk, a denied write - propagates, so a failure is never read as "it was already there".
-        /// The temp goes either way; a leftover .tmp is inert, since nothing here ever scans the folder.</summary>
+        /// The temp goes either way, and the only scan that could ever meet a leftover - R2's - skips .tmp
+        /// on purpose (see <see cref="Occupied"/>).
+        ///
+        /// The File.Exists ahead of the temp is NOT the decision - the Move still is, which is what keeps
+        /// this race-safe - it is a cost check: a repeated Ship of a mesh already copied would otherwise
+        /// write the WHOLE .glb out before discovering the destination exists, so verifying a copy would
+        /// need as much free space as making one and would fail on a full disk instead of answering.</summary>
         private static bool CreateNew(string path, byte[] bytes)
         {
+            if (File.Exists(path)) return false;
             string temp = Path.Combine(Path.GetDirectoryName(path), Guid.NewGuid().ToString("N") + ".tmp");
             try
             {
@@ -376,7 +404,22 @@ namespace Morgott.ContentTool.Project
                 catch (IOException) when (File.Exists(path)) { return false; }
                 return true;
             }
-            finally { try { File.Delete(temp); } catch (IOException) { } }
+            // Anything at all, not just an IOException: a Delete that is denied AFTER a successful Move
+            // would turn a completed create into a thrown press, and the author would be told a folder
+            // that is now correct on disk failed to be written.
+            finally { try { File.Delete(temp); } catch (Exception) { } }
+        }
+
+        /// <summary>Does the folder hold a file that is not one of <see cref="CreateNew"/>'s own leftovers?
+        /// Spelled by EXTENSION rather than by handing "*.tmp" to GetFiles: on NTFS a search pattern is
+        /// matched against a file's 8.3 SHORT name too, so an author's own file could answer to it and the
+        /// folder would read as empty.</summary>
+        private static bool Occupied(string root)
+        {
+            foreach (string there in Directory.GetFiles(root))
+                if (!string.Equals(Path.GetExtension(there), ".tmp", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
         }
 
         /// <summary>Does the project ALREADY declare exactly this replacement? Each field folded the way the

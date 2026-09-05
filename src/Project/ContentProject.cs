@@ -566,7 +566,13 @@ namespace Morgott.ContentTool.Project
             string dir = Path.Combine(Path.Combine(root, "Content"), folder);
             if (!Directory.Exists(dir)) return new string[0];
             List<string> files = new List<string>();
-            foreach (string pattern in patterns) files.AddRange(Directory.GetFiles(dir, pattern));
+            // The EXTENSION is re-checked because NTFS matches a search pattern against a file's 8.3 SHORT
+            // name too: "*.glb" also answers body.glbx, and the pair-collision rule below would then see the
+            // stem "body" twice and skip BOTH - the real body.glb among them.
+            foreach (string pattern in patterns)
+                foreach (string f in Directory.GetFiles(dir, pattern))
+                    if (string.Equals(Path.GetExtension(f), pattern.Substring(1), StringComparison.OrdinalIgnoreCase))
+                        files.Add(f);
             files.Sort(StringComparer.OrdinalIgnoreCase);
             int i = files.Count - 1;
             while (i > 0)

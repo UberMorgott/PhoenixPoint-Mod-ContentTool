@@ -406,18 +406,24 @@ internal static class ProjectScaffoldTests
                             Same(File.ReadAllBytes(meshPath), new byte[] { 1, 2, 3 }),
                             "the SAME bytes under the same name are a no-op, not a rewrite");
 
-            // The copy lands as a temp beside itself and is then MOVED into place, so a press killed mid-write
-            // leaves a .tmp rather than half a .glb. The next press must walk straight past that leftover -
-            // Content\Meshes\ is never scanned, only named.
-            File.WriteAllBytes(Path.Combine(made.Root, "Content", "Meshes", "leftover.tmp"), new byte[] { 0 });
+            // Every file this tool must not overwrite lands as a temp beside itself and is then MOVED into
+            // place, so a press killed between the two leaves a .tmp rather than half a file. The one that
+            // MATTERS is the manifest template's: the root is created first and the ppcontent.json arrives
+            // after, so that leftover sits alone in a folder with no manifest - exactly the shape R2's
+            // emptiness scan refuses. It must walk past it, or the crash locks the author out of the very
+            // press that caused it, forever.
+            string crashed = Path.Combine(mods, "Crashed");
+            Directory.CreateDirectory(crashed);
+            File.WriteAllBytes(Path.Combine(crashed, "9f2c1ab.tmp"), new byte[] { 0 });
             string afterCrashGlb = Path.Combine(dir, "aftercrash.glb");
             File.WriteAllBytes(afterCrashGlb, new byte[] { 5, 5 });
             ProjectScaffold.Result afterCrash = ProjectScaffold.AddMeshReplacement(
-                modDir, "Replace_Rifle", afterCrashGlb, AliasMap.Sha256(File.ReadAllBytes(afterCrashGlb)),
+                modDir, "Crashed", afterCrashGlb, AliasMap.Sha256(File.ReadAllBytes(afterCrashGlb)),
                 "a.bundle", "AfterCrash", empty);
-            checks += Check(!afterCrash.MeshAlreadyPresent &&
+            checks += Check(afterCrash.Created && !afterCrash.MeshAlreadyPresent &&
+                            File.Exists(afterCrash.ManifestPath) &&
                             Same(File.ReadAllBytes(afterCrash.MeshPath), new byte[] { 5, 5 }),
-                            "a stale .tmp beside the copy does not break the next press");
+                            "a .tmp left by a killed press does not make the folder it created un-pressable");
 
             string clashDir = Path.Combine(dir, "clash");
             Directory.CreateDirectory(clashDir);
