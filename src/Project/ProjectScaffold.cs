@@ -78,8 +78,15 @@ namespace Morgott.ContentTool.Project
         internal static string RootOf(string modDir, string name)
         {
             if (NameRefusal(name) != null || string.IsNullOrEmpty(modDir)) return null;
-            DirectoryInfo mods = Directory.GetParent(Normalized(modDir));
-            return mods == null ? null : Path.Combine(mods.FullName, name);
+            // Path.GetFullPath THROWS on a ModDir no path can be made of, and the ship gate's catch-all
+            // calls this while it is already handling a failure - a second exception out of the handler
+            // would replace the refusal the author needs to read. "No root" is exactly what that is.
+            try
+            {
+                DirectoryInfo mods = Directory.GetParent(Normalized(modDir));
+                return mods == null ? null : Path.Combine(mods.FullName, name);
+            }
+            catch (Exception) { return null; }
         }
 
         /// <summary>ModDir made absolute with its trailing separator off. Directory.GetParent("...\Mods\
@@ -155,9 +162,7 @@ namespace Morgott.ContentTool.Project
             // safely stops the press before a meta is written beside it.
             ManifestFile file = ManifestFile.Load(result.ManifestPath);
             string id = file.Manifest.Id;
-            if (!File.Exists(result.MetaPath))
-                AtomicFile.WriteText(result.MetaPath, Meta(id), new UTF8Encoding(false));
-            else
+            if (File.Exists(result.MetaPath))
             {
                 // R13. An existing meta is never rewritten and never trusted: PACKAGE'S own validator says
                 // whether a player would end up with a working mod, so the wizard and the packager cannot
@@ -174,7 +179,17 @@ namespace Morgott.ContentTool.Project
                                ? Package.MetaRefusal(text, null)
                                : "meta.json is not a JSON object.";
                 }
-                catch (FormatException bad) { said = "meta.json did not read as JSON: " + bad.Message; }
+                // Json's own sentence ends in advice meant for a glTF ("re-export it rather than editing
+                // it by hand", Json.cs:142-145), which is wrong for a file the author is expected to fix
+                // by hand; only the POSITION and the CAUSE it names carry over to a meta.json.
+                catch (FormatException bad)
+                {
+                    string why = bad.Message;
+                    int glb = why.LastIndexOf("; re-export", StringComparison.Ordinal);
+                    if (glb > 0) why = why.Substring(0, glb);
+                    int at = why.IndexOf("at character ", StringComparison.Ordinal);
+                    said = "meta.json did not read as JSON " + (at > 0 ? why.Substring(at) : why) + ".";
+                }
                 if (said != null)
                     throw new InvalidDataException("'" + result.MetaPath + "' already exists but is not a " +
                                                    "mod this project can ship: " + said + " - fix that file, " +
@@ -188,13 +203,18 @@ namespace Morgott.ContentTool.Project
             // add its row never leaves a .glb behind that nothing references.
             result.RowAlreadyPresent = Reuses(file.Manifest, shippedBundle, shippedAsset, stem);
             if (!result.RowAlreadyPresent)
-            {
                 file.Manifest.AddMeshReplacement(shippedBundle, shippedAsset, stem);
-                file.Manifest.Validate();
-            }
             // The splice, the .bak and the E5 fingerprint are ManifestFile's; nothing outside the "replace"
             // value span moves - and with nothing pending, Save validates and writes NOTHING (Manifest.cs:321).
+            // Save VALIDATES before it splices (Manifest.cs:320), so R6 lands here, before the copy, and no
+            // separate Validate call is needed to put it there.
             file.Save();
+
+            // THE META LAST, because it is the file that turns a folder into a MOD the manager lists. An R6
+            // refusal or a failed Save above leaves the press with nothing added, and a meta.json written
+            // before that decision would hand the author a mod id for a project that gained no row.
+            if (!File.Exists(result.MetaPath))
+                AtomicFile.WriteText(result.MetaPath, Meta(id), new UTF8Encoding(false));
 
             // THE POST-CONDITION, asserted rather than assumed: this is what makes `ct_project <name>` and
             // `ct_route7 apply <name>` find the folder that was just written (ContentMods.Sibling:128).

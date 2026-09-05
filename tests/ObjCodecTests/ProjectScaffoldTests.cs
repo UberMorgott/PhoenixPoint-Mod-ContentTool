@@ -59,6 +59,12 @@ internal static class ProjectScaffoldTests
                             ProjectScaffold.RootOf(modDir, "Replace_Rifle"),
                             "RootOf ignores a trailing separator on ModDir: " +
                             ProjectScaffold.RootOf(modDir + Path.DirectorySeparatorChar, "Replace_Rifle"));
+            // RootOf is documented to answer null when the mod folder makes a root impossible, and the ship
+            // gate's catch-all CALLS it to name a folder while it is already handling a failure - so a
+            // ModDir no path can be made of has to come back null rather than throw a second exception out
+            // of the handler (R12).
+            checks += Check(ProjectScaffold.RootOf(modDir + "\0bad", "Replace_Rifle") == null,
+                            "a ModDir Path.GetFullPath refuses answers null instead of throwing");
 
             // ---- Scaffold_CreatesProjectTemplates
             string glb = Path.Combine(dir, "body.glb");
@@ -139,6 +145,12 @@ internal static class ProjectScaffoldTests
             checks += Check(tornSaid != null &&
                             tornSaid.StartsWith("'" + Path.Combine(torn, "meta.json") + "' already exists but " +
                                                 "is not a mod this project can ship: ", StringComparison.Ordinal) &&
+                            // The POSITION and the CAUSE the parser named, and NOT the glTF advice its
+                            // sentence ends in - "re-export it rather than editing it by hand" is the
+                            // opposite of what the author of a hand-written meta.json has to do.
+                            tornSaid.IndexOf("did not read as JSON at character ",
+                                             StringComparison.Ordinal) > 0 &&
+                            tornSaid.IndexOf("re-export", StringComparison.Ordinal) < 0 &&
                             Same(File.ReadAllBytes(Path.Combine(torn, "meta.json")), tornWas),
                             "a meta.json that does not PARSE is R13, and is not rewritten: " + tornSaid);
             string listy = Project(mods, "ListMeta", "[1,2]");
@@ -147,8 +159,8 @@ internal static class ProjectScaffoldTests
             try { ProjectScaffold.AddMeshReplacement(modDir, "ListMeta", glb, sha, "a.bundle", "Foo", empty); }
             catch (InvalidDataException refused) { listySaid = refused.Message; }
             checks += Check(listySaid != null &&
-                            listySaid.IndexOf("is not a mod this project can ship: ",
-                                              StringComparison.Ordinal) > 0 &&
+                            listySaid.IndexOf("is not a mod this project can ship: meta.json is not a " +
+                                              "JSON object.", StringComparison.Ordinal) > 0 &&
                             Same(File.ReadAllBytes(Path.Combine(listy, "meta.json")), listyWas),
                             "a meta.json that is not an OBJECT is R13 too: " + listySaid);
 
@@ -221,13 +233,21 @@ internal static class ProjectScaffoldTests
                 "\"asset\":\"WPN_PX_RG_Assault_Rifle_T01_V01\",\"mesh\":\"body\"} ],\n" +
                 "  \"nested\": { \"a\": [ 1, 2, { \"b\": true } ] }\n}\n";
             File.WriteAllText(handManifest, handwritten, new UTF8Encoding(false));
-            string beforeAppend = File.ReadAllText(handManifest);
+            // Read as BYTES and decoded here rather than through File.ReadAllText, which STRIPS the BOM:
+            // both texts would then start at '{' and "the BOM is unchanged" could not fail. Encoding.UTF8
+            // .GetString keeps it as U+FEFF, so the prefix comparison below covers those three bytes too.
+            byte[] beforeBytes = File.ReadAllBytes(handManifest);
+            string beforeAppend = Encoding.UTF8.GetString(beforeBytes);
             ProjectScaffold.Result grew = ProjectScaffold.AddMeshReplacement(
                 modDir, "Handwritten", second, secondSha,
                 "px_equipment_assets_all.bundle", "WPN_PX_Hand", empty);
             checks += Check(!grew.Created && grew.Root == handAt,
                             "the SECOND press joins the AUTHORED project instead of making another one");
-            string afterAppend = File.ReadAllText(handManifest);
+            byte[] afterBytes = File.ReadAllBytes(handManifest);
+            checks += Check(afterBytes.Length > 3 &&
+                            afterBytes[0] == 0xEF && afterBytes[1] == 0xBB && afterBytes[2] == 0xBF,
+                            "the BOM is still the file's first three BYTES after the append");
+            string afterAppend = Encoding.UTF8.GetString(afterBytes);
             // Located independently in each text - the '[' after the "replace" key through its ']' - so the
             // comparison never borrows the writer's own idea of where it wrote.
             int wasOpen = beforeAppend.IndexOf('[', beforeAppend.IndexOf("\"replace\"", StringComparison.Ordinal));
@@ -258,6 +278,7 @@ internal static class ProjectScaffoldTests
                 modDir, "Replace_Twice", second, secondSha,
                 "px_equipment_assets_all.bundle", "WPN_PX_Hand", empty);
             byte[] afterFirst = File.ReadAllBytes(once.ManifestPath);
+            byte[] metaAfterFirst = File.ReadAllBytes(once.MetaPath);
             ProjectScaffold.Result reused = ProjectScaffold.AddMeshReplacement(
                 modDir, "Replace_Twice", second, secondSha,
                 "PX_EQUIPMENT_ASSETS_ALL.BUNDLE", "WPN_PX_Hand", empty);
@@ -267,6 +288,8 @@ internal static class ProjectScaffoldTests
                             "and the file holds exactly ONE row after two identical runs");
             checks += Check(Same(File.ReadAllBytes(once.ManifestPath), afterFirst),
                             "the manifest bytes did not move at all - a reuse writes nothing");
+            checks += Check(Same(File.ReadAllBytes(once.MetaPath), metaAfterFirst),
+                            "and the VALID meta.json the first press wrote is left byte for byte alone");
 
             // ---- Scaffold_RefusesConflictingTarget (R6 == Manifest.Validate's E4, verbatim). The same
             // target with a DIFFERENT mesh is the case R6 was written for, and the only one left.
@@ -291,6 +314,20 @@ internal static class ProjectScaffoldTests
                             "and the refused row copied no .glb - Validate runs before the first byte moves");
             checks += Check(ManifestFile.Load(once.ManifestPath).Manifest.Replace.Count == 1,
                             "a conflicting press leaves the one row that was already there");
+
+            // ---- Scaffold_WritesNoMetaUntilTheRowLands. meta.json is the file that turns a folder into a
+            // MOD the manager lists, so a press that refused to add its row must not leave one behind: the
+            // author would be looking at a mod id they never asked for in a project that gained nothing.
+            string metaless = Path.Combine(mods, "MetaLess");
+            Directory.CreateDirectory(metaless);
+            File.WriteAllText(Path.Combine(metaless, "ppcontent.json"),
+                              "{\n  \"id\": \"MetaLess\",\n  \"bundle\": \"MetaLess.bundle\",\n" +
+                              "  \"replace\": [ {\"bundle\":\"a.bundle\",\"asset\":\"Foo\",\"mesh\":\"other\"} ]\n}\n");
+            string metaLess = null;
+            try { ProjectScaffold.AddMeshReplacement(modDir, "MetaLess", glb, sha, "a.bundle", "Foo", empty); }
+            catch (InvalidDataException refused) { metaLess = refused.Message; }
+            checks += Check(metaLess != null && !File.Exists(Path.Combine(metaless, "meta.json")),
+                            "an R6 refusal into a project that had no meta.json leaves none: " + metaLess);
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates";
