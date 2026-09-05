@@ -744,7 +744,7 @@ namespace Morgott.ContentTool.Dev
             slotTargets.Clear();
             if (variant == null) return;
 
-            Dictionary<string, SkinnedMeshRenderer> live = LiveSlots();
+            Dictionary<string, KeyValuePair<Addon, SkinnedMeshRenderer>> live = LiveSlots();
             Transform root = bay.CharacterBuilder.transform;
             foreach (PrototypeSlot slot in variant.Slots)
             {
@@ -753,21 +753,28 @@ namespace Morgott.ContentTool.Dev
                     Record = record, Variant = variant,
                     SlotDefName = slot.SlotDefName, Mode = VerifyMode.Replace
                 };
-                SkinnedMeshRenderer smr;
-                if (slot.SlotDefName != null && live.TryGetValue(slot.SlotDefName, out smr) && smr != null)
-                    target.Live = ModelDoctor.Snapshot(smr, SeamSwap.RelativePath(root, smr.transform));
+                KeyValuePair<Addon, SkinnedMeshRenderer> made;
+                if (slot.SlotDefName != null && live.TryGetValue(slot.SlotDefName, out made) && made.Value != null)
+                {
+                    target.Live = ModelDoctor.Snapshot(made.Value, SeamSwap.RelativePath(root, made.Value.transform));
+                    // Stored, never thrown: the row that could not be derived says why, and every other slot
+                    // in this rebuild still gets its target.
+                    ShippedTarget.Resolve(made.Key, made.Value, target);
+                }
                 else
                     target.Unavailable = "slot visual unavailable";
                 slotTargets.Add(target);
             }
         }
 
-        /// <summary>Slot def name -&gt; the renderer THIS rebuild produced for it. Restricted to
-        /// <c>proto.Slots()</c> so a renderer left over from whatever stood here before can never be
-        /// snapshotted as this prototype's.</summary>
-        private static Dictionary<string, SkinnedMeshRenderer> LiveSlots()
+        /// <summary>Slot def name -&gt; the renderer THIS rebuild produced for it, WITH the addon that owns
+        /// it. Restricted to <c>proto.Slots()</c> so a renderer left over from whatever stood here before can
+        /// never be snapshotted as this prototype's. The addon comes along because it - not the renderer -
+        /// owns the dependency graph <see cref="ShippedTarget.Resolve"/> derives the shipped target from, and
+        /// it is already in hand here.</summary>
+        private static Dictionary<string, KeyValuePair<Addon, SkinnedMeshRenderer>> LiveSlots()
         {
-            var found = new Dictionary<string, SkinnedMeshRenderer>(StringComparer.Ordinal);
+            var found = new Dictionary<string, KeyValuePair<Addon, SkinnedMeshRenderer>>(StringComparer.Ordinal);
             try
             {
                 var produced = new HashSet<SkinnedMeshRenderer>(proto.Slots());
@@ -781,7 +788,7 @@ namespace Morgott.ContentTool.Dev
                     foreach (SkinnedMeshRenderer smr in a.VisualRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true))
                     {
                         if (smr == null || smr.sharedMesh == null || !produced.Contains(smr)) continue;
-                        found[slot.SlotDef.name] = smr;
+                        found[slot.SlotDef.name] = new KeyValuePair<Addon, SkinnedMeshRenderer>(a, smr);
                         break;
                     }
                 }
