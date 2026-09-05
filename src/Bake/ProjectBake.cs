@@ -1844,6 +1844,18 @@ namespace Morgott.ContentTool.Bake
                 return 0;
             }
 
+            // A rig with an UNVERIFIED slot is a FAILURE of this gate, not a VOID. The fixture falls
+            // back to the plain sample rig when it cannot reverse the skeleton (ReversedRig), the bind
+            // is then refused, and the VOID that came out of the catch below read as "nothing to
+            // measure" - so the by-name proof arm went dark while the run stayed green. The file is
+            // not the one being refused here; the TARGET has no complete named rig to bind onto.
+            int unverified = Array.IndexOf(bones, null);
+            if (unverified >= 0)
+                return Check(log, "P6", false, "mesh '" + key + "' - " + Path.GetFileName(shipped) +
+                    " leaves bone slot " + unverified + " of " + bones.Length + " UNVERIFIED against " +
+                    "the mesh's own bone path hashes, so there is no named target rig to bind onto and " +
+                    "this arm cannot prove a by-name binding either way");
+
             int n = im.Baked.VertexCount;
             if (f.Joints == null || f.Weights == null || f.Joints.Length != n * 4)
             {
@@ -2424,7 +2436,7 @@ namespace Morgott.ContentTool.Bake
             // A rig with an UNVERIFIED slot (null) cannot be reversed into a fixture either - the .glb
             // would carry a nameless joint, which is a different question from the one this asks.
             int n = bones == null ? 0 : bones.Length;
-            if (n < 3 || n - 1 == 0 || Array.IndexOf(bones, null) >= 0) return ModelBuild.SampleGlb();
+            if (n < 3 || Array.IndexOf(bones, null) >= 0) return ModelBuild.SampleGlb();
 
             SkinnedModel m = new SkinnedModel { Name = "rigfix" };
             m.Nodes.Add(new SkinNode { Name = "rigfix_root", Parent = -1, Local = Identity() });

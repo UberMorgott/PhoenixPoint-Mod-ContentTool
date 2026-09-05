@@ -1011,28 +1011,54 @@ namespace Morgott.ContentTool.Bake
                     int slash = paths[b].LastIndexOf('/');
                     names[b] = slash < 0 ? paths[b] : paths[b].Substring(slash + 1);
                 }
-                // The anchor the hashes are checked against: the renderer's own m_RootBone first, then
-                // the bone CARRYING the mesh's root hash. Both are tried, because m_RootBone may point
-                // at a transform this mesh was never hashed against, and one wrong anchor must not cost
-                // a whole rig its names.
                 long rootId = r["m_RootBone"]["m_PathID"].AsLong;
                 string byRoot = rootId == 0 ? null : TransformPath(m, af, rootId, memo);
-                string byHash = null;
-                for (int b = 0; b < poses; b++) if (hashes[b] == rootHash) { byHash = paths[b]; break; }
-
-                string clash = null;
-                string[] verified = byRoot == null ? null : Verify(names, paths, byRoot, rootHash, hashes, ref clash);
-                if (verified == null && byHash != null && byHash != byRoot)
-                {
-                    clash = null;   // the first ANCHOR was wrong, which says nothing about the rig
-                    verified = Verify(names, paths, byHash, rootHash, hashes, ref clash);
-                }
-                if (verified == null) { refusal = clash; return null; }
+                string[] verified = Verified(names, paths, byRoot, rootHash, hashes, out refusal);
+                if (verified == null) return null;
 
                 if (found == null) { found = verified; continue; }
-                for (int b = 0; b < poses; b++) if (found[b] != verified[b]) return null;
+                // Two renderers need not check the SAME slots - each has its own anchor, and a slot one
+                // of them could not reach is not a disagreement with the one that could. Only a slot
+                // BOTH named, differently, is; everything else is a union, so a second renderer can
+                // only ADD names. Comparing the arrays whole nulled a rig that nothing contradicted.
+                for (int b = 0; b < poses; b++)
+                {
+                    if (verified[b] == null || verified[b] == found[b]) continue;
+                    if (found[b] == null) { found[b] = verified[b]; continue; }
+                    refusal = "two SkinnedMeshRenderers in this file disagree about bone slot " + b +
+                              ": one calls it '" + found[b] + "', the other '" + verified[b] +
+                              "', so the file does not agree with itself about this mesh's bone order";
+                    return null;
+                }
             }
             return found;
+        }
+
+        /// <summary>
+        /// The names ONE renderer's bone list verifies, from whichever anchor the file confirms: the
+        /// renderer's own m_RootBone first, then the bone CARRYING the mesh's root hash. Both are
+        /// tried, because m_RootBone may point at a transform this mesh was never hashed against, and
+        /// one wrong anchor must not cost a whole rig its names.
+        /// </summary>
+        /// <param name="refusal">why the names were REFUSED rather than merely unverifiable - null when
+        /// nothing here contradicts, which is a different answer and must not read as a refusal.</param>
+        internal static string[] Verified(string[] names, string[] paths, string byRoot, uint rootHash,
+                                          uint[] hashes, out string refusal)
+        {
+            refusal = null;
+            string byHash = null;
+            for (int b = 0; b < paths.Length; b++) if (hashes[b] == rootHash) { byHash = paths[b]; break; }
+
+            string clash = null;
+            string[] verified = byRoot == null ? null : Verify(names, paths, byRoot, rootHash, hashes, ref clash);
+            // A second anchor is only worth trying when the first was never CONFIRMED. A contradiction
+            // reaches here from an anchor something else vouched for, so it IS the answer: retrying it
+            // against the bone that carries the root hash would un-refuse a real disagreement with a
+            // tautology, because that bone matches itself by construction.
+            if (verified == null && clash == null && byHash != null && byHash != byRoot)
+                verified = Verify(names, paths, byHash, rootHash, hashes, ref clash);
+            if (verified == null) refusal = clash;
+            return verified;
         }
 
         /// <summary>
@@ -1045,25 +1071,38 @@ namespace Morgott.ContentTool.Bake
         /// null when the anchor verifies NOTHING (it is not the prefix these hashes are of), or - with
         /// <paramref name="contradiction"/> set - when a slot's path is checkable and DISAGREES, which
         /// means m_Bones is not this mesh's bone order and no part of it may be trusted.
+        ///
+        /// The anchor's claim - that the CRC register at its path is ~rootHash - has to be CONFIRMED by
+        /// something the anchor did not manufacture, or every slot it "verifies" is circular. Two
+        /// independent confirmations, either will do: the path's own CRC really is the root hash (only
+        /// possible when the file kept the prefix the mesh was hashed under), or a bone at a DIFFERENT
+        /// path checks out from it. An anchor with neither has verified nothing and contradicted
+        /// nothing, whatever its own slot says about itself.
         /// </summary>
         private static string[] Verify(string[] names, string[] paths, string anchor, uint rootHash,
                                        uint[] hashes, ref string contradiction)
         {
+            bool confirmed = BoneHash(anchor) == rootHash;
             string[] verified = new string[names.Length];
+            string clash = null;
             int named = 0;
             for (int b = 0; b < names.Length; b++)
             {
                 bool? ok = BoneVerifies(paths[b], anchor, rootHash, hashes[b]);
-                if (ok == false)
-                {
-                    contradiction = "the SkinnedMeshRenderer puts '" + paths[b] + "' in bone slot " + b +
-                                    ", but the mesh's own m_BoneNameHashes[" + b + "] is " + hashes[b] +
-                                    ", which that path does not produce - so its m_Bones is not this " +
-                                    "mesh's bone order, and every name it offers would land on another bone";
-                    return null;
-                }
-                if (ok == true) { verified[b] = names[b]; named++; }
+                // NOT an early return: a contradiction is only worth reporting once something else has
+                // confirmed the anchor, and that evidence can sit in a slot further down the list.
+                if (ok == false && clash == null)
+                    clash = "the SkinnedMeshRenderer puts '" + paths[b] + "' in bone slot " + b +
+                            ", but the mesh's own m_BoneNameHashes[" + b + "] is " + hashes[b] +
+                            ", which that path does not produce - so its m_Bones is not this " +
+                            "mesh's bone order, and every name it offers would land on another bone";
+                if (ok != true) continue;
+                verified[b] = names[b];
+                named++;
+                if (paths[b] != anchor) confirmed = true;
             }
+            if (!confirmed) return null;
+            if (clash != null) { contradiction = clash; return null; }
             return named == 0 ? null : verified;
         }
 

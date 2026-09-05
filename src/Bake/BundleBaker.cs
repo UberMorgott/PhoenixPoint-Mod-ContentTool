@@ -190,7 +190,12 @@ namespace Morgott.ContentTool.Bake
 
             string how;
             string[] names = armature ? SkinFields.BoneNames(man, afileInst, info.PathId) : null;
-            Outcome outcome = ReplacementDecision.Decide(armature, rigged, names != null, null);
+            // A PARTIALLY named rig is not a name array. A slot the file could not verify comes back
+            // null, RebindByName would hand SkinBinder an empty bone name, and it refuses at the door
+            // with a sentence about reloading the scene - offline, where there is no scene. NoNames is
+            // the honest outcome, and it is the same guard the P6 fixture uses (ProjectBake.ReversedRig).
+            bool allNamed = names != null && Array.IndexOf(names, null) < 0;
+            Outcome outcome = ReplacementDecision.Decide(armature, rigged, allNamed, null);
             if (outcome != Outcome.ByName)
             {
                 // Rebind is still CALLED for its effect; which sentence this is comes from the outcome,
@@ -199,7 +204,7 @@ namespace Morgott.ContentTool.Bake
                 how = outcome == Outcome.NotRigged
                     ? "not rigged - the target carries no bind poses"
                     : "nearest-bone, one full-weight influence per vertex (no SkinnedMeshRenderer in " +
-                      "this bundle names the target's bones)";
+                      "this bundle names ALL of the target's bones)";
             }
             else
             {

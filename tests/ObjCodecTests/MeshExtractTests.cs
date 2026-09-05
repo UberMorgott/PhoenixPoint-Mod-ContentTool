@@ -53,7 +53,13 @@ internal static class MeshExtractTests
             first = OneMesh(m, afile, resS, Rigged);
             second = OneMesh(m, afile, resS, Control);
         });
+        // The turret bundle carries the out-of-subtree rig arms, and a machine without it has NOT run
+        // them. Saying PASS on the line that also says "VOID - not on this machine" reads as a green
+        // gate; the headline is the only part anyone greps.
         string turret = Turret(classData, Path.GetDirectoryName(shipped));
+        if (turret == null)
+            return "MESH extract VOID - no " + Path.Combine(Path.GetDirectoryName(shipped), Turrets) +
+                   ", so the out-of-subtree rig arms did not run\n  " + first + "\n  " + second;
         return "MESH extract PASS on " + Bundle + ", " + checks + " check(s)\n  " + first + "\n  " +
                second + "\n  " + turret;
     }
@@ -68,7 +74,7 @@ internal static class MeshExtractTests
     private static string Turret(string classData, string streamingAssets)
     {
         string bundle = Path.Combine(streamingAssets, Turrets);
-        if (!File.Exists(bundle)) return Turrets + ": VOID - not on this machine";
+        if (!File.Exists(bundle)) return null;   // VOID, and Run's headline has to say so
         string line = null;
         Open(classData, bundle, (m, afile, resS) =>
         {
@@ -78,6 +84,9 @@ internal static class MeshExtractTests
                 AssetFileInfo info = AssetIndex.FindUnique(m, afile, AssetClassID.Mesh, name, Turrets);
                 AssetTypeValueField mesh = m.GetBaseField(afile, info);
                 int poses = Int(SkinFields.SkinSummary(mesh), "bindposes=");
+                int wantPoses = name == Siblings ? 9 : 6;
+                Check(poses == wantPoses, name + ": the shipped mesh still carries its " + wantPoses +
+                      " bind poses (" + poses + ") - every count below is measured against that");
 
                 string refusal;
                 string[] rig = SkinFields.BoneNames(m, afile, info.PathId, out refusal);
@@ -96,6 +105,16 @@ internal static class MeshExtractTests
                 // Read back off the WRITTEN nodes, so this cannot claim a name the .glb does not carry.
                 SkinnedModel model = MeshRead.Read(mesh, resS, rig);
                 int joints = model.JointNodes == null ? 0 : model.JointNodes.Length;
+                // WHAT THE SOURCE MESH ACTUALLY HOLDS, written down rather than read back off the
+                // extract: "every joint written is a name" is satisfied by writing NONE, so a run that
+                // lost the skin whole would pass it 0 of 0. The Guns are the skinned mesh (6 joints);
+                // the Base is STATIC - 9 bind poses and no weights - so it writes no joints at all and
+                // its 9/9 above is the only thing that can speak for it.
+                int wantJoints = name == Siblings ? 0 : 6;
+                Check(joints == wantJoints,
+                      name + ": the extract writes the " + wantJoints + " skinned joint(s) this mesh has" +
+                      (wantJoints == 0 ? " - it carries bind poses but no weights" : "") +
+                      " (got " + joints + ")");
                 Check(MeshRead.NamedJoints(model) == joints,
                       name + ": every joint the extract writes is a NAME, none on a hash (" +
                       MeshRead.NamedJoints(model) + " of " + joints + ")");
@@ -260,6 +279,35 @@ internal static class MeshExtractTests
         uint[] wrongSibling = { hashes[0], rootHash, SkinFields.BoneHash(gone + "Root/Somewhere") };
         Check(!SkinFields.BonesAligned(new[] { paths[0], root, sibling }, root, rootHash, wrongSibling),
               "... and one whose hash does not come out of that ancestor is not counted as verified");
+
+        // A FALLBACK ANCHOR MUST BE CONFIRMED BY SOMETHING IT DID NOT MANUFACTURE. The bone carrying
+        // the mesh's root hash matches ITSELF by construction, so retrying a contradicting rig against
+        // it always "verified" at least that one slot and the refusal was thrown away. Fabricated to
+        // the shape that broke it: the hashes are of Root and Root/Child, m_Bones lists them the other
+        // way round, and the wrong answer was ["Child", null] - the CHILD's name in the ROOT's slot.
+        const string plainRoot = "Root", plainChild = "Root/Child";
+        uint plainRootHash = SkinFields.BoneHash(plainRoot);
+        uint[] swappedHashes = { plainRootHash, SkinFields.BoneHash(plainChild) };
+        string tautology;
+        string[] taut = SkinFields.Verified(new[] { "Child", "Root" }, new[] { plainChild, plainRoot },
+                                            plainRoot, plainRootHash, swappedHashes, out tautology);
+        Check(taut == null && tautology != null,
+              "a rig that contradicts a CONFIRMED anchor is refused, not re-read from the bone that " +
+              "carries the root hash by construction (got " +
+              (taut == null ? "null" : "[" + string.Join(", ", taut) + "]") + ", refusal " +
+              (tautology ?? "none") + ")");
+
+        // The other half of the same rule: an anchor NOTHING confirms reports no contradiction either.
+        // m_RootBone here is the hashed root's own PARENT and no slot carries the root hash, so every
+        // bone is a descendant of the anchor and every one of them fails. That is this file being
+        // unreadable from that anchor, not evidence that m_Bones is in the wrong order.
+        string unconfirmed;
+        string[] kids = { root + "/Head", root + "/Jaw" };
+        uint[] kidHashes = { hashes[0], hashes[2] };
+        Check(SkinFields.Verified(new[] { "Head", "Jaw" }, kids, "Root", rootHash, kidHashes,
+                                  out unconfirmed) == null && unconfirmed == null,
+              "an anchor nothing confirms leaves every bone unverifiable, and refuses nothing (" +
+              (unconfirmed ?? "none") + ")");
     }
 
     // ---------------------------------------------------------------- helpers
