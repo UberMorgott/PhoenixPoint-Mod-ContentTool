@@ -49,6 +49,7 @@
     <Compile Include="..\..\src\Bake\StageText.cs" Link="StageText.cs" />
     <Compile Include="..\..\src\Bake\OutputClaim.cs" Link="OutputClaim.cs" />
     <Compile Include="..\..\src\Bake\LifecycleState.cs" Link="LifecycleState.cs" />
+    <Compile Include="..\..\src\Bake\StageValidate.cs" Link="StageValidate.cs" />
     <Compile Include="..\..\src\Bake\Publication.cs" Link="Publication.cs" />
     <!-- And the RECEIPT that publication writes last. PatchCache is plain System.IO (its stamps are
          path/size/mtime and one SHA-1 of the manifest, which is why TargetPathTests already links it),

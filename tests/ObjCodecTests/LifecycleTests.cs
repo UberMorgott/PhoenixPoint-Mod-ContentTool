@@ -264,10 +264,12 @@ internal static class LifecycleTests
         checks += Cancelling();
         checks += Sequencing();
         checks += Sections();
+        checks += Validating();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
                "one file swap, the pre-import receipt, the publication ordering, one output owner, " +
-               "the admission table, the cancel contract, the Run all chain, the bounded seam sections";
+               "the admission table, the cancel contract, the Run all chain, the bounded seam sections, " +
+               "the Validate producer";
     }
 
     /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per
@@ -669,6 +671,75 @@ internal static class LifecycleTests
                             "the claim is released in a finally - an exception inside the run cannot leak it");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
+        return checks;
+    }
+
+    /// <summary>
+    /// G8 - the Validate producer's PURE half, on real files. §4.1 and nothing more: the declaration
+    /// structure plus activation eligibility. The one Unity-bound piece is `ModRoster.Build`, which is why
+    /// the producer takes the roster as a DICTIONARY - main captures it, the worker validates - and that
+    /// split is the whole reason every arm below drives production code rather than a stub.
+    ///
+    /// DISABLED IS NOT MALFORMED (design:103): eligibility is its own field and never becomes the verdict,
+    /// so a project the player switched off still reports Validate PASS.
+    /// </summary>
+    private static int Validating()
+    {
+        int checks = 0;
+        string root = Path.Combine(Path.GetTempPath(), "ct_valid_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "Content"));
+        try
+        {
+            string name = Path.GetFileName(root);
+            string manifest = Path.Combine(root, ContentMods.Manifest);
+            File.WriteAllText(manifest,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " +
+                "{ \"mesh\": \"torso\", \"bundle\": \"b.bundle\", \"asset\": \"Torso\" } ] }");
+            File.WriteAllBytes(Path.Combine(root, "Content", "torso.glb"), new byte[] { 1, 2, 3 });
+            string[] shipped = { Path.Combine(root, "Content", "torso.glb") };
+            Dictionary<string, bool> off = new Dictionary<string, bool>(StringComparer.Ordinal);
+            off[ModGate.Key(root)] = false;
+
+            LifecycleState.StageReport ok = StageValidate.Run(root, manifest, shipped, off);
+            checks += Check(ok.Outcome == GateOutcome.Pass && ok.Verdict == StageText.S3(name) &&
+                            ok.How == BakeDisposition.Success && ok.Applicable && !ok.RestartRequired,
+                            "S3 verbatim, and Validate PASS is the producer's own line");
+            checks += Check(ok.Eligibility == ModGate.Why(ModVerdict.Disabled),
+                            "a DISABLED project still validates - eligibility is a field, never the verdict " +
+                            "(design:103)");
+
+            LifecycleState.StageReport none = StageValidate.Run(root, manifest, shipped, null);
+            checks += Check(none.Outcome == GateOutcome.Pass &&
+                            none.Eligibility == ModGate.Why(ModVerdict.NoRoster),
+                            "no roster is an eligibility answer too, and still not a Validate failure");
+
+            // E4, Manifest.cs:220 - the same target claimed twice.
+            string twice = Path.Combine(root, "twice.json");
+            File.WriteAllText(twice,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " +
+                "{ \"mesh\": \"torso\", \"bundle\": \"b.bundle\", \"asset\": \"Torso\" }, " +
+                "{ \"mesh\": \"torso2\", \"bundle\": \"b.bundle\", \"asset\": \"Torso\" } ] }");
+            LifecycleState.StageReport dup = StageValidate.Run(root, twice, shipped, off);
+            checks += Check(dup.Outcome == GateOutcome.Fail && dup.How == BakeDisposition.Failed &&
+                            dup.Verdict.StartsWith("Validate: FAIL - ", StringComparison.Ordinal) &&
+                            dup.Verdict.IndexOf("already replaces", StringComparison.Ordinal) > 0,
+                            "E4 comes back as ValidateFailed carrying the manifest's own reason, and the " +
+                            "throw never escapes the producer");
+
+            LifecycleState.StageReport gone =
+                StageValidate.Run(root, Path.Combine(root, "absent.json"), shipped, off);
+            checks += Check(gone.Outcome == GateOutcome.Fail &&
+                            gone.Verdict.StartsWith("Validate: FAIL - ", StringComparison.Ordinal) &&
+                            gone.Verdict.IndexOf(Environment.NewLine, StringComparison.Ordinal) < 0,
+                            "a missing ppcontent.json is an IOException answered by the same one-line " +
+                            "fallback, not an exception out of the panel");
+
+            // The key must be COMPUTABLE here - the producer calls it and stores nothing, so this is the
+            // arm that fails if the four §4.1 calls stop being reachable offline.
+            checks += Check(!string.IsNullOrEmpty(PatchCache.Key(root, shipped)),
+                            "the pre-import key is computable from the validated declaration");
+        }
+        finally { try { Directory.Delete(root, true); } catch (Exception) { } }
         return checks;
     }
 

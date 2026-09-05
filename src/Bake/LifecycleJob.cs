@@ -61,6 +61,9 @@ namespace Morgott.ContentTool.Bake
         {
             internal string Root, Id, PatchedDir, LiveRefusal;
             internal string[] Declared, Shipped, OutputDirs;
+            /// <summary>The mod manager's own state, from <c>ModRoster.Build</c> - the ONE Unity-bound half
+            /// of §4.1, so it is captured here and the Validate worker only reads the dictionary.</summary>
+            internal IDictionary<string, bool> Roster;
         }
 
         /// <summary>
@@ -110,7 +113,10 @@ namespace Morgott.ContentTool.Bake
                 PatchedDir = ContentToolMain.PatchedDir(d.Id),
                 Declared = declared.ToArray(),
                 Shipped = new string[declared.Count],
-                OutputDirs = ProjectBake.OutputDirs(projectRoot, d.Id)
+                OutputDirs = ProjectBake.OutputDirs(projectRoot, d.Id),
+                // MAIN, like the three paths above: ModManager.Mods is Unity's. It answers null rather than
+                // throwing (ModRoster.cs:63), and ModGate reads that null as a refusal, never a free pass.
+                Roster = ModRoster.Build()
             };
             for (int i = 0; i < declared.Count; i++) on.Shipped[i] = BakeSelfCheck.ShippedBundlePath(declared[i]);
 
@@ -181,14 +187,35 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static string Start(string stage, Captured on)
         {
+            if (stage == "Validate") return StartValidate(on);
             if (stage == "Bake") return StartBake(on);
             if (stage == "Package") return StartPackage(on);
-            // ponytail: Validate, Apply and Verify have no segmented producer yet - 4.1's ManifestFile/
-            // ModGate pair, Route7.ApplyProject's structured overload and 4.4's read-back producer are
-            // three separate pieces of work, none of them budgeted here (Task 5 is the coordinator, the
-            // seam and the pump). This says so instead of inventing a verdict for a stage nothing ran.
+            // ponytail: Apply and Verify have no segmented producer yet - Route7.ApplyProject's structured
+            // overload and 4.4's read-back producer are two separate pieces of work, neither budgeted here
+            // (Task 5 is the coordinator, the seam and the pump). This says so instead of inventing a
+            // verdict for a stage nothing ran.
             // Wire them where their panel rows land, and delete this line with the last of them.
             return "Lifecycle: " + stage + " is not wired to the dashboard yet.";
+        }
+
+        /// <summary>
+        /// MAIN, then WHOLLY A WORKER, like <see cref="StartPackage"/>: the roster is already a dictionary
+        /// (captured on main) and the other three §4.1 calls are plain System.IO. No parked main segment, so
+        /// a Validate completes with the bench closed.
+        /// </summary>
+        internal static string StartValidate(Captured on)
+        {
+            long id = Run.Begin("Validate");
+            if (id == 0) return StageText.R26(Run.Latest.Stage);
+            Worker(delegate
+            {
+                LifecycleState.StageReport r = StageValidate.Run(on.Root,
+                                                                 Path.Combine(on.Root, ContentMods.Manifest),
+                                                                 on.Shipped, on.Roster);
+                Observe(on);
+                Finish(id, r.Verdict, r.How);
+            });
+            return null;
         }
 
         /// <summary>

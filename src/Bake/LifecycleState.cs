@@ -449,12 +449,17 @@ namespace Morgott.ContentTool.Bake
             /// Verify with nothing declared. Design:281: those are "VOID with a reason" and do NOT stop the
             /// chain, while a VOID that means "the proof is missing" does (design:279-:280).</summary>
             internal readonly bool Applicable;
+            /// <summary>What the mod manager says about the folder - <c>ModGate.Why</c>, or null for a
+            /// stage that does not ask. Task 6 draws it beside the Validate row and <see cref="Admit"/>
+            /// never reads it: DISABLED blocks nothing (design §4.6's activation column), and folding it
+            /// into the verdict would word a switched-off project as malformed (design:103).</summary>
+            internal readonly string Eligibility;
 
             internal StageReport(GateOutcome outcome, string verdict, BakeDisposition how,
-                                 bool restartRequired, bool applicable)
+                                 bool restartRequired, bool applicable, string eligibility = null)
             {
                 Outcome = outcome; Verdict = verdict; How = how;
-                RestartRequired = restartRequired; Applicable = applicable;
+                RestartRequired = restartRequired; Applicable = applicable; Eligibility = eligibility;
             }
         }
 
