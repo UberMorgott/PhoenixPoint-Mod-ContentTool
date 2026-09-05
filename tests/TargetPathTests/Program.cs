@@ -1205,6 +1205,21 @@ internal static class Program
                 "a project with nothing baked is refused instead of packaged empty -> " +
                 said.Replace("\n", " "));
 
+            // IsOwnTemp, pinned. It is the ONLY thing standing between an author's own .tmp and a
+            // scaffold that reads their folder as empty (Package.cs:522-533) - and the packager's
+            // "do not ship a half-written temp" rule leans on the same answer. THE GUID IS THE
+            // SIGNATURE: "N" only, so the dashed form a hand-written tool emits is NOT ours, and
+            // neither is a bare .tmp with any other stem.
+            Check("S14-owntemp",
+                Package.IsOwnTemp(Guid.NewGuid().ToString("N") + ".tmp"),
+                "a 32-hex-digit guid .tmp is ContentTool's own half-written file");
+            Check("S14-owntemp-not",
+                !Package.IsOwnTemp("{" + Guid.NewGuid().ToString("D") + "}.tmp") &&
+                !Package.IsOwnTemp(Guid.NewGuid().ToString("D") + ".tmp") &&
+                !Package.IsOwnTemp("artist-recovery.tmp") &&
+                !Package.IsOwnTemp("CON.tmp"),
+                "a braced guid, a dashed guid, an author's recovery file and a bare name are NOT");
+
             ModelessArm(tmp);
 
             // meta.json, the half that decides whether an ORDINARY PLAYER ends up with a working mod.

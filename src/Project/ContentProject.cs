@@ -258,6 +258,13 @@ namespace Morgott.ContentTool.Project
         /// The bake adds it to its failure count, so skipping a source stays non-fatal to the OTHER
         /// sources without the run reporting ALL PASS over a model that never made it in.</summary>
         internal int ImportFailures;
+        /// <summary>How many of those refusals were "replace" ROWS - a declared replacement that was
+        /// dropped before it ever reached the patcher. Route vii gates NOT APPLIED on the PATCH route's
+        /// own count (ProjectBake.Run's patchFailed) and a dropped row never reaches Patch, so without
+        /// this the guard installed a PARTIAL result and stamped the cache current over a replacement
+        /// that was declared and never performed. Tagged at the ParseReplace seam in <see cref="Load"/>,
+        /// never re-parsed. An unrelated .wav/.png refusal is still non-blocking.</summary>
+        internal int ReplaceRefusals;
 
         /// <summary>What ppcontent.json DECLARES, with nothing imported.</summary>
         internal sealed class Declared
@@ -325,7 +332,9 @@ namespace Morgott.ContentTool.Project
             SourceImport.Each(Sources(root, "Models", p.SourceRefusals, "*.glb"),
                               p.Models, p.SourceRefusals, ImportModel);
             p.Videos.AddRange(ImportVideos(root));
+            int beforeReplace = p.SourceRefusals.Count;
             p.Replace.AddRange(ParseReplace(File.ReadAllText(metaPath), p.SourceRefusals));
+            p.ReplaceRefusals = p.SourceRefusals.Count - beforeReplace;
             p.Publish.AddRange(ParsePublish(File.ReadAllText(metaPath), p.SourceRefusals));
 
             string refused = RefuseUnsupported(Path.Combine(Path.Combine(root, "Content"), "Audio"));

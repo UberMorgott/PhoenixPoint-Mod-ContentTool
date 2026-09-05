@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
@@ -118,7 +119,7 @@ namespace Morgott.ContentTool.Bake
                 else if (BundleClaims.RouteMoves(true, BundleLive.Holds(project.Id), on))
                     log.AppendLine(on && Failed.Contains(project.Id)
                         ? "'" + project.Id + "' failed to bake earlier in this session - not baking it " +
-                          "again. Fix the lines it printed, then 'ct_route7 apply " + project.Id + "'."
+                          "again. Fix the lines it printed, then " + RetryHint(modDir)
                         : on ? ApplyProject(name) : BundleLive.Uninstall(project.Id));
             }
             if (wantPublish)
@@ -134,6 +135,25 @@ namespace Morgott.ContentTool.Bake
 
             string what = log.ToString().TrimEnd();
             return what.Length == 0 ? null : what;
+        }
+
+        /// <summary>
+        /// THE ARGUMENT THAT ACTUALLY RESOLVES BACK TO THIS FOLDER, or the truth that none does.
+        /// The recovery line used to name the mod ID (`ct_route7 apply morgott.demo.customcreature`),
+        /// which every verb here resolves through ContentToolMain.ProjectDir - and that resolves a
+        /// FOLDER name (CustomCreature), never an id, so the line sent the author to run a command
+        /// that finds nothing. A Steam Workshop mod lives at workshop\content\839770\&lt;id&gt;, beside
+        /// no Mods\ folder, so NO console argument reaches it at all: the parser eats the backslashes
+        /// of a path (ContentToolMain.ProjectDir's note) and the folder name is not a sibling. Asked of
+        /// ProjectDir itself rather than re-derived, so the hint cannot drift from the resolver.
+        /// </summary>
+        private static string RetryHint(string modDir)
+        {
+            string folder = Path.GetFileName(modDir.TrimEnd('\\', '/'));
+            return string.Equals(ContentToolMain.ProjectDir(folder), modDir, StringComparison.OrdinalIgnoreCase)
+                ? "'ct_route7 apply " + folder + "'."
+                : "restart the game - this mod is not in Mods\\, so no 'ct_route7 apply <name>' " +
+                  "argument reaches " + modDir + " and the checkbox will not re-bake it this session.";
         }
 
         /// <summary>
@@ -243,9 +263,14 @@ namespace Morgott.ContentTool.Bake
             // What the project DECLARES today, not whatever .bundle the folder still holds: a copy
             // left by an older revision of the same project would otherwise be installed forever,
             // and a target that has been retargeted away collides with whoever owns it now.
+            // CASE-BLIND, like every other bundle-name comparison on this route (BundleClaims.Find:224,
+            // the forBundle arms below, File.Exists itself on Windows). Ordinal made a row whose casing
+            // changed - "MyMod.Bundle" for "mymod.bundle" - list the same file twice here and, worse,
+            // fail the :311 membership test against the patched copy already on disk, so the apply
+            // ended in "REFUSED: nothing to install" permanently.
             List<string> declared = new List<string>();
             foreach (Morgott.ContentTool.Project.ShippedReplacement r in project.Replace)
-                if (!declared.Contains(r.bundle)) declared.Add(r.bundle);
+                if (!declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) declared.Add(r.bundle);
 
             // FRESHNESS, not existence (S3). "Every declared file is there" said nothing about
             // WHICH version of the game, of this mod or of ContentTool's own bake format produced
@@ -300,7 +325,6 @@ namespace Morgott.ContentTool.Bake
                                           " failure(s), named in the P0/REFUSED line(s) above; nothing was " +
                                           "installed and no copy was marked current.").ToString();
                 }
-                Failed.Remove(modId);
                 Project.PatchCache.Write(patched, key);
             }
             List<KeyValuePair<string, string>> copies = new List<KeyValuePair<string, string>>();
@@ -308,7 +332,7 @@ namespace Morgott.ContentTool.Bake
                 foreach (string f in Directory.GetFiles(patched, "*.bundle"))
                 {
                     string name = Path.GetFileName(f);
-                    if (!declared.Contains(name))
+                    if (!declared.Contains(name, StringComparer.OrdinalIgnoreCase))
                     {
                         pre.AppendLine("skipping " + name + " - " + patched +
                                        " still holds it, but the project no longer declares it");
@@ -348,6 +372,12 @@ namespace Morgott.ContentTool.Bake
             bool wasResident = ours && BundleLive.ResidentNow(forBundle);
             pre.Append("installing " + copies.Count + " patched copy(ies) as '" + modId + "'\n")
                .Append(BundleLive.Install(modId, copies));
+            // UNCONDITIONALLY, once the copies are in. It sat inside the `!haveAll` branch, so the
+            // press that arrived with a FRESH patched folder - the common case after a fix elsewhere -
+            // installed the copies and left the session's "this one failed" flag standing, and the
+            // mod-manager checkbox refused the mod for the rest of the session over a bake that is no
+            // longer failing.
+            Failed.Remove(modId);
             if (ours)
             {
                 BundleClaim mine = copies.Exists(c => string.Equals(c.Key, forBundle, StringComparison.OrdinalIgnoreCase))

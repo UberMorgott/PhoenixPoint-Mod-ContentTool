@@ -102,8 +102,14 @@ namespace Morgott.ContentTool.Bake
             // Counted TWICE on purpose: into the run's own total, and out through patchFailed, which is
             // the only count route vii may gate on (see the param note). Assigned here rather than at the
             // top because no exit precedes this line.
-            patchFailed = 0;
-            if (p.Replace.Count > 0) { patchFailed = Patch(p, log); failures += patchFailed; }
+            // A "replace" ROW THE PARSER DROPPED IS A PATCH FAILURE TOO. ContentProject.ParseReplace
+            // records an incomplete row in SourceRefusals and returns without it, so Patch never sees
+            // it and answered 0: route vii then installed the PARTIAL result and wrote the freshness
+            // key over a replacement the project declared and nobody performed. Counted into
+            // patchFailed only - `failures` already holds it through p.ImportFailures above, and
+            // adding it twice would report one half-typed row as two failures.
+            patchFailed = p.ReplaceRefusals;
+            if (p.Replace.Count > 0) { int refused = Patch(p, log); patchFailed += refused; failures += refused; }
             // WHAT WAS PATCHED, not how many rows were declared. A "video" row is a replacement that
             // needs no patched bundle at all - Bundles(p) skips it, because the clip is a loose file
             // served live by ct_video - so keying the success line on p.Replace.Count made a

@@ -297,8 +297,7 @@ namespace Morgott.ContentTool.Project
             if (!File.Exists(result.MetaPath) &&
                 !CreateNew(result.MetaPath, new UTF8Encoding(false).GetBytes(Meta(id))))
                 MetaMustBeShippable(result.MetaPath,
-                                    " - the mesh and its row are already in this project; fix meta.json and " +
-                                    "press again");
+                                    "then press again - the mesh and its row are already in THIS project");
 
             // THE POST-CONDITION, asserted rather than assumed: this is what makes `ct_project <name>` and
             // `ct_route7 apply <name>` find the folder that was just written (ContentMods.Sibling:128).
@@ -318,7 +317,11 @@ namespace Morgott.ContentTool.Project
         /// MetaRefusal is REGEX-based, so an unclosed object that happens to hold a matching "ID" and
         /// "Dependencies" sails through it while the game's own reader refuses the file. The strict reader
         /// this codebase already has runs first; no second parser is grown for it.</summary>
-        private static void MetaMustBeShippable(string metaPath, string also = "")
+        /// <param name="tail">REPLACES the default advice, it does not follow it: the race-loser arm used to
+        /// APPEND its sentence, so the author read "or ship into another project" and then "the mesh and its
+        /// row are already in this project" - the first half sending them off to do exactly what the second
+        /// half says is already done. The default keeps the first arm's bytes identical.</param>
+        private static void MetaMustBeShippable(string metaPath, string tail = "or ship into another project")
         {
             if (!File.Exists(metaPath)) return;
             string text = File.ReadAllText(metaPath);
@@ -343,7 +346,7 @@ namespace Morgott.ContentTool.Project
             if (said != null)
                 throw new InvalidDataException("'" + metaPath + "' already exists but is not a " +
                                                "mod this project can ship: " + said + " - fix that file, " +
-                                               "or ship into another project" + also);
+                                               tail);
         }
 
         /// <summary>The code-free content mod's meta.json, shaped like the shipped demo
