@@ -166,7 +166,27 @@ overload has no other possible owner. `BundleClaims` stays on it — R38 asks th
 `src\Dev\ModelDoctor.cs` (Tail moves out, S1/S2 read from `StageText`), `src\Bake\Route7.cs` (R29/R35 read from
 `StageText`).
 
-- [ ] **Step 0: Register the gate BEFORE writing it** (finding 8). `ObjCodecTests.csproj` sets
+> **DONE at `cd32eef` (Step 0) + `fc1c4a4` (Steps 1–4).** Real gate: **`LIFECYCLE PASS, 50 check(s)`** against
+> the predicted ~26 — the G2 wording table has 26 arms of its own (every S, every R, the three bake special
+> cases, the fallbacks, the transients, the placeholders), G1 13 and G3 9. Baseline re-measured at `27c2a53`
+> and unchanged after: `PROJECT-SCAFFOLD 89`, `MANIFEST 53`, `ALIAS 32`, `REFUSAL-COUNT 17`, `PACKAGE-GATE 7`,
+> `MESH extract 64` (the plan's `57+`), `R0: ALL PASS`, `Ошибок: 0` / `Предупреждений: 1`.
+> **Three deviations, disk over plan:**
+> 1. the carrier enum is **`GateOutcome`**, not `Outcome` — `Morgott.ContentTool.Import.Outcome` already exists
+>    and `BundleBaker.cs:203` uses it unqualified under `using Morgott.ContentTool.Import`, so a second
+>    `Outcome` in `Bake` makes those lines CS0104-ambiguous. `None` is its idle member.
+> 2. **`StageResult` ships as the static home of `Tail` only.** Its five row fields (`Stage`, `Verdict`,
+>    `Outcome`, `Freshness`, `Generation`) have no producer until Task 3's receipts and were five CS0649s;
+>    Task 3 lands them with the reducer that fills them.
+> 3. `ReadBackResult.Terminal` is **readonly, set by a second `Of(terminal, …)` overload** rather than a
+>    settable field — same reason (CS0649 in `ContentTool.csproj`, which never assigns it yet).
+> Also: `StageText.R28` takes a **`Freshness`**, not a freshness string, so "never/stale/fresh" has one
+> spelling. `ProjectBake` (S4/S5, the three bake special cases) and `Package` (S7, the refusal) are NOT routed
+> through `StageText` — both are outside Task 1's file list, `Package` is on the "NOT modified" list, and
+> `ProjectBake` is Task 2's file; those five strings are quoted in `StageText` with a `ponytail:` note to route
+> `ProjectBake` when Task 2 opens it.
+
+- [x] **Step 0: Register the gate BEFORE writing it** (finding 8). `ObjCodecTests.csproj` sets
   `EnableDefaultCompileItems=false` (`:6`), so a `LifecycleTests.cs` that is not in the `<Compile Include>` list is not
   compiled and Step 1's "RED" would be a green build that silently ran nothing. Add the `<Compile Include>` entry and the
   `Console.WriteLine(LifecycleTests.Run());` line in `Program.cs` first, with a stub `Run()` returning
@@ -174,7 +194,7 @@ overload has no other possible owner. `BundleClaims` stays on it — R38 asks th
   - Run: `dotnet run --project tests\ObjCodecTests -c Release` → the marker PRINTS. That is the proof the gate is wired;
     a compile failure alone never was.
 
-- [ ] **Step 1: Write the failing gate.** Fill `tests\ObjCodecTests\LifecycleTests.cs` — G1's carrier arms, all of G2 and
+- [x] **Step 1: Write the failing gate.** Fill `tests\ObjCodecTests\LifecycleTests.cs` — G1's carrier arms, all of G2 and
   **G3's `Tail` cases** (empty, under/at/over the limit, CRLF and LF, trailing newline, one long line; the offline table
   at the end of this file assigns G3 here and no other step implemented it). Shape, disk wins:
   ```csharp
@@ -204,7 +224,7 @@ overload has no other possible owner. `BundleClaims` stays on it — R38 asks th
     then, once the types exist as empty shells, a COMPILING run that fails on the wrong result. A compile error alone
     proves nothing about whether `Program` reaches the gate — Step 0 is what proved that.
 
-- [ ] **Step 2: The carrier.** `src\Bake\StageResult.cs` — no interface, no builder, one type per fact (design §4.4:
+- [x] **Step 2: The carrier.** `src\Bake\StageResult.cs` — no interface, no builder, one type per fact (design §4.4:
   "one type with one producer"). `Outcome { Pass, Fail, Void }`; `GateEntry { string Gate, Target, Line; Outcome
   Outcome; }`; `ReadBackResult { int Failed, Passed, Void; IList<GateEntry> Entries; string Terminal; }` plus the §4.4
   **mandatory-proof** predicate (mesh row → `P4` AND `P4-bytes` non-VOID; texture row → `P1` AND `P1-ctl-shipped`;
@@ -212,7 +232,7 @@ overload has no other possible owner. `BundleClaims` stays on it — R38 asks th
   Freshness, Verdict, Generation }`. Move `Tail` here from `ModelDoctor.cs:745` unchanged (fact 7) and make
   `ModelDoctor` call it — **freeze its current semantics, do not "fix" them** (G3).
 
-- [ ] **Step 3: The formatter.** `src\Bake\StageText.cs`. Each string is copied from the file:line below; nothing is
+- [x] **Step 3: The formatter.** `src\Bake\StageText.cs`. Each string is copied from the file:line below; nothing is
   reconstructed from this plan's quotes.
 
   | ID | Copy from |
@@ -233,13 +253,13 @@ overload has no other possible owner. `BundleClaims` stays on it — R38 asks th
   `StageText.R35(patchFailed)`. The dashboard forwards the producer's returned line at runtime; G2 compares the
   formatter against the strings copied from disk, and the producer now IS the formatter.
 
-- [ ] **Step 4: GREEN.** (Step 0 already linked `LifecycleTests.cs` and registered it; link the two new src files here.)
+- [x] **Step 4: GREEN.** (Step 0 already linked `LifecycleTests.cs` and registered it; link the two new src files here.)
   - Run: `dotnet build -c Release` → `Ошибок: 0`, `Предупреждений: 1`
   - Run: `dotnet run --project tests\ObjCodecTests -c Release` → exit 0, `PROJECT-SCAFFOLD PASS, 89` unchanged,
     **new `LIFECYCLE PASS, ~26 check(s)`** (prediction: 8 carrier arms + 18 wording arms)
   - Run: `dotnet run --project tests\TargetPathTests -c Release` → `R0: ALL PASS`
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Bake\StageResult.cs src\Bake\StageText.cs src\Bake\Route7.cs src\Dev\ModelDoctor.cs tests\ObjCodecTests\LifecycleTests.cs tests\ObjCodecTests\ObjCodecTests.csproj tests\ObjCodecTests\Program.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "feat(bake): a structured stage carrier and one verdict formatter, so an all-VOID read-back is not a PASS"`
 
 - [ ] **Review gate:** `cx -Review E:\DEV\PhoenixPoint\ContentTool -Commit <sha> -TimeoutSec 600` (background) +
@@ -800,9 +820,9 @@ gate written after its code is a gate written to pass.
 
 | Gate | Owner | Predicted count | Result |
 |---|---|---|---|
-| G1 state (carrier arms) | Task 1 (carrier) + Task 3 (freshness/receipts) | 8 + 4 | |
-| G2 wording (R25–R38, S1–S7, bake special cases, backend passthrough) | Task 1 | 18 | |
-| G3 Tail (empty, under/at/over the limit, CRLF and LF, trailing newline, one long line) | Task 1 | inside the 26 | |
+| G1 state (carrier arms) | Task 1 (carrier) + Task 3 (freshness/receipts) | 8 + 4 | **13** from Task 1 (`fc1c4a4`) |
+| G2 wording (R25–R38, S1–S7, bake special cases, backend passthrough) | Task 1 | 18 | **26** (`fc1c4a4`) |
+| G3 Tail (empty, under/at/over the limit, CRLF and LF, trailing newline, one long line) | Task 1 | inside the 26 | **9** (`fc1c4a4`) |
 | G4 cancel | Task 4 | 8 | |
 | G5 sequence | Task 5 | 14 | |
 | G6 admission | Task 3 | 22 | |
