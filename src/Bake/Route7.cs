@@ -104,7 +104,11 @@ namespace Morgott.ContentTool.Bake
             // install". Ask for the rows the route actually patches.
             bool wantReplace = project.Replace.Exists(r => string.IsNullOrEmpty(r.video)),
                  wantPublish = project.Publish.Count > 0;
-            if (!wantReplace && !wantPublish) return null;
+            // ...but the LEGACY record is keyed on the MOD, not on what it declares TODAY: a mod that
+            // once declared bundle rows and now declares only "video" still has its .ct-edits record
+            // applied by Addressables before any mod runs, and returning here left that unwarned - the
+            // one outcome this route refuses to have, content applied under a checkbox reading OFF.
+            if (project.Replace.Count == 0 && !wantPublish) return null;
 
             StringBuilder log = new StringBuilder();
             // The mod's OWN directory, never its folder NAME. Both verbs below resolve their argument
@@ -115,18 +119,17 @@ namespace Morgott.ContentTool.Bake
             // and fail silently; reachable since 9f4a316 made media-only Workshop mods loadable.
             string name = modDir;
 
-            if (wantReplace)
-            {
-                // An install carrying the OLD on-disk edit for this mod: refuse the route in both
-                // directions rather than write into the player's game to repair it, and say so loudly.
-                string legacy = LegacyDisk(project.Id);
-                if (legacy != null) log.AppendLine(legacy);
-                else if (BundleClaims.RouteMoves(true, BundleLive.Holds(project.Id), on))
-                    log.AppendLine(on && Failed.Contains(project.Id)
-                        ? "'" + project.Id + "' failed to bake earlier in this session - not baking it " +
-                          "again. Fix the lines it printed, then " + RetryHint(modDir)
-                        : on ? ApplyProject(name) : BundleLive.Uninstall(project.Id));
-            }
+            // An install carrying the OLD on-disk edit for this mod: refuse the route in both
+            // directions rather than write into the player's game to repair it, and say so loudly.
+            // Asked whenever the project declares ANY "replace" row, video ones included; only the
+            // WORK below is gated on the rows this route actually patches.
+            string legacyEdit = project.Replace.Count > 0 ? LegacyDisk(project.Id) : null;
+            if (legacyEdit != null) log.AppendLine(legacyEdit);
+            else if (wantReplace && BundleClaims.RouteMoves(true, BundleLive.Holds(project.Id), on))
+                log.AppendLine(on && Failed.Contains(project.Id)
+                    ? "'" + project.Id + "' failed to bake earlier in this session - not baking it " +
+                      "again. Fix the lines it printed, then " + RetryHint(modDir)
+                    : on ? ApplyProject(name) : BundleLive.Uninstall(project.Id));
             if (wantPublish)
             {
                 // Same as above, for route iii: an install carrying the OLD on-disk key publication is

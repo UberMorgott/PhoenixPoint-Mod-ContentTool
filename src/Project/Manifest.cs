@@ -86,6 +86,17 @@ namespace Morgott.ContentTool.Project
             "ppcontent.json's \"replace\" must be an ARRAY OF ROWS - a value of any other shape declares " +
             "nothing this tool can read or write";
 
+        /// <summary>V3, carried on the exception's own Data rather than in its text. ContentProject.Load
+        /// has to tell this refusal from the two ParseFor throws beside it, and those already PREFIX
+        /// their text with `what` (:132, :136) - so the day this one is prefixed or reworded too, a
+        /// message compare would silently stop matching and the patch-cache stamp it guards would come
+        /// back. A subtype would say it better, but InvalidDataException is SEALED (CS0509) and every
+        /// caller here catches that exact type, so the marker is the structural check that fits.</summary>
+        private const string NotAnArrayMark = "ct.replace-not-an-array";
+
+        /// <summary>Whether <paramref name="bad"/> is V3's refusal, whatever it ends up SAYING.</summary>
+        internal static bool IsNotAnArray(Exception bad) { return bad != null && bad.Data.Contains(NotAnArrayMark); }
+
         private readonly Dictionary<string, object> root;
         private readonly List<ReplaceRow> rows = new List<ReplaceRow>();
         private readonly List<ReplaceRow> pending = new List<ReplaceRow>();
@@ -97,7 +108,12 @@ namespace Morgott.ContentTool.Project
             object value;
             if (!root.TryGetValue("replace", out value) || value == null) return;
             List<object> array = value as List<object>;
-            if (array == null) throw new InvalidDataException(NotAnArray);
+            if (array == null)
+            {
+                var refused = new InvalidDataException(NotAnArray);
+                refused.Data[NotAnArrayMark] = true;
+                throw refused;
+            }
             foreach (object item in array)
             {
                 Dictionary<string, object> members = item as Dictionary<string, object>;

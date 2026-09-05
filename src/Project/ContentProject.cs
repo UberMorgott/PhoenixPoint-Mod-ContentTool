@@ -353,7 +353,9 @@ namespace Morgott.ContentTool.Project
                 // (ProjectBake:111) and Route7:345 stamped the cache current over replacements nobody
                 // performed. Broken JSON and a non-object root say nothing about "replace" - still
                 // non-blocking.
-                if (bad.Message == Manifest.NotAnArray) p.ReplaceRefusals = 1;
+                // BY TYPE, never by sentence: the other two throws in ParseFor prefix their text with
+                // `what`, so a message compare here is one reword away from silently failing open.
+                if (Manifest.IsNotAnArray(bad)) p.ReplaceRefusals = 1;
             }
             p.Publish.AddRange(ParsePublish(File.ReadAllText(metaPath), p.SourceRefusals));
 
