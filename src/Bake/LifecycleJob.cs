@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using Morgott.ContentTool.Import;
 using Morgott.ContentTool.Project;
@@ -190,11 +191,57 @@ namespace Morgott.ContentTool.Bake
             if (stage == "Validate") return StartValidate(on);
             if (stage == "Bake") return StartBake(on);
             if (stage == "Apply") return StartApply(on);
+            if (stage == "Verify") return StartVerify(on);
             if (stage == "Package") return StartPackage(on);
-            // ponytail: Verify has no segmented producer yet - 4.4's read-back producer is its own piece of
-            // work, not budgeted here. This says so instead of inventing a verdict for a stage nothing ran.
-            // Delete this line with it.
-            return "Lifecycle: " + stage + " is not wired to the dashboard yet.";
+            // Every one of the five reaches a producer now, so the only thing left here is a token that is
+            // not a stage - which `Admit` already answers with R33 before anything is dispatched.
+            return StageText.R33(stage);
+        }
+
+        /// <summary>
+        /// MAIN, then WORKER (the freshness observation), then a PARKED MAIN segment: the read-back gates
+        /// mount bundles through AssetsTools and sample Unity-derived paths, so they are frame work like
+        /// the bake's - §5's A3.
+        ///
+        /// IT READS AND NOTHING ELSE. <c>ReadBack.Verify</c> constructs no BundleBaker and installs
+        /// nothing, so there is no publication to protect and no cancel pre-check to make: a Verify that
+        /// runs to the end changes nothing an author has to undo.
+        ///
+        /// <c>ContentProject.Load</c>, not <c>LoadDeclared</c>: the expectations are the IMPORTS - the
+        /// author's own pixels, meshes and weights - and the declared rows alone cannot state them.
+        /// </summary>
+        internal static string StartVerify(Captured on)
+        {
+            long id = Run.Begin("Verify");
+            if (id == 0) return StageText.R26(Run.Latest.Stage);
+            // The empty capture shell, the same refusal StartValidate and StartApply answer: a declaration
+            // that could not be read leaves Declared null, and Load would throw on the same file.
+            if (on.Declared == null)
+            {
+                Finish(id, on.LiveRefusal, BakeDisposition.Refused);
+                return null;
+            }
+            Worker(delegate
+            {
+                Barrier.Wait(id);
+                Observe(on);
+                Park(delegate
+                {
+                    LifecycleState.StageReport r;
+                    try
+                    {
+                        ContentProject p = ContentProject.Load(on.Root);
+                        r = ReadBack.Verify(p, on.PatchedDir, new StringBuilder());
+                    }
+                    catch (Exception ex)
+                    {
+                        Finish(id, "ct_route7 verify THREW: " + ex.Message, BakeDisposition.Failed);
+                        return;
+                    }
+                    Worker(delegate { Observe(on); Finish(id, r.Verdict, r.How, null, false, r.Applicable); });
+                }, true);
+            });
+            return null;
         }
 
         /// <summary>

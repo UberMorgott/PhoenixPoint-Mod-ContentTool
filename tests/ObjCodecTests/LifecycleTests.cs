@@ -266,11 +266,64 @@ internal static class LifecycleTests
         checks += Sequencing();
         checks += Sections();
         checks += Validating();
+        checks += Verifying();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
                "one file swap, the pre-import receipt, the publication ordering, one output owner, " +
                "the admission table, the cancel contract, the Run all chain, the bounded seam sections, " +
-               "the Validate producer";
+               "the Validate producer, the Verify decision";
+    }
+
+    /// <summary>
+    /// G9 - the Verify DECISION. `ReadBack.Verify` gathers (Unity, AssetsTools, unlinkable) and this
+    /// decides, so the dashboard's Verify row and `ct_route7 verify` are the SAME sentence by
+    /// construction - W18's parity assertion is structural, not a comparison of two formatters.
+    ///
+    /// The four §4.4/§7 rules in their order: a counted failure outranks everything, then a mandatory
+    /// proof that never ran, then an empty census, then the census sentence itself.
+    /// </summary>
+    private static int Verifying()
+    {
+        int checks = 0;
+
+        // design:390 - a video-only project declares no patched target, and refusing it forever was the
+        // bug. Nothing to measure is a PASS with NO applicable gate, so it never stops `Run all`.
+        LifecycleState.StageReport empty = LifecycleState.VerifyVerdict("introvideo", 0, 0, false, null, 0);
+        checks += Check(empty.Outcome == GateOutcome.Pass && empty.Verdict == StageText.S8("introvideo") &&
+                        empty.How == BakeDisposition.Success && !empty.Applicable,
+                        "an EMPTY census is S8's PASS and a row with no applicable gate - design:390");
+
+        LifecycleState.StageReport full = LifecycleState.VerifyVerdict("demo", 2, 2, false, null, 0);
+        checks += Check(full.Outcome == GateOutcome.Pass && full.Verdict == StageText.S6("demo", 2, 2) &&
+                        full.How == BakeDisposition.Success && full.Applicable && !full.RestartRequired,
+                        "a FULL census is S6's PASS, in the producer's own words");
+
+        // design:384 - any declared target missing from the census is VOID, and S6 is the function that
+        // refuses to word "1 of 2 ... PASS" at all.
+        LifecycleState.StageReport shortfall = LifecycleState.VerifyVerdict("demo", 1, 2, false, null, 0);
+        checks += Check(shortfall.Outcome == GateOutcome.Void &&
+                        shortfall.Verdict == StageText.S6("demo", 1, 2) && shortfall.Applicable,
+                        "a SHORTFALL is VOID in S6's own wording - a census miss is never worded PASS");
+
+        // The gate's line, VERBATIM. Relabelling it "Verify: VOID - ..." would be a second copy of a
+        // verdict the producer already wrote, and the log and the row would then quote two sentences.
+        string gate = "P4-bytes VOID mesh 'Torso' has no readable vertex/index buffers in the copy";
+        LifecycleState.StageReport mandatory = LifecycleState.VerifyVerdict("demo", 2, 2, true, gate, 0);
+        checks += Check(mandatory.Outcome == GateOutcome.Void && mandatory.Verdict == gate &&
+                        mandatory.How == BakeDisposition.Success && mandatory.Applicable,
+                        "a MANDATORY VOID reports the gate's OWN line, never relabelled");
+
+        LifecycleState.StageReport both = LifecycleState.VerifyVerdict("demo", 1, 2, true, gate, 0);
+        checks += Check(both.Outcome == GateOutcome.Void && both.Verdict == gate,
+                        "a shortfall that ALSO has a mandatory VOID reports the VOID line, not the " +
+                        "census sentence");
+
+        LifecycleState.StageReport failed = LifecycleState.VerifyVerdict("demo", 2, 2, true, gate, 2);
+        checks += Check(failed.Outcome == GateOutcome.Fail && failed.How == BakeDisposition.Failed &&
+                        failed.Verdict == StageText.VerifyFailed(
+                            "2 load-back gate(s) failed for 'demo'; the FAIL line(s) above name them."),
+                        "a counted FAILURE outranks every VOID - VerifyFailed, and the run is Failed");
+        return checks;
     }
 
     /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per

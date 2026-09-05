@@ -2220,7 +2220,10 @@ namespace Morgott.ContentTool.Bake
         /// the patch ran a SECOND BundleBaker pass into the same file and `patchedBundles` (Patch, :172)
         /// counted two. Not offline-linkable - this file carries UnityEngine, so ObjCodecTests cannot link
         /// it; the build gate is the only check this arm gets.</summary>
-        private static List<string> Bundles(ContentProject p)
+        /// <summary>INTERNAL since Verify: `ReadBack.Verify` reads the same census off the imported
+        /// project (it constructs no BundleBaker), and a second copy of this dedup is exactly the drift
+        /// the note above describes.</summary>
+        internal static List<string> Bundles(ContentProject p)
         {
             List<string> names = new List<string>();
             foreach (ShippedReplacement r in p.Replace)
@@ -2265,14 +2268,17 @@ namespace Morgott.ContentTool.Bake
             return "";
         }
 
-        private static ImportedTexture Find(ContentProject p, string name)
+        /// <summary>INTERNAL since Verify - it resolves a row to the same import the patch loop did
+        /// (:1832), because the expectation lists are built inside that loop and cannot be reused.</summary>
+        internal static ImportedTexture Find(ContentProject p, string name)
         {
             foreach (ImportedTexture t in p.Textures)
                 if (string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)) return t;
             return null;
         }
 
-        private static ImportedMesh FindMesh(ContentProject p, string name)
+        /// <summary>INTERNAL since Verify, for the same reason as <see cref="Find"/> (:1799).</summary>
+        internal static ImportedMesh FindMesh(ContentProject p, string name)
         {
             foreach (ImportedMesh m in p.Meshes)
                 if (string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)) return m;

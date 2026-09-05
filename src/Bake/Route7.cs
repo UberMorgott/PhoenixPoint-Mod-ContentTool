@@ -53,8 +53,15 @@ namespace Morgott.ContentTool.Bake
                           "declarations to serve. There is no target-less demo apply any more: it " +
                           "wrote the game's own catalog.json.";
                 case "status": return Status();
-                case "dryrun":
+                // THE SECOND CONSUMER OF THE ONE VERIFY PRODUCER (§4.4 item 9). It left the removal arm
+                // below - whose text is otherwise UNCHANGED - because there IS something to verify now:
+                // the patched copies on disk, read back through the same gates the bake ran.
                 case "verify":
+                    return args != null && args.Length > 1
+                        ? VerifyProject(args[1])
+                        : "usage: ct_route7 verify <project> - re-read this project's patched copies. It " +
+                          "installs nothing and writes nothing.";
+                case "dryrun":
                 case "revert":
                 case "stacktest":
                     return BundleClaims.Removed("ct_route7", verb,
@@ -344,6 +351,23 @@ namespace Morgott.ContentTool.Bake
             {
                 Bundle = bundle; Line = line; Outcome = outcome;
             }
+        }
+
+        /// <summary>
+        /// `ct_route7 verify &lt;project&gt;` - the console consumer of the ONE Verify producer. It prints
+        /// the gate log and then the producer's terminal line, which is character for character the line
+        /// the dashboard's Verify row shows for the same project (W18).
+        ///
+        /// NO INSTALL, NO WRITE, NO KEY. It loads the declaration and its sources, reads the copies that
+        /// are already in <c>PatchedDir</c>, and says what they prove.
+        /// </summary>
+        private static string VerifyProject(string projectName)
+        {
+            Morgott.ContentTool.Project.ContentProject p =
+                Morgott.ContentTool.Project.ContentProject.Load(ContentToolMain.ProjectDir(projectName));
+            StringBuilder log = new StringBuilder();
+            LifecycleState.StageReport r = ReadBack.Verify(p, ContentToolMain.PatchedDir(p.Id), log);
+            return log.Append(r.Verdict).ToString();
         }
 
         /// <summary>

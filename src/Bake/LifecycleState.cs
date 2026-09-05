@@ -636,6 +636,41 @@ namespace Morgott.ContentTool.Bake
         /// `never` forever - `Admit("Verify")` returned R28 over evidence that will never exist, on every
         /// launch. An empty census has nothing to be stale about either, so `fresh` is the honest answer and
         /// Verify says so with <c>StageText.S8</c>.</summary>
+        /// <summary>
+        /// THE VERIFY DECISION, and the only copy of it. <c>ReadBack.Verify</c> gathers the four numbers
+        /// and this states the verdict, so the dashboard's row and `ct_route7 verify` cannot word the same
+        /// measurement differently - §4.4's "one producer, two consumers" is structural here rather than a
+        /// pair of formatters a gate has to keep in step.
+        ///
+        /// THE ORDER IS THE RULE. A counted failure outranks everything (a FAIL is a measurement, and a
+        /// VOID beside it is not news); then a MANDATORY proof that never ran, reported in
+        /// <paramref name="voidLine"/> - THE GATE'S OWN SENTENCE, never relabelled, because the producer
+        /// already wrote it into the log and a second wording would be a second truth; then an empty
+        /// census (design:390); and last the census itself, worded by <see cref="StageText.S6"/>, which is
+        /// what refuses to call a shortfall PASS.
+        ///
+        /// <paramref name="declared"/> is the only thing that decides `Applicable`: a project that
+        /// declares no patched target has NO Verify gate at all, so it is "VOID with a reason" in
+        /// design:281's sense and never stops `Run all`.
+        /// </summary>
+        internal static StageReport VerifyVerdict(string name, int served, int declared,
+                                                  bool mandatoryVoid, string voidLine, int failed)
+        {
+            if (failed > 0)
+                return new StageReport(GateOutcome.Fail,
+                                       StageText.VerifyFailed(failed + " load-back gate(s) failed for '" +
+                                                              name + "'; the FAIL line(s) above name them."),
+                                       BakeDisposition.Failed, false, true, null);
+            if (mandatoryVoid)
+                return new StageReport(GateOutcome.Void, voidLine, BakeDisposition.Success, false, true, null);
+            if (declared == 0)
+                return new StageReport(GateOutcome.Pass, StageText.S8(name), BakeDisposition.Success,
+                                       false, false, null);
+            return new StageReport(served == declared ? GateOutcome.Pass : GateOutcome.Void,
+                                   StageText.S6(name, served, declared), BakeDisposition.Success,
+                                   false, true, null);
+        }
+
         internal static Freshness Fresh(FreshnessObservation o)
         {
             if (o == null) return Freshness.Never;

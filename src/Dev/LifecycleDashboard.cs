@@ -181,15 +181,135 @@ namespace Morgott.ContentTool.Dev
                     LifecycleJob.Barrier.Arm();
                     return Accepted(scenario, null);
                 }
-                // ponytail: `prepare`, `resident`, `change-source`, `ship` and `enable-resident` need real
-                // fixture ASSETS (a .glb, a shipped bundle target to contest) and the Doctor's own SHIP
-                // path; none of that is decidable here without inventing content, and a DashboardValid that
-                // is subtly wrong would fail W9-W12 as a fixture bug wearing a product bug's clothes.
-                // They belong with the rows that consume them.
-                return Accepted(scenario, "scenario '" + scenario + "' is not implemented yet - " +
-                                          "'arm-cancel-bake' is.");
+                if (scenario == "prepare") return Accepted(scenario, Prepare(mods));
+                if (scenario == "change-source") return Accepted(scenario, ChangeSource());
+                if (scenario == "resident") return Accepted(scenario, Resident(mods));
+                if (scenario == "enable-resident") return Accepted(scenario, EnableResident(mods));
+                // ponytail: `ship` needs a Doctor carrying a loaded preview and its `made.Root`
+                // (ModelDoctor.cs:653), which Task 7 Step 1 is what wires. Driving the SHIP path without
+                // it would mean fabricating the very state the row is supposed to measure.
+                if (scenario == "ship")
+                    return Accepted(scenario, "scenario 'ship' needs the Doctor's loaded preview and its " +
+                                              "made.Root, which Task 7 Step 1 wires - it is not decidable " +
+                                              "here yet.");
+                return Accepted(scenario, "unknown scenario '" + scenario + "' - 'prepare', " +
+                                          "'change-source', 'resident', 'enable-resident' and " +
+                                          "'arm-cancel-bake' are.");
             }
             catch (Exception ex) { return Accepted(scenario, ex.GetType().Name + ": " + ex.Message); }
+        }
+
+        // ---- the acceptance fixtures ---------------------------------------------------------------------
+
+        /// <summary>The wizard slice's own project on the bench, and the ONLY fixture source. Nothing below
+        /// invents content: every fixture is a copy of this with its id rewritten, so the assets, the rows
+        /// and the shipped targets are ones that already bake.</summary>
+        private const string FixtureSource = "Replace_Leftleg";
+
+        private static string Prepare(string mods)
+        {
+            string source = ContentMods.Sibling(mods, FixtureSource);
+            if (source == null)
+                return "refused: no " + FixtureSource + " beside " + mods + " - the fixtures are forks of " +
+                       "that project, so it has to be on disk first.";
+            Fork(source, "DashboardValid", null);
+            // A REAL MissingTarget (ProjectBake.cs:1807), not a fabricated FAIL: the row names an asset the
+            // shipped bundle does not contain, so the bake fails the way a broken project fails.
+            Fork(source, "DashboardPatchFail",
+                 delegate(string json) { return Retarget(json, "asset", "ContentToolNoSuchTarget"); });
+            // ponytail: the plan words this fixture as "retargeted to a bundle no other fixture and no live
+            // claim contests". Its own ID already is that: R38 asks whether THIS project's copy is being
+            // served (Capture -> ProjectBake.Live over PatchedDir(id)\<bundle>), and a distinct id is a
+            // distinct copy path that nothing loads while the fixture is never applied. Retargeting the
+            // bundle without the asset would instead produce a MissingTarget - DashboardPatchFail's job.
+            Fork(source, "DashboardAuthor", null);
+            return null;
+        }
+
+        /// <summary>Only the fixture that is SELECTED, and only one file of it.</summary>
+        private static string ChangeSource()
+        {
+            if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+                return "refused: nothing is selected - Open a forked fixture first.";
+            string name = Path.GetFileName(root.TrimEnd('\\', '/'));
+            if (!name.StartsWith("Dashboard", StringComparison.Ordinal))
+                return "refused: '" + name + "' is not a forked fixture, and this rewrites a source file.";
+            string content = Path.Combine(root, "Content");
+            string[] files = Directory.Exists(content)
+                ? Directory.GetFiles(content, "*", SearchOption.AllDirectories) : new string[0];
+            if (files.Length == 0) return "refused: " + content + " holds no source file to change.";
+            Array.Sort(files, StringComparer.Ordinal);
+            // The bytes are rewritten UNCHANGED and the stamp moves with them: `PatchCache.Key` hashes each
+            // source's name, length and LastWriteTimeUtc, so the receipt goes stale by an actual key
+            // comparison (Route7.Observe:150) - and the fixture stays a loadable .glb, which flipping a
+            // byte inside it would not.
+            File.WriteAllBytes(files[0], File.ReadAllBytes(files[0]));
+            return null;
+        }
+
+        /// <summary>It does not INVENT a resident bundle - it asks which of the source project's declared
+        /// targets the running game has already loaded, and refuses when none has. That refusal is the
+        /// honest answer to a question about live state, not a fixture bug.</summary>
+        private static string Resident(string mods)
+        {
+            string source = ContentMods.Sibling(mods, FixtureSource);
+            if (source == null) return "refused: no " + FixtureSource + " beside " + mods + ".";
+            foreach (ShippedReplacement r in ContentProject.LoadDeclared(source).Replace)
+            {
+                if (!string.IsNullOrEmpty(r.video) || string.IsNullOrEmpty(r.bundle)) continue;
+                if (!BundleLive.ResidentNow(r.bundle)) continue;
+                Fork(source, "DashboardResident", null);
+                return null;
+            }
+            return "refused: the game has none of " + FixtureSource + "'s declared bundles loaded right " +
+                   "now, so there is no resident target to fork onto.";
+        }
+
+        /// <summary>The REAL checkbox body (`Route7.Toggle`, the one ModRoster calls), never a roster edit
+        /// and never a fabricated claim. The fixture has to be on disk from a previous session, because the
+        /// point of the row is a mod enabled AFTER a restart.</summary>
+        private static string EnableResident(string mods)
+        {
+            string at = ContentMods.Sibling(mods, "DashboardResident");
+            if (at == null)
+                return "refused: no DashboardResident on disk - run 'resident', restart the game, then " +
+                       "ask again.";
+            Route7.Toggle(at, true);
+            return null;
+        }
+
+        /// <summary>A fixture is a COPY of a real project carrying its own id, so two of them can be baked,
+        /// applied and claimed without contesting each other. <paramref name="mutate"/> edits the manifest
+        /// TEXT, which is how a fixture that must fail gets its defect - a real row naming a real absence.</summary>
+        private static void Fork(string source, string name, Func<string, string> mutate)
+        {
+            string at = Path.Combine(Directory.GetParent(source).FullName, name);
+            if (Directory.Exists(at)) Directory.Delete(at, true);
+            Copy(source, at);
+            string manifest = Path.Combine(at, ContentMods.Manifest);
+            string json = Retarget(File.ReadAllText(manifest), "id", "acceptance." + name.ToLowerInvariant());
+            File.WriteAllText(manifest, mutate == null ? json : mutate(json));
+        }
+
+        /// <summary>Rewrites the FIRST value of a named string field, in place, leaving every other byte of
+        /// the manifest as the author wrote it.</summary>
+        private static string Retarget(string json, string field, string value)
+        {
+            int key = json.IndexOf("\"" + field + "\"", StringComparison.Ordinal);
+            if (key < 0)
+                throw new InvalidDataException("no \"" + field + "\" in " + ContentMods.Manifest);
+            int open = json.IndexOf('"', json.IndexOf(':', key) + 1);
+            int close = json.IndexOf('"', open + 1);
+            return json.Substring(0, open + 1) + value + json.Substring(close);
+        }
+
+        private static void Copy(string from, string to)
+        {
+            Directory.CreateDirectory(to);
+            foreach (string f in Directory.GetFiles(from))
+                File.Copy(f, Path.Combine(to, Path.GetFileName(f)), true);
+            foreach (string d in Directory.GetDirectories(from))
+                Copy(d, Path.Combine(to, Path.GetFileName(d)));
         }
 
         // ---- the pump ----------------------------------------------------------------------------------

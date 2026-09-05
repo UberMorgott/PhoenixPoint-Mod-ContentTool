@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using Morgott.ContentTool.Import;
@@ -28,6 +29,150 @@ namespace Morgott.ContentTool.Bake
     /// </summary>
     internal static class ReadBack
     {
+        /// <summary>
+        /// THE VERIFY PRODUCER, and there is exactly one of it: the dashboard's Verify row
+        /// (<c>LifecycleJob.StartVerify</c>) and `ct_route7 verify &lt;project&gt;` both print what this
+        /// returns, which is what makes W18's parity assertion structural rather than a comparison of two
+        /// formatters.
+        ///
+        /// IT READS. No <see cref="BundleBaker"/> is constructed, so nothing is opened for writing and
+        /// <c>baker.WhyNot</c> is never asked - the gates measure the COPY that is already on disk, and an
+        /// absent copy is a CENSUS MISS rather than a failed gate: the target is named and no gate is run
+        /// over a file that is not there.
+        ///
+        /// THE EXPECTATION LISTS CANNOT BE REUSED FROM THE PATCH LOOP - they are filled interleaved with
+        /// the writer (ProjectBake.cs:1772, :1791, :1822, :1842) - so they are REBUILT here from the
+        /// imported project alone, through the same <c>ProjectBake.Find</c>/<c>FindMesh</c> resolution the
+        /// loop used. The WORDING is not rebuilt: every line still comes out of <see cref="Run"/>.
+        ///
+        /// The census is PER TARGET and never <c>BundleLive.Holds</c>, which passes on ONE matching claim
+        /// (design:388): for each declared bundle the standing claim has to exist, be this project's and
+        /// point at this project's own copy.
+        /// </summary>
+        internal static LifecycleState.StageReport Verify(ContentProject p, string patchedDir,
+                                                          StringBuilder log)
+        {
+            List<string> declared = ProjectBake.Bundles(p);
+            int served = 0, failed = 0;
+            bool mandatoryVoid = false;
+            string voidLine = null;
+
+            foreach (string bundleFile in declared)
+            {
+                string shipped = BakeSelfCheck.ShippedBundlePath(bundleFile);
+                string copy = Path.Combine(patchedDir, bundleFile);
+                if (!File.Exists(copy))
+                {
+                    // NAMED, NOT MEASURED. This is the shortfall S6 words; running a gate over a missing
+                    // file would report FAIL for an absence, which is the one thing the carrier exists to
+                    // keep apart.
+                    log.AppendLine("VERIFY " + bundleFile + ": no patched copy at " + copy +
+                                   " - this project serves no copy of that target.");
+                    continue;
+                }
+
+                List<ImportedTexture> want = new List<ImportedTexture>();
+                List<KeyValuePair<string, string>> mats = new List<KeyValuePair<string, string>>();
+                List<KeyValuePair<string, ImportedMesh>> meshes = new List<KeyValuePair<string, ImportedMesh>>();
+                List<KeyValuePair<string, ShippedReplacement>> clips =
+                    new List<KeyValuePair<string, ShippedReplacement>>();
+                foreach (ShippedReplacement r in Rows(p, bundleFile))
+                {
+                    if (!string.IsNullOrEmpty(r.material))
+                    {
+                        // The bake stores the NORMALISED value (ProjectBake.cs:1772), which is what P3
+                        // looks for in the property block - the author's own spelling would not match.
+                        string[] kv = r.material.Split('=');
+                        float v;
+                        if (kv.Length == 2 && float.TryParse(kv[1], NumberStyles.Float,
+                                                             CultureInfo.InvariantCulture, out v))
+                            mats.Add(new KeyValuePair<string, string>(
+                                r.asset, kv[0] + "=" + v.ToString(CultureInfo.InvariantCulture)));
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(r.clip))
+                    {
+                        clips.Add(new KeyValuePair<string, ShippedReplacement>(r.asset, r));
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(r.mesh))
+                    {
+                        ImportedMesh im = ProjectBake.FindMesh(p, r.mesh);
+                        if (im != null) meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));
+                        continue;
+                    }
+                    ImportedTexture t = ProjectBake.Find(p, r.texture);
+                    if (t != null) want.Add(t);
+                }
+
+                ReadBackResult measured = Run(log, bundleFile, shipped, copy, want, mats, meshes, clips);
+                failed += measured.Failed;
+
+                foreach (ShippedReplacement r in Rows(p, bundleFile))
+                {
+                    // A clip row has no mandatory gate - P7 is not in ReadBackResult's three lists
+                    // (StageResult.cs:103-:105), and asking for one would invent a proof nothing measures.
+                    if (!string.IsNullOrEmpty(r.clip)) continue;
+                    RowKind kind = !string.IsNullOrEmpty(r.material) ? RowKind.Material
+                                 : !string.IsNullOrEmpty(r.mesh) ? RowKind.Mesh : RowKind.Texture;
+                    if (!measured.MandatoryVoid(r.asset, kind, bundleFile)) continue;
+                    mandatoryVoid = true;
+                    if (voidLine != null) continue;
+                    voidLine = FirstVoid(measured, kind == RowKind.Texture ? bundleFile : r.asset);
+                    if (voidLine != null) continue;
+                    // The gate did not run AT ALL, so there is no line of its own to quote. Verify is the
+                    // producer of this one and writes it to the log too, so the row and the log still
+                    // quote the same sentence.
+                    voidLine = "VERIFY VOID '" + r.asset + "' in " + bundleFile + " has no measurement " +
+                               "for a gate its row requires - nothing proves this target.";
+                    log.AppendLine(voidLine);
+                }
+
+                // THE PER-TARGET CLAIM CENSUS. `BundleLive.Holds` answers true on one matching claim over
+                // the whole mod, so a project serving one of its two targets would read as served.
+                BundleClaim claim = BundleClaims.Find(bundleFile);
+                if (claim != null && string.Equals(claim.Mod, p.Id, StringComparison.Ordinal) &&
+                    Same(claim.Path, copy)) served++;
+                else
+                    log.AppendLine("VERIFY " + bundleFile + ": the live claim is " +
+                                   (claim == null ? "held by nobody" : "'" + claim.Mod + "' -> " + claim.Path) +
+                                   ", not this project's " + copy + ".");
+            }
+
+            return LifecycleState.VerifyVerdict(p.Id, served, declared.Count, mandatoryVoid, voidLine, failed);
+        }
+
+        /// <summary>This project's non-video rows for one bundle, in declaration order - the same filter
+        /// the patch loop applies (ProjectBake.cs:1750-:1752).</summary>
+        private static IEnumerable<ShippedReplacement> Rows(ContentProject p, string bundleFile)
+        {
+            foreach (ShippedReplacement r in p.Replace)
+            {
+                if (!string.IsNullOrEmpty(r.video)) continue;
+                if (!string.Equals(r.bundle, bundleFile, StringComparison.OrdinalIgnoreCase)) continue;
+                yield return r;
+            }
+        }
+
+        /// <summary>The first VOID line recorded against that key, so the verdict quotes the producer
+        /// rather than composing a second sentence about the same measurement.</summary>
+        private static string FirstVoid(ReadBackResult r, string key)
+        {
+            foreach (GateEntry e in r.Entries)
+                if (e.Outcome == GateOutcome.Void && string.Equals(e.Target, key, StringComparison.Ordinal))
+                    return e.Line;
+            return null;
+        }
+
+        /// <summary>One spelling of a file path, so a claim's and ours can be compared - the claim is
+        /// recorded with whatever separators the installer handed it.</summary>
+        private static bool Same(string a, string b)
+        {
+            try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b),
+                                       StringComparison.OrdinalIgnoreCase); }
+            catch (Exception) { return false; }
+        }
+
         /// <summary>THIS PRODUCER NEVER CARRIES A TERMINAL LINE - it returns one result PER BUNDLE, and the
         /// run's terminal sentence is composed once, after every bundle and after the gates that are not
         /// read-back at all, at ProjectBake.cs:402 (S4/S5). There is nothing to thread in: the line does not
