@@ -318,6 +318,25 @@ namespace Morgott.ContentTool.Bake
         /// face.</summary>
         internal enum ApplyDisposition { Redirected, Resident, Refused, BakeFailed }
 
+        /// <summary>What became of ONE target, kept instead of thrown away. <c>BundleLive.Install</c> builds
+        /// exactly this line per bundle and then folds every one of them into an aggregate (:66), and
+        /// <c>ApplyProject</c>'s single-bundle answer can only speak for the ONE bundle its caller named -
+        /// so a panel with five rows had two ways to learn what happened to the other four: parse the log,
+        /// or install twice. Both are forbidden, and this is the third.</summary>
+        internal sealed class TargetInstall
+        {
+            internal readonly string Bundle;
+            /// <summary>The producer's own line for this target, VERBATIM - never re-composed, and never
+            /// parsed to work out <see cref="Outcome"/>, which is measured separately.</summary>
+            internal readonly string Line;
+            internal readonly ApplyDisposition Outcome;
+
+            internal TargetInstall(string bundle, string line, ApplyDisposition outcome)
+            {
+                Bundle = bundle; Line = line; Outcome = outcome;
+            }
+        }
+
         /// <summary>
         /// Installs a project's already-baked copies LIVE. Reads ContentToolMain.PatchedDir() and
         /// bakes when it is empty: this is what installing a DOWNLOADED mod looks like, where the
@@ -331,10 +350,28 @@ namespace Morgott.ContentTool.Bake
             return ApplyProject(projectName, null, out ignored);
         }
 
+        /// <summary>The SAME apply, with a disposition per declared target - what a five-row panel needs and
+        /// what neither wrapper can give it (see <see cref="TargetInstall"/>). <paramref name="how"/> is
+        /// aggregated CONSERVATIVELY: any refusal survives, then any restart-required target, and a blanket
+        /// "redirected LIVE" is only reported when every target was.</summary>
+        internal static string ApplyProject(string projectName, out IList<TargetInstall> targets,
+                                            out ApplyDisposition how)
+        {
+            return ApplyProject(projectName, null, out targets, out how);
+        }
+
         /// <param name="forBundle">the ONE shipped bundle the caller cares about, or null for the console
         /// verb, which prints the log and asks nothing.</param>
         internal static string ApplyProject(string projectName, string forBundle, out ApplyDisposition how)
         {
+            IList<TargetInstall> ignored;
+            return ApplyProject(projectName, forBundle, out ignored, out how);
+        }
+
+        private static string ApplyProject(string projectName, string forBundle,
+                                           out IList<TargetInstall> targets, out ApplyDisposition how)
+        {
+            targets = new List<TargetInstall>();
             how = ApplyDisposition.Refused;
             string projectRoot = ContentToolMain.ProjectDir(projectName);
             Morgott.ContentTool.Project.ContentProject project =
@@ -347,15 +384,17 @@ namespace Morgott.ContentTool.Bake
             string[] owned = ProjectBake.OutputDirs(projectRoot, project.Id);
             string contended;
             if (!OutputClaim.Take(owned, out contended)) return contended;
-            try { return Applied(project, projectRoot, forBundle, out how); }
+            try { return Applied(project, projectRoot, forBundle, out targets, out how); }
             finally { OutputClaim.Release(owned); }
         }
 
         /// <summary>The apply itself, under this project's output claim. Private for the same reason
         /// <c>ProjectBake.Baked</c> is: a caller that reached here directly would own nothing.</summary>
         private static string Applied(Morgott.ContentTool.Project.ContentProject project, string projectRoot,
-                                      string forBundle, out ApplyDisposition how)
+                                      string forBundle, out IList<TargetInstall> targets,
+                                      out ApplyDisposition how)
         {
+            targets = new List<TargetInstall>();
             how = ApplyDisposition.Refused;
             StringBuilder pre = new StringBuilder();
             string modId = project.Id;
@@ -463,9 +502,12 @@ namespace Morgott.ContentTool.Bake
                 pre.AppendLine("REFUSED: " + forBundle + " is not declared by this project - its " +
                                Project.ContentMods.Manifest + " names " + declared.Count + " \"replace\" " +
                                "target(s)" + (declared.Count == 0 ? "" : ": " + string.Join(", ", declared.ToArray())));
-            bool wasResident = ours && BundleLive.ResidentNow(forBundle);
             pre.Append("installing " + copies.Count + " patched copy(ies) as '" + modId + "'\n")
-               .Append(BundleLive.Install(modId, copies));
+               // THE PER-TARGET ANSWER COMES OUT OF THE INSTALL LOOP, not from a second sample around it.
+               // The `wasResident`/`Find` pair that used to sit here measured ONE bundle either side of a
+               // loop that installs several; inside, each target is sampled at its own Register, which is
+               // the same rule applied per target instead of per press.
+               .Append(BundleLive.Install(modId, copies, out targets));
             // UNCONDITIONALLY, once the copies are in. It sat inside the `!haveAll` branch, so the
             // press that arrived with a FRESH patched folder - the common case after a fix elsewhere -
             // installed the copies and left the session's "this one failed" flag standing, and the
@@ -474,12 +516,23 @@ namespace Morgott.ContentTool.Bake
             Failed.Remove(modId);
             if (ours)
             {
-                BundleClaim mine = copies.Exists(c => string.Equals(c.Key, forBundle, StringComparison.OrdinalIgnoreCase))
-                    ? BundleClaims.Find(forBundle) : null;
-                how = wasResident ? ApplyDisposition.Resident
-                    : mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal)
-                      ? ApplyDisposition.Redirected
-                      : ApplyDisposition.Refused;
+                // A declared bundle this apply did NOT install - refused by Register, or simply absent from
+                // the patched folder - is not in the list, and stays Refused.
+                foreach (TargetInstall t in targets)
+                    if (string.Equals(t.Bundle, forBundle, StringComparison.OrdinalIgnoreCase))
+                    { how = t.Outcome; break; }
+            }
+            else if (!asked)
+            {
+                // NO BUNDLE NAMED, so speak for the whole project - CONSERVATIVELY. `how` used to stay at
+                // its initial Refused here (it was only ever overwritten inside `if (ours)`), so the
+                // console-shaped call reported a refusal that did not happen. Any refusal survives; then any
+                // restart-required target, because that is the one the author has to act on; a blanket
+                // Redirected only when every target was.
+                foreach (TargetInstall t in targets)
+                    if (t.Outcome == ApplyDisposition.Refused) { how = ApplyDisposition.Refused; break; }
+                    else if (t.Outcome == ApplyDisposition.Resident) how = ApplyDisposition.Resident;
+                    else if (how != ApplyDisposition.Resident) how = ApplyDisposition.Redirected;
             }
             return pre.ToString();
         }

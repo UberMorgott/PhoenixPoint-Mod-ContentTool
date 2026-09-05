@@ -54,12 +54,33 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static string Install(string modId, IList<KeyValuePair<string, string>> bundleToCopy)
         {
+            IList<Route7.TargetInstall> ignored;
+            return Install(modId, bundleToCopy, out ignored);
+        }
+
+        /// <param name="targets">what became of each bundle, in install order - the same lines this method
+        /// already builds, kept instead of folded into the aggregate. MEASURED, never read off the line:
+        /// residency is sampled immediately BEFORE that target's Register (the order Register:80-92 decides
+        /// in - it refuses a resident bundle before it looks at claims), and the claim immediately after, so
+        /// a mod's own standing claim from an earlier apply cannot be credited to this press.</param>
+        internal static string Install(string modId, IList<KeyValuePair<string, string>> bundleToCopy,
+                                       out IList<Route7.TargetInstall> targets)
+        {
+            List<Route7.TargetInstall> per = new List<Route7.TargetInstall>();
+            targets = per;
             if (bundleToCopy == null || bundleToCopy.Count == 0) return "no patched copies to redirect";
             StringBuilder log = new StringBuilder();
             List<string> lines = new List<string>();
             foreach (KeyValuePair<string, string> c in bundleToCopy)
             {
+                bool wasResident = ResidentNow(c.Key);
                 string line = Register(modId, c.Key, c.Value);
+                BundleClaim mine = BundleClaims.Find(c.Key);
+                per.Add(new Route7.TargetInstall(c.Key, line,
+                    wasResident ? Route7.ApplyDisposition.Resident
+                    : mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal)
+                      ? Route7.ApplyDisposition.Redirected
+                      : Route7.ApplyDisposition.Refused));
                 lines.Add(line);
                 log.AppendLine(line);
             }

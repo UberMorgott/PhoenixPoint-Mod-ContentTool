@@ -53,6 +53,7 @@ internal static class Program
         VideoOnlyReportArm();
         DeclaredTypeArm();
         StopEventArm();
+        CancelPrecedenceArm();
         WeaponTintArm();
         FitBelowRootArm();
         FitAlgebraArm();
@@ -1948,6 +1949,38 @@ internal static class Program
     /// the SOURCE, the arrangement S13-wired, S17 and S18 use, with the shipped body as the control
     /// in the same run. Scanned RAW, not through Strip(): the evidence is in the string literals.
     /// </summary>
+    /// <summary>
+    /// Gate S40: a CANCELLED bake must not poison the session and must not install.
+    ///
+    /// `BakeDisposition.Cancelled` had no producer until the segmented job landed, and Route7.Applied reads
+    /// the disposition BEFORE it reads `patchFailed`. Get the order wrong and a run the author stopped is
+    /// read as a bake with zero patch failures - so the STALE copies are installed as if this bake had
+    /// produced them - or, if contention is encoded as a failure instead, it reaches `Failed.Add(modId)` and
+    /// blocks the mod's checkbox for the rest of the session over a press nobody got wrong.
+    ///
+    /// Route7 needs UnityEngine and Addressables, so it cannot run here: the arm is over the SOURCE, the
+    /// arrangement S13-wired, S17, S18 and S20 use. It asserts the SHAPE - the Refused/Cancelled return
+    /// stands between the bake and both `Failed.Add` and the install - not a sentence.
+    /// </summary>
+    private static void CancelPrecedenceArm()
+    {
+        string src = SrcRoot();
+        string file = src == null ? null : Path.Combine(src, "Bake", "Route7.cs");
+        string text = file != null && File.Exists(file) ? File.ReadAllText(file) : null;
+
+        int bake = text == null ? -1 : text.IndexOf("ProjectBake.Bake(projectRoot, true)", StringComparison.Ordinal);
+        int stop = text == null ? -1 : text.IndexOf("BakeDisposition.Cancelled", StringComparison.Ordinal);
+        int poison = text == null ? -1 : text.IndexOf("Failed.Add(modId)", StringComparison.Ordinal);
+        int install = text == null ? -1 : text.IndexOf("BundleLive.Install(", StringComparison.Ordinal);
+
+        Check("S40-cancel-precedence",
+            bake >= 0 && stop > bake && poison > stop && install > stop &&
+            Regex.IsMatch(text, "How\\s*==\\s*BakeDisposition\\.Refused\\s*\\|\\|\\s*" +
+                                "\\w+\\.How\\s*==\\s*BakeDisposition\\.Cancelled\\)\\s*\\r?\\n\\s*return"),
+            "a Refused or Cancelled bake returns before `patchFailed` is read, so a cancelled run reaches " +
+            "neither Failed.Add nor the install -> " + file);
+    }
+
     private static void StopEventArm()
     {
         string src = SrcRoot();
