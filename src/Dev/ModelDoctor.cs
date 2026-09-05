@@ -79,6 +79,13 @@ namespace Morgott.ContentTool.Dev
         /// volatile-snapshot pattern does not apply here - no worker changes state between Layout and
         /// Repaint, the main thread simply stops.</summary>
         private bool shipPending, shipLabelPainted;
+        /// <summary>Ticks the arm has waited for its label. The gate closes on a PAINT, and a panel that is
+        /// not drawn at all never paints one: the browser and the prototype tree return out of Draw before
+        /// the SHIP section, and the FIT tab does not call Draw while Tick keeps running. Those controls are
+        /// dead while a press is armed, but a press that is somehow still waiting after two ticks is
+        /// abandoned rather than left to fire under whatever panel is on screen when it finally paints.
+        /// </summary>
+        private int shipArmedFor;
         private string shipPhase = "", shipResult = "", shipPath = "", shipTail = "";
         /// <summary>Everything the run needs, copied when the intent drains, so a click on the browser while
         /// the bake runs cannot change what is being shipped.</summary>
@@ -437,8 +444,33 @@ namespace Morgott.ContentTool.Dev
             {
                 shipPending = false;
                 shipLabelPainted = false;
+                shipArmedFor = 0;
                 DoShip();
+                // EVERY refusal DoShip can reach is written to shipResult and returned - and the rows that
+                // show it live past Draw's early returns, which is exactly where a refused press leaves the
+                // panel (the gen-mismatch arm exists BECAUSE Restart nulled Ready). Message is drawn above
+                // them, so mirroring it here is what makes a refusal readable at all.
+                Message = shipResult;
             }
+            else if (shipPending && ++shipArmedFor > 2) CancelShip();
+        }
+
+        /// <summary>The arm outlived the panel: two ticks and no paint. Everything the press copied is
+        /// dropped, so the next one starts from what is on screen now.</summary>
+        private void CancelShip()
+        {
+            shipPending = false;
+            shipLabelPainted = false;
+            shipArmedFor = 0;
+            shipGen = -1;
+            shipName = shipSource = shipSha = shipBundle = shipAsset = null;
+            shipAliases = null;
+            shipProto = null;
+            shipTargetWas = null;
+            shipRenderer = null;
+            shipPhase = "";
+            Message = shipResult = "SHIP: cancelled - the panel was not drawn";
+            ContentToolMain.Say("SHIP: cancelled - the panel was not drawn");
         }
 
         private string DoPreview()
@@ -576,7 +608,13 @@ namespace Morgott.ContentTool.Dev
             shipPhase = "creating the project, baking and applying - the game freezes for a few seconds";
             shipPending = true;
             shipLabelPainted = false;
+            shipArmedFor = 0;
         }
+
+        /// <summary>True while a press is armed and has not run yet. The bench reads it to keep its own
+        /// tab toggle - the one control that can stop Draw being called at all - dead for that frame.
+        /// </summary>
+        internal bool ShipPending { get { return shipPending; } }
 
         /// <summary>
         /// FRAME N+2, and every byte of it. Order is design §4.5: the source is re-read and compared against
@@ -665,14 +703,17 @@ namespace Morgott.ContentTool.Dev
                     // S1, THE NORMAL OUTCOME. The bay rendered this very mesh, so the bundle is resident and
                     // BundleLive.Register refuses before taking a claim. No forced unload: it would pull the
                     // archive out from under live objects, which is what that refusal exists to prevent.
-                    shipResult = "baked OK - restart the game and enable '" + shipName + "' in the mod manager. " +
+                    // "applied", not "baked": ApplyProject bakes only when the patched copies are missing or
+                    // stale (Route7:283-286), so a press that arrived with a fresh folder baked nothing at
+                    // all and a line claiming it did would be a line about work that did not happen.
+                    shipResult = "applied - restart the game and enable '" + shipName + "' in the mod manager. " +
                                  "Phoenix Point already loaded " + shipBundle + ", so this session keeps showing " +
                                  "your Doctor preview.";
                 else if (how == Bake.Route7.ApplyDisposition.Redirected)
-                    shipResult = "baked and redirected LIVE - " + shipBundle + " now loads from the patched copy " +
+                    shipResult = "applied and redirected LIVE - " + shipBundle + " now loads from the patched copy " +
                                  "on the next load";
                 else                                    // R23
-                    shipResult = "baked, but NOT APPLIED: " + shipBundle + " was neither redirected nor already " +
+                    shipResult = "NOT APPLIED: " + shipBundle + " was neither redirected nor already " +
                                  "loaded - the log above names the refusal; the project folder is complete and " +
                                  "can be enabled after a restart";
             }
@@ -1434,7 +1475,10 @@ namespace Morgott.ContentTool.Dev
             // bone-less target already says, and the same refusal to invent one.
             // EVERY CONTROL THAT CAN MOVE THE TARGET IS DEAD WHILE A PRESS IS ARMED: the gate spans one
             // frame the author can act in, and retargeting mid-press is what DoShip's generation check
-            // would then have to throw the press away for.
+            // would then have to throw the press away for. That is Preview, Revert preview, Save aliases
+            // and Write skel plan here, plus Browse..., Change and the Replace/Extend toggle in Header
+            // and the bench's own FIT/DOCTOR tab. Copy report is NOT gated: it reads the report the
+            // author is looking at and touches neither the target nor the panel's shape.
             bool blind = Target == null || Target.BoneNames == null;
             GUI.enabled = !shipPending &&
                           (Ready.Outcome == Outcome.ByName || Ready.Outcome == Outcome.NearestBone) &&
@@ -1452,10 +1496,9 @@ namespace Morgott.ContentTool.Dev
             // state an author is in when they decide to bake it.
             GUI.enabled = !shipPending && aliases.Count > 0;
             if (GUILayout.Button("Write skel plan", GUILayout.Width(120f))) Enqueue("skelplan");
-            GUI.enabled = !shipPending;
+            GUI.enabled = true;
             if (GUILayout.Button("Copy report", GUILayout.Width(100f)))
                 GUIUtility.systemCopyBuffer = PlainTextOf(Ready, Path, Target);
-            GUI.enabled = true;
             GUILayout.EndHorizontal();
 
             Ship();
@@ -1488,7 +1531,9 @@ namespace Morgott.ContentTool.Dev
 
             // ponytail: File.Exists on every OnGUI pass - two stats a frame on a local file. Cache it in
             // Refresh() (Layout only) if a profile ever shows it.
-            string refusal = ProjectScaffold.NameRefusal(projectName);
+            // TRIMMED FIRST, because ArmShip ships the trimmed name: judging the raw field refused
+            // "MyMod " for a trailing space the press would never have sent.
+            string refusal = ProjectScaffold.NameRefusal((projectName ?? "").Trim());
             bool ready = Ready != null && Ready.Outcome == Outcome.ByName &&
                          Ready.Report.Count(Severity.Blocking) == 0 &&
                          Prototype != null && Prototype.Mode == VerifyMode.Replace && Prototype.Live != null &&
@@ -1527,17 +1572,24 @@ namespace Morgott.ContentTool.Dev
             GUILayout.BeginHorizontal();
             GUILayout.Label("source " + BenchList.Elide(Path == null ? "-" : System.IO.Path.GetFileName(Path), 22),
                             GUILayout.Width(180f));
+            // DEAD WHILE A PRESS IS ARMED, like every control below it - and these three for a second
+            // reason: each one takes Draw down a path that never reaches the SHIP section, so the gate's
+            // paint would never happen and the press would sit armed until the panel came back.
+            GUI.enabled = !shipPending;
             if (GUILayout.Button("Browse...", GUILayout.Width(80f)))
                 browser.Show(Path == null ? "" : System.IO.Path.GetDirectoryName(Path));
+            GUI.enabled = true;
             GUILayout.Label("|", GUILayout.Width(8f));
             GUILayout.Label("prototype " + BenchList.Elide(Prototype == null || Prototype.Record == null
                                                            ? "-" : Prototype.Record.DisplayName, 18),
                             GUILayout.Width(160f));
+            GUI.enabled = !shipPending;
             if (GUILayout.Button("Change", GUILayout.Width(70f))) edits.Enqueue(delegate { browserOpen = true; });
+            GUI.enabled = true;
             GUILayout.Label("|", GUILayout.Width(8f));
             // The mode is a TOGGLE and not a label: Replace and Extend answer two different questions
             // about the same slot, and swapping between them is the comparison the author came for.
-            GUI.enabled = Prototype != null;
+            GUI.enabled = !shipPending && Prototype != null;
             if (GUILayout.Button(Prototype == null ? "Replace/Extend" : Prototype.Mode.ToString(),
                                  GUILayout.Width(100f)))
             {
@@ -1956,6 +2008,7 @@ namespace Morgott.ContentTool.Dev
             // opening on the last one's result text.
             shipPending = false;
             shipLabelPainted = false;
+            shipArmedFor = 0;
             shipGen = -1;
             shipName = shipSource = shipSha = shipBundle = shipAsset = null;
             shipAliases = null;

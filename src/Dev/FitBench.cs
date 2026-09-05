@@ -1666,8 +1666,13 @@ namespace Morgott.ContentTool.Dev
             // mesh is being diagnosed. The close is still deferred past EndArea, exactly as below:
             // the tab is a different panel, not a different set of rules about the layout stack.
             GUILayout.BeginHorizontal();
+            // DEAD WHILE THE DOCTOR HAS A PRESS ARMED. Its two-frame gate closes on a PAINT of its own
+            // SHIP label, and leaving the tab stops Draw being called at all while Tick keeps running
+            // below - so the press would sit armed and fire whenever the author came back.
+            GUI.enabled = !doctor.ShipPending;
             if (GUILayout.Toggle(!doctorTab, " FIT", GUILayout.Width(70f))) doctorTab = false;
             if (GUILayout.Toggle(doctorTab, " MODEL DOCTOR", GUILayout.Width(130f))) doctorTab = true;
+            GUI.enabled = true;
             GUILayout.EndHorizontal();
             if (doctorTab)
             {

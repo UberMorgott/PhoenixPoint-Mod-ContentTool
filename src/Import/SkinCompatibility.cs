@@ -50,9 +50,6 @@ namespace Morgott.ContentTool.Import
     /// A plain snapshot of the live target, taken on the main thread so the worker never touches a
     /// UnityEngine object. The last five fields are the FINGERPRINT: a SkinnedMeshRenderer keeps its
     /// instance id while its mesh, its bind poses and its bones are replaced under it.
-    ///
-    /// Nothing WRITES these yet - the Doctor preflight fills them from the renderer (task 7), which
-    /// is why the compiler reports them as never assigned until then.
     /// </summary>
     internal sealed class RigTarget
     {
