@@ -42,6 +42,11 @@
     <!-- The lifecycle CARRIER and the one verdict formatter carry no UnityEngine type on purpose (the
          dashboard's producers run on a worker), so "an all-VOID read-back is not a PASS" and every
          verdict string are proven here against the production types instead of by reading a panel. -->
+    <!-- The lifecycle CARRIER and the one verdict formatter carry no UnityEngine type on purpose (the
+         dashboard's producers run on a worker), so "an all-VOID read-back is not a PASS" and every verdict
+         string are proven here against the PRODUCTION types instead of by reading a panel. -->
+    <Compile Include="..\..\src\Bake\StageResult.cs" Link="StageResult.cs" />
+    <Compile Include="..\..\src\Bake\StageText.cs" Link="StageText.cs" />
     <Compile Include="LifecycleTests.cs" />
     <Compile Include="PreflightTests.cs" />
     <!-- The PROTOTYPE CATALOG carries no UnityEngine type on purpose, so which rigs are one binding

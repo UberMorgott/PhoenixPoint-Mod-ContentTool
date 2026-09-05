@@ -694,12 +694,12 @@ namespace Morgott.ContentTool.Dev
                 Bake.Route7.ApplyDisposition how;
                 string log = Bake.Route7.ApplyProject(made.Root, shipBundle, out how);
                 ContentToolMain.Say(log);
-                shipTail = Tail(log, 10);
+                shipTail = Bake.StageResult.Tail(log, 10);
                 if (how == Bake.Route7.ApplyDisposition.BakeFailed)
                     // R11. ApplyProject's own NOT APPLIED line names the count and where to read the
                     // failures; it deliberately states no next step, because the console verb and the mod
                     // manager print it too. THIS caller has one.
-                    shipResult = Tail(log, 1) + " Fix the lines above and press Ship again.";
+                    shipResult = Bake.StageResult.Tail(log, 1) + " Fix the lines above and press Ship again.";
                 else if (how == Bake.Route7.ApplyDisposition.Resident)
                     // S1, THE NORMAL OUTCOME. The bay rendered this very mesh, so the bundle is resident and
                     // BundleLive.Register refuses before taking a claim. No forced unload: it would pull the
@@ -707,12 +707,9 @@ namespace Morgott.ContentTool.Dev
                     // "applied", not "baked": ApplyProject bakes only when the patched copies are missing or
                     // stale (Route7:283-286), so a press that arrived with a fresh folder baked nothing at
                     // all and a line claiming it did would be a line about work that did not happen.
-                    shipResult = "applied - restart the game and enable '" + shipName + "' in the mod manager. " +
-                                 "Phoenix Point already loaded " + shipBundle + "." +
-                                 (HasPreview ? " This session keeps showing your Doctor preview." : "");
+                    shipResult = Bake.StageText.S1(shipName, shipBundle, HasPreview);   // ONE copy of S1
                 else if (how == Bake.Route7.ApplyDisposition.Redirected)
-                    shipResult = "applied and redirected LIVE - " + shipBundle + " now loads from the patched copy " +
-                                 "on the next load";
+                    shipResult = Bake.StageText.S2(shipBundle);                        // ONE copy of S2
                 else                                    // R23
                     shipResult = "NOT APPLIED: " + shipBundle + " was neither redirected nor already " +
                                  "loaded - the log above names the refusal; the project folder is complete and " +
@@ -735,24 +732,10 @@ namespace Morgott.ContentTool.Dev
             }
         }
 
-        /// <summary>The last few lines of the bake log, for the panel. The WHOLE log went to
-        /// ContentToolMain.Say, which is where an author reads the rows one by one.
-        ///
-        /// THE TRAILING EMPTY ELEMENT IS DISCARDED BEFORE THE COUNT. ApplyProject ends in AppendLine, so
-        /// Split('\n') always produces one empty element at the end; taking "the last 1" then selected that
-        /// empty string and Tail(log, 1) answered "", which is exactly the R11 path - the panel would report
-        /// a failed bake with a BLANK result line. Trim the tail first, then take N.</summary>
-        private static string Tail(string log, int lines)
-        {
-            if (string.IsNullOrEmpty(log)) return "";
-            string[] all = log.Replace("\r\n", "\n").Split('\n');
-            int end = all.Length;
-            while (end > 0 && all[end - 1].Length == 0) end--;      // the AppendLine's own empty tail
-            var kept = new StringBuilder();
-            for (int i = Math.Max(0, end - lines); i < end; i++)
-                if (all[i].Length != 0) kept.AppendLine(all[i]);
-            return kept.ToString().TrimEnd();
-        }
+        // Tail MOVED, unchanged, to Bake.StageResult.Tail. The WHOLE log went to ContentToolMain.Say, which
+        // is where an author reads the rows one by one; this took the last few for the panel. It was private
+        // static in a file no offline gate can link (JsonUtility and friends), so nothing could prove the
+        // R11 rule it encodes - and the dashboard needs the same helper. A second copy is how they drift.
 
         /// <summary>The file's ONE scene root, or null when it has none or several. A plan's Root is
         /// what PP's paths are measured from and Validate refuses one that names no node; u9_probe.glb

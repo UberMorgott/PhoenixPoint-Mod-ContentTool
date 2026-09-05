@@ -127,8 +127,7 @@ namespace Morgott.ContentTool.Bake
             if (legacyEdit != null) log.AppendLine(legacyEdit);
             else if (wantReplace && BundleClaims.RouteMoves(true, BundleLive.Holds(project.Id), on))
                 log.AppendLine(on && Failed.Contains(project.Id)
-                    ? "'" + project.Id + "' failed to bake earlier in this session - not baking it " +
-                      "again. Fix the lines it printed, then " + RetryHint(modDir)
+                    ? StageText.R29(project.Id, RetryHint(modDir))   // ONE copy of R29, in StageText
                     : on ? ApplyProject(name) : BundleLive.Uninstall(project.Id));
             if (wantPublish)
             {
@@ -346,9 +345,7 @@ namespace Morgott.ContentTool.Bake
                     // No "press Ship again": this same text is printed by the console verb (Run:49) and by
                     // the mod-manager checkbox (Toggle:109), where there is no Ship button to press. The
                     // failures are NAMED above; a caller that has a next step adds its own.
-                    return pre.AppendLine("NOT APPLIED: patching the shipped bundle(s) reported " + patchFailed +
-                                          " failure(s), named in the P0/REFUSED line(s) above; nothing was " +
-                                          "installed and no copy was marked current.").ToString();
+                    return pre.AppendLine(StageText.R35(patchFailed)).ToString();
                 }
                 Project.PatchCache.Write(patched, key);
             }
