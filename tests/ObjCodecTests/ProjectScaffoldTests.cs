@@ -412,9 +412,12 @@ internal static class ProjectScaffoldTests
             // after, so that leftover sits alone in a folder with no manifest - exactly the shape R2's
             // emptiness scan refuses. It must walk past it, or the crash locks the author out of the very
             // press that caused it, forever.
+            // NAMED BY GUID, because that is the only .tmp this tool ever writes (CreateNew spells it
+            // Guid.ToString("N")), and the exemption is spelled to match: an author's own .tmp is
+            // someone's work, and a folder holding one is theirs.
             string crashed = Path.Combine(mods, "Crashed");
             Directory.CreateDirectory(crashed);
-            File.WriteAllBytes(Path.Combine(crashed, "9f2c1ab.tmp"), new byte[] { 0 });
+            File.WriteAllBytes(Path.Combine(crashed, Guid.NewGuid().ToString("N") + ".tmp"), new byte[] { 0 });
             string afterCrashGlb = Path.Combine(dir, "aftercrash.glb");
             File.WriteAllBytes(afterCrashGlb, new byte[] { 5, 5 });
             ProjectScaffold.Result afterCrash = ProjectScaffold.AddMeshReplacement(
@@ -424,6 +427,25 @@ internal static class ProjectScaffoldTests
                             File.Exists(afterCrash.ManifestPath) &&
                             Same(File.ReadAllBytes(afterCrash.MeshPath), new byte[] { 5, 5 }),
                             "a .tmp left by a killed press does not make the folder it created un-pressable");
+
+            // AND THE OTHER WAY. ".tmp" is not this tool's signature - authors and their tools write
+            // .tmp files too, and a folder holding one is someone's work. Exempting the EXTENSION made
+            // that folder read as empty and the scaffold moved into it.
+            string theirs = Path.Combine(mods, "TheirRecovery");
+            Directory.CreateDirectory(theirs);
+            File.WriteAllBytes(Path.Combine(theirs, "artist-recovery.tmp"), new byte[] { 0 });
+            string notOurs = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "TheirRecovery", glb, sha, "a.bundle", "Foo", empty);
+            }
+            catch (InvalidDataException refused) { notOurs = refused.Message; }
+            checks += Check(notOurs == "'" + theirs + "' already exists, is not empty, and holds no " +
+                                       "ppcontent.json, so it is not a ContentTool project - pick another " +
+                                       "project name" &&
+                            !File.Exists(Path.Combine(theirs, "ppcontent.json")),
+                            "a .tmp that is NOT this tool's own GUID name still makes the folder someone " +
+                            "else's: " + notOurs);
 
             string clashDir = Path.Combine(dir, "clash");
             Directory.CreateDirectory(clashDir);

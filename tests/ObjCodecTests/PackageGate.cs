@@ -18,6 +18,9 @@ using Morgott.ContentTool.Project;
 /// </summary>
 internal static class PackageGate
 {
+    /// <summary>Shaped exactly like ProjectScaffold.CreateNew's leftover: Guid.ToString("N") + ".tmp".</summary>
+    private static readonly string OwnTemp = Guid.NewGuid().ToString("N") + ".tmp";
+
     private const string Meta =
         "{ \"ID\": \"com.test.Mod\", \"Dependencies\": [ \"com.morgott.ContentTool\" ], \"AssemblyName\": \"\" }";
 
@@ -48,6 +51,14 @@ internal static class PackageGate
             checks += Check(Refusal(root, "stray", "{ \"publish\": [ { \"name\": \"a\" } ] }", "notes.txt") == null,
                 "an UNDECLARED file of an unknown extension is still not this rule's business");
 
+            // A PRESS KILLED MID-WRITE LEAVES A <guid>.tmp UNDER Content\, and Content\ is copied
+            // verbatim - so that half-written byte string used to ship inside the release zip. Only
+            // THIS tool's own GUID name is dropped; an author's own .tmp is their file and still ships.
+            checks += Check(Refusal(root, "leftover", "{ \"publish\": [ { \"name\": \"a\" } ] }", null) == null &&
+                            !File.Exists(Path.Combine(root, "leftover-out", "Content", OwnTemp)) &&
+                            File.Exists(Path.Combine(root, "leftover-out", "Content", "artist-recovery.tmp")),
+                "a killed press's <guid>.tmp is not staged into the package, an author's own .tmp is");
+
             return "PACKAGE-GATE PASS, " + checks + " check(s)";
         }
         finally
@@ -65,6 +76,8 @@ internal static class PackageGate
         File.WriteAllText(Path.Combine(project, "meta.json"), Meta);
         File.WriteAllText(Path.Combine(project, "ppcontent.json"), manifest);
         File.WriteAllText(Path.Combine(project, "Content", "a.png"), "x");
+        File.WriteAllText(Path.Combine(project, "Content", OwnTemp), "x");
+        File.WriteAllText(Path.Combine(project, "Content", "artist-recovery.tmp"), "x");
         if (sound != null)
         {
             string replace = Path.Combine(project, "Content\\Audio\\Replace");

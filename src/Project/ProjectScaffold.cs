@@ -233,7 +233,10 @@ namespace Morgott.ContentTool.Project
                 {
                     { "id", name }, { "bundle", name + ".bundle" }
                 };
-                CreateNew(result.ManifestPath,
+                // A false is ANOTHER press winning the create: the manifest at that path is not this call's,
+                // so this call did not create the project and must not say it did - the panel words its
+                // report on Created, and "created" for a folder someone else made is a lie the author acts on.
+                result.Created &= CreateNew(result.ManifestPath,
                           new UTF8Encoding(false).GetBytes(new JsonWriter().Val(tree).ToString() + "\n"));
             }
 
@@ -286,10 +289,16 @@ namespace Morgott.ContentTool.Project
             // refusal or a failed Save above leaves the press with nothing added, and a meta.json written
             // before that decision would hand the author a mod id for a project that gained no row.
             // A false here is the Move losing a race: SOMEONE ELSE'S meta.json is at that path now, and it
-            // never passed the gate above. The winner is judged by the same rule rather than shipped unseen.
+            // never passed the gate above. The winner is judged by the same rule rather than shipped unseen -
+            // and by the time that judgement can throw, the copy, the sidecar and the row have ALL landed.
+            // That ordering is deliberate (the meta must come last), so the SENTENCE is what has to say so:
+            // this arm's refusal tells the author the work is already in THIS project and the fix is meta.json,
+            // not the "ship into another project" the first arm's identical wording would send them off to do.
             if (!File.Exists(result.MetaPath) &&
                 !CreateNew(result.MetaPath, new UTF8Encoding(false).GetBytes(Meta(id))))
-                MetaMustBeShippable(result.MetaPath);
+                MetaMustBeShippable(result.MetaPath,
+                                    " - the mesh and its row are already in this project; fix meta.json and " +
+                                    "press again");
 
             // THE POST-CONDITION, asserted rather than assumed: this is what makes `ct_project <name>` and
             // `ct_route7 apply <name>` find the folder that was just written (ContentMods.Sibling:128).
@@ -309,7 +318,7 @@ namespace Morgott.ContentTool.Project
         /// MetaRefusal is REGEX-based, so an unclosed object that happens to hold a matching "ID" and
         /// "Dependencies" sails through it while the game's own reader refuses the file. The strict reader
         /// this codebase already has runs first; no second parser is grown for it.</summary>
-        private static void MetaMustBeShippable(string metaPath)
+        private static void MetaMustBeShippable(string metaPath, string also = "")
         {
             if (!File.Exists(metaPath)) return;
             string text = File.ReadAllText(metaPath);
@@ -334,7 +343,7 @@ namespace Morgott.ContentTool.Project
             if (said != null)
                 throw new InvalidDataException("'" + metaPath + "' already exists but is not a " +
                                                "mod this project can ship: " + said + " - fix that file, " +
-                                               "or ship into another project");
+                                               "or ship into another project" + also);
         }
 
         /// <summary>The code-free content mod's meta.json, shaped like the shipped demo
@@ -411,14 +420,14 @@ namespace Morgott.ContentTool.Project
         }
 
         /// <summary>Does the folder hold a file that is not one of <see cref="CreateNew"/>'s own leftovers?
-        /// Spelled by EXTENSION rather than by handing "*.tmp" to GetFiles: on NTFS a search pattern is
-        /// matched against a file's 8.3 SHORT name too, so an author's own file could answer to it and the
-        /// folder would read as empty.</summary>
+        /// The exemption is <see cref="Package.IsOwnTemp"/> - the GUID name, not the extension: an author's
+        /// own "artist-recovery.tmp" is their work, and exempting every .tmp made a folder holding one read
+        /// as empty and the scaffold moved in. Asked file by file rather than by handing "*.tmp" to GetFiles
+        /// as well: on NTFS a search pattern is matched against a file's 8.3 SHORT name too.</summary>
         private static bool Occupied(string root)
         {
             foreach (string there in Directory.GetFiles(root))
-                if (!string.Equals(Path.GetExtension(there), ".tmp", StringComparison.OrdinalIgnoreCase))
-                    return true;
+                if (!Package.IsOwnTemp(there)) return true;
             return false;
         }
 

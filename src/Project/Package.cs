@@ -519,10 +519,32 @@ namespace Morgott.ContentTool.Project
             return rel;
         }
 
+        /// <summary>Is this one of ContentTool's OWN half-written leftovers - the temp
+        /// <see cref="ProjectScaffold"/> writes whole and then Moves into place, named
+        /// <c>Guid.ToString("N") + ".tmp"</c>?
+        ///
+        /// SPELLED HERE, not in ProjectScaffold: tools\Package and tests\TargetPathTests link Package.cs
+        /// ALONE, so the dependency can only run this way. Both callers need the same answer - the packager
+        /// must not ship one, and the scaffold's emptiness scan must not count one - and a second spelling
+        /// would let them drift.
+        ///
+        /// THE EXTENSION ALONE IS NOT THE SIGNATURE. Authors and their tools write .tmp files too; a folder
+        /// holding only "artist-recovery.tmp" is someone's work, and reading it as empty moved the scaffold
+        /// into it. The GUID is what makes the name this tool's.</summary>
+        internal static bool IsOwnTemp(string path)
+        {
+            Guid ours;
+            return string.Equals(Path.GetExtension(path), ".tmp", StringComparison.OrdinalIgnoreCase) &&
+                   Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out ours);
+        }
+
         private static void CopyDir(string from, string to)
         {
             Directory.CreateDirectory(to);
-            foreach (string f in Directory.GetFiles(from)) File.Copy(f, Path.Combine(to, Path.GetFileName(f)), true);
+            // Content\ is copied VERBATIM, so a press killed between the temp and its Move used to ship its
+            // half-written bytes inside the release zip.
+            foreach (string f in Directory.GetFiles(from))
+                if (!IsOwnTemp(f)) File.Copy(f, Path.Combine(to, Path.GetFileName(f)), true);
             foreach (string d in Directory.GetDirectories(from))
                 CopyDir(d, Path.Combine(to, Path.GetFileName(d)));
         }

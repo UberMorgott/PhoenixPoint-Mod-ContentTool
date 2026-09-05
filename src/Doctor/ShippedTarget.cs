@@ -47,7 +47,8 @@ namespace Morgott.ContentTool.Doctor
         /// <paramref name="bakers"/> is the CALLER'S open-bundle cache for one whole rebuild, keyed by shipped
         /// path case-blind: the BundleBaker ctor decompresses the archive on the main thread, and the slots of
         /// one prototype name the same few bundles over and over. Resolve never disposes it - the caller opened
-        /// the pass, the caller closes it.</summary>
+        /// the pass, the caller closes it. A NULL VALUE means that path's ctor already threw in this pass, so
+        /// the caller must skip it on Dispose.</summary>
         internal static string Resolve(Addon addon, SkinnedMeshRenderer smr, PrototypeTarget target,
                                        Dictionary<string, BundleBaker> bakers)
         {
@@ -92,7 +93,21 @@ namespace Morgott.ContentTool.Doctor
                     {
                         BundleBaker baker;
                         if (!bakers.TryGetValue(shipped, out baker))
-                            bakers[shipped] = baker = new BundleBaker(shipped, "ct.doctor");
+                            // A CTOR THAT THROWS CACHED NOTHING, so every later slot of the pass re-opened
+                            // and re-decompressed the same broken archive on the main thread. A NULL value
+                            // is the negative marker: TryGetValue tells "never tried" from "already
+                            // refused". Only the CTOR is marked - a WhyNot that throws for one asset says
+                            // nothing about the bundle, and its baker stays open and reusable.
+                            try { bakers[shipped] = baker = new BundleBaker(shipped, "ct.doctor"); }
+                            catch (Exception) { bakers[shipped] = null; throw; }
+                        if (baker == null)
+                        {
+                            last = file + ": refused to open earlier in this pass";
+                            Debug.Log("[ContentTool] ShippedTarget:   " + last);
+                            if (unproven == null)
+                                unproven = Unproven(file, asset, "refused to open earlier in this pass");
+                            continue;
+                        }
                         opened++;             // the archive IS open, whatever WhyNot then answers or throws
                         Addressable how;
                         string gone = baker.WhyNot(AssetClassID.Mesh, asset, out how);

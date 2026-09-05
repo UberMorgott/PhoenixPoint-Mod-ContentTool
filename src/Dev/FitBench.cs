@@ -775,8 +775,10 @@ namespace Morgott.ContentTool.Dev
             }
             finally
             {
+                // Null is Resolve's "this one's ctor already threw" marker - there is nothing to close.
                 foreach (BundleBaker baker in bakers.Values)
-                    try { baker.Dispose(); } catch (Exception ex) { Debug.LogWarning("[ContentTool] Retarget: " + ex); }
+                    if (baker != null)
+                        try { baker.Dispose(); } catch (Exception ex) { Debug.LogWarning("[ContentTool] Retarget: " + ex); }
             }
         }
 
