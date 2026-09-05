@@ -1689,11 +1689,6 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>
-        /// The skeleton half of a <see cref="SkinFields.SkinSummary"/> line - its first four tokens,
-        /// bindposes/hashes/rootHash/bonesAABB. null when the mesh carries no bind poses, which is a
-        /// question P5 cannot ask rather than one it can answer with "no".
-        /// </summary>
-        /// <summary>
         /// The author's whole curve-edit grammar: <c>&lt;channel&gt;*&lt;number&gt;</c>, the same shape
         /// "material" already uses. Returns null when it read, or the sentence that says why not.
         ///
@@ -1895,6 +1890,11 @@ namespace Morgott.ContentTool.Bake
 
         private static string V(Vector3 v) { return "(" + Num(v.x) + "," + Num(v.y) + "," + Num(v.z) + ")"; }
 
+        /// <summary>
+        /// The skeleton half of a <see cref="SkinFields.SkinSummary"/> line - its first four tokens,
+        /// bindposes/hashes/rootHash/bonesAABB. null when the mesh carries no bind poses, which is a
+        /// question P5 cannot ask rather than one it can answer with "no".
+        /// </summary>
         internal static string Skeleton(string skinSummary)
         {
             string[] t = skinSummary.Split(' ');
