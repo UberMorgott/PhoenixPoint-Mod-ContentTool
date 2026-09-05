@@ -1382,6 +1382,46 @@ internal static class LifecycleTests
                         }) == "REFUSED: R38" && ran.Count == 3,
                         "while a genuine refusal - one with a gate to refuse - stops it at Apply");
 
+        // ---- ...AND THAT VOID STILL HAS TO ANSWER A CANCEL. The no-target branch returns on the WORKER,
+        // before the parked segment whose pre-check is the only place the request was ever read, so a Cancel
+        // pressed while the run sat in `Barrier.Wait` or `Observe` published S9 Void: `cancelRequested true`,
+        // `cancelAcknowledged false` - rule 3 says nothing acknowledged it - and `Run all` walked straight on
+        // past a stage the author had stopped. Source again, for the same reason as the arm above.
+        checks += Check(CancelBefore(jobText, "internal static string StartApply(",
+                                     "if (on.Declared.Length == 0)"),
+                        "StartApply's no-target branch consults the cancel request BEFORE it finishes " +
+                        "S9 Void -> " + job);
+        checks += Check(!CancelBefore("internal static string StartApply(Captured on) { Observe(on); " +
+                                      "if (on.Declared.Length == 0) { Finish(id, StageText.S9(on.Id)); " +
+                                      "return; } if (Stopped(id)) return; }",
+                                      "internal static string StartApply(", "if (on.Declared.Length == 0)"),
+                        "while the shape that shipped - the check only AFTER the Void - fails the same " +
+                        "arm, so it is a measurement and not a blind pass");
+        // Verify has the identical window and never had a pre-check at all: the parked segment is entered
+        // after `Barrier.Wait` and after it may have sat parked for a painted panel, and it then mounts
+        // bundles for seconds while the request goes unread. It is the LAST cancellable instant there too.
+        checks += Check(CancelBefore(jobText, "internal static string StartVerify(", "ReadBack.Verify("),
+                        "and StartVerify answers a pending cancel before it starts reading back -> " + job);
+        // The whole path for it, through a real run: the request, the producer's Cancelled, the
+        // acknowledgement rule 3 states, and the sequencer that stops on the snapshot those produced.
+        ran.Clear();
+        LifecycleRun stopped = new LifecycleRun();
+        long ar = stopped.Begin("Apply");
+        stopped.Cancel();
+        stopped.Complete(ar, StageText.R31("Apply"), BakeDisposition.Cancelled);
+        LifecycleRun.Snapshot ack = stopped.Latest;
+        checks += Check(ack.CancelAcknowledged && !ack.Busy &&
+                        Drive(Fresh(), ran, delegate(string s)
+                        {
+                            return s == "Apply"
+                                ? new LifecycleState.StageReport(
+                                      LifecycleState.Outcome(ack.Outcome, ack.How), ack.Result, ack.How,
+                                      ack.RestartRequired, ack.Applicable, ack.Eligibility)
+                                : Pass("ok");
+                        }) == StageText.R31("Apply") && ran.Count == 3 && !ran.Contains("Verify"),
+                        "a cancelled Apply is ACKNOWLEDGED and stops Run all at Apply - never a Void the " +
+                        "chain walks past");
+
         // THE S1 BARRIER. Apply PASSES and reports restart-required; Verify is then refused by Admit's own
         // R30 arm - the sequencer never learns what S1 means, it only re-asks Admit.
         ran.Clear();
@@ -1625,6 +1665,20 @@ internal static class LifecycleTests
         int applied = text.IndexOf("Route7.ApplyRoot(", StringComparison.Ordinal);
         return decided >= 0 && applied > decided &&
                text.IndexOf("bool applicable = on.Declared", StringComparison.Ordinal) < 0;
+    }
+
+    /// <summary>Does <paramref name="method"/> answer a pending cancel - the shared `Stopped(id)` guard -
+    /// BEFORE it reaches <paramref name="work"/>, the first thing in it that publishes or costs seconds?
+    /// Scoped to the method, because the guard appears in three of them and file order alone would let one
+    /// producer's check vouch for another's.</summary>
+    private static bool CancelBefore(string text, string method, string work)
+    {
+        if (text == null) return false;
+        int m = text.IndexOf(method, StringComparison.Ordinal);
+        if (m < 0) return false;
+        int guard = text.IndexOf("Stopped(id)", m, StringComparison.Ordinal);
+        int at = text.IndexOf(work, m, StringComparison.Ordinal);
+        return guard > 0 && at > 0 && guard < at;
     }
 
     /// <summary>The repo's src\, walked up from the test binary - null when the suite runs from a

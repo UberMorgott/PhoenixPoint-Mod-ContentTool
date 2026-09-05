@@ -230,6 +230,12 @@ namespace Morgott.ContentTool.Bake
                 Observe(on);
                 Park(delegate
                 {
+                    // THE LAST CANCELLABLE INSTANT HERE TOO. Nothing below yields, so a cancel raised while
+                    // this run sat in `Barrier.Wait`, in `Observe`, or parked waiting for a painted panel is
+                    // answered HERE or not at all. It is not about undo - the read-back installs nothing -
+                    // it is that an unanswered request finishes `cancelAcknowledged false` and lets
+                    // `Run all` carry on into Package over a stage the author stopped.
+                    if (Stopped(id)) return;
                     LifecycleState.StageReport r;
                     // THE GATE LOG IS THE VERDICT'S "ABOVE". `VerifyFailed` says "the FAIL line(s) above
                     // name them" and `ct_route7 verify` prints exactly this buffer before the terminal
@@ -300,6 +306,12 @@ namespace Morgott.ContentTool.Bake
                 //
                 // ON THE WORKER, not inside Park: a no-op has no Unity work to do, and parking it would
                 // make it wait for a painted panel to say "nothing to install".
+                // ...AND IT STILL HAS TO ANSWER A CANCEL. This branch returns HERE, before the parked
+                // segment whose pre-check below was the only place the request was ever read, so a Cancel
+                // pressed while this run sat in `Barrier.Wait` or `Observe` published S9 Void with
+                // `cancelAcknowledged false` - rule 3 saw nothing acknowledge it - and `Run all`, reading a
+                // non-applicable Void, walked straight on past a stage the author had stopped.
+                if (Stopped(id)) return;
                 if (on.Declared.Length == 0)
                 {
                     // VOID, STATED - S9 says so in its own words, and the row must not read `Refused` off
@@ -318,12 +330,7 @@ namespace Morgott.ContentTool.Bake
                     // ApplyRoot -> Applied -> ProjectBake.Bake means widening four public overloads and
                     // every caller of them (console verb, mod-manager toggle, wizard) - far past this
                     // commit's budget. The pre-check is what makes the button honest meanwhile.
-                    LifecycleRun.Snapshot at = Run.Latest;
-                    if (at.CancelRequested)
-                    {
-                        Finish(id, StageText.R31(at.Stage), BakeDisposition.Cancelled);
-                        return;
-                    }
+                    if (Stopped(id)) return;
                     string line;
                     // Task 6 draws a row per target; the seam carries one verdict, so the list is asked for
                     // here rather than parsed back out of the log later (TargetInstall's whole point).
@@ -466,6 +473,20 @@ namespace Morgott.ContentTool.Bake
                 LifecycleRun.Snapshot now = Run.Latest;
                 if (now.Busy) Finish(now.RunId, "lifecycle: " + ex.Message, BakeDisposition.Failed);
             }
+        }
+
+        /// <summary>WORKER OR MAIN. The author asked to stop and this producer has not stated anything yet:
+        /// publish R31 and answer the request, which is what ACKNOWLEDGES it (LifecycleState's rule 3).
+        ///
+        /// CALLED ONLY BEFORE THE WORK IT GUARDS. Rule 3 also says a cancel that lost the race to a
+        /// completed publication stays a request and never becomes an outcome, so a producer holding a
+        /// verdict must publish that verdict - never this.</summary>
+        private static bool Stopped(long id)
+        {
+            LifecycleRun.Snapshot at = Run.Latest;
+            if (!at.CancelRequested) return false;
+            Finish(id, StageText.R31(at.Stage), BakeDisposition.Cancelled);
+            return true;
         }
 
         /// <summary>MAIN. Asks the running producer to stop. It is a REQUEST: busy stays set until the
