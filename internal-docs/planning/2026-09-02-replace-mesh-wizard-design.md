@@ -9,7 +9,7 @@ empty-folder arm §4.2/§8, R12 from observed state §6, and the `ContentMods.En
 **2026-09-05, Codex DEEP review of the PLAN** (`ec5951d5…out.md`, 19 findings + a sequencing paragraph): 17 accepted and
 folded into §§4.1-4.5, §8 and §10 here — path normalization and a strict parse before `MetaRefusal` (§4.2), absent-only
 creation (§4.2), `Register`'s residency-first precedence (§4.3), the generation cancel and `Dispose` clearing (§4.4),
-R16 reserved for a walk that ran (§4.1) — and 2 rejected: **11** (Instance3 has its own profile `…593`, so a
+R16 reserved for a walk that ran (§4.1) — and 2 rejected: **11** (the bench install has its own profile — Instance2 `…592` since 2026-09-05 — so a
 `MOD_ACTIVATED` edit there cannot reach the user's `…591`) and **19** (the id is quoted through `JsonWriter`; the
 template body stays a fixed literal, §4.2). Execution order is now **2 → 3 → 5 → 4 → 6 → 7 → 8**, numbers unchanged.
 
@@ -391,7 +391,7 @@ last line `SCAFFOLD PASS, N check(s) - ...`, wired into `Program.cs` beside `Man
 | `Scaffold_NameTable` | valid; empty; 65 chars; `..`; `a\b`; `C:\x`; `CON`; `nul.glb`; leading `-`; trailing `.` and space → each refused with R1, nothing created outside the Mods folder |
 | `Fingerprint_APreviewIsNotAChangedRig` | §4.5 on plain data: a preview-shaped `RigTarget` (same renderer, same bones, **all four mesh-derived fields moved** — `MeshInstanceId`, `MeshName`, `BindPoseCount`, `Rigged`) is `!SameAs` and `SameRigAs`; a different renderer and a renamed bone are neither. Written and observed RED (`CS1061` on `SameRigAs`) before the split is implemented. `SkinCompatibility.cs` is linked into this gate (`ObjCodecTests.csproj:190`), so the split does not wait for a game |
 
-**In-game acceptance, PPCLI on `D:\PP-Instance3`** (steps only — `PPCLI\PLAYBOOK.md` maps them to lines): (1) `connect state`
+**In-game acceptance, PPCLI on `D:\PP-Instance2`** (user order 2026-09-05: bench = Instance2, profile `…592`; Steam install untouchable) (steps only — `PPCLI\PLAYBOOK.md` maps them to lines): (1) `connect state`
 answers, start a campaign, open the bench; (2) via `call`, `FitBench.ShowPrototype`, wait until the prototype is no longer
 busy, take one `SlotTargets()` entry, read its `ShippedBundle`/`ShippedAsset`; (3) via `call` on `FitBench.doctor`,
 `PickFile(<glb>)`, `PickTarget(target)`, poll `Ready.Outcome == ByName`, then `Enqueue("preview")` and confirm `HasPreview`

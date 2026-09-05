@@ -64,8 +64,8 @@ is on disk; **4** is one `FileMode.CreateNew` call, not a temp+move dance; **16*
 adds "land this task as several green commits" to Tasks 5 and 6 instead of renumbering anything.
 
 **Rejected, each with its reason:**
-- **11 (restore Instance3's `MOD_ACTIVATED`)** — rejected: Instance3 has its OWN profile `76561197996210593`
-  (the user's game is `…591`, Instance2 `…592`), so an edit there can never reach the user's profile. Task 8's
+- **11 (restore Instance2's `MOD_ACTIVATED`)** — rejected: Instance2 has its OWN profile `76561197996210592`
+  (the user's game is `…591`), so an edit there can never reach the user's profile. Task 8's
   byte-snapshot of THAT profile's `Options.jopt` is the whole ceremony; no restore-and-hash ritual is added.
 - **19 (assemble the whole `meta.json` tree through `JsonWriter`)** — rejected: `id` is the only value that can
   carry a quote or a backslash, and it already goes through `JsonWriter.Val` quoted AND escaped; the rest is a
@@ -2029,7 +2029,7 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
 
 ---
 
-### Task 8: in-game acceptance on `D:\PP-Instance3` via PPCLI (**W3b + W4 + W5 + W6 + W7**)
+### Task 8: in-game acceptance on `D:\PP-Instance2` via PPCLI (**W3b + W4 + W5 + W6 + W7**)
 
 The only proof for three of the four seams: `ShippedTarget` reads the LIVE Addressables catalog and the LIVE addon
 graph, the SHIP row is IMGUI, and `ApplyProject` ends in `BundleLive`. **Do not mark the slice done before this
@@ -2037,18 +2037,18 @@ task is green.**
 
 **Command source: `E:\DEV\PhoenixPoint\PPCLI\PLAYBOOK.md`.** Read it and take the exact invocations from there;
 this plan deliberately spells none, because a stale command line in a plan is worse than no command line.
-`D:\PP-Instance3` is the automation install — never the user's own game at
+`D:\PP-Instance2` is the automation install — never the user's own game at
 `D:\Steam\steamapps\common\Phoenix Point`.
 
 - [ ] **Step 1: Build, deploy, activate.** `dotnet build -c Release`, then install the built
-  `bin\Release\ContentTool\ContentTool.dll` + `meta.json` into `D:\PP-Instance3`'s mods folder with no game
+  `bin\Release\ContentTool\ContentTool.dll` + `meta.json` into `D:\PP-Instance2`'s mods folder with no game
   running. Confirm `com.morgott.ContentTool` is in that profile's `MOD_ACTIVATED` array
-  (`…LocalLow\Snapshot Games Inc\Phoenix Point\Steam\76561197996210593\Options.jopt` — **Instance3's OWN profile**;
-  the user's game is `…591` and Instance2 is `…592`, so an edit here reaches neither); **editing that array is
-  allowed on Instance3 and forbidden on the user's own game** — the count is duplicated in
+  (`…LocalLow\Snapshot Games Inc\Phoenix Point\Steam\76561197996210592\Options.jopt` — **Instance2's OWN profile**;
+  the user's game is `…591`, so an edit here never reaches it); **editing that array is
+  allowed on Instance2 and forbidden on the user's own game** — the count is duplicated in
   `ArrayDimensions.CollectionValues` and must match. Take a byte copy of that one file before the first edit and
   keep it beside the run's notes. (Codex finding 11 asked for a full restore-and-hash-verify ritual and a
-  dedicated automation profile; **rejected** — `…593` IS the dedicated automation profile, and the snapshot is
+  dedicated automation profile; **rejected** — `…592` IS the dedicated automation profile, and the snapshot is
   the whole ceremony.) A deploy that silently leaves the old DLL makes every result below a ghost.
 
 - [ ] **Step 2: Drive it.** Launch that install through PPCLI and wait until `connect state` actually answers
@@ -2061,7 +2061,7 @@ this plan deliberately spells none, because a stale command line in a plan is wo
      true. **The ship is performed with the preview LIVE** — that is the state an author actually presses from,
      it is what W6 asks for, and before the §4.5 fingerprint split it was refused as R8 every single time.
   4. Set the project-name field, `Enqueue("ship")`, poll the ship result.
-  5. On disk: `D:\PP-Instance3\Mods\<name>\ppcontent.json` + `meta.json` + `Content\Meshes\<stem>.glb` + the
+  5. On disk: `D:\PP-Instance2\Mods\<name>\ppcontent.json` + `meta.json` + `Content\Meshes\<stem>.glb` + the
      sidecar, and the row's `bundle`/`asset` are the pair step 2 resolved. `meta.json`'s `"ID"` equals
      `ppcontent.json`'s `"id"`, and its `Dependencies` name `com.morgott.ContentTool`.
   6. In `Player.log`: the `patch <bundle>: mesh '<asset>' <- <stem> ...` line,
@@ -2098,7 +2098,7 @@ this plan deliberately spells none, because a stale command line in a plan is wo
   | W3b | The second press of an unchanged Ship ends green with ONE row, not R6 (step 8) | |
   | W7 | Owner visual check: the replaced mesh is on the prototype after the restart in step 9 | |
 
-  **Left behind / removed.** Record what the run created under `D:\PP-Instance3\Mods\` and whether it was deleted;
+  **Left behind / removed.** Record what the run created under `D:\PP-Instance2\Mods\` and whether it was deleted;
   a scratch project whose `id` collides with a shipped demo's must be removed, or two projects share one patched
   copy folder.
 
