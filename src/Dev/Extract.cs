@@ -103,7 +103,8 @@ namespace Morgott.ContentTool.Dev
             if (names == null)
                 return "ct_list VOID - nothing in " + bundleFileName + " names the bones of Mesh '" +
                        meshName + "': either no SkinnedMeshRenderer there uses it, or two do and " +
-                       "disagree about the skeleton - an ambiguity is refused, never guessed";
+                       "disagree about the skeleton, or the one that does lists its bones in an order " +
+                       "that does not match the mesh's own bone path hashes - refused, never guessed";
 
             List<string> hits = new List<string>();
             for (int i = 0; i < names.Length; i++)
@@ -330,18 +331,21 @@ namespace Morgott.ContentTool.Dev
         /// <summary>Returns what was read, for the log; anything wrong throws with the cause.</summary>
         internal static string MeshToGlb(string bundlePath, string assetName, string outPath)
         {
-            string[] boneNames;
-            SkinnedModel model = BundleBaker.ReadMesh(bundlePath, assetName, out boneNames);
+            SkinnedModel model = BundleBaker.ReadMesh(bundlePath, assetName);
             byte[] glb = GlbCodec.Write(model);
             Directory.CreateDirectory(Path.GetDirectoryName(outPath));
             File.WriteAllBytes(outPath, glb);
             // Named joints are what a re-import matches on; hashed ones can never reach ByName, so the
-            // fallback is never silent - it says which file could not name them.
+            // fallback is never silent - it says which file could not name them. The count is read back
+            // off the WRITTEN nodes, so the line cannot claim a name the .glb does not carry.
             int joints = model.JointNodes == null ? 0 : model.JointNodes.Length;
-            return Describe(model) + (joints == 0 ? "" : boneNames != null
+            int named = MeshRead.NamedJoints(model);
+            return Describe(model) + (joints == 0 ? "" : named == joints
                 ? " joints: " + joints + " named, 0 hashed"
-                : " joints: 0 named, " + joints + " hashed (no SkinnedMeshRenderer references this mesh in " +
-                  Path.GetFileName(bundlePath) + ", or two do and disagree about its bones)");
+                : " joints: " + named + " named, " + (joints - named) +
+                  " hashed (no SkinnedMeshRenderer in " + Path.GetFileName(bundlePath) +
+                  " references this mesh, or two do and disagree about its bones, or the one that does " +
+                  "lists them in an order that does not match the mesh's own bone path hashes)");
         }
 
         /// <summary>What a model actually holds, in one line - the oracle both gates read.</summary>

@@ -325,8 +325,11 @@ namespace Morgott.ContentTool.Bake
 
             AssetTypeValueField hashes = mesh["m_BoneNameHashes"]["Array"];
             // m_Bones is index-for-index with m_BindPose and m_BoneNameHashes - the bake writes all
-            // three off one loop counter (SkinFields.cs:400/451/462). A renderer that disagrees about
-            // the length is not that correspondence, so it is refused whole rather than half-applied.
+            // three off one loop counter (SkinFields.cs:400/451/462). SkinFields.BoneNames is the one
+            // place that decides whether a file honours that, count and order both; a name array that
+            // reaches here anyway with the wrong length is not that correspondence, so the joints fall
+            // back on the hashes. Nothing says "named" on the strength of this local: the report is
+            // read back off the nodes by <see cref="NamedJoints"/>.
             if (boneNames != null && boneNames.Length != poses.Children.Count) boneNames = null;
             model.RootBonePath = mesh["m_RootBoneNameHash"].AsUInt.ToString();
             model.Nodes.Add(new SkinNode { Name = name + "_rig", Parent = -1, Local = Identity() });
@@ -347,6 +350,24 @@ namespace Morgott.ContentTool.Bake
                 model.JointNodes[i] = i + 1;
             }
             model.BindposeCount = poses.Children.Count;
+        }
+
+        /// <summary>
+        /// How many of a read model's joints came out NAMED, derived from what was actually WRITTEN:
+        /// a joint whose node name is still the hash <see cref="SkinnedModel.BonePaths"/> records was
+        /// not named. A report built on this cannot disagree with the file, whatever the caller
+        /// believed it was passing in - the count is never taken from the name array's nullness.
+        /// </summary>
+        internal static int NamedJoints(SkinnedModel model)
+        {
+            if (model == null || model.JointNodes == null) return 0;
+            int named = 0;
+            for (int i = 0; i < model.JointNodes.Length && i < model.BonePaths.Count; i++)
+            {
+                int node = model.JointNodes[i];
+                if (node >= 0 && node < model.Nodes.Count && model.Nodes[node].Name != model.BonePaths[i]) named++;
+            }
+            return named;
         }
 
         /// <summary>Unity's Matrix4x4f as glTF wants it: column-major float[16], index = col*4 + row.</summary>

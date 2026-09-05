@@ -512,10 +512,18 @@ namespace Morgott.ContentTool.Bake
         /// CRC-32 of a bone's transform path relative to the model root - what m_BoneNameHashes and
         /// m_RootBoneNameHash carry (identified against aln_fireworm, see the class remark).
         /// </summary>
-        internal static uint BoneHash(string path)
+        internal static uint BoneHash(string path) { return Continue(0xFFFFFFFFu, path); }
+
+        /// <summary>
+        /// The same CRC-32 continued from a register state instead of started: the hash of
+        /// <c>prefix + tail</c> given the state the prefix left behind, which is <c>~BoneHash(prefix)</c>.
+        /// This is what lets a bone's hash be checked without knowing the prefix at all - see
+        /// <see cref="BonesAligned"/>.
+        /// </summary>
+        private static uint Continue(uint state, string tail)
         {
-            uint c = 0xFFFFFFFFu;
-            foreach (char ch in path)
+            uint c = state;
+            foreach (char ch in tail)
             {
                 c ^= (byte)ch;
                 for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (uint)-(int)(c & 1));
@@ -952,9 +960,22 @@ namespace Morgott.ContentTool.Bake
         /// GameObject name. null when nothing in this file uses the mesh, when a bone will not
         /// resolve, or when two renderers use it and DISAGREE about the skeleton: an ambiguity is
         /// refused and never guessed, the same rule <see cref="AssetIndex.FindUnique"/> keeps.
+        ///
+        /// This is the ONE place that decides whether a mesh's bones are named, so both the count
+        /// and the ORDER are settled here rather than assumed by each caller: index-for-index with
+        /// m_BindPose is a convention, and <see cref="BonesAligned"/> holds the file to it.
         /// </summary>
         internal static string[] BoneNames(AssetsManager m, AssetsFileInstance af, long meshPathId)
         {
+            AssetTypeValueField mesh = PrefabFields.Get(m, af, meshPathId);
+            if (mesh == null) return null;
+            AssetTypeValueField hashArray = mesh["m_BoneNameHashes"]["Array"];
+            int poses = mesh["m_BindPose"]["Array"].Children.Count;
+            if (poses == 0 || hashArray.Children.Count != poses) return null;
+            uint[] hashes = new uint[poses];
+            for (int b = 0; b < poses; b++) hashes[b] = hashArray.Children[b].AsUInt;
+            uint rootHash = mesh["m_RootBoneNameHash"].AsUInt;
+
             string[] found = null;
             foreach (AssetFileInfo i in af.file.Metadata.GetAssetsOfType(AssetClassID.SkinnedMeshRenderer))
             {
@@ -962,22 +983,90 @@ namespace Morgott.ContentTool.Bake
                 if (r["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
 
                 AssetTypeValueField bones = r["m_Bones"]["Array"];
-                string[] names = new string[bones.Children.Count];
-                for (int b = 0; b < names.Length; b++)
+                // A renderer that disagrees about the LENGTH is not that correspondence at all, so
+                // its names are refused whole rather than half-applied to the bind poses.
+                if (bones.Children.Count != poses) return null;
+                string[] names = new string[poses], paths = new string[poses];
+                for (int b = 0; b < poses; b++)
                 {
-                    AssetTypeValueField tf = PrefabFields.Get(m, af, bones.Children[b]["m_PathID"].AsLong);
-                    AssetTypeValueField go = tf == null ? null
-                        : PrefabFields.Get(m, af, tf["m_GameObject"]["m_PathID"].AsLong);
-                    if (go == null || go["m_Name"].IsDummy) return null;
-                    names[b] = go["m_Name"].AsString;
-                    if (string.IsNullOrEmpty(names[b])) return null;
+                    paths[b] = TransformPath(m, af, bones.Children[b]["m_PathID"].AsLong);
+                    if (paths[b] == null) return null;
+                    int slash = paths[b].LastIndexOf('/');
+                    names[b] = slash < 0 ? paths[b] : paths[b].Substring(slash + 1);
                 }
+                // The anchor the other hashes are checked against: the renderer's own m_RootBone, or
+                // the bone that carries the mesh's root hash when the renderer does not name one.
+                long rootId = r["m_RootBone"]["m_PathID"].AsLong;
+                string rootPath = rootId == 0 ? null : TransformPath(m, af, rootId);
+                if (rootPath == null)
+                    for (int b = 0; b < poses; b++) if (hashes[b] == rootHash) { rootPath = paths[b]; break; }
+                if (!BonesAligned(paths, rootPath, rootHash, hashes)) return null;
+
                 if (found == null) { found = names; continue; }
-                if (found.Length != names.Length) return null;
-                for (int b = 0; b < names.Length; b++) if (found[b] != names[b]) return null;
+                for (int b = 0; b < poses; b++) if (found[b] != names[b]) return null;
             }
             return found;
         }
+
+        /// <summary>
+        /// Is m_Bones REALLY in the mesh's own bone order? Each m_BoneNameHashes entry is the CRC-32
+        /// of that bone's transform PATH (<see cref="BoneHash"/>), while the renderer's m_Bones order
+        /// is only asserted - Unity lets it be written in any order, and mutoid_assets_all really does
+        /// ship one whose root bone is slot 2 - so the correspondence is verified, not trusted.
+        ///
+        /// The path those hashes are of CANNOT be rebuilt from the file: it is relative to the rig the
+        /// mesh was IMPORTED under, and a shipped addon prefab keeps only the subtree under a renamed
+        /// placeholder root (crc of every suffix of 'PLACEHOLDER_Mutoid_Head_Spitter_Ready/Head/Mutoid'
+        /// misses m_BoneNameHashes[0], measured). The unknown prefix is not needed, because CRC-32 is
+        /// CONTINUABLE: a bone under the root bone extends the ROOT's path, and the root's own hash is
+        /// m_RootBoneNameHash - so its register state is ~rootHash and every descendant's hash is that
+        /// state continued along the path BELOW the root bone. Exact on both shipped meshes the mesh
+        /// gate reads, and it pins order and hierarchy together: a swapped pair fails.
+        ///
+        /// false whenever a bone cannot be checked at all - no anchor, or a bone that does not descend
+        /// from the root bone - because "not checked" and "verified" must not report the same.
+        /// </summary>
+        internal static bool BonesAligned(string[] paths, string rootPath, uint rootHash, uint[] hashes)
+        {
+            if (rootPath == null || paths.Length != hashes.Length) return false;
+            for (int b = 0; b < paths.Length; b++)
+            {
+                if (paths[b] == rootPath)
+                {
+                    if (hashes[b] != rootHash) return false;
+                    continue;
+                }
+                if (!paths[b].StartsWith(rootPath + "/", StringComparison.Ordinal)) return false;
+                if (Continue(~rootHash, paths[b].Substring(rootPath.Length)) != hashes[b]) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// One transform's path from the TOP of this file's hierarchy, root first ("root/spine/head"),
+        /// walked through m_Father the same way the names are read. null when a link, a GameObject or
+        /// a name will not resolve, or the chain loops. The model root the bone hashes are relative to
+        /// sits somewhere on this path; <see cref="BonesAligned"/> is what finds where.
+        /// </summary>
+        private static string TransformPath(AssetsManager m, AssetsFileInstance af, long transformPathId)
+        {
+            string path = null;
+            long at = transformPathId;
+            for (int steps = 0; at != 0 && steps <= MaxBoneDepth; steps++)
+            {
+                AssetTypeValueField tf = PrefabFields.Get(m, af, at);
+                AssetTypeValueField go = tf == null ? null
+                    : PrefabFields.Get(m, af, tf["m_GameObject"]["m_PathID"].AsLong);
+                if (go == null || go["m_Name"].IsDummy) return null;
+                string name = go["m_Name"].AsString;
+                if (string.IsNullOrEmpty(name)) return null;
+                path = path == null ? name : name + "/" + path;
+                at = tf["m_Father"]["m_PathID"].AsLong;
+            }
+            return at == 0 ? path : null;
+        }
+
+        private const int MaxBoneDepth = 256;
 
         /// <summary>
         /// Every vertex's influences, read back OUT OF THE WRITTEN BYTES: "v0=w0/w1-&gt;bone3+bone7".

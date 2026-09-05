@@ -30,6 +30,7 @@ internal static class MeshExtractTests
 
     internal static string Run()
     {
+        Alignment();
         string root = Environment.GetEnvironmentVariable("PPRoot") ?? @"D:\Steam\steamapps\common\Phoenix Point";
         string classData = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\..\lib\classdata.tpk");
         string shipped = Path.Combine(root,
@@ -133,6 +134,22 @@ internal static class MeshExtractTests
                                              issues.Count == 0 ? null : issues[0]) == Outcome.ByName,
                   name + ": the replacement verdict on it is ByName");
         }
+        if (wantRigged)
+        {
+            // The FALLBACK arm, on the same real mesh. A name array that is not index-for-index with
+            // m_BindPose is not that correspondence at all, so the joints must come out on the HASHES
+            // and the count the report is built from must say so - it is read back off the written
+            // nodes (MeshRead.NamedJoints), never from whether the caller passed an array.
+            string[] wrong = new string[filePoses + 1];
+            for (int i = 0; i < wrong.Length; i++) wrong[i] = "not_a_bone_" + i;
+            SkinnedModel fell = MeshRead.Read(mesh, resS, wrong);
+            Check(MeshRead.NamedJoints(fell) == 0,
+                  name + ": a wrong-length name array is reported as 0 named, " + filePoses + " hashed");
+            Check(fell.Nodes[fell.JointNodes[0]].Name.StartsWith("bone_", StringComparison.Ordinal),
+                  name + ": ... and the joints really are named after the hashes (" +
+                  fell.Nodes[fell.JointNodes[0]].Name + ")");
+        }
+
         // The STATIC path, without hunting for an unrigged shipped mesh: the same geometry with the
         // skin stripped must still be a whole valid export - Validate refuses a half-rig either way.
         SkinnedModel stat = MeshRead.Read(mesh, resS);
@@ -146,6 +163,31 @@ internal static class MeshExtractTests
                " -> glb " + glb.Length + "B verts=" + back.Positions.Length + " tris=" + backTriangles +
                " joints=" + back.JointNames.Count +
                (back.JointNames.Count == 0 ? "" : " bone0='" + back.JointNames[0] + "'");
+    }
+
+    /// <summary>
+    /// The other half of "the names are index-for-index with m_BindPose": ORDER. m_BoneNameHashes is
+    /// the CRC-32 of each bone's transform PATH, and m_Bones may be written in any order, so a rig
+    /// whose bones are permuted has to be REFUSED rather than renumbered - it would otherwise hand
+    /// every joint the name of a different bone. Needs no bundle, so it runs even when one is VOID.
+    /// </summary>
+    private static void Alignment()
+    {
+        // The hashes are of paths under a prefix the shipped prefab does NOT keep (its root is a
+        // renamed placeholder), so they are built here with one and checked without it - which is
+        // the whole reason the check continues the root's CRC instead of rebuilding a path.
+        const string gone = "PLACEHOLDER_Rig/";
+        const string root = "Root/Spine";
+        string[] paths = { root + "/Head", root, root + "/Jaw" };   // root bone in slot 1, as shipped
+        uint rootHash = SkinFields.BoneHash(gone + root);
+        uint[] hashes = { SkinFields.BoneHash(gone + paths[0]), rootHash, SkinFields.BoneHash(gone + paths[2]) };
+        Check(SkinFields.BonesAligned(paths, root, rootHash, hashes),
+              "a rig in its own bind-pose order verifies against the mesh's bone path hashes");
+        string[] swapped = { paths[2], paths[1], paths[0] };
+        Check(!SkinFields.BonesAligned(swapped, root, rootHash, hashes),
+              "a permuted m_Bones is refused, not silently renumbered onto the bind poses");
+        Check(!SkinFields.BonesAligned(new[] { "Elsewhere/Head", root, paths[2] }, root, rootHash, hashes),
+              "a bone that does not descend from the root bone cannot be checked, so it is refused");
     }
 
     // ---------------------------------------------------------------- helpers
