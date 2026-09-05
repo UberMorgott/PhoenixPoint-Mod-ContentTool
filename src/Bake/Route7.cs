@@ -150,11 +150,19 @@ namespace Morgott.ContentTool.Bake
         private static string RetryHint(string modDir)
         {
             string folder = Path.GetFileName(modDir.TrimEnd('\\', '/'));
-            return string.Equals(ContentToolMain.ProjectDir(folder), modDir, StringComparison.OrdinalIgnoreCase)
+            // NORMALISED on both sides. ProjectDir builds with Path.Combine (no trailing separator),
+            // while modDir arrives as the mod manager spelled it - a trailing '\' or '/', or mixed
+            // separators, made a real Mods\<name> project print "restart the game - this mod is not
+            // in Mods\", which is the one sentence that is never true for it.
+            return string.Equals(Norm(ContentToolMain.ProjectDir(folder)), Norm(modDir),
+                                 StringComparison.OrdinalIgnoreCase)
                 ? "'ct_route7 apply " + folder + "'."
                 : "restart the game - this mod is not in Mods\\, so no 'ct_route7 apply <name>' " +
                   "argument reaches " + modDir + " and the checkbox will not re-bake it this session.";
         }
+
+        /// <summary>One spelling of a directory path, so two of them can be compared.</summary>
+        private static string Norm(string path) { return Path.GetFullPath(path).TrimEnd('\\', '/'); }
 
         /// <summary>
         /// Route iii's half of <see cref="LegacyDisk"/>: keys an OLDER ContentTool wrote into the
@@ -270,7 +278,16 @@ namespace Morgott.ContentTool.Bake
             // ended in "REFUSED: nothing to install" permanently.
             List<string> declared = new List<string>();
             foreach (Morgott.ContentTool.Project.ShippedReplacement r in project.Replace)
+            {
+                // A VIDEO row carries no "bundle" at all - the cutscenes are loose files behind
+                // Catalog.json and belong to ct_video (ContentProject.ParseReplace:429 exempts them
+                // from the bundle/asset requirement, so r.bundle is null). Taken here it keyed the
+                // freshness hash on ShippedBundlePath(null) and then threw ArgumentNullException out
+                // of Path.Combine(patched, null) below, killing the checkbox and Ship for any project
+                // with one video row. Mirrors ProjectBake.Bundles:2122, which already skips them.
+                if (!string.IsNullOrEmpty(r.video)) continue;
                 if (!declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) declared.Add(r.bundle);
+            }
 
             // FRESHNESS, not existence (S3). "Every declared file is there" said nothing about
             // WHICH version of the game, of this mod or of ContentTool's own bake format produced

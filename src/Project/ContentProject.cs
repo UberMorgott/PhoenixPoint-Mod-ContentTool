@@ -332,9 +332,19 @@ namespace Morgott.ContentTool.Project
             SourceImport.Each(Sources(root, "Models", p.SourceRefusals, "*.glb"),
                               p.Models, p.SourceRefusals, ImportModel);
             p.Videos.AddRange(ImportVideos(root));
+            // A manifest NOTHING can read is a SOURCE refusal, never a patch failure: it is refused
+            // before ParseReplace can tell whether "replace" is even declared, so a project with no
+            // "replace" key at all used to leave ReplaceRefusals=1 and ProjectBake:110 announced
+            // "patching the shipped bundle(s) reported 1 failure(s)" over zero declared patches.
+            // ReplaceRefusals is assigned INSIDE the try, so only refusals past the "replace" gate
+            // enter the delta; the message still lands in the one list ImportFailures counts.
             int beforeReplace = p.SourceRefusals.Count;
-            p.Replace.AddRange(ParseReplace(File.ReadAllText(metaPath), p.SourceRefusals));
-            p.ReplaceRefusals = p.SourceRefusals.Count - beforeReplace;
+            try
+            {
+                p.Replace.AddRange(ParseReplace(File.ReadAllText(metaPath), p.SourceRefusals));
+                p.ReplaceRefusals = p.SourceRefusals.Count - beforeReplace;
+            }
+            catch (InvalidDataException bad) { p.SourceRefusals.Add(bad.Message); }
             p.Publish.AddRange(ParsePublish(File.ReadAllText(metaPath), p.SourceRefusals));
 
             string refused = RefuseUnsupported(Path.Combine(Path.Combine(root, "Content"), "Audio"));
@@ -393,17 +403,10 @@ namespace Morgott.ContentTool.Project
         private static List<ShippedReplacement> ParseReplace(string json, List<string> refusals = null)
         {
             List<ShippedReplacement> list = new List<ShippedReplacement>();
-            Manifest manifest;
-            try { manifest = Manifest.Parse(json); }
-            catch (InvalidDataException bad)
-            {
-                // Today's tolerance kept where there is a channel to say so - and ONLY there. Swallowing
-                // this into an empty list would report a manifest nothing can read as a project that
-                // replaces nothing, which is exactly the "refusal nobody counts" this gate exists for.
-                if (refusals == null) throw;
-                refusals.Add(bad.Message);
-                return list;
-            }
+            // THROWN, with or without a channel. A manifest nothing can read is not a "replace"
+            // refusal - this cannot yet tell whether "replace" is declared - so it is not counted as
+            // one here. Load catches it and records it as a source refusal, which is what it is.
+            Manifest manifest = Manifest.Parse(json);
             if (!manifest.Declares("replace")) return list;
 
             // An element that is not an object is refused ALONE - the object rows beside it are still
