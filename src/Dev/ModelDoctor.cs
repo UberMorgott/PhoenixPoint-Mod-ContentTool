@@ -469,8 +469,9 @@ namespace Morgott.ContentTool.Dev
             shipTargetWas = null;
             shipRenderer = null;
             shipPhase = "";
-            Message = shipResult = "SHIP: cancelled - the panel was not drawn";
-            ContentToolMain.Say("SHIP: cancelled - the panel was not drawn");
+            shipPath = shipTail = "";
+            Message = shipResult = "SHIP: cancelled - the SHIP section was not on screen (the report is being re-read or the panel is closed)";
+            ContentToolMain.Say("SHIP: cancelled - the SHIP section was not on screen (the report is being re-read or the panel is closed)");
         }
 
         private string DoPreview()
@@ -707,8 +708,8 @@ namespace Morgott.ContentTool.Dev
                     // stale (Route7:283-286), so a press that arrived with a fresh folder baked nothing at
                     // all and a line claiming it did would be a line about work that did not happen.
                     shipResult = "applied - restart the game and enable '" + shipName + "' in the mod manager. " +
-                                 "Phoenix Point already loaded " + shipBundle + ", so this session keeps showing " +
-                                 "your Doctor preview.";
+                                 "Phoenix Point already loaded " + shipBundle + "." +
+                                 (HasPreview ? " This session keeps showing your Doctor preview." : "");
                 else if (how == Bake.Route7.ApplyDisposition.Redirected)
                     shipResult = "applied and redirected LIVE - " + shipBundle + " now loads from the patched copy " +
                                  "on the next load";
@@ -1518,9 +1519,10 @@ namespace Morgott.ContentTool.Dev
             GUILayout.Label("project", GUILayout.Width(56f));
             // Seeded on LAYOUT only: a value that changed between Layout and Repaint is how an IMGUI pass ends
             // up unbalanced.
-            if (Event.current.type == EventType.Layout && projectName.Length == 0 &&
+            var name = (projectName ?? "").Trim();
+            if (Event.current.type == EventType.Layout && name.Length == 0 &&
                 Prototype != null && Prototype.ShippedAsset != null)
-                projectName = ProjectScaffold.DefaultName(Prototype.ShippedAsset);
+                projectName = name = ProjectScaffold.DefaultName(Prototype.ShippedAsset);
             projectName = GUILayout.TextField(projectName ?? "", GUILayout.Width(220f));
             GUILayout.Label(Prototype != null && Prototype.ShippedBundle != null
                             ? "target " + Prototype.ShippedBundle + " / " + Prototype.ShippedAsset
@@ -1533,7 +1535,8 @@ namespace Morgott.ContentTool.Dev
             // Refresh() (Layout only) if a profile ever shows it.
             // TRIMMED FIRST, because ArmShip ships the trimmed name: judging the raw field refused
             // "MyMod " for a trailing space the press would never have sent.
-            string refusal = ProjectScaffold.NameRefusal((projectName ?? "").Trim());
+            name = (projectName ?? "").Trim();
+            string refusal = ProjectScaffold.NameRefusal(name);
             bool ready = Ready != null && Ready.Outcome == Outcome.ByName &&
                          Ready.Report.Count(Severity.Blocking) == 0 &&
                          Prototype != null && Prototype.Mode == VerifyMode.Replace && Prototype.Live != null &&
