@@ -1014,22 +1014,44 @@ namespace Morgott.ContentTool.Bake
                 long rootId = r["m_RootBone"]["m_PathID"].AsLong;
                 string byRoot = rootId == 0 ? null : TransformPath(m, af, rootId, memo);
                 string[] verified = Verified(names, paths, byRoot, rootHash, hashes, out refusal);
-                if (verified == null) return null;
-
-                if (found == null) { found = verified; continue; }
-                // Two renderers need not check the SAME slots - each has its own anchor, and a slot one
-                // of them could not reach is not a disagreement with the one that could. Only a slot
-                // BOTH named, differently, is; everything else is a union, so a second renderer can
-                // only ADD names. Comparing the arrays whole nulled a rig that nothing contradicted.
-                for (int b = 0; b < poses; b++)
+                // A renderer that verifies NOTHING contradicts nothing either - its anchor is one this
+                // file never confirms. Nulling the rig there let a LATER such renderer throw away the
+                // names an EARLIER one verified, so the answer depended on the order GetAssetsOfType
+                // happens to hand the renderers back. Only a REFUSAL nulls the rig.
+                if (verified == null)
                 {
-                    if (verified[b] == null || verified[b] == found[b]) continue;
-                    if (found[b] == null) { found[b] = verified[b]; continue; }
-                    refusal = "two SkinnedMeshRenderers in this file disagree about bone slot " + b +
-                              ": one calls it '" + found[b] + "', the other '" + verified[b] +
-                              "', so the file does not agree with itself about this mesh's bone order";
-                    return null;
+                    if (refusal != null) return null;
+                    continue;
                 }
+                found = Fold(found, verified, out refusal);
+                if (found == null) return null;
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// What the file's names are once ONE renderer's verified slots are folded into what the
+        /// renderers before it verified.
+        ///
+        /// Two renderers need not check the SAME slots - each has its own anchor, and a slot one of
+        /// them could not reach is not a disagreement with the one that could. Only a slot BOTH named,
+        /// differently, is; everything else is a union, so a second renderer can only ADD names.
+        /// Comparing the arrays whole nulled a rig that nothing contradicted.
+        /// </summary>
+        /// <returns>the names so far, or null with <paramref name="refusal"/> set on a disagreement.</returns>
+        internal static string[] Fold(string[] found, string[] verified, out string refusal)
+        {
+            refusal = null;
+            if (verified == null) return found;
+            if (found == null) return verified;
+            for (int b = 0; b < found.Length && b < verified.Length; b++)
+            {
+                if (verified[b] == null || verified[b] == found[b]) continue;
+                if (found[b] == null) { found[b] = verified[b]; continue; }
+                refusal = "two SkinnedMeshRenderers in this file disagree about bone slot " + b +
+                          ": one calls it '" + found[b] + "', the other '" + verified[b] +
+                          "', so the file does not agree with itself about this mesh's bone order";
+                return null;
             }
             return found;
         }

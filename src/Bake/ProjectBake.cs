@@ -1835,7 +1835,15 @@ namespace Morgott.ContentTool.Bake
                 return 0;
             }
 
-            string[] bones = BundleBaker.ReadBoneNames(shipped, key);
+            // REFUSED and ABSENT are not the same answer: a rig whose bones CONTRADICT the mesh's own
+            // hashes is a fact about the file and a counted failure, while nobody naming them at all is
+            // an absence and a VOID. Reading the refusal-less overload printed the absence sentence for
+            // a self-contradicting file, so the bake log blamed the wrong thing and counted nothing.
+            string refusal;
+            string[] bones = BundleBaker.ReadBoneNames(shipped, key, out refusal);
+            if (bones == null && refusal != null)
+                return Check(log, "P6", false, "mesh '" + key + "' - " + Path.GetFileName(shipped) +
+                    " REFUSES to name this mesh's bones: " + refusal);
             if (bones == null)
             {
                 log.AppendLine("P6 VOID '" + key + "' - no SkinnedMeshRenderer in " +
@@ -1844,17 +1852,19 @@ namespace Morgott.ContentTool.Bake
                 return 0;
             }
 
-            // A rig with an UNVERIFIED slot is a FAILURE of this gate, not a VOID. The fixture falls
-            // back to the plain sample rig when it cannot reverse the skeleton (ReversedRig), the bind
-            // is then refused, and the VOID that came out of the catch below read as "nothing to
-            // measure" - so the by-name proof arm went dark while the run stayed green. The file is
-            // not the one being refused here; the TARGET has no complete named rig to bind onto.
+            // A rig with an UNVERIFIED slot is a VOID, not a failure: nothing here contradicts, the
+            // TARGET simply has no complete named rig to bind onto, and the bake correctly finished
+            // that mesh nearest-bone (BundleBaker.ReplaceMesh, the same Array.IndexOf guard). Counting
+            // it FAIL propagated to `ct_project: N FAILURE(S)` over a bake that did the right thing.
             int unverified = Array.IndexOf(bones, null);
             if (unverified >= 0)
-                return Check(log, "P6", false, "mesh '" + key + "' - " + Path.GetFileName(shipped) +
-                    " leaves bone slot " + unverified + " of " + bones.Length + " UNVERIFIED against " +
-                    "the mesh's own bone path hashes, so there is no named target rig to bind onto and " +
-                    "this arm cannot prove a by-name binding either way");
+            {
+                log.AppendLine("P6 VOID '" + key + "' - " + Path.GetFileName(shipped) + " leaves bone " +
+                               "slot " + unverified + " of " + bones.Length + " UNVERIFIED against the " +
+                               "mesh's own bone path hashes, so there is no named target rig to bind " +
+                               "onto and this arm cannot prove a by-name binding either way");
+                return 0;
+            }
 
             int n = im.Baked.VertexCount;
             if (f.Joints == null || f.Weights == null || f.Joints.Length != n * 4)

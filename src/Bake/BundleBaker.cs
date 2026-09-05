@@ -189,7 +189,12 @@ namespace Morgott.ContentTool.Bake
             MeshFields.Fill(mesh, baked);
 
             string how;
-            string[] names = armature ? SkinFields.BoneNames(man, afileInst, info.PathId) : null;
+            // WITH the refusal: a rig whose bones CONTRADICT the mesh's own hashes is refused, not
+            // merely absent, and "nobody names ALL of them" is the wrong sentence for a file that does
+            // not agree with itself. Same fallback either way; only the reason the author reads changes.
+            string namesRefusal = null;
+            string[] names = armature
+                ? SkinFields.BoneNames(man, afileInst, info.PathId, out namesRefusal) : null;
             // A PARTIALLY named rig is not a name array. A slot the file could not verify comes back
             // null, RebindByName would hand SkinBinder an empty bone name, and it refuses at the door
             // with a sentence about reloading the scene - offline, where there is no scene. NoNames is
@@ -203,8 +208,10 @@ namespace Morgott.ContentTool.Bake
                 SkinFields.Rebind(mesh, baked, influences);
                 how = outcome == Outcome.NotRigged
                     ? "not rigged - the target carries no bind poses"
-                    : "nearest-bone, one full-weight influence per vertex (no SkinnedMeshRenderer in " +
-                      "this bundle names ALL of the target's bones)";
+                    : "nearest-bone, one full-weight influence per vertex (" +
+                      (namesRefusal != null
+                          ? "this bundle REFUSES to name the target's bones: " + namesRefusal
+                          : "no SkinnedMeshRenderer in this bundle names ALL of the target's bones") + ")";
             }
             else
             {

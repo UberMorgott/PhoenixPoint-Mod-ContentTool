@@ -304,10 +304,30 @@ internal static class MeshExtractTests
         string unconfirmed;
         string[] kids = { root + "/Head", root + "/Jaw" };
         uint[] kidHashes = { hashes[0], hashes[2] };
-        Check(SkinFields.Verified(new[] { "Head", "Jaw" }, kids, "Root", rootHash, kidHashes,
-                                  out unconfirmed) == null && unconfirmed == null,
+        string[] nothing = SkinFields.Verified(new[] { "Head", "Jaw" }, kids, "Root", rootHash,
+                                               kidHashes, out unconfirmed);
+        Check(nothing == null && unconfirmed == null,
               "an anchor nothing confirms leaves every bone unverifiable, and refuses nothing (" +
               (unconfirmed ?? "none") + ")");
+
+        // ORDER MUST NOT DECIDE THE ANSWER. GetAssetsOfType hands the renderers back in file order, and
+        // a renderer that verifies NOTHING (the case just above) used to null the whole rig - so the
+        // names an earlier renderer verified survived or vanished depending on which one came second.
+        // Both folds, both orders, one answer.
+        string lateRefusal, earlyRefusal;
+        string[] late = SkinFields.Fold(SkinFields.Fold(null, new[] { "Root", null }, out lateRefusal),
+                                        nothing, out lateRefusal);
+        string[] early = SkinFields.Fold(SkinFields.Fold(null, nothing, out earlyRefusal),
+                                         new[] { "Root", null }, out earlyRefusal);
+        Check(late != null && early != null && late[0] == "Root" && early[0] == "Root" &&
+              lateRefusal == null && earlyRefusal == null,
+              "a renderer that verifies nothing cannot discard the names another verified, whichever " +
+              "order the file lists the two in (late=" + Show(late) + ", early=" + Show(early) + ")");
+    }
+
+    private static string Show(string[] names)
+    {
+        return names == null ? "null" : "[" + string.Join(", ", names) + "]";
     }
 
     // ---------------------------------------------------------------- helpers
