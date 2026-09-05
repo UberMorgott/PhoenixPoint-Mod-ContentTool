@@ -68,15 +68,60 @@ namespace Morgott.ContentTool.Bake
         /// nothing. An unrelated import failure is still counted, printed and reported as before.</param>
         internal static string Run(string projectRoot, out int failed, out int patchFailed)
         {
+            BakeResult r = Bake(projectRoot, false);
+            failed = r.Failed; patchFailed = r.PatchFailed;
+            return r.Terminal;
+        }
+
+        /// <summary>The two output directories ONE bake owns: the patched copies in the player's AppData
+        /// and the project's own Dist. Derived here rather than inside <see cref="OutputClaim"/> because
+        /// <see cref="ContentToolMain.PatchedDir"/> reads Application.persistentDataPath and the claim is
+        /// UnityEngine-free so the offline gate can link it.</summary>
+        internal static string[] OutputDirs(string projectRoot, string modId)
+        {
+            return new[] { ContentToolMain.PatchedDir(modId), Path.Combine(projectRoot, "Dist") };
+        }
+
+        /// <summary>
+        /// THE SAME RUN, structured - and the one place the output directories are owned.
+        ///
+        /// The claim is taken as soon as the project's id is known (that is what names the patched
+        /// directory) and released in a `finally` on EVERY path, exception and refusal included. A second
+        /// producer for either directory is refused with R37 and writes nothing at all; there is no wait
+        /// and no retry.
+        /// </summary>
+        /// <param name="claimHeld">the caller already owns these directories and holds them past this bake -
+        /// <see cref="Route7.ApplyProject"/> keeps the claim through Install, so re-taking it here would
+        /// make Apply's own bake refuse against itself. Passed down, never re-taken.</param>
+        internal static BakeResult Bake(string projectRoot, bool claimHeld)
+        {
+            ContentProject p = ContentProject.Load(projectRoot);
+            // AFTER Load, because p.Id is what names the patched directory - and Load writes nothing, so
+            // every byte this run produces is still covered. A project that fails to load never took a
+            // claim and needs no release.
+            string[] dirs = OutputDirs(p.Root, p.Id);
+            string contended;
+            if (!claimHeld && !OutputClaim.Take(dirs, out contended))
+                return new BakeResult(0, 0, contended, BakeDisposition.Refused);
+            // EVERY path, exception included: an unhandled throw out of the bake is reported by ct_project
+            // as "ct_project THREW" and the run ends - with the claim left standing, every later press in
+            // that session would be refused for a run that is long over.
+            try { return Baked(p); }
+            finally { if (!claimHeld) OutputClaim.Release(dirs); }
+        }
+
+        /// <summary>The bake itself, under someone's claim. Private because <see cref="Bake"/> is what owns
+        /// the directories this writes into, and a caller that reached here directly would own none.</summary>
+        private static BakeResult Baked(ContentProject p)
+        {
             StringBuilder log = new StringBuilder();
-            // NOT initialised here on purpose. `failed = 0` up front is what let the
-            // LoadFromFile-returned-null exit report a failed bake as a success: C# only demands an
-            // out parameter be assigned on every path that RETURNS, and a default at the top satisfies
-            // that for all of them at once. Left unassigned, the compiler proves what a reviewer
-            // otherwise has to - every exit states its own count.
+            // NO `int failed = 0` up front. That is what let the LoadFromFile-returned-null exit report a
+            // failed bake as a success: a default at the top satisfies the compiler for every exit at once.
+            // The count is stated AT each exit instead, which proves - rather than asks a reviewer to check
+            // - that every one of them says how the run ended.
+            int patchFailed;
             int failures = 0;
 
-            ContentProject p = ContentProject.Load(projectRoot);
             // The replacement count is ALWAYS printed, including 0. A declared "replace" that parses
             // to nothing used to produce no output at all (ct_project 13:51) - the run looked clean
             // and the whole feature was simply absent.
@@ -109,7 +154,16 @@ namespace Morgott.ContentTool.Bake
             // patchFailed only - `failures` already holds it through p.ImportFailures above, and
             // adding it twice would report one half-typed row as two failures.
             patchFailed = p.ReplaceRefusals;
-            if (p.Replace.Count > 0) { int refused = Patch(p, log); patchFailed += refused; failures += refused; }
+            if (p.Replace.Count > 0)
+            {
+                // R38 IS NOT A FAILURE AND NOT A COUNT. A copy the game is serving right now cannot be
+                // rewritten under its reader, so the bake stops before it writes anything at all - zero
+                // failures, disposition Refused, and Apply reads the disposition rather than the counts.
+                string live;
+                int refused = Patch(p, log, out live);
+                if (live != null) return new BakeResult(0, 0, log.Append(live).ToString(), BakeDisposition.Refused);
+                patchFailed += refused; failures += refused;
+            }
             // WHAT WAS PATCHED, not how many rows were declared. A "video" row is a replacement that
             // needs no patched bundle at all - Bundles(p) skips it, because the clip is a loose file
             // served live by ct_video - so keying the success line on p.Replace.Count made a
@@ -121,16 +175,16 @@ namespace Morgott.ContentTool.Bake
                 // FAILURES FIRST. A project whose only model refused to import has nothing left to bake,
                 // and saying "nothing to bake" for it reports the symptom as if it were the state of
                 // an empty folder - the run has to end on the count.
-                failed = failures;
                 // The wording lives in StageText, which the dashboard also reads: one producer per
                 // sentence, so the panel cannot show a line this command never printed.
-                return log.Append(failures != 0
+                return new BakeResult(failures, patchFailed, log.Append(failures != 0
                     ? StageText.S5(failures)
                     : p.Replace.Count == 0
                         ? StageText.BakeNothingToBake()
                         : patchedBundles > 0
                             ? StageText.BakeNoOwnBundle()
-                            : StageText.BakeNothingPatched(p.Replace.Count)).ToString();
+                            : StageText.BakeNothingPatched(p.Replace.Count)).ToString(),
+                    failures != 0 ? BakeDisposition.Failed : BakeDisposition.Success);
             }
             failures += ClipNamesDeclared(p, log);
             failures += CreatureScaffold(p, log);
@@ -352,10 +406,11 @@ namespace Morgott.ContentTool.Bake
                 if (common != null) common.Unload(false);
                 // A bake that cannot read its own output is a FAILED bake, and `failed` says so or
                 // Route7 marks this run's copies current (the hole the count was added to close).
-                failed = failures + 1;
-                return log.Append("FAIL AssetBundle.LoadFromFile returned null - something still holds " +
-                                  "a bundle named '" + BundleResidency.Identity(p.Id) + "'. Restart, or " +
-                                  "switch that mod off in the mod manager, then bake again.").ToString();
+                return new BakeResult(failures + 1, patchFailed,
+                    log.Append("FAIL AssetBundle.LoadFromFile returned null - something still holds " +
+                               "a bundle named '" + BundleResidency.Identity(p.Id) + "'. Restart, or " +
+                               "switch that mod off in the mod manager, then bake again.").ToString(),
+                    BakeDisposition.Failed);
             }
             try
             {
@@ -398,8 +453,9 @@ namespace Morgott.ContentTool.Bake
                 if (common != null) common.Unload(false);
             }
 
-            failed = failures;
-            return log.Append(failures == 0 ? StageText.S4(outPath) : StageText.S5(failures)).ToString();
+            return new BakeResult(failures, patchFailed,
+                log.Append(failures == 0 ? StageText.S4(outPath) : StageText.S5(failures)).ToString(),
+                failures == 0 ? BakeDisposition.Success : BakeDisposition.Failed);
         }
 
         /// <summary>
@@ -1499,10 +1555,15 @@ namespace Morgott.ContentTool.Bake
                            bundleFile + " " + cls);
         }
 
-        private static int Patch(ContentProject p, StringBuilder log)
+        /// <param name="liveRefusal">R38, or null. Set when one of the copies this would replace is being
+        /// SERVED to the game right now, in which case nothing at all was written and the whole bake is
+        /// Refused - not failed, and not counted.</param>
+        private static int Patch(ContentProject p, StringBuilder log, out string liveRefusal)
         {
             int failures = 0;
             string outDir = ContentToolMain.PatchedDir(p.Id);
+            liveRefusal = LiveReader(p, outDir);
+            if (liveRefusal != null) return 0;
             Directory.CreateDirectory(outDir);
             List<KeyValuePair<string, string>> copies = new List<KeyValuePair<string, string>>();
 
@@ -1901,6 +1962,43 @@ namespace Morgott.ContentTool.Bake
             if (t.Length < 4 || !t[0].StartsWith("bindposes=", StringComparison.Ordinal)) return null;
             if (t[0] == "bindposes=0") return null;
             return t[0] + " " + t[1] + " " + t[2] + " " + t[3];
+        }
+
+        /// <summary>
+        /// R38: is one of the copies this bake is about to replace being SERVED to the game right now?
+        ///
+        /// ASKED PER TARGET, and ASKED FIRST - before a single byte is written, so a refusal leaves the
+        /// previous copies exactly as the live readers found them. The answer is a restart boundary; there
+        /// is no rewriting beneath a reader and no partial bake to explain afterwards.
+        ///
+        /// <see cref="BundleClaims.Find"/> (:221), never <see cref="BundleLive.Holds"/>: Holds answers
+        /// "does this mod hold ANY claim", which is true on the first of two targets and would pass a bake
+        /// straight over the second one's live copy. The claim must be OURS (a different mod's claim points
+        /// at ITS copy, not at this file) and must name the very path about to be replaced.
+        ///
+        /// Applies to a stale, fresh, repair or forced same-key bake alike - a forced re-bake is a
+        /// replacement of the claimed file like any other.
+        /// </summary>
+        private static string LiveReader(ContentProject p, string outDir)
+        {
+            foreach (string bundleFile in Bundles(p))
+            {
+                BundleClaim c = BundleClaims.Find(bundleFile);
+                if (c == null || !string.Equals(c.Mod, p.Id, StringComparison.Ordinal)) continue;
+                string copy = Path.Combine(outDir, bundleFile);
+                // BundleLive stores the served path with forward slashes (Route7.cs:363); one spelling on
+                // both sides, case-blind like every other path comparison on this route.
+                if (string.Equals(Slashed(c.Path), Slashed(copy), StringComparison.OrdinalIgnoreCase))
+                    return StageText.R38(copy);
+            }
+            return null;
+        }
+
+        private static string Slashed(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            try { return Path.GetFullPath(path).Replace('/', '\\').TrimEnd('\\'); }
+            catch (Exception) { return path.Replace('/', '\\').TrimEnd('\\'); }
         }
 
         /// <summary>Distinct shipped bundles named by the project, in declaration order.</summary>

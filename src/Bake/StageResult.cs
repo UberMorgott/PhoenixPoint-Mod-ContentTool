@@ -120,22 +120,30 @@ namespace Morgott.ContentTool.Bake
         }
     }
 
-    /// <summary>A bake's two counts kept APART, plus its terminal line. <c>PatchFailed</c> alone authorises
-    /// patch-cache publication; an unrelated import failure still shows in <c>Failed</c> and still fails the
-    /// row (ProjectBake.cs:401-402, Route7.cs:342).
+    /// <summary>How a bake ENDED, which its two counts cannot say. R37 and R38 return with ZERO failures -
+    /// nothing was baked and nothing was wrong - and <c>Route7.ApplyProject</c> reads only
+    /// <c>patchFailed != 0</c> (Route7.cs:341) before it enumerates and installs, so a zero-count refusal
+    /// read as <c>Success</c> installs the STALE copies as if the bake had produced them. Encoding
+    /// contention as a patch failure instead is equally wrong: that reaches <c>Failed.Add(modId)</c>
+    /// (Route7.cs:344) and poisons the session's checkbox over a race nobody caused.
     ///
-    /// Filled by Task 3, which is what it is here for: the plan has `Run` return one beside its two `out`
-    /// counts (2026-09-05-lifecycle-dashboard-plan.md:143) and gives it a disposition
-    /// (Success/Refused/Cancelled/Failed, Step 3b `:420`) - R37 and R38 return with ZERO counts, which no
-    /// pair of ints can tell apart from a clean bake.</summary>
+    /// So: <c>Refused</c> and <c>Cancelled</c> stop Apply WITHOUT touching that set; only <c>Failed</c>
+    /// reaches it. <c>Cancelled</c> has no producer until the segmented job lands (Task 4) - it is here
+    /// because the caller's `switch` has to be written once, not widened later.</summary>
+    internal enum BakeDisposition { Success, Refused, Cancelled, Failed }
+
+    /// <summary>A bake's two counts kept APART, plus its terminal line and how it ended. <c>PatchFailed</c>
+    /// alone authorises patch-cache publication; an unrelated import failure still shows in <c>Failed</c>
+    /// and still fails the row (ProjectBake.cs:401-402, Route7.cs:342).</summary>
     internal sealed class BakeResult
     {
         internal readonly int Failed, PatchFailed;
         internal readonly string Terminal;
+        internal readonly BakeDisposition How;
 
-        internal BakeResult(int failed, int patchFailed, string terminal)
+        internal BakeResult(int failed, int patchFailed, string terminal, BakeDisposition how)
         {
-            Failed = failed; PatchFailed = patchFailed; Terminal = terminal;
+            Failed = failed; PatchFailed = patchFailed; Terminal = terminal; How = how;
         }
     }
 

@@ -268,10 +268,28 @@ namespace Morgott.ContentTool.Bake
         internal static string ApplyProject(string projectName, string forBundle, out ApplyDisposition how)
         {
             how = ApplyDisposition.Refused;
-            StringBuilder pre = new StringBuilder();
             string projectRoot = ContentToolMain.ProjectDir(projectName);
             Morgott.ContentTool.Project.ContentProject project =
                 Morgott.ContentTool.Project.ContentProject.Load(projectRoot);
+
+            // THE CLAIM IS TAKEN HERE, not inside the bake below, and it is HELD ALL THE WAY THROUGH
+            // INSTALL: the bake, the freshness key and the redirect are one publication, and a second
+            // producer arriving between them would leave one run's key stamped over the other's copies.
+            // Passed DOWN to the bake (claimHeld: true) so Apply's own bake cannot refuse against itself.
+            string[] owned = ProjectBake.OutputDirs(projectRoot, project.Id);
+            string contended;
+            if (!OutputClaim.Take(owned, out contended)) return contended;
+            try { return Applied(project, projectRoot, forBundle, out how); }
+            finally { OutputClaim.Release(owned); }
+        }
+
+        /// <summary>The apply itself, under this project's output claim. Private for the same reason
+        /// <c>ProjectBake.Baked</c> is: a caller that reached here directly would own nothing.</summary>
+        private static string Applied(Morgott.ContentTool.Project.ContentProject project, string projectRoot,
+                                      string forBundle, out ApplyDisposition how)
+        {
+            how = ApplyDisposition.Refused;
+            StringBuilder pre = new StringBuilder();
             string modId = project.Id;
             string patched = ContentToolMain.PatchedDir(modId);
 
@@ -336,8 +354,17 @@ namespace Morgott.ContentTool.Bake
                 // permanently, on the PLAYER'S enable path: the key stayed unwritten, so every launch
                 // re-baked, failed on the same unrelated file and installed nothing at all. Those failures
                 // are still counted and printed by the bake above; they just do not decide route vii.
-                int failed, patchFailed;
-                pre.AppendLine(ProjectBake.Run(projectRoot, out failed, out patchFailed));
+                //
+                // THE DISPOSITION, NOT THE COUNTS. R37 and R38 come back with ZERO failures - nothing was
+                // baked and nothing was wrong - so `patchFailed != 0` alone would fall straight through
+                // and install the STALE copies as if this bake had produced them. Counting a refusal as a
+                // patch failure instead is no better: that reaches Failed.Add below and blocks the mod's
+                // checkbox for the rest of the session over a race nobody caused.
+                BakeResult baked = ProjectBake.Bake(projectRoot, true);   // claimHeld: this apply owns it
+                pre.AppendLine(baked.Terminal);
+                if (baked.How == BakeDisposition.Refused || baked.How == BakeDisposition.Cancelled)
+                    return pre.ToString();                                // `how` stays Refused; Failed untouched
+                int patchFailed = baked.PatchFailed;
                 if (patchFailed != 0)
                 {
                     how = ApplyDisposition.BakeFailed;

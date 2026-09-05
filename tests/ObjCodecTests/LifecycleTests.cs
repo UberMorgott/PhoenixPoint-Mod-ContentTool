@@ -88,10 +88,17 @@ internal static class LifecycleTests
         checks += Check(terminal.Entries.Length == 0 && ReadBackResult.Of(null).Terminal == null &&
                         terminal.Terminal == "ct_project: ALL PASS - D:\\x\\Dist\\a.bundle",
                         "the terminal line rides along verbatim, never recomposed by the panel");
-        BakeResult bake = new BakeResult(3, 1, "ct_project: 3 FAILURE(S)");
-        checks += Check(bake.Failed == 3 && bake.PatchFailed == 1 && bake.Terminal == "ct_project: 3 FAILURE(S)",
+        BakeResult bake = new BakeResult(3, 1, "ct_project: 3 FAILURE(S)", BakeDisposition.Failed);
+        checks += Check(bake.Failed == 3 && bake.PatchFailed == 1 && bake.Terminal == "ct_project: 3 FAILURE(S)" &&
+                        bake.How == BakeDisposition.Failed,
                         "BakeResult keeps failed and patchFailed apart - patchFailed alone authorises " +
                         "publication; Task 3 returns one from Run and gives it a disposition (plan:143, :420)");
+        // The disposition exists for THIS: a refusal that failed nothing. Read as Success it would install
+        // the stale copies; counted as a patch failure it would poison Route7's session Failed set.
+        BakeResult refused = new BakeResult(0, 0, StageText.R37("D:\\x"), BakeDisposition.Refused);
+        checks += Check(refused.Failed == 0 && refused.PatchFailed == 0 &&
+                        refused.How == BakeDisposition.Refused,
+                        "R37/R38 return with ZERO counts - only the disposition tells them from a clean bake");
 
         // ---- G2 wording: the exact strings, from ONE producer.
         checks += Check(StageText.S1("Replace_Rifle", "px_equipment_assets_all.bundle", false) ==
@@ -203,9 +210,54 @@ internal static class LifecycleTests
         checks += Check(StageResult.Tail(wide, 1) == wide, "one very long line comes back whole");
 
         checks += Publication();
+        checks += Ownership();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
-               "one file swap";
+               "one file swap, one output owner";
+    }
+
+    /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per
+    /// CANONICAL output directory, so the console verb (ContentToolMain.cs:480) and the mod-manager checkbox
+    /// (Route7.cs:341) are refused by the same set the panel is; none of them asks the panel.
+    ///
+    /// THE PAIR IS ATOMIC (plan finding 10). A run takes the patched dir AND its own Dist together: taking
+    /// them one at a time lets two runs each hold one and refuse each other forever, and nothing here ever
+    /// waits, retries or steals, so that deadlock would be permanent.</summary>
+    private static int Ownership()
+    {
+        int checks = 0;
+        string patched = "C:\\pd\\ContentTool\\Patched\\aabbccdd\\morgott.demo",
+               dist = "C:\\proj\\Demo\\Dist",
+               other = "C:\\proj\\Other\\Dist";
+        string[] mine = { patched, dist };
+        string refusal;
+
+        checks += Check(OutputClaim.Take(mine, out refusal) && refusal == null &&
+                        OutputClaim.Held(patched) && OutputClaim.Held(dist),
+                        "a free pair is taken whole");
+        checks += Check(!OutputClaim.Take(new[] { patched }, out refusal) &&
+                        refusal == StageText.R37(patched),
+                        "a second producer for a directory in flight is refused IMMEDIATELY, with R37");
+
+        // The atomic half: the SECOND directory is the contended one, so a non-atomic implementation would
+        // leave `other` held by a run that never started and nobody would ever release it.
+        checks += Check(!OutputClaim.Take(new[] { other, dist }, out refusal) && !OutputClaim.Held(other),
+                        "a pair that contends on its SECOND directory takes NEITHER - no partial acquisition");
+
+        // Canonical, and case-blind: Route7.cs:287 already compares these paths case-insensitively, and a
+        // trailing separator or a forward slash is the same folder on Windows.
+        checks += Check(!OutputClaim.Take(new[] { "c:/proj/Demo/Dist\\" }, out refusal),
+                        "the claim is canonical - case, separator and trailing slash name one directory");
+
+        OutputClaim.Release(mine);
+        checks += Check(!OutputClaim.Held(patched) && !OutputClaim.Held(dist) &&
+                        OutputClaim.Take(mine, out refusal),
+                        "Release frees the whole pair and the next run takes it");
+        OutputClaim.Release(mine);
+        OutputClaim.Release(mine);
+        checks += Check(OutputClaim.Take(mine, out refusal), "Release is idempotent - a double release is not a leak");
+        OutputClaim.Release(mine);
+        return checks;
     }
 
     /// <summary>G4 - the ONE swap. AtomicFile.Write makes its own temp (AtomicFile.cs:19) and so cannot
