@@ -8,7 +8,7 @@ namespace Morgott.ContentTool.Bake
     /// copies agree while the producer drifted from both.
     ///
     /// S4/S5 and the three bake special cases are now COMPOSED here for ProjectBake too (it calls S4, S5,
-    /// BakeNothingToBake, BakeNoOwnBundle and BakeNothingPatched at :125-133 and :400), so bake's console
+    /// BakeNothingToBake, BakeNoOwnBundle and BakeNothingPatched at :127-133 and :402), so bake's console
     /// line and the panel's row are the same string and cannot drift apart.
     /// S7 and the Package refusal are composed here too: `Package.Run` calls them (src\Project\Package.cs:77
     /// and :178), which cost two Compile lines in tools\Package and tests\TargetPathTests and removed the
@@ -40,10 +40,10 @@ namespace Morgott.ContentTool.Bake
         /// <summary>Validate PASS. NEW - Validate had no success string of its own.</summary>
         internal static string S3(string name) { return "Validate: PASS - '" + name + "'."; }
 
-        /// <summary>Bake PASS. Quotes ProjectBake.cs:405.</summary>
+        /// <summary>Bake PASS. Quotes ProjectBake.cs:402.</summary>
         internal static string S4(string outPath) { return "ct_project: ALL PASS - " + outPath; }
 
-        /// <summary>Bake FAIL. Quotes ProjectBake.cs:406 (and :126, the same sentence).</summary>
+        /// <summary>Bake FAIL. Quotes ProjectBake.cs:402 (and :128, the same sentence).</summary>
         internal static string S5(int failures) { return "ct_project: " + failures + " FAILURE(S)"; }
 
         /// <summary>Verify PASS. NEW. Says how many of the DECLARED targets this project's own copies serve -

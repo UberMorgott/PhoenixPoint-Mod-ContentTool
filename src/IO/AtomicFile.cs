@@ -46,20 +46,27 @@ namespace Morgott.ContentTool.IO
         /// swap without the buffer. ONE swap in the codebase, so a publication cannot drift from a write.
         ///
         /// Throws when there is no temp to publish: silently doing nothing there would leave the previous
-        /// file in place and read, from the outside, exactly like a successful publication.</summary>
+        /// file in place and read, from the outside, exactly like a successful publication.
+        ///
+        /// THE TEMP MUST BE A SIBLING OF <paramref name="path"/>. Across volumes File.Move is a copy plus a
+        /// delete - not a swap, and a reader can see a half-written destination - and File.Replace throws
+        /// outright, so the guard below refuses instead of publishing non-atomically.</summary>
         internal static void Publish(string tempPath, string path, string backupPath = null)
         {
-            try
-            {
-                if (File.Exists(path)) File.Replace(tempPath, path, backupPath);
-                else File.Move(tempPath, path);
-            }
-            finally
-            {
-                // A successful swap moved it away, so this is a no-op; a failed one leaves the caller's
-                // temp behind, and nobody else knows its name.
-                try { File.Delete(tempPath); } catch (Exception) { }
-            }
+            if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(tempPath)),
+                               Path.GetDirectoryName(Path.GetFullPath(path)),
+                               StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("the temp to publish must sit beside its destination: '" +
+                                            tempPath + "' is not in the folder of '" + path + "'");
+            if (File.Exists(path)) File.Replace(tempPath, path, backupPath);
+            else
+                // THE DESTINATION CAN APPEAR between the Exists above and this Move - a second writer, or
+                // the same bake retried - and the Move then throws over a file that is already there.
+                try { File.Move(tempPath, path); }
+                catch (IOException) when (File.Exists(path)) { File.Replace(tempPath, path, backupPath); }
+            // NO cleanup arm. A swap that worked moved the temp away already; a swap that THREW must keep
+            // it - the caller streamed a whole bundle into it and has no second copy to retry from, and
+            // nobody else knows its name either way.
         }
 
         /// <summary>The encoding's PREAMBLE is NOT written - a BOM belongs in the bytes overload, where

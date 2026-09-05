@@ -4,9 +4,9 @@ using System.Text;
 namespace Morgott.ContentTool.Bake
 {
     /// <summary>PASS, FAIL, or NOTHING WAS MEASURED. The third one is why this enum exists: every VOID arm of
-    /// the read-back returns 0 exactly like a pass (ProjectBake.cs:1835, :1852, :1866, :1873, :1894, :1923,
-    /// :1942), so "no failures" and "no proof" are the same number and a panel that counts cannot tell them
-    /// apart. <c>None</c> is the idle row - a stage nobody has run yet - so a default-constructed
+    /// the read-back returns 0 exactly like a pass (ReadBack.cs:51, :105, :118, :141, :171 and the seven P6
+    /// arms at :241, :262, :276, :287, :308, :337, :357), so "no failures" and "no proof" are the same number
+    /// and a panel that counts cannot tell them apart. <c>None</c> is the idle row - a stage nobody has run yet - so a default-constructed
     /// <see cref="StageResult"/> is idle without anyone setting a field.
     ///
     /// NOT <c>Morgott.ContentTool.Import.Outcome</c> and not named <c>Outcome</c> either: that name is already
@@ -92,19 +92,27 @@ namespace Morgott.ContentTool.Bake
         /// <summary>True when this target has no non-VOID measurement for one of the gates its row kind
         /// REQUIRES. A gate that never ran at all answers the same as a gate that ran and measured nothing:
         /// neither is proof, and treating absence as an implied pass is exactly the bug this carrier exists
-        /// to stop.</summary>
-        internal bool MandatoryVoid(string target, RowKind kind)
+        /// to stop.
+        ///
+        /// A TEXTURE ROW IS LOOKED UP BY ITS BUNDLE, not by its asset name: P1 and P1-ctl-shipped ask their
+        /// question about every declared texture of a bundle AT ONCE and are recorded under the bundle file
+        /// (ReadBack.cs:51, :55, :57), so no P1 entry has ever carried a texture's own name and matching on
+        /// one made this predicate answer "unproven" for every texture row ever measured. Mesh and material
+        /// rows keep their own key - P3/P4 are recorded per asset. <paramref name="bundle"/> left null is
+        /// therefore an unproven texture row, never an implied pass.</summary>
+        internal bool MandatoryVoid(string target, RowKind kind, string bundle = null)
         {
             string[] gates = kind == RowKind.Mesh ? MeshGates
                            : kind == RowKind.Texture ? TextureGates
                            : MaterialGates;
+            string key = kind == RowKind.Texture ? bundle : target;
             foreach (string gate in gates)
             {
                 bool proven = false;
                 foreach (GateEntry e in Entries)
                     if (e.Outcome != GateOutcome.Void &&
                         string.Equals(e.Gate, gate, StringComparison.Ordinal) &&
-                        string.Equals(e.Target, target, StringComparison.Ordinal))
+                        string.Equals(e.Target, key, StringComparison.Ordinal))
                     { proven = true; break; }
                 if (!proven) return true;
             }
@@ -114,7 +122,7 @@ namespace Morgott.ContentTool.Bake
 
     /// <summary>A bake's two counts kept APART, plus its terminal line. <c>PatchFailed</c> alone authorises
     /// patch-cache publication; an unrelated import failure still shows in <c>Failed</c> and still fails the
-    /// row (ProjectBake.cs:403-406, Route7.cs:342).
+    /// row (ProjectBake.cs:401-402, Route7.cs:342).
     ///
     /// Filled by Task 3, which is what it is here for: the plan has `Run` return one beside its two `out`
     /// counts (2026-09-05-lifecycle-dashboard-plan.md:143) and gives it a disposition

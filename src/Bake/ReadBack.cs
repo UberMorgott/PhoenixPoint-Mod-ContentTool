@@ -28,6 +28,12 @@ namespace Morgott.ContentTool.Bake
     /// </summary>
     internal static class ReadBack
     {
+        /// <summary>THIS PRODUCER NEVER CARRIES A TERMINAL LINE - it returns one result PER BUNDLE, and the
+        /// run's terminal sentence is composed once, after every bundle and after the gates that are not
+        /// read-back at all, at ProjectBake.cs:402 (S4/S5). There is nothing to thread in: the line does not
+        /// exist yet when this returns, and the sole caller adds `.Failed` to a running count
+        /// (ProjectBake.cs:1657) rather than holding the result. <see cref="ReadBackResult.Terminal"/> is
+        /// therefore <c>null</c> here, which is what its own factory demands be said explicitly.</summary>
         internal static ReadBackResult Run(StringBuilder log, string bundleFile, string shipped, string copy,
                                            List<ImportedTexture> want,
                                            List<KeyValuePair<string, string>> mats,
@@ -154,15 +160,33 @@ namespace Morgott.ContentTool.Bake
 
             foreach (KeyValuePair<string, ShippedReplacement> c in clips)
             {
+                // BAKE pre-validates this row (ProjectBake.cs:1576) and never reaches here with a bad one,
+                // but Verify reads the rows off DISK and does: a malformed "clip" left attribute=0 and
+                // factor=0, so both arms below measured nothing at all while reporting VOID as though the
+                // clip simply bound no curve. The refusal is the answer, and it is the parser's own words.
                 uint attribute; float k;
-                ProjectBake.ParseClipEdit(c.Value.clip, out attribute, out k);
+                string why = ProjectBake.ParseClipEdit(c.Value.clip, out attribute, out k);
+                if (why != null)
+                {
+                    Void(log, entries, "P7", c.Key,
+                         "P7 VOID clip '" + c.Key + "' \"" + c.Value.clip + "\" " + why +
+                         ", so there is no edit to read back");
+                    continue;
+                }
                 int at = log.Length;
-                ProjectBake.Curves(log, c.Key, c.Value.clip, attribute, k, shipped, copy);
-                ProjectBake.SampleClip(log, c.Key, attribute, k, shipped, copy);
-                Clips(log, entries, c.Key, at);
+                // ONE failure count, not two. Both arms already RETURN what they counted; the entries are
+                // sliced back off the lines they wrote, and the two must agree or one of them is lying.
+                int counted = ProjectBake.Curves(log, c.Key, c.Value.clip, attribute, k, shipped, copy) +
+                              ProjectBake.SampleClip(log, c.Key, attribute, k, shipped, copy);
+                int sliced = Clips(log, entries, c.Key, at);
+                if (sliced != counted)
+                    throw new InvalidOperationException(
+                        "the P7 read-back disagrees with itself for clip '" + c.Key + "': its arms returned " +
+                        counted + " failure(s) and the lines they wrote classify as " + sliced + " - " +
+                        log.ToString(at, log.Length - at).TrimEnd('\r', '\n'));
             }
 
-            return ReadBackResult.Of(null, entries.ToArray());   // no terminal line: the caller composes it
+            return ReadBackResult.Of(null, entries.ToArray());   // no terminal line: see the note on Run
         }
 
         /// <summary>The clip arms stay where they are - `Curves` would have to be RENAMED to move (there is
@@ -173,18 +197,23 @@ namespace Morgott.ContentTool.Bake
         ///
         /// ponytail: one line per arm, which is what Check and every P7 VOID arm write today. An arm that
         /// ever printed a detail containing a newline would need this to slice by Check's return instead.
-        /// </summary>
-        private static void Clips(StringBuilder log, List<GateEntry> entries, string target, int at)
+        ///
+        /// Returns the number of FAIL entries it made, so the caller can hold it against what the arms
+        /// themselves returned - the two are the same fact and a mismatch means the slicing has stopped
+        /// matching the producer.</summary>
+        private static int Clips(StringBuilder log, List<GateEntry> entries, string target, int at)
         {
+            int failed = 0;
             foreach (string line in log.ToString(at, log.Length - at)
                                        .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
             {
                 string[] token = line.Split(' ');
                 if (token.Length < 2) continue;
                 if (token[1] == "PASS") entries.Add(GateEntry.Pass(token[0], target, line));
-                else if (token[1] == "FAIL") entries.Add(GateEntry.Fail(token[0], target, line));
+                else if (token[1] == "FAIL") { entries.Add(GateEntry.Fail(token[0], target, line)); failed++; }
                 else if (token[1] == "VOID") entries.Add(GateEntry.Void(token[0], target, line));
             }
+            return failed;
         }
 
         /// <summary>

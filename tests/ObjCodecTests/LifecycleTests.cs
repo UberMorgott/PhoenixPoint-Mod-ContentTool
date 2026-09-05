@@ -5,8 +5,8 @@ using Morgott.ContentTool.IO;
 
 /// <summary>The lifecycle dashboard's CARRIER and its one verdict formatter.
 ///
-/// G1 - a read-back that failed nothing is not therefore a PASS. Every VOID arm in ProjectBake returns 0
-/// exactly like a pass (`ProjectBake.cs:1835`, `:1852`, `:1866`, `:1873`, `:1894`, `:1923`, `:1942`), so a
+/// G1 - a read-back that failed nothing is not therefore a PASS. Every VOID arm of the read-back returns 0
+/// exactly like a pass (`ReadBack.cs:51`, `:105`, `:118`, `:141`, `:171` and the seven P6 arms), so a
 /// failure count plus a log cannot tell the two apart and the panel would print PASS over a row nothing
 /// proved. The carrier answers structurally, without anyone reading text.
 ///
@@ -39,7 +39,7 @@ internal static class LifecycleTests
                         "the counts are structured, not parsed out of the log");
 
         // A mesh row needs BOTH P4 and P4-bytes; P5/P6 may be VOID (a skinless or same-order source has
-        // nothing to measure - ProjectBake.cs:1832, :1939), and that must not sink the row.
+        // nothing to measure - ReadBack.cs:141, :357), and that must not sink the row.
         ReadBackResult meshOk = ReadBackResult.Of(null,
             GateEntry.Pass("P4", "mesh_a", "P4 mesh 'mesh_a' read back"),
             GateEntry.Pass("P4-bytes", "mesh_a", "P4-bytes 12 vertices"),
@@ -59,12 +59,22 @@ internal static class LifecycleTests
                         "a mandatory gate with NO entry at all is VOID, not an implied pass");
         checks += Check(meshOk.MandatoryVoid("mesh_b", RowKind.Mesh),
                         "another target's proofs never satisfy this target");
+        // A TEXTURE ROW IS KEYED ON ITS BUNDLE. P1 and its control are recorded under the bundle file
+        // (ReadBack.cs:51, :55, :57) because they measure every declared texture of that bundle at once,
+        // so a lookup by the row's asset name matches nothing and calls every measured texture unproven.
+        ReadBackResult texBundle = ReadBackResult.Of(null,
+            GateEntry.Pass("P1", "a.bundle", "P1 PASS every replaced Texture2D in a.bundle reads back its new pixels"),
+            GateEntry.Pass("P1-ctl-shipped", "a.bundle", "P1-ctl-shipped PASS the shipped a.bundle does NOT contain them"));
+        checks += Check(!texBundle.MandatoryVoid("tex_a", RowKind.Texture, "a.bundle"),
+                        "a texture row is proven by its BUNDLE's P1 pair, not by its asset name");
+        checks += Check(texBundle.MandatoryVoid("tex_a", RowKind.Texture, "other.bundle") &&
+                        texBundle.MandatoryVoid("tex_a", RowKind.Texture, null),
+                        "another bundle's P1 pair - or no bundle named at all - leaves the texture row unproven");
         checks += Check(ReadBackResult.Of(null,
-                            GateEntry.Pass("P1", "tex_a", "x"),
-                            GateEntry.Void("P1-ctl-shipped", "tex_a", "y")).MandatoryVoid("tex_a", RowKind.Texture) &&
-                        !ReadBackResult.Of(null,
-                            GateEntry.Pass("P1", "tex_a", "x"),
-                            GateEntry.Pass("P1-ctl-shipped", "tex_a", "y")).MandatoryVoid("tex_a", RowKind.Texture),
+                            GateEntry.Pass("P1", "a.bundle", "x"),
+                            GateEntry.Void("P1-ctl-shipped", "a.bundle", "y"))
+                            .MandatoryVoid("tex_a", RowKind.Texture, "a.bundle") &&
+                        !texBundle.MandatoryVoid("tex_a", RowKind.Texture, "a.bundle"),
                         "a texture row needs P1 AND P1-ctl-shipped");
         checks += Check(ReadBackResult.Of(null, GateEntry.Void("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material) &&
                         !ReadBackResult.Of(null, GateEntry.Pass("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material),
@@ -245,6 +255,41 @@ internal static class LifecycleTests
             catch (Exception) { threw = true; }
             checks += Check(threw && Same(File.ReadAllBytes(dest), streamed),
                             "publishing an absent temp throws and does not touch the destination");
+
+            // THE RACE. The destination can appear between Publish's own File.Exists and its File.Move -
+            // a second writer, or the same bake retried - and the Move then throws over a file that is
+            // already there. The temp's bytes must still land.
+            string raced = Path.Combine(dir, "raced.bundle");
+            string racedTmp = raced + ".streamed.tmp";
+            File.WriteAllBytes(racedTmp, streamed);
+            File.WriteAllBytes(raced, older);       // pre-created between the temp write and the Publish
+            AtomicFile.Publish(racedTmp, raced);
+            checks += Check(Same(File.ReadAllBytes(raced), streamed) && !File.Exists(racedTmp),
+                            "a destination that appeared after the Exists check still gets the temp's bytes");
+
+            // A swap that THROWS must KEEP the caller's temp: a streamed bundle has no second copy, so
+            // deleting it here loses the whole write and leaves the caller nothing to retry from.
+            string held = Path.Combine(dir, "held.bundle");
+            string heldTmp = held + ".streamed.tmp";
+            File.WriteAllBytes(held, older);
+            File.WriteAllBytes(heldTmp, streamed);
+            bool refusedSwap = false;
+            using (new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                try { AtomicFile.Publish(heldTmp, held); }
+                catch (Exception) { refusedSwap = true; }
+            }
+            checks += Check(refusedSwap && Same(File.ReadAllBytes(heldTmp), streamed),
+                            "a swap that throws KEEPS the caller's temp - there is no second copy to retry from");
+            File.Delete(heldTmp);                   // kept on purpose above; the Write arm below counts *.tmp
+
+            // A temp in ANOTHER directory is not a swap at all: File.Move across volumes is copy+delete
+            // and File.Replace throws outright, so the guard refuses it instead of writing non-atomically.
+            bool crossVolume = false;
+            try { AtomicFile.Publish(Path.Combine(Path.GetTempPath(), "elsewhere.tmp"), dest); }
+            catch (ArgumentException) { crossVolume = true; }
+            checks += Check(crossVolume && Same(File.ReadAllBytes(dest), streamed),
+                            "a temp that is not a sibling of the destination is refused, not published");
 
             // Write still writes - it is now two lines over Publish, and MANIFEST/ALIAS/PROJECT-SCAFFOLD
             // all ride on it.
