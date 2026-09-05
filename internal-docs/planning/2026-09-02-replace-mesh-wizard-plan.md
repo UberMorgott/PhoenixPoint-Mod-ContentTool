@@ -54,6 +54,30 @@ string Run() }` that throws on failure and is called from `Program.Main`. `ObjCo
    the mesh file, so an identical row re-added is E4 exactly like a conflicting one. Task 2 answers "is this the SAME
    row?" before adding, which is the only reason a retry after R7/R8/R11 can work at all.
 
+## Codex plan review 2026-09-05 — applied
+
+Deep review `C:\Temp\cx\ec5951d509df433a980182e8a0b1d624.out.md`: 19 findings plus a sequencing paragraph.
+
+**Accepted and applied in this file:** 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18 — three of them
+in a lighter form. **2 + 3** land as **Task 2 Step 0**, because Task 1 is already shipped (`13e6361`) and its code
+is on disk; **4** is one `FileMode.CreateNew` call, not a temp+move dance; **16** keeps every task boundary and
+adds "land this task as several green commits" to Tasks 5 and 6 instead of renumbering anything.
+
+**Rejected, each with its reason:**
+- **11 (restore Instance3's `MOD_ACTIVATED`)** — rejected: Instance3 has its OWN profile `76561197996210593`
+  (the user's game is `…591`, Instance2 `…592`), so an edit there can never reach the user's profile. Task 8's
+  byte-snapshot of THAT profile's `Options.jopt` is the whole ceremony; no restore-and-hash ritual is added.
+- **19 (assemble the whole `meta.json` tree through `JsonWriter`)** — rejected: `id` is the only value that can
+  carry a quote or a backslash, and it already goes through `JsonWriter.Val` quoted AND escaped; the rest is a
+  fixed literal whose expected bytes are spelled independently in the test. Design §4.2's wording is relaxed to
+  "the id quoted through `JsonWriter`; the template body a fixed literal" instead.
+
+**Execution order — the sequencing paragraph, accepted: 2 → 3 → 5 → 4 → 6 → 7 → 8.** The task NUMBERS do not
+change; other documents cite them. Task 5 goes before Task 4 because target derivation defines the `forBundle`
+value and is the riskiest compile/runtime seam, and `ApplyProject`'s global behaviour change must not sit
+un-exercised across several commits — Task 4 then lands immediately adjacent to its first caller and its
+acceptance evidence.
+
 ## File Structure
 
 **Created**
@@ -516,6 +540,38 @@ packager ships cannot drift. `ContentTool.csproj` needs no edit (it globs `src\*
 
 ### Task 2: the row, appended through `ManifestFile`, reused when identical, refused when it conflicts
 
+- [ ] **Step 0: Task 1 follow-ups (Codex findings 2, 3, and the cavecrew note on `13e6361`).** Task 1 is shipped;
+  these are corrections to code already on disk, landed here before the row work.
+  1. **Normalize `modDir` before taking its parent** (finding 2). `Directory.GetParent("…\Mods\ContentTool\")`
+     answers `…\Mods\ContentTool`, so a trailing separator puts the project UNDER ContentTool — exactly where the
+     manager never discovers it (`ModGate.Decide:38` → `Unknown`) — and the post-condition accepts it, because
+     `ContentMods.ProjectDir` walks the same wrong parent. In BOTH `RootOf` and `AddMeshReplacement`, replace
+     `Directory.GetParent(modDir)` with the parent of
+     `Path.GetFullPath(modDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)`.
+     Arms: `RootOf(modDir + "\\", "Replace_Rifle") == RootOf(modDir, "Replace_Rifle")`, and one press made
+     through the trailing-separator spelling landing in the same `Root` as the non-trailing one.
+  2. **Strictly parse an EXISTING `meta.json` before `Package.MetaRefusal`** (finding 3). `MetaRefusal`
+     (`Package.cs:313-329`) is REGEX-based: an unclosed object that happens to hold a matching `ID` and
+     `Dependencies` passes it, so R13 alone does not prove the mod is discoverable. Use the reader this codebase
+     already has — **`Json.Parse(text, maxDepth)`** (`src\Import\Json.cs:15`), which returns a
+     `Dictionary<string, object>` for an object and throws `FormatException` naming the offset otherwise, and is
+     already linked into the gate (`ObjCodecTests.csproj:145`). **Do not add a parser.** In the `else` branch,
+     before the `MetaRefusal` call: `Json.Parse(text, 64)`, and refuse as R13 when it throws (carrying the
+     `FormatException` message) or when the result is not a `Dictionary<string, object>`; then call `MetaRefusal`
+     unchanged. Arms: a malformed meta
+     (`{"ID":"x","Dependencies":["com.morgott.ContentTool"` — nothing closed) → R13 and the file not rewritten;
+     a non-object meta (`[1,2]`) → R13 and the file not rewritten.
+  3. **A quoted-id fixture** (cavecrew note). The helper `ProjectScaffoldTests.Template()` (`:146-151`) spells the
+     expected meta by hand and does NOT JSON-escape the id, while production `Meta()` does (`JsonWriter.Val`). Add
+     an arm shipping into a project whose authored `ppcontent.json` carries the id `com.test"quote`: the written
+     `meta.json` re-reads through `Json.Parse` with `ID == com.test"quote`, and `Package.MetaRefusal` accepts it.
+     Escape the id inside `Template()` the same way (or build that arm's expected bytes with `JsonWriter`) — never
+     weaken the fixture to the unescaped spelling.
+  - Run: `dotnet run --project tests\ObjCodecTests -c Release`
+  - Expected: `PROJECT-SCAFFOLD PASS, 35 check(s) - name table, project templates` (29 + 6), last line
+    `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0. Commit this step on its own:
+    `git -C E:\DEV\PhoenixPoint\ContentTool add src\Project\ProjectScaffold.cs tests\ObjCodecTests\ProjectScaffoldTests.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "fix(project): a trailing separator on ModDir no longer buries the project under ContentTool, and an existing meta.json is parsed before it is judged"`
+
 - [ ] **Step 1: Write the failing gate.** In `ProjectScaffoldTests.Run()`, inside the `try`, after the
   `Scaffold_RefusesAnUnrelatedFolder` block (the `EmptyOne` check is the last thing before it):
   ```csharp
@@ -530,47 +586,78 @@ packager ships cannot drift. `ContentTool.csproj` needs no edit (it globs `src\*
               string second = Path.Combine(dir, "hand.glb");
               File.WriteAllBytes(second, new byte[] { 4, 5, 6, 7 });
               string secondSha = AliasMap.Sha256(File.ReadAllBytes(second));
+
+              // The append is proved against a HAND-WRITTEN manifest, not one this tool authored (Codex
+              // finding 12): the template has no unknown member, no nested value and no BOM, so a splice
+              // that lost any of those would still pass a check made against it. The row's own bytes are
+              // asserted INSIDE an independently located span, and everything outside that span is compared
+              // byte for byte - a substring search alone proves nothing about what moved elsewhere.
+              string authored = Path.Combine(mods, "Handwritten");
+              Directory.CreateDirectory(authored);
+              string authoredManifest = Path.Combine(authored, "ppcontent.json");
+              const string handwritten =
+                  "\uFEFF{\n  \"id\": \"Handwritten\",\n  \"bundle\": \"Handwritten.bundle\",\n" +
+                  "  \"note\": \"ünknown member, kept verbatim\",\n" +
+                  "  \"replace\": [ {\"bundle\":\"px_equipment_assets_all.bundle\"," +
+                  "\"asset\":\"WPN_PX_RG_Assault_Rifle_T01_V01\",\"mesh\":\"body\"} ],\n" +
+                  "  \"nested\": { \"a\": [ 1, 2, { \"b\": true } ] }\n}\n";
+              File.WriteAllText(authoredManifest, handwritten, new UTF8Encoding(false));
+              string beforeAppend = File.ReadAllText(authoredManifest);
               ProjectScaffold.Result grew = ProjectScaffold.AddMeshReplacement(
-                  modDir, "Replace_Rifle", second, secondSha,
+                  modDir, "Handwritten", second, secondSha,
                   "px_equipment_assets_all.bundle", "WPN_PX_Hand", empty);
-              checks += Check(!grew.Created && grew.Root == made.Root,
-                              "the SECOND press joins the project instead of making another one");
-              ManifestFile two = ManifestFile.Load(made.ManifestPath);
-              checks += Check(two.Manifest.Replace.Count == 2 && two.Manifest.Replace[1].Mesh == "hand",
-                              "and the file holds two rows now: " + two.Manifest.Replace.Count);
-              checks += Check(two.Manifest.Id == "Replace_Rifle" &&
-                              two.Manifest.Bundle == "Replace_Rifle.bundle" &&
-                              File.ReadAllText(made.MetaPath) == Template("Replace_Rifle"),
-                              "id, bundle and meta.json are untouched by an append");
+              checks += Check(!grew.Created && grew.Root == authored,
+                              "the SECOND press joins the AUTHORED project instead of making another one");
+              string afterAppend = File.ReadAllText(authoredManifest);
+              // Located independently in each text - the '[' after the "replace" key through its ']' - so the
+              // comparison never borrows the writer's own idea of where it wrote.
+              int wasOpen = beforeAppend.IndexOf('[', beforeAppend.IndexOf("\"replace\"", StringComparison.Ordinal));
+              int wasClose = beforeAppend.IndexOf(']', wasOpen);
+              int isOpen = afterAppend.IndexOf('[', afterAppend.IndexOf("\"replace\"", StringComparison.Ordinal));
+              int isClose = afterAppend.IndexOf(']', isOpen);
+              checks += Check(beforeAppend.Substring(0, wasOpen) == afterAppend.Substring(0, isOpen) &&
+                              beforeAppend.Substring(wasClose) == afterAppend.Substring(isClose),
+                              "every byte OUTSIDE the replace span is unchanged - BOM, unknown member, nested " +
+                              "value, prefix AND suffix");
               const string firstRow = "{\"bundle\":\"px_equipment_assets_all.bundle\"," +
                                       "\"asset\":\"WPN_PX_RG_Assault_Rifle_T01_V01\",\"mesh\":\"body\"}";
-              checks += Check(File.ReadAllText(made.ManifestPath)
+              checks += Check(afterAppend.Substring(isOpen, isClose - isOpen)
                                   .IndexOf(firstRow, StringComparison.Ordinal) >= 0,
-                              "and the first row survived the splice as ONE unbroken byte run");
+                              "and the original row survived INSIDE the new span as ONE unbroken byte run");
+              ManifestFile two = ManifestFile.Load(authoredManifest);
+              checks += Check(two.Manifest.Replace.Count == 2 && two.Manifest.Replace[1].Mesh == "hand" &&
+                              two.Manifest.Id == "Handwritten" && two.Manifest.Bundle == "Handwritten.bundle",
+                              "two rows now, id and bundle untouched: " + two.Manifest.Replace.Count);
+              checks += Check(File.ReadAllText(Path.Combine(authored, "meta.json")) == Template("Handwritten"),
+                              "and the meta written beside it is the §4.2 template on the MANIFEST's id");
 
-              // ---- Scaffold_ReusesAnIdenticalRow. THE RETRY PATH. Every "fix it and press Ship again" in
-              // the design meets a row this tool already committed; if that read as R6 the author could never
-              // retry anything, and the second press of an unchanged Ship is exactly that case.
-              byte[] beforeReuse = File.ReadAllBytes(made.ManifestPath);
+              // ---- Scaffold_ReusesAnIdenticalRow. THE RETRY PATH, in a FRESH project (Codex finding 13), so
+              // the assertion is "exactly ONE row after two identical runs" rather than "two rows, one of them
+              // older". Every "fix it and press Ship again" in the design meets a row this tool already
+              // committed; if that read as R6 the author could never retry anything.
+              ProjectScaffold.Result once = ProjectScaffold.AddMeshReplacement(
+                  modDir, "Replace_Twice", second, secondSha,
+                  "px_equipment_assets_all.bundle", "WPN_PX_Hand", empty);
+              byte[] afterFirst = File.ReadAllBytes(once.ManifestPath);
               ProjectScaffold.Result reused = ProjectScaffold.AddMeshReplacement(
-                  modDir, "Replace_Rifle", second, secondSha,
+                  modDir, "Replace_Twice", second, secondSha,
                   "PX_EQUIPMENT_ASSETS_ALL.BUNDLE", "WPN_PX_Hand", empty);
-              checks += Check(reused.RowAlreadyPresent && !reused.Created && reused.Root == made.Root,
-                              "pressing the SAME ship twice reuses the row instead of refusing it");
-              checks += Check(ManifestFile.Load(made.ManifestPath).Manifest.Replace.Count == 2,
-                              "and the file still holds two rows, not three");
-              checks += Check(Same(File.ReadAllBytes(made.ManifestPath), beforeReuse),
+              checks += Check(reused.RowAlreadyPresent && !reused.Created && reused.Root == once.Root,
+                              "the IDENTICAL press reuses the row instead of refusing it");
+              checks += Check(ManifestFile.Load(once.ManifestPath).Manifest.Replace.Count == 1,
+                              "and the file holds exactly ONE row after two identical runs");
+              checks += Check(Same(File.ReadAllBytes(once.ManifestPath), afterFirst),
                               "the manifest bytes did not move at all - a reuse writes nothing");
 
               // ---- Scaffold_RefusesConflictingTarget (R6 == Manifest.Validate's E4, verbatim). The same
               // target with a DIFFERENT mesh is the case R6 was written for, and the only one left.
               string dupSrc = Path.Combine(dir, "dupsrc.glb");
               File.WriteAllBytes(dupSrc, new byte[] { 8, 9 });
-              byte[] beforeDup = File.ReadAllBytes(made.ManifestPath);
+              byte[] beforeDup = File.ReadAllBytes(once.ManifestPath);
               string dup = null;
               try
               {
-                  ProjectScaffold.AddMeshReplacement(modDir, "Replace_Rifle", dupSrc,
+                  ProjectScaffold.AddMeshReplacement(modDir, "Replace_Twice", dupSrc,
                                                      AliasMap.Sha256(File.ReadAllBytes(dupSrc)),
                                                      "PX_EQUIPMENT_ASSETS_ALL.BUNDLE", "WPN_PX_Hand", empty);
               }
@@ -579,12 +666,12 @@ packager ships cannot drift. `ContentTool.csproj` needs no edit (it globs `src\*
                                      "\"PX_EQUIPMENT_ASSETS_ALL.BUNDLE\" with a mesh, so a second row for the " +
                                      "same target was NOT written - edit the existing row instead",
                               "R6 is E4 verbatim, the bundle folded case-blind: " + dup);
-              checks += Check(Same(File.ReadAllBytes(made.ManifestPath), beforeDup),
+              checks += Check(Same(File.ReadAllBytes(once.ManifestPath), beforeDup),
                               "the manifest bytes are identical after the refusal");
-              checks += Check(!File.Exists(Path.Combine(made.Root, "Content", "Meshes", "dupsrc.glb")),
+              checks += Check(!File.Exists(Path.Combine(once.Root, "Content", "Meshes", "dupsrc.glb")),
                               "and the refused row copied no .glb - Validate runs before the first byte moves");
-              checks += Check(ManifestFile.Load(made.ManifestPath).Manifest.Replace.Count == 2,
-                              "a conflicting press leaves the two rows that were already there");
+              checks += Check(ManifestFile.Load(once.ManifestPath).Manifest.Replace.Count == 1,
+                              "a conflicting press leaves the one row that was already there");
   ```
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
   - Expected: **FAIL at runtime**, not at compile time — Task 1's scaffold writes no row, so the first new check is
@@ -695,7 +782,7 @@ packager ships cannot drift. `ContentTool.csproj` needs no edit (it globs `src\*
           }
   ```
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
-  - Expected: `PROJECT-SCAFFOLD PASS, 41 check(s) - name table, project templates`; the run's last line is
+  - Expected: `PROJECT-SCAFFOLD PASS, 48 check(s) - name table, project templates`; the run's last line is
     `DEMO BANKS: ALL PASS, 6 check(s)` and exit 0.
 
 - [ ] **Step 3: Build.** `dotnet build -c Release` → `Ошибок: 0`, `Предупреждений: 1` (the known CS0649).
@@ -924,19 +1011,57 @@ packager ships cannot drift. `ContentTool.csproj` needs no edit (it globs `src\*
           /// <summary>True when the destination already held these exact bytes. R4 otherwise: the .glb under
           /// Content\Meshes\ is an authored input, and PatchCache.Key stamps it by path/size/mtime (:43/:49),
           /// so a same-size overwrite would be INVISIBLE to the freshness check and the player would keep being
-          /// served last bake's copy.</summary>
+          /// served last bake's copy.
+          ///
+          /// "Absent" is decided by the CREATE ITSELF, never by a File.Exists that another writer can falsify
+          /// between the question and the write (Codex finding 4): AtomicFile.Write ends in File.Replace, which
+          /// would happily overwrite a file created in that window - the one thing this method exists to
+          /// forbid. FileMode.CreateNew is the stdlib's own create-only-or-fail, one line and atomic; the loser
+          /// of a race re-reads the winner and judges it by the same SHA, so two presses agree.</summary>
           private static bool CopyOrVerify(string meshPath, byte[] bytes, string sha, string stem)
           {
-              if (!File.Exists(meshPath)) { AtomicFile.Write(meshPath, bytes); return false; }
+              try
+              {
+                  using (var made = new FileStream(meshPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                      made.Write(bytes, 0, bytes.Length);
+                  return false;
+              }
+              catch (IOException) when (File.Exists(meshPath)) { }
               string have = AliasMap.Sha256(File.ReadAllBytes(meshPath));
               if (string.Equals(have, sha, StringComparison.OrdinalIgnoreCase)) return true;
               throw new IOException("Content\\Meshes\\" + stem + ".glb already holds DIFFERENT bytes (sha " +
                                     have + " vs " + sha + "), so it was NOT overwritten - rename the file you " +
                                     "are shipping, or ship into another project");
           }
+
+          /// <summary>The absent-only twin of AtomicFile.WriteText, for the two TEMPLATES. Same reason as
+          /// CopyOrVerify: the upsert writer must never be the one deciding "it was not there a moment ago".
+          /// A file that appeared in the meantime is left exactly as its writer left it, and the caller reads
+          /// it back - ManifestFile.Load for the manifest, Json.Parse + Package.MetaRefusal for the meta -
+          /// so the winner is validated rather than trusted.</summary>
+          private static void CreateNew(string path, string text)
+          {
+              byte[] bytes = new UTF8Encoding(false).GetBytes(text);
+              try
+              {
+                  using (var made = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                      made.Write(bytes, 0, bytes.Length);
+              }
+              catch (IOException) when (File.Exists(path)) { }
+          }
   ```
+  and the two template writes become absent-only calls — `AtomicFile.WriteText` is the UPSERT writer and is
+  never used for a file that must not already exist:
+  ```csharp
+              if (result.Created) CreateNew(result.ManifestPath, new JsonWriter().Val(tree).ToString() + "\n");
+              ...
+              if (!File.Exists(result.MetaPath)) CreateNew(result.MetaPath, Meta(id));
+              else { /* Json.Parse + Package.MetaRefusal, R13 - Task 2 Step 0 */ }
+  ```
+  The `else` arm already re-reads and validates whatever is there, so a meta that appeared in the race is
+  judged, not overwritten; `ManifestFile.Load` on the next line does the same for the manifest.
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
-  - Expected: `PROJECT-SCAFFOLD PASS, 53 check(s) - name table, project templates`; last line
+  - Expected: `PROJECT-SCAFFOLD PASS, 60 check(s) - name table, project templates`; last line
     `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0.
 
 - [ ] **Step 3: Build.** `dotnet build -c Release` → `Ошибок: 0`, `Предупреждений: 1`.
@@ -947,6 +1072,11 @@ packager ships cannot drift. `ContentTool.csproj` needs no edit (it globs `src\*
 ---
 
 ### Task 4: `Route7.ApplyProject` — reachable, and refusing to install a bake nobody vouched for
+
+**Runs AFTER Task 5** (Codex sequencing, accepted): Task 5 defines the `forBundle` value this task branches on, and
+`ApplyProject`'s behaviour change is global — the console verb `ct_route7 apply` sees it too — so it lands
+immediately adjacent to its first caller (Task 6's `DoShip`) and to its acceptance evidence (**W5**, Task 8 step
+2.10) rather than sitting un-exercised across several commits.
 
 Unity-only: `ApplyProject` calls `ContentProject.Load`, `ProjectBake.Run` and `BundleLive.Install`, none of which
 run outside the player. The gate here is the compiler; the behaviour is proved by **W5** in Task 8.
@@ -996,18 +1126,24 @@ run outside the player. The gate here is the compiler; the behaviour is proved b
                   }
                   Project.PatchCache.Write(patched, key);
   ```
-  and the final `return` (`:280-281`) becomes — the answer taken from LIVE STATE after the install, never from the
-  text just produced:
+  and the final `return` (`:280-281`) becomes — the answer taken from LIVE STATE around the install, never from the
+  text just produced, and **in `Register`'s own order** (Codex finding 5):
   ```csharp
+              // RESIDENCY IS READ BEFORE THE INSTALL, because that is the order Register:80-92 decides in: it
+              // refuses a resident bundle BEFORE it looks at claims. A press made after an earlier redirect has
+              // already loaded would otherwise find this mod's own stale claim, report Redirected, and print S2
+              // ("redirected LIVE") over a log that says "restart required" - the wizard lying with a straight
+              // face, which is the whole reason this is a value and not a grep of the log.
+              bool wasResident = !string.IsNullOrEmpty(forBundle) && BundleLive.ResidentNow(forBundle);
               pre.Append("installing " + copies.Count + " patched copy(ies) as '" + modId + "'\n")
                  .Append(BundleLive.Install(modId, copies));
               if (!string.IsNullOrEmpty(forBundle))
               {
                   BundleClaim mine = BundleClaims.Find(forBundle);
-                  how = mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal)
+                  how = wasResident ? ApplyDisposition.Resident
+                      : mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal)
                         ? ApplyDisposition.Redirected
-                        : BundleLive.ResidentNow(forBundle) ? ApplyDisposition.Resident
-                                                            : ApplyDisposition.Refused;
+                        : ApplyDisposition.Refused;
               }
               return pre.ToString();
   ```
@@ -1038,7 +1174,7 @@ run outside the player. The gate here is the compiler; the behaviour is proved b
     R11, `BundleLive.Holds(<id>)` is false and `ct-cache.key` was not written.
 
 - [ ] **Step 3: The offline gates still pass.** Run `dotnet run --project tests\ObjCodecTests -c Release` →
-  `PROJECT-SCAFFOLD PASS, 53 check(s) - name table, project templates` present, last line
+  `PROJECT-SCAFFOLD PASS, 60 check(s) - name table, project templates` present, last line
   `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0; and `dotnet run --project tests\TargetPathTests -c Release` →
   last line `R0: ALL PASS`, exit 0.
 
@@ -1048,6 +1184,12 @@ run outside the player. The gate here is the compiler; the behaviour is proved b
 ---
 
 ### Task 5: `ShippedTarget` — the row's target, derived from the addon graph and proved on disk
+
+**Runs BEFORE Task 4** (Codex sequencing), and **lands as TWO green commits, not one** (Codex finding 16 — the task
+is ~300 lines, past a reviewable diff): (a) **the carrier** — step 1's three `PrototypeTarget` fields, which
+compile and change no behaviour on their own; (b) **the resolver and its plumbing** — step 2's `ShippedTarget.cs`
+plus step 3's `LiveSlots`/`Retarget` change, which is the first thing that can call it. Each commit builds
+`Ошибок: 0` on its own; the task boundary and the step numbering do not change.
 
 Unity + AssetsTools, so it cannot be test-linked; the gate is `dotnet build -c Release` and the proof is **W4** in
 Task 8. Never `AssetBundle.GetAllLoadedAssetBundles() + Contains`: a loaded bundle's `name` is the BUILD identity,
@@ -1079,6 +1221,11 @@ the one thing that makes the answer trustworthy — the owning dependency graph.
   using AssetsTools.NET.Extra;
   using Base.Assets;
   using Base.Core;
+  // BOTH namespaces above declare an AssetsManager (Base.Assets.AssetsManager is the game's component;
+  // AssetsTools.NET.Extra.AssetsManager comes in with BundleBaker), so the bare name is CS0104-ambiguous and
+  // the file does not compile without this alias. Spell GameAssetsManager in the variable, the generic
+  // GameUtl.GameComponent call and the typeof - all three (Codex finding 1).
+  using GameAssetsManager = Base.Assets.AssetsManager;
   using Morgott.ContentTool.Bake;
   using PhoenixPoint.Common.Entities.Addons;
   using UnityEngine;
@@ -1130,13 +1277,25 @@ the one thing that makes the answer trustworthy — the owning dependency graph.
                   string why = BundlesOf(addon, out files);          // R15, R16, R17, R18, R19
                   if (why != null) return Refuse(target, why);
 
+                  // THE DERIVATION LINE W4 IS PROVED BY (Codex finding 8). A successful resolve used to log
+                  // nothing, so "exactly one candidate answered null" was unfalsifiable after the fact: the
+                  // manifest row and the later patch line prove only that the CHOSEN pair works, never that no
+                  // second holder existed. Every deduplicated candidate is named here, with what WhyNot said
+                  // about it - "holds it" for the one that answered null included.
+                  Debug.Log("[ContentTool] ShippedTarget: '" + asset + "' candidates (" + files.Count + "): " +
+                            Spell(files));
+
                   string last = null;
                   int present = 0, opened = 0;
                   var holders = new List<string>();
                   foreach (string file in files)
                   {
                       string shipped = BakeSelfCheck.ShippedBundlePath(file);
-                      if (!File.Exists(shipped)) continue;
+                      if (!File.Exists(shipped))
+                      {
+                          Debug.Log("[ContentTool] ShippedTarget:   " + file + ": not shipped by this install");
+                          continue;
+                      }
                       present++;
                       try
                       {
@@ -1148,15 +1307,23 @@ the one thing that makes the answer trustworthy — the owning dependency graph.
                               string gone = baker.WhyNot(AssetClassID.Mesh, asset);
                               opened++;                              // the archive answered, whatever it said
                               if (gone == null) holders.Add(file); else last = gone;
+                              Debug.Log("[ContentTool] ShippedTarget:   " + file + ": " +
+                                        (gone == null ? "HOLDS IT (WhyNot == null)" : gone));
                           }
                       }
-                      catch (Exception ex) { last = file + ": " + ex.GetType().Name + " - " + ex.Message; }
+                      catch (Exception ex)
+                      {
+                          last = file + ": " + ex.GetType().Name + " - " + ex.Message;
+                          Debug.Log("[ContentTool] ShippedTarget:   " + last);
+                      }
                   }
 
                   if (holders.Count == 1)
                   {
                       target.ShippedBundle = holders[0];
                       target.ShippedAsset = asset;
+                      Debug.Log("[ContentTool] ShippedTarget: resolved '" + asset + "' -> " + holders[0] +
+                              " (1 of " + present + " present candidate(s) answered WhyNot == null)");
                       return null;
                   }
                   if (holders.Count > 1)
@@ -1279,20 +1446,31 @@ the one thing that makes the answer trustworthy — the owning dependency graph.
 
           /// <summary>The game's OWN public-field walk, by reflection because it is an internal INSTANCE method
           /// (AssetsManager.cs:316). Using it rather than a copy means this sees exactly what
-          /// AcquireDependenciesAsync sees. Empty rather than throwing when the shape ever changes - the caller
-          /// then reports "no AssetReference reaches the prefab", which is true and actionable.
+          /// AcquireDependenciesAsync sees.
+          ///
+          /// THROWS rather than answering empty when the INFRASTRUCTURE is missing (Codex finding 9): no
+          /// AssetsManager component, no such method, a null result. Folding those into an empty list made the
+          /// caller print R16 - "this addon's SkinData reaches no AssetReference whose asset is the prefab it
+          /// built" - which is a statement about this addon's DATA and sends the author to inspect a def that is
+          /// perfectly fine. They are the tool's own footing giving way, so they belong to the outer catch: R22,
+          /// with the stack in Player.log. R16 is reserved for a walk that RAN and matched nothing.
           /// ponytail: copy the :339-381 field walk if a game update ever breaks the lookup.</summary>
           private static IEnumerable<AssetReference> References(object skinData)
           {
               var found = new List<AssetReference>();
-              AssetsManager manager = GameUtl.GameComponent<AssetsManager>();
-              if (manager == null) return found;
-              MethodInfo walk = typeof(AssetsManager).GetMethod(
+              GameAssetsManager manager = GameUtl.GameComponent<GameAssetsManager>();
+              if (manager == null)
+                  throw new InvalidOperationException("no live Base.Assets.AssetsManager component");
+              MethodInfo walk = typeof(GameAssetsManager).GetMethod(
                   "GetAssetReferencesFromObject", BindingFlags.Instance | BindingFlags.NonPublic,
                   null, new[] { typeof(object), typeof(Type[]) }, null);
-              if (walk == null) return found;
+              if (walk == null)
+                  throw new MissingMethodException("Base.Assets.AssetsManager",
+                                                   "GetAssetReferencesFromObject(object, Type[])");
               IEnumerable produced = walk.Invoke(manager, new object[] { skinData, null }) as IEnumerable;
-              if (produced == null) return found;
+              if (produced == null)
+                  throw new InvalidOperationException(
+                      "AssetsManager.GetAssetReferencesFromObject returned no enumerable");
               foreach (object item in produced)
               {
                   AssetReference reference = item as AssetReference;
@@ -1370,7 +1548,7 @@ the one thing that makes the answer trustworthy — the owning dependency graph.
     same pair.
 
 - [ ] **Step 4: The offline gates still pass.** `dotnet run --project tests\ObjCodecTests -c Release` →
-  last line `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0, `PROJECT-SCAFFOLD PASS, 53 check(s)` present.
+  last line `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0, `PROJECT-SCAFFOLD PASS, 60 check(s)` present.
 
 - [ ] **Step 5: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Doctor\ShippedTarget.cs src\Doctor\PrototypeTarget.cs src\Dev\FitBench.cs && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "feat(doctor): derive a slot's shipped bundle and mesh from the addon graph, and prove it with the bake's own WhyNot"`
@@ -1378,6 +1556,12 @@ the one thing that makes the answer trustworthy — the owning dependency graph.
 ---
 
 ### Task 6: the Doctor's SHIP row — one intent, a two-frame gate, and the honest end state
+
+**Lands as THREE green commits, not one** (Codex finding 16 — the task is over 300 lines): (a) **the fingerprint**
+— step 2 whole, `SameRigAs`/`SameAs` plus its offline arm, which is green on its own; (b) **the gate and its
+state** — step 1's `Intent.Ship`, the snapshot fields, `Enqueue`, the two-frame gate and the `Dispose` clearing
+below; (c) **`DoShip` and the panel** — steps 3 and 4. Each commit builds `Ошибок: 0` and leaves the offline gates
+green; the task boundary and the step numbering do not change.
 
 Unity-only (IMGUI, `Route7`, `ReplacementPreflight` against a live renderer). Gate: `dotnet build -c Release`;
 proof: Task 8 steps 3-6 and **W6**/**W7**.
@@ -1408,6 +1592,11 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
           private PrototypeTarget shipProto;
           private RigTarget shipTargetWas;
           private SkinnedMeshRenderer shipRenderer;
+          /// <summary>The Doctor generation this press was armed on (`gen`, `:58`, bumped by Restart:269, by
+          /// the slot change at :660 and by Dispose:1668). The two-frame gate spans a frame the AUTHOR can act
+          /// in - retarget, pick another file, close the bench - and every one of those moves `gen`, so an
+          /// armed press whose generation no longer matches is abandoned before it writes anything.</summary>
+          private int shipGen = -1;
   ```
 
   At `:228-234`, `Enqueue` gains one line:
@@ -1444,8 +1633,31 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
               }
   ```
 
-- [ ] **Step 2: The fingerprint a live preview does not break.** In `src\Import\SkinCompatibility.cs`, replace
-  `RigTarget.SameAs` (`:70-82`) with the pair — the same comparison, split at the seam that matters:
+  And, in `Dispose` (`:1664`), beside the queues it already drains — an armed press MUST NOT survive the bench
+  closing (Codex finding 7). Without this, a Ship armed on the frame the bench closed runs on the next Doctor,
+  against a renderer that is gone and a project name nobody typed:
+  ```csharp
+              shipPending = false;
+              shipLabelPainted = false;
+              shipGen = -1;
+              shipName = shipSource = shipSha = shipBundle = shipAsset = null;
+              shipAliases = null;
+              shipProto = null;
+              shipTargetWas = null;
+              shipRenderer = null;
+              projectName = "";
+              shipPhase = shipResult = shipPath = shipTail = "";
+  ```
+  `Dispose` already bumps `gen` (`:1668`), so the generation check in `DoShip` would catch it too; clearing the
+  fields as well is what stops the NEXT Doctor from opening on the last one's result text.
+
+- [ ] **Step 2: The fingerprint a live preview does not break — RED FIRST** (Codex finding 15). The arm and the
+  implementation used to arrive in one step, so the arm was never observed failing and proved nothing about
+  itself. Write the arm below into `ProjectScaffoldTests.Run()` FIRST, run
+  `dotnet build tests\ObjCodecTests\ObjCodecTests.csproj -c Release`, and record the failure:
+  `error CS1061: 'RigTarget' does not contain a definition for 'SameRigAs'` (four occurrences, one per call).
+  Only then, in `src\Import\SkinCompatibility.cs`, replace `RigTarget.SameAs` (`:70-82`) with the pair — the same
+  comparison, split at the seam that matters — and rerun to green:
   ```csharp
           /// <summary>Everything about the target that is NOT the mesh: which renderer, where it sits in the
           /// hierarchy, and what its bones are called. A live Doctor preview puts a mesh WE built onto the
@@ -1485,13 +1697,16 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
                   RendererInstanceId = 7, TransformPath = "Root/Body", MeshName = "Body",
                   MeshInstanceId = 11, BindPoseCount = 3, Rigged = true, BoneNames = new[] { "a", "b" }
               };
+              // ALL FOUR mesh-derived fields differ (Codex finding 14): with BindPoseCount and Rigged left
+              // equal, the arm would pass even if SameRigAs still compared them, and the split it claims to
+              // prove would be two fields short.
               var previewing = new RigTarget
               {
                   RendererInstanceId = 7, TransformPath = "Root/Body", MeshName = "ours.glb",
-                  MeshInstanceId = 12, BindPoseCount = 3, Rigged = true, BoneNames = new[] { "a", "b" }
+                  MeshInstanceId = 12, BindPoseCount = 0, Rigged = false, BoneNames = new[] { "a", "b" }
               };
               checks += Check(!previewing.SameAs(was) && previewing.SameRigAs(was),
-                              "a preview mesh changes SameAs and NOT SameRigAs - the whole R8 split");
+                              "all four mesh fields change SameAs and NOT SameRigAs - the whole R8 split");
               var elsewhere = new RigTarget
               {
                   RendererInstanceId = 8, TransformPath = "Root/Body", MeshName = "Body",
@@ -1508,7 +1723,7 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
                               "SameAs still answers itself, and still refuses null");
   ```
   - Run: `dotnet build -c Release`, then `dotnet run --project tests\ObjCodecTests -c Release`
-  - Expected: `Ошибок: 0`, `Предупреждений: 1`; then `PROJECT-SCAFFOLD PASS, 57 check(s) - name table, project
+  - Expected: `Ошибок: 0`, `Предупреждений: 1`; then `PROJECT-SCAFFOLD PASS, 64 check(s) - name table, project
     templates`. Every existing caller of `SameAs` (`ModelDoctor.cs:377`, `:421`, and the Doctor's own guards)
     keeps compiling and keeps its old meaning — this step only ADDS a weaker comparison beside it.
 
@@ -1528,6 +1743,7 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
               shipProto = Prototype;
               shipTargetWas = Target;
               shipRenderer = Renderer;
+              shipGen = gen;                      // the generation this press belongs to
               shipResult = ""; shipPath = ""; shipTail = "";
               shipPhase = "creating the project, baking and applying - the game freezes for a few seconds";
               shipPending = true;
@@ -1547,6 +1763,19 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
           private void DoShip()
           {
               shipPhase = "";
+              // CANCEL BEFORE THE FIRST BYTE (Codex finding 7). One frame stands between arming and running,
+              // and the author owns it: retargeting bumps gen at :660, picking another file bumps it through
+              // Restart:269, closing the bench bumps it at :1668. Shipping the snapshot anyway would write a
+              // project for the OLD slot under a panel already showing the new one - a mod folder the author
+              // never asked for, named after a target they have moved away from.
+              if (shipGen != gen)
+              {
+                  shipGen = -1;
+                  shipResult = "the slot or the file changed before the bake started, so nothing was written - " +
+                               "press Ship again";
+                  return;
+              }
+              shipGen = -1;
               string root = null;
               try
               {
@@ -1633,17 +1862,31 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
           }
 
           /// <summary>The last few lines of the bake log, for the panel. The WHOLE log went to
-          /// ContentToolMain.Say, which is where an author reads the rows one by one.</summary>
+          /// ContentToolMain.Say, which is where an author reads the rows one by one.
+          ///
+          /// THE TRAILING EMPTY ELEMENT IS DISCARDED BEFORE THE COUNT (Codex finding 6). ApplyProject ends in
+          /// AppendLine, so Split('\n') always produces one empty element at the end; taking "the last 1" then
+          /// selected that empty string and Tail(log, 1) answered "", which is exactly the R11 path - the panel
+          /// would report a failed bake with a BLANK result line. Trim the tail first, then take N.</summary>
           private static string Tail(string log, int lines)
           {
               if (string.IsNullOrEmpty(log)) return "";
               string[] all = log.Replace("\r\n", "\n").Split('\n');
+              int end = all.Length;
+              while (end > 0 && all[end - 1].Length == 0) end--;      // the AppendLine's own empty tail
               var kept = new StringBuilder();
-              for (int i = Math.Max(0, all.Length - lines); i < all.Length; i++)
+              for (int i = Math.Max(0, end - lines); i < end; i++)
                   if (all[i].Length != 0) kept.AppendLine(all[i]);
               return kept.ToString().TrimEnd();
           }
   ```
+  **Where the exact-R11 arm lives.** Codex asked for a unit arm on this; `ModelDoctor.cs` is NOT linked into
+  `ObjCodecTests` (`ObjCodecTests.csproj` links `Package.cs:83`, `Json.cs:145`, `SkinCompatibility.cs:192` and no
+  Dev file), and `Tail` is `private static` inside it — an offline arm would mean linking a Unity-dependent file
+  into the gate to test five lines. So the assertion is made where the string is actually produced: **Task 8 step
+  2.10 (W5)** compares the panel's `shipResult` byte for byte with
+  `NOT APPLIED: the bake reported <n> failure(s); fix the lines above and press Ship again` — a blank or
+  truncated result there fails W5.
 
 - [ ] **Step 4: The panel row.** In `src\Dev\ModelDoctor.cs`, in `Draw`, immediately after
   `GUILayout.EndHorizontal();` that closes the Preview/Revert/Save/Skel-plan row (`:1264`) and before the closing
@@ -1651,6 +1894,11 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
   ```csharp
               Ship();
   ```
+  and, in the same row, **every control that can move the target is dead while a press is armed** (Codex finding
+  7): the gate spans one frame the author can act in, and retargeting mid-press is what the generation check
+  above then has to throw the press away for. Each `GUI.enabled =` at `:1246`, `:1250`, `:1254`, `:1259` and
+  `:1261` gains `!shipPending &&` in front of its condition (`:1261` becomes `GUI.enabled = !shipPending;`), so
+  Preview / Revert preview / Save aliases / Write skel plan / Copy report all grey out for that one frame.
   and, after `Draw`:
   ```csharp
           /// <summary>
@@ -1696,9 +1944,13 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
               GUILayout.Label(shipPending ? shipPhase : (refusal ?? ""));
               GUILayout.EndHorizontal();
 
-              if (shipPath.Length > 0) GUILayout.Label("project " + shipPath);
-              if (shipResult.Length > 0) GUILayout.Label(shipResult);
-              if (shipTail.Length > 0) GUILayout.Label(shipTail);
+              // ALWAYS DRAWN, placeholder or not (design §4.4 "Rows, always drawn"; Codex finding 17). A row
+              // that appears only once it has content makes the section jump under the author's cursor at the
+              // exact moment they are reading a result, and an IMGUI layout that changes shape between one
+              // press and the next is also how a Layout/Repaint pair ends up unbalanced.
+              GUILayout.Label(shipPath.Length > 0 ? "project " + shipPath : "project -");
+              GUILayout.Label(shipResult.Length > 0 ? shipResult : "-");
+              GUILayout.Label(shipTail.Length > 0 ? shipTail : "-");
 
               // THE SECOND HALF OF THE GATE, and Repaint only: a Layout pass paints nothing, so arming on it
               // would let the freeze start under a panel that still says nothing.
@@ -1716,7 +1968,7 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
     S1) and **W6**/**W7** after the restart.
 
 - [ ] **Step 5: The offline gates still pass.** `dotnet run --project tests\ObjCodecTests -c Release` → last line
-  `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0, `PROJECT-SCAFFOLD PASS, 57 check(s)` present; `dotnet run --project
+  `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0, `PROJECT-SCAFFOLD PASS, 64 check(s)` present; `dotnet run --project
   tests\TargetPathTests -c Release` → last line `R0: ALL PASS`, exit 0. `PreflightTests` and `DecisionGolden` lean
   on `SameAs` through `ReplacementPreflight`, so their staying green is what proves the split changed no answer.
 
@@ -1733,7 +1985,7 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
                  "and reuse, mesh collision policy, sidecar, rig fingerprint";
   ```
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
-  - Expected: `PROJECT-SCAFFOLD PASS, 57 check(s) - name table, project templates, row append and reuse, mesh
+  - Expected: `PROJECT-SCAFFOLD PASS, 64 check(s) - name table, project templates, row append and reuse, mesh
     collision policy, sidecar, rig fingerprint`, last line `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0.
 
 - [ ] **Step 2: Every build and every gate, from clean.**
@@ -1744,24 +1996,33 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
   - `dotnet build tools\Package\Package.csproj -c Release` → `Ошибок: 0`. (It links `Package.cs`, `Json.cs`,
     `ImportRefused.cs`, `AtomicFile.cs` and `Manifest.cs` — not `ProjectScaffold.cs`, which nothing in that tool
     calls. Do NOT add it.)
+  **Baseline known failures — NOT part of W1** (Codex finding 18). W1 asks for GREEN gates, and this slice
+  neither owns nor repairs these two; listing them under "every build and every gate" made a green W1
+  unachievable by definition. Run them as a REGRESSION check that the breakage did not widen, and record the
+  result beside W1 rather than inside it:
   - `dotnet build tools\ClipEvents\ClipEvents.csproj -c Release` and
     `dotnet build tools\SpiderAxisCheck\SpiderAxisCheck.csproj -c Release` → still exactly ONE error each,
     `GlbReader.cs(6,27): error CS0234` on `Morgott.ContentTool.Bake`, the pre-existing breakage this slice does not
-    own and did not widen.
+    own and did not widen. A SECOND error in either is a regression this slice owns; repairing the first one is a
+    separately scoped prerequisite, not this task.
 
 - [ ] **Step 3: Record the offline half of design §10, in this file.** Append the table below under a new
   `## Task 7 acceptance run` heading, filled with what the run actually printed — command, last line, exit code —
   and mark **W4**, **W5**, **W6** and **W7** `pending`, not passed: they are Task 8.
-  - **W1** offline gates green: the five commands of step 2.
+  - **W1** offline gates green: the FOUR commands of step 2 (build, `ObjCodecTests`, `TargetPathTests`,
+    `Package.csproj`). The two standalone tools are recorded under **baseline known failures**, outside W1.
   - **W2** the scaffold is exact: `Scaffold_CreatesProjectTemplates` (meta.json compared against a template spelled
-    independently in the test file) + `Scaffold_KeepsAnAuthoredId` (the meta carries the MANIFEST's id) +
-    `Scaffold_AppendsSecondRow` (id, bundle and meta.json unchanged; the first row still one unbroken byte run
-    after the splice).
+    independently in the test file, plus the `com.test"quote` id arm from Task 2 Step 0) +
+    `Scaffold_KeepsAnAuthoredId` (the meta carries the MANIFEST's id) + `Scaffold_AppendsSecondRow` — the append is
+    made into a HAND-WRITTEN manifest carrying a BOM, an unknown member and a nested value, the `replace` span is
+    located independently in the before and after texts, prefix AND suffix outside it are compared byte for byte,
+    and the original row is still one unbroken run INSIDE the new span (Codex finding 12).
   - **W3** no overwrite is possible: `Scaffold_MeshCollisionPolicy` (same SHA → `MeshAlreadyPresent`, different SHA
     → R4, destination bytes unchanged) + `Scaffold_RefusesConflictingTarget` (R6, manifest bytes identical, no .glb
     copied) + `Scaffold_RefusesAnUnrelatedFolder` (R2) + `Scaffold_RefusesAnUnshippableMeta` (R13, the file not
     rewritten) + `Scaffold_RefusesAStaleSourceBeforeWriting` (R3 creates no folder).
-  - **W3b** a retry is a retry: `Scaffold_ReusesAnIdenticalRow` (no second row, no R6, manifest bytes unmoved).
+  - **W3b** a retry is a retry: `Scaffold_ReusesAnIdenticalRow` in a FRESH project — the identical replacement run
+    twice leaves EXACTLY ONE row, no R6, and byte-identical manifest state after run two (Codex finding 13).
 
 - [ ] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add tests\ObjCodecTests\ProjectScaffoldTests.cs internal-docs\planning\2026-09-02-replace-mesh-wizard-plan.md && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "test(project): name what the scaffold gate proves, and close the offline half of the acceptance table"`
@@ -1782,10 +2043,13 @@ this plan deliberately spells none, because a stale command line in a plan is wo
 - [ ] **Step 1: Build, deploy, activate.** `dotnet build -c Release`, then install the built
   `bin\Release\ContentTool\ContentTool.dll` + `meta.json` into `D:\PP-Instance3`'s mods folder with no game
   running. Confirm `com.morgott.ContentTool` is in that profile's `MOD_ACTIVATED` array
-  (`...LocalLow\Snapshot Games Inc\Phoenix Point\Steam\<id>\Options.jopt`); **editing that array is allowed on
-  Instance3 and forbidden on the user's own game** — the count is duplicated in
-  `ArrayDimensions.CollectionValues` and must match. A deploy that silently leaves the old DLL makes every result
-  below a ghost.
+  (`…LocalLow\Snapshot Games Inc\Phoenix Point\Steam\76561197996210593\Options.jopt` — **Instance3's OWN profile**;
+  the user's game is `…591` and Instance2 is `…592`, so an edit here reaches neither); **editing that array is
+  allowed on Instance3 and forbidden on the user's own game** — the count is duplicated in
+  `ArrayDimensions.CollectionValues` and must match. Take a byte copy of that one file before the first edit and
+  keep it beside the run's notes. (Codex finding 11 asked for a full restore-and-hash-verify ritual and a
+  dedicated automation profile; **rejected** — `…593` IS the dedicated automation profile, and the snapshot is
+  the whole ceremony.) A deploy that silently leaves the old DLL makes every result below a ghost.
 
 - [ ] **Step 2: Drive it.** Launch that install through PPCLI and wait until `connect state` actually answers
   before sending anything. Then, in order — the design §8 sequence:
@@ -1811,17 +2075,25 @@ this plan deliberately spells none, because a stale command line in a plan is wo
   9. **Mandatory final arm** — restart so `meta.json` is discovered, enable `<name>` in the mod manager BEFORE
      entering the geoscape, show the prototype again, and assert `BundleLive.Holds(<id>)` plus the live
      `sharedMesh` vertex/index counts equal the GLB's baked counts.
-  10. **W5** — add a row naming a bundle this game does not ship (or a mesh stem with no file) to that project and
-     press Ship again: the panel's result must be `NOT APPLIED: the bake reported N failure(s); ...`,
-     `BundleLive.Holds(<id>)` must be false for that press, and no `ct-cache.key` written for it.
+  10. **W5, in a SEPARATE NEVER-APPLIED PROJECT** (Codex finding 10). It cannot run on the project above and it
+     cannot run after step 9: by then `<name>` is enabled, `BundleLive.Holds(<id>)` is deliberately TRUE, and the
+     earlier successful bake has already written that project's `ct-cache.key` — asserting "false" and "absent"
+     against it is impossible, not merely hard. So: **before the restart of step 9**, ship into a second project
+     with its own name and its own id (`Replace_BadRow`, never applied, never enabled), then hand-edit its
+     `ppcontent.json` to name a bundle this install does not ship (or a mesh stem with no file) and press Ship
+     again. Assert, all three about THAT project and its own patched directory: the panel's `shipResult` is byte
+     for byte `NOT APPLIED: the bake reported <n> failure(s); fix the lines above and press Ship again` (the exact
+     R11 string — a blank result is the `Tail` bug of finding 6 and fails this row), `BundleLive.Holds(<its id>)`
+     is FALSE, and no `ct-cache.key` exists under its patched directory. Remove that project afterwards and record
+     it under "Left behind / removed".
 
 - [ ] **Step 3: Record the evidence, then commit.** Fill this table in, in this file, with what the run actually
   produced — a log excerpt, a screenshot path, the on-disk paths. An empty cell means the slice is not done.
 
   | id | Check | Evidence |
   |---|---|---|
-  | W4 | Target derivation disk-proved: the stored pair equals the row the bake matched, and `WhyNot` answered `null` for exactly one bundle | |
-  | W5 | A failed bake installs nothing: `ApplyDisposition.BakeFailed` → R11 shown, `Holds` false, cache key not written | |
+  | W4 | Target derivation disk-proved: the stored pair equals the row the bake matched, and `WhyNot` answered `null` for **exactly one** bundle — evidence is the `Player.log` derivation block `[ContentTool] ShippedTarget: '<asset>' candidates (n): …` with one `WhyNot` outcome line per deduplicated candidate and a single `HOLDS IT (WhyNot == null)`, closed by `resolved '<asset>' -> <bundle> (1 of <present> present candidate(s) …)` | |
+  | W5 | A failed bake installs nothing, proved in a SEPARATE never-applied project before the step-9 restart: `ApplyDisposition.BakeFailed` → the exact R11 string in `shipResult`, `Holds(<its id>)` false, no `ct-cache.key` under its patched directory | |
   | W6 | Honest end state, preview and all: shipped with `HasPreview` true and NOT refused as R8; S1 with no live swap this session; after restart + enable, `Holds` true and live mesh counts equal the GLB's | |
   | W3b | The second press of an unchanged Ship ends green with ONE row, not R6 (step 8) | |
   | W7 | Owner visual check: the replaced mesh is on the prototype after the restart in step 9 | |
@@ -1851,6 +2123,7 @@ the tree holds untracked `.zip` files and untracked import folders, so `git add 
 | 4.1 | `ShippedTarget.Resolve`, four steps, R9/R10 + R14-R22, visited set, case-blind file names | Task 5 step 2, in full |
 | 4.1 | `PrototypeTarget` gains three fields; `LiveSlots` keeps the `Addon`; `Retarget` calls `Resolve` | Task 5 steps 1 and 3 |
 | 4.2 | `ProjectScaffold` API + `RootOf`, sibling placement, post-condition, name table, write order (R3 first), reuse-not-R6, GLB policy, meta.json from the manifest id, R13 | Tasks 1-3 (name table + templates + meta, row append/reuse, copy/sidecar) |
+| 4.2 | normalized `modDir`, strict `Json.Parse` before `MetaRefusal`, absent-only creation (`FileMode.CreateNew`), the id quoted through `JsonWriter` and the template body a literal | Task 2 **Step 0** (1 and 2) and Task 3 step 2 (`CopyOrVerify`/`CreateNew`) |
 | 4.3 | `ApplyProject` internal, early return on `failed != 0`, `ApplyDisposition`, `BundleLive.ResidentNow` | Task 4 steps 1-2 |
 | 4.4 | SHIP section, the enabled condition verbatim, `Intent.Ship`, `Enqueue("ship")`, two-frame gate | Task 6 steps 1, 3, 4 |
 | 4.5 | Doctor ≡ bake: R3 owned by the scaffold, sidecar beside the copy, R7 on `MeshBytes`, R8 preview-aware | Task 6 step 2 (`SameRigAs`) and step 3 (`DoShip`), in that order |
@@ -1873,7 +2146,7 @@ the tree holds untracked `.zip` files and untracked import folders, so `git add 
 **Placeholder scan.** No `TBD`, no "add validation", no "similar to Task N": `AddMeshReplacement` is given whole in
 Task 1, whole again in Task 2 and whole again in Task 3, because a partially-quoted method is how a plan grows a
 step nobody can execute. Every expected build/run line is a literal (`Ошибок: 0`, `Предупреждений: 1`,
-`DEMO BANKS: ALL PASS, 6 check(s)`, `R0: ALL PASS`, `PROJECT-SCAFFOLD PASS, 29/41/53/57 check(s)`), and every red
+`DEMO BANKS: ALL PASS, 6 check(s)`, `R0: ALL PASS`, `PROJECT-SCAFFOLD PASS, 29/35/48/60/64 check(s)`), and every red
 step names its exact text (CS2001 + CS0246 in Task 1; the `PROJECT-SCAFFOLD FAILURE:` sentence in Tasks 2 and 3).
 
 **Name and type consistency across tasks.** `ProjectScaffold.Result` fields (`Root`, `ManifestPath`, `MetaPath`,
@@ -1891,8 +2164,11 @@ step 3. `ContentMods.Manifest` is the `ppcontent.json` file name; `Package.Engin
 in both the source and the arms.
 
 **Test-count arithmetic.** Task 1 = 13 (name table: 1 valid + 11 refused + 1 "nothing created") + 3 (default name)
-+ 5 (templates) + 2 (authored id) + 3 (R13) + 2 (R2) + 1 (empty folder) = **29**. Task 2 adds 5 (append) + 3 (reuse)
-+ 4 (conflict) = **41**. Task 3 adds 2 (copy + no-op) + 2 (R4) + 2 (R3) + 1 (R3 on a new name) + 1 (R5) + 4 (sidecar
-+ `MeshBytes`) = **53**. Task 6 step 2 adds 4 (the rig fingerprint) = **57**. If a reviewer's own run prints a
-different integer, the arm SENTENCE is the contract and the integer is bookkeeping — update the number here rather
-than deleting a check to reach it.
++ 5 (templates) + 2 (authored id) + 3 (R13) + 2 (R2) + 1 (empty folder) = **29**. Task 2 **Step 0** adds 2
+(trailing separator) + 2 (malformed / non-object meta) + 2 (the `com.test"quote` id) = **35**. Task 2 Step 1 adds
+1 (the first press left one row) + 5 (append into the hand-written manifest: joined, outside-span bytes, the
+original row unbroken inside the span, two rows with id/bundle intact, the meta template) + 3 (reuse in a fresh
+project) + 4 (conflict) = **48**. Task 3 adds 2 (copy + no-op) + 2 (R4) + 2 (R3) + 1 (R3 on a new name) + 1 (R5)
++ 4 (sidecar + `MeshBytes`) = **60**. Task 6 step 2 adds 4 (the rig fingerprint, all four mesh fields moved) =
+**64**. If a reviewer's own run prints a different integer, the arm SENTENCE is the contract and the integer is
+bookkeeping — update the number here rather than deleting a check to reach it.

@@ -6,6 +6,12 @@ full** — findings 1-10 of the second are applied to §§3-10 (preview-aware fi
 R3 §4.2/§7, manifest-first meta §4.2, per-branch target refusals §4.1/§6, `ApplyDisposition` §4.3, the stage order §7, R2's
 empty-folder arm §4.2/§8, R12 from observed state §6, and the `ContentMods.Enabled:50-58` citation §3). Builds on the shipped manifest core
 (`2026-09-02-manifest-core-design.md`). Next slice: the lifecycle dashboard (Validate/Bake/Apply/Verify/Package, progress).
+**2026-09-05, Codex DEEP review of the PLAN** (`ec5951d5…out.md`, 19 findings + a sequencing paragraph): 17 accepted and
+folded into §§4.1-4.5, §8 and §10 here — path normalization and a strict parse before `MetaRefusal` (§4.2), absent-only
+creation (§4.2), `Register`'s residency-first precedence (§4.3), the generation cancel and `Dispose` clearing (§4.4),
+R16 reserved for a walk that ran (§4.1) — and 2 rejected: **11** (Instance3 has its own profile `…593`, so a
+`MOD_ACTIVATED` edit there cannot reach the user's `…591`) and **19** (the id is quoted through `JsonWriter`; the
+template body stays a fixed literal, §4.2). Execution order is now **2 → 3 → 5 → 4 → 6 → 7 → 8**, numbers unchanged.
 
 ## 1. Goal
 On the bench's MODEL DOCTOR tab, with a prototype slot picked (`PrototypeTarget`, `Mode==Replace`, live SMR), a GLB picked,
@@ -66,6 +72,10 @@ owning `Addon` (local `a`, `:776`) beside each renderer — its value becomes a 
    `AssetsManager.GetAssetReferencesFromObject` (`:316`, internal instance → reflection; its public-field walk is small enough
    to copy if that breaks). Keep the one whose `.Asset` is `ReferenceEquals` to `addon.VisualsSourcePrefab` (`:179`).
    No `SkinData` or no prefab → **R15**; zero matches → **R16**; several distinct `AssetGUID`s → **R17**.
+   **R16 is reserved for a walk that RAN and matched nothing.** No `AssetsManager` component, no reflected method, or a
+   null reflection result are the TOOL's own footing giving way, not a statement about this addon's data — they THROW,
+   so the outer catch answers **R22** with the stack in `Player.log`. Folding them into an empty collection printed R16
+   and sent the author to inspect a def that was perfectly fine.
 3. Locate `matched[0].RuntimeKey` through `Addressables.ResourceLocators` — the walk `BundleLive.Locate:199-213` does, keyed on
    that ONE key instead of every key — then walk each location's `Dependencies`. A location whose
    `Data is AssetBundleRequestOptions` contributes `Path.GetFileName(l.InternalId)`, the shipped `.bundle` file name spelled
@@ -85,6 +95,12 @@ owning `Addon` (local `a`, `:776`) beside each renderer — its value becomes a 
 The stored pair is by construction what `Patch` matches: bundle `OrdinalIgnoreCase` (`:1534`), asset ordinal through the same
 `WhyNot` call (`:1588`).
 
+**The derivation is LOGGED, or W4 is unfalsifiable.** A successful resolve used to say nothing, and the manifest row plus
+the later `patch` line prove only that the CHOSEN pair works — never that no second holder existed. So step 4 logs the
+deduplicated candidate list, one outcome line per candidate (`not shipped by this install`, the `WhyNot` sentence, or
+`HOLDS IT (WhyNot == null)`), and a closing `resolved '<asset>' -> <bundle> (1 of <present> present candidate(s) …)`.
+That block is W4's evidence.
+
 ### 4.2 `ProjectScaffold` — `src\Project\ProjectScaffold.cs` (new, UnityEngine-free, test-linked)
 ```csharp
 internal static class ProjectScaffold
@@ -101,7 +117,10 @@ internal static class ProjectScaffold
     internal static string RootOf(string modDir, string name); // the folder AddMeshReplacement would use, or null
 }
 ```
-Placement: the **sibling** `Directory.GetParent(modDir)\<name>` — i.e. `Mods\<name>` — never the `Mods\ContentTool\<name>`
+Placement: the **sibling** of the NORMALIZED `modDir` — `Path.GetFullPath(modDir).TrimEnd(Path.DirectorySeparatorChar,
+Path.AltDirectorySeparatorChar)`, then its parent, in `RootOf` and `AddMeshReplacement` alike, because a trailing
+separator makes `Directory.GetParent` answer `…\Mods\ContentTool` and bury the project inside ContentTool while the
+post-condition, walking the same wrong parent, accepts it — i.e. `Mods\<name>`, never the `Mods\ContentTool\<name>`
 fallback, because a folder under ContentTool is not a mod the manager can discover or the player can switch off
 (`ModGate:38/:62`). Post-condition asserted before returning: `ContentMods.ProjectDir(modDir, name) == Root` — true once
 `ppcontent.json` exists (`Sibling:128`), and what makes `ct_project <name>` / `ct_route7 apply <name>` find it. `NameRefusal`:
@@ -133,8 +152,16 @@ file.Save();                                                       // atomic spl
 `ProjectBake.FindMesh` under `Content\Meshes\` (`:1581`, `OrdinalIgnoreCase` at `:2152`); `ManifestFile.Create` stays
 unnecessary. An existing project keeps its authored `id` and own `bundle` and only gains a row; reuse only a folder already
 holding `ppcontent.json` — a folder that **already exists, is non-empty and holds no `ppcontent.json`** is R2, and an EMPTY
-folder of that name counts as new and is filled in. GLB collision: absent → atomic copy; same SHA-256 → no-op
+folder of that name counts as new and is filled in. GLB collision: absent → copy; same SHA-256 → no-op
 (`MeshAlreadyPresent`); different SHA-256 → R4, never an overwrite; sidecar present while `aliases` is empty → R5.
+
+**"Absent" is decided by the create, not by a preceding `File.Exists`.** The three absent-only writes — the GLB copy, the
+`ppcontent.json` template and the `meta.json` template — use `new FileStream(path, FileMode.CreateNew, FileAccess.Write,
+FileShare.None)`, the stdlib's own atomic create-or-fail, and never `AtomicFile.Write`/`WriteText`, which is the UPSERT
+writer and ends in `File.Replace`: a file created between the check and the write would be silently overwritten, the one
+thing this whole section exists to forbid. On the losing side of that race the winner is re-read and validated by the
+same gates as any pre-existing file (`AliasMap.Sha256` → R4, `ManifestFile.Load`, `Json.Parse` + `Package.MetaRefusal` →
+R13), never trusted and never replaced.
 `Result.MeshBytes` carries the verified bytes out, so §4.5's copied-byte preflight judges the very bytes that were written
 rather than re-reading the file and re-opening the same question.
 
@@ -157,10 +184,19 @@ folder name assumed to be both; `Dependencies` makes the manager enable ContentT
   "Name": [ { "Key": "English", "Value": "<id>" } ],
   "Dependencies": [ "com.morgott.ContentTool" ] }
 ```
-An **existing** `meta.json` is never rewritten and never trusted either: it goes through `Package.MetaRefusal(text, null)` —
-the packager's own validator, `stagedFiles` null so the `AssemblyName` arm cannot fire — and a file with no usable `ID` or
-without the exact `com.morgott.ContentTool` dependency is R13. Shipping behind one of those produces a mod the manager keys
-wrongly, or one the player installs with the engine switched off, silently doing nothing.
+Only the **id** is written through `JsonWriter` (quoted AND escaped — an existing project's id came back DECODED from
+`ManifestFile.Load` and may hold a quote or a backslash); the template BODY is a fixed literal, and the test spells the
+expected bytes independently. Assembling the whole tree through the writer buys nothing: no other value here can carry a
+character that needs escaping.
+
+An **existing** `meta.json` is never rewritten and never trusted either: it is **strictly parsed first** —
+`Json.Parse(text, 64)` (`src\Import\Json.cs:15`), which must yield a `Dictionary<string, object>` or the file is R13,
+carrying the `FormatException` — and only then goes through `Package.MetaRefusal(text, null)`, the packager's own
+validator, `stagedFiles` null so the `AssemblyName` arm cannot fire. The parse is not belt-and-braces: `MetaRefusal`
+(`Package.cs:313-329`) is REGEX-based and accepts an unclosed object that happens to contain a matching `ID` and
+`Dependencies`, so R13 without it does not prove the mod is discoverable. A file with no usable `ID` or without the exact
+`com.morgott.ContentTool` dependency is R13 too. Shipping behind one of those produces a mod the manager keys wrongly, or
+one the player installs with the engine switched off, silently doing nothing.
 
 ### 4.3 Bake + apply — `Route7.ApplyProject` alone
 `private` → `internal`, an early return on a failed bake, and a **structured answer about the one bundle the wizard cares
@@ -183,10 +219,15 @@ internal static string ApplyProject(string projectName, string forBundle, out Ap
     if (failed != 0) { how = ApplyDisposition.BakeFailed; return pre.AppendLine(R11).ToString(); }
     PatchCache.Write(patched, key);
 ...
-    // AFTER Install, from LIVE STATE, never by reading the log back:
+    // From LIVE STATE, never by reading the log back - and in REGISTER'S OWN ORDER: residency is read BEFORE
+    // Install, because Register:80-92 refuses a resident bundle before it ever looks at claims. A press made
+    // after an earlier redirect has loaded would otherwise find this mod's own stale claim, answer Redirected
+    // and print S2 over a log that says "restart required".
+    bool wasResident = BundleLive.ResidentNow(forBundle);        // BEFORE Install
+    ...
     BundleClaim mine = BundleClaims.Find(forBundle);
-    how = mine != null && mine.Mod == modId    ? ApplyDisposition.Redirected
-        : BundleLive.ResidentNow(forBundle)    ? ApplyDisposition.Resident
+    how = wasResident                          ? ApplyDisposition.Resident
+        : mine != null && mine.Mod == modId    ? ApplyDisposition.Redirected
         :                                        ApplyDisposition.Refused;
 ```
 `BundleLive` gains exactly one query, `internal static bool ResidentNow(string bundleFile)`, which reuses its own private
@@ -223,9 +264,17 @@ ProjectScaffold.NameRefusal(projectName) == null && !Busy && !shipPending
 `Intent.Ship` joins the enum (`:29`), `Enqueue("ship")` the map (`:228-234`). The bake is Unity-heavy and blocks the main
 thread for seconds, so `SlimPanel`'s volatile snapshot pattern does not apply (no worker changes state between Layout and
 Repaint) — a **two-frame gate** in `Tick` (`:360`, driven by `FitBench.Update` `:2106`) paints the label before the freeze:
-(1) Tick N+1 drains `Intent.Ship`, snapshots the inputs, sets `shipPending = true`, `shipPhase = "Baking…"`; (2) `Draw` sets
-`shipLabelPainted = true` during `EventType.Repaint` only; (3) Tick N+2 sees both and runs scaffold + `ApplyProject`
-synchronously, the painted frame staying up while Unity blocks. No cancel, no moving progress this slice.
+(1) Tick N+1 drains `Intent.Ship`, snapshots the inputs **and the Doctor generation `gen` (`:58`)**, sets
+`shipPending = true`, `shipPhase = "Baking…"`; (2) `Draw` sets `shipLabelPainted = true` during `EventType.Repaint` only;
+(3) Tick N+2 sees both and runs scaffold + `ApplyProject` synchronously, the painted frame staying up while Unity blocks.
+No progress bar this slice — but the gate spans a frame **the author can act in**, so:
+- **the armed press is cancelled when the generation moved** (retarget `:660`, a new file through `Restart:269`, the bench
+  closing `:1668`) — checked before the scaffold writes its first byte, because shipping the old snapshot would author a
+  mod folder for a slot the panel has already left;
+- **every target-changing control is disabled while `shipPending`** (Preview / Revert preview / Save aliases / Write skel
+  plan / Copy report, `ModelDoctor.cs:1246-1261`), so the cancel above is the backstop and not the normal path;
+- **`Dispose` (`:1664`) clears `shipPending`, `shipLabelPainted` and every snapshot field**, so a press armed on the frame
+  the bench closed cannot execute against the next Doctor, and the next Doctor does not open on the last one's result.
 
 ### 4.5 Doctor verdict ≡ bake verdict
 Before the bake, in order: the scaffold re-reads the source and compares `AliasMap.Sha256` with `Ready.Sha256` before it
@@ -260,7 +309,7 @@ name array — everything except the four mesh-derived fields (`MeshInstanceId`,
 | `src\Project\ProjectScaffold.cs` · `src\Doctor\ShippedTarget.cs` | **new**: scaffold UnityEngine-free and linked into `ObjCodecTests`, `ShippedTarget` Unity + AssetTools | the disk half is provable offline; §4.1 needs Unity types, so it is not test-linked |
 | `src\Doctor\PrototypeTarget.cs` `:30-43` | **add** `ShippedBundle`, `ShippedAsset`, `TargetRefusal` | the row's target, carried from the slot |
 | `src\Dev\FitBench.cs` `:768`, `:739` | **change** `LiveSlots` to keep the owning `Addon`; `Retarget` calls `Resolve` | the Addon is already in hand at `:776` |
-| `src\Dev\ModelDoctor.cs` `:29`, `:228`, `:360`, `:1262` | **add** `Intent.Ship`, `"ship"`, the two-frame gate, the SHIP section | one intent, no new panel class |
+| `src\Dev\ModelDoctor.cs` `:29`, `:228`, `:360`, `:1246-1261`, `:1262`, `:1664` | **add** `Intent.Ship`, `"ship"`, the two-frame gate with its generation cancel, the SHIP section; **change** the button row to grey out while `shipPending`, and `Dispose` to clear the armed press | one intent, no new panel class |
 | `src\Bake\Route7.cs` `:205`, `:249-256` | **change** to `internal`, early-return on `failed != 0`, plus the `ApplyDisposition` overload | a one-button command must not install an unvouched bake, nor guess S1 from log text |
 | `src\Bake\BundleLive.cs` | **add** `internal static bool ResidentNow(string bundleFile)` | the residency fact lives behind two private methods there; a copy in `Route7` is the comparison this project already got wrong once (`:230-238`) |
 | `src\Import\SkinCompatibility.cs` `:70` | **add** `RigTarget.SameRigAs`, `SameAs` delegates to it | §4.5 — a live preview must not read as "the renderer changed" |
@@ -330,14 +379,17 @@ last line `SCAFFOLD PASS, N check(s) - ...`, wired into `Program.cs` beside `Man
 | `Scaffold_RefusesAnUnrelatedFolder` | a non-empty folder with no `ppcontent.json` → R2 verbatim, and nothing written into it |
 | `Scaffold_KeepsAnAuthoredId` | a hand-written `ppcontent.json` whose `id` is NOT the folder name gets a `meta.json` carrying that `id`, not the name |
 | `Scaffold_RefusesAnUnshippableMeta` | an existing `meta.json` with no `ID`, and one without the `com.morgott.ContentTool` dependency → R13 carrying `Package.MetaRefusal`'s own sentence; the file is not rewritten |
-| `Scaffold_AppendsSecondRow` | a second distinct row lands; every byte outside the `replace` span unchanged; `id`/`bundle`/`meta.json` untouched |
-| `Scaffold_ReusesAnIdenticalRow` | the SAME (bundle CI, asset, mesh) pressed twice → no second row, no exception, `RowAlreadyPresent` true, manifest bytes identical — the retry path every "press Ship again" depends on |
+| `Scaffold_AppendsSecondRow` | a second distinct row lands **into a HAND-WRITTEN manifest** carrying a BOM, an unknown member and a nested value; the `replace` span is located independently in the before and after texts, and prefix AND suffix outside it are byte-identical; the original row survives INSIDE the new span as one unbroken run; `id`/`bundle` untouched, the meta keyed on the manifest's id |
+| `Scaffold_ReusesAnIdenticalRow` | the SAME (bundle CI, asset, mesh) pressed twice **in a fresh project** → exactly ONE row after run two, no exception, `RowAlreadyPresent` true, manifest bytes byte-identical — the retry path every "press Ship again" depends on |
+| `Scaffold_RefusesAMalformedMeta` | an existing `meta.json` that is unclosed, and one that is not a JSON object → R13 from the strict `Json.Parse` before `MetaRefusal` ever runs; neither file rewritten |
+| `Scaffold_QuotedId` | an authored id `com.test"quote` → the written `meta.json` re-reads with `ID == com.test"quote` and `Package.MetaRefusal` accepts it (the test's own template escapes it the same way `Meta()` does) |
+| `Scaffold_TrailingSeparator` | `modDir` spelled with a trailing `\` resolves to the SAME `Root` as without it, in `RootOf` and in a real press — never `Mods\ContentTool\<name>` |
 | `Scaffold_RefusesConflictingTarget` | same (bundle CI, asset) with a DIFFERENT mesh stem → R6/E4, manifest bytes identical, no copy written |
 | `Scaffold_MeshCollisionPolicy` | same SHA → no-op with `MeshAlreadyPresent`; different SHA → R4, destination bytes unchanged |
 | `Scaffold_RefusesAStaleSourceBeforeWriting` | a SHA mismatch under a name whose folder does not exist → R3, and no folder was created |
 | `Scaffold_SidecarRoundTrips` | `AliasMap.LoadSidecar(copy, sha, out why)` returns the same aliases and the sidecar's sha is the COPY's; `Result.MeshBytes` equals the copy's bytes |
 | `Scaffold_NameTable` | valid; empty; 65 chars; `..`; `a\b`; `C:\x`; `CON`; `nul.glb`; leading `-`; trailing `.` and space → each refused with R1, nothing created outside the Mods folder |
-| `Fingerprint_APreviewIsNotAChangedRig` | §4.5 on plain data: a preview-shaped `RigTarget` (same renderer, same bones, different mesh) is `!SameAs` and `SameRigAs`; a different renderer and a renamed bone are neither. `SkinCompatibility.cs` is linked into this gate (`ObjCodecTests.csproj:190`), so the split does not wait for a game |
+| `Fingerprint_APreviewIsNotAChangedRig` | §4.5 on plain data: a preview-shaped `RigTarget` (same renderer, same bones, **all four mesh-derived fields moved** — `MeshInstanceId`, `MeshName`, `BindPoseCount`, `Rigged`) is `!SameAs` and `SameRigAs`; a different renderer and a renamed bone are neither. Written and observed RED (`CS1061` on `SameRigAs`) before the split is implemented. `SkinCompatibility.cs` is linked into this gate (`ObjCodecTests.csproj:190`), so the split does not wait for a game |
 
 **In-game acceptance, PPCLI on `D:\PP-Instance3`** (steps only — `PPCLI\PLAYBOOK.md` maps them to lines): (1) `connect state`
 answers, start a campaign, open the bench; (2) via `call`, `FitBench.ShowPrototype`, wait until the prototype is no longer
@@ -349,9 +401,13 @@ busy, take one `SlotTargets()` entry, read its `ShippedBundle`/`ShippedAsset`; (
 the row's bundle/asset being the pair step 2 resolved; (6) assert `Player.log` holds the derivation line, `patch <bundle>:
 mesh ...`, `ct_project: ALL PASS` and the expected `REFUSED: restart required` line (S1); (7) re-run `ct_project <name>` via
 `connect console` → `ALL PASS`; (8) press Ship a SECOND time with everything unchanged — it must end green again with the
-manifest holding exactly ONE row (§4.2 reuse), not R6; (9) **mandatory final arm** — restart so `meta.json` is discovered,
-enable `<name>` BEFORE entering the geoscape, show the prototype again, assert `BundleLive.Holds(<id>)` plus live
-`sharedMesh` vertex/index counts equal the GLB's baked counts.
+manifest holding exactly ONE row (§4.2 reuse), not R6; (8b) **W5, in a SEPARATE never-applied project and BEFORE the
+restart** — a second project (`Replace_BadRow`, its own id, never enabled) whose `ppcontent.json` is hand-edited to name a
+bundle this install does not ship: `shipResult` is byte-for-byte the R11 string, `Holds(<its id>)` is false, and no
+`ct-cache.key` exists under its patched directory. It cannot run on the project above or after step 9, where `Holds` is
+deliberately true and a good bake has already written the key; (9) **mandatory final arm** — restart so `meta.json` is
+discovered, enable `<name>` BEFORE entering the geoscape, show the prototype again, assert `BundleLive.Holds(<id>)` plus
+live `sharedMesh` vertex/index counts equal the GLB's baked counts.
 
 ## 9. Follow-ups (`ponytail:` ledger)
 - `ponytail:` `ShippedTarget.Resolve` opens each candidate bundle with `BundleBaker` per slot — fine for one press, O(bundles)
@@ -367,10 +423,10 @@ enable `<name>` BEFORE entering the geoscape, show the prototype again, assert `
 | id | Check | Command / evidence |
 |---|---|---|
 | W1 | Offline gates green | `dotnet build -c Release` → 0 errors (1 known CS0649 allowed); `dotnet run --project tests\ObjCodecTests -c Release` (exit 0, `SCAFFOLD PASS` present); `dotnet run --project tests\TargetPathTests -c Release` (exit 0); `dotnet build tools\Package\Package.csproj -c Release` → `0 Error(s)` |
-| W2 | Scaffold is exact | `Scaffold_CreatesProjectTemplates` + `Scaffold_KeepsAnAuthoredId` + `Scaffold_AppendsSecondRow`: `meta.json` byte-compared to the §4.2 template, manifest bytes outside the `replace` span identical |
+| W2 | Scaffold is exact | `Scaffold_CreatesProjectTemplates` + `Scaffold_KeepsAnAuthoredId` + `Scaffold_QuotedId` + `Scaffold_AppendsSecondRow`: `meta.json` byte-compared to the §4.2 template (the id escaped as `Meta()` escapes it), and, appending into a HAND-WRITTEN manifest with a BOM, an unknown member and a nested value, the bytes before and after an INDEPENDENTLY located `replace` span byte-identical with the original row still one unbroken run inside it |
 | W3 | No overwrite is possible | `Scaffold_MeshCollisionPolicy` + `Scaffold_RefusesConflictingTarget` + `Scaffold_RefusesAnUnrelatedFolder` + `Scaffold_RefusesAnUnshippableMeta` |
 | W3b | A retry is a retry, not a refusal | `Scaffold_ReusesAnIdenticalRow` offline + in-game step 8: the second press ends green with one row |
-| W4 | Target derivation disk-proved | in-game steps 2 + 5: the stored pair equals the row the bake matched, `WhyNot` answered `null` for exactly one bundle |
-| W5 | A failed bake installs nothing | force a bad row, press Ship → the panel shows R11 (`ApplyDisposition.BakeFailed`), `BundleLive.Holds` false, `ct-cache.key` not written |
+| W4 | Target derivation disk-proved | in-game steps 2 + 5, plus the §4.1 derivation block in `Player.log`: `[ContentTool] ShippedTarget: '<asset>' candidates (n): …`, one outcome line per deduplicated candidate with a single `HOLDS IT (WhyNot == null)`, closed by `resolved '<asset>' -> <bundle> (1 of <present> present candidate(s) …)`. The row the bake matched equals that pair |
+| W5 | A failed bake installs nothing | in-game step 8b, in a SEPARATE never-applied project, before the step-9 restart: force a bad row, press Ship → `shipResult` is byte-for-byte the R11 string (`ApplyDisposition.BakeFailed`), `BundleLive.Holds(<its id>)` false, no `ct-cache.key` under its patched directory |
 | W6 | Honest end state, with the preview up | in-game steps 3 + 6 + 9: shipped while `HasPreview` is true and NOT refused as R8; S1 shown with no live swap this session; after restart + enable, `Holds` true and live mesh counts equal the GLB's |
 | W7 | Owner visual check | owner sees the replaced mesh on the prototype after the restart in step 9 |
