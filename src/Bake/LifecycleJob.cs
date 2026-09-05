@@ -96,8 +96,11 @@ namespace Morgott.ContentTool.Bake
                 return new Captured
                 {
                     Root = projectRoot,
+                    // NO BUTTON NAMED. The same sentence answers a Validate, an Apply and a Verify row -
+                    // every one of them refuses on this capture (:221, :268, :351) - and "press Bake
+                    // again" sent an author who pressed Verify to a button that is not the one they used.
                     LiveRefusal = "ct_project: " + projectRoot + " could not be read - " + ex.Message +
-                                  " - fix ppcontent.json and press Bake again."
+                                  " - fix ppcontent.json and run it again."
                 };
             }
             List<string> declared = new List<string>();
@@ -228,17 +231,30 @@ namespace Morgott.ContentTool.Bake
                 Park(delegate
                 {
                     LifecycleState.StageReport r;
+                    // THE GATE LOG IS THE VERDICT'S "ABOVE". `VerifyFailed` says "the FAIL line(s) above
+                    // name them" and `ct_route7 verify` prints exactly this buffer before the terminal
+                    // line - handing the producer a StringBuilder and dropping it left the dashboard with
+                    // a verdict pointing at nothing, and no way to learn WHICH gate on WHICH target.
+                    StringBuilder gates = new StringBuilder();
                     try
                     {
                         ContentProject p = ContentProject.Load(on.Root);
-                        r = ReadBack.Verify(p, on.PatchedDir, new StringBuilder());
+                        r = ReadBack.Verify(p, on.PatchedDir, gates);
                     }
                     catch (Exception ex)
                     {
-                        Finish(id, "ct_route7 verify THREW: " + ex.Message, BakeDisposition.Failed);
+                        Finish(id, "ct_route7 verify THREW: " + ex.Message, BakeDisposition.Failed,
+                               null, false, true, GateOutcome.None, StageResult.Tail(gates.ToString(), 40));
                         return;
                     }
-                    Worker(delegate { Observe(on); Finish(id, r.Verdict, r.How, null, false, r.Applicable); });
+                    // The OUTCOME too, not just the disposition: a mandatory VOID is `How = Success`, and
+                    // rebuilt from that alone the row read PASS (LifecycleState.Outcome's own note).
+                    Worker(delegate
+                    {
+                        Observe(on);
+                        Finish(id, r.Verdict, r.How, null, false, r.Applicable, r.Outcome,
+                               StageResult.Tail(gates.ToString(), 40));
+                    });
                 }, true);
             });
             return null;
@@ -286,7 +302,11 @@ namespace Morgott.ContentTool.Bake
                 // make it wait for a painted panel to say "nothing to install".
                 if (on.Declared.Length == 0)
                 {
-                    Finish(id, StageText.S9(on.Id), BakeDisposition.Refused, null, false, false);
+                    // VOID, STATED - S9 says so in its own words, and the row must not read `Refused` off
+                    // a disposition that is only there to keep the stage out of the live segment.
+                    // `Applicable false` is what lets the chain walk past it (design:281).
+                    Finish(id, StageText.S9(on.Id), BakeDisposition.Refused, null, false, false,
+                           GateOutcome.Void);
                     return;
                 }
                 Park(delegate
@@ -471,9 +491,11 @@ namespace Morgott.ContentTool.Bake
         /// source that outlived its run is a Cancel for the NEXT stage aimed at the last one's token.
         /// `Cancel` already swallows ObjectDisposedException, which is the race this cannot avoid.</summary>
         private static void Finish(long id, string result, BakeDisposition how, string eligibility = null,
-                                   bool restartRequired = false, bool applicable = true)
+                                   bool restartRequired = false, bool applicable = true,
+                                   GateOutcome outcome = GateOutcome.None, string log = null)
         {
-            if (!Run.Complete(id, result, how, eligibility, restartRequired, applicable)) return;
+            if (!Run.Complete(id, result, how, eligibility, restartRequired, applicable, outcome, log))
+                return;
             CancellationTokenSource c = Interlocked.Exchange(ref cts, null);
             if (c != null) try { c.Dispose(); } catch (Exception) { }
         }

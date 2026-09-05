@@ -55,15 +55,28 @@ namespace Morgott.ContentTool.Bake
             /// declares no non-video replacement target. Such a row is VOID WITH A REASON and must not stop
             /// the chain (design:281). True by default, so every other producer is unchanged.</summary>
             internal readonly bool Applicable;
+            /// <summary>The producer's OWN <c>StageReport.Outcome</c>, or <c>None</c> when it stated none.
+            /// It rides here for the reason <see cref="Eligibility"/> and <see cref="RestartRequired"/> do,
+            /// and it is the one that cost a chain: <c>VerifyVerdict</c> answers a mandatory VOID with
+            /// <c>How = Success</c> - a VOID is not a failed RUN - so the pump, rebuilding the row from the
+            /// disposition alone, published PASS and `Run all` walked on into Package over a target nothing
+            /// proved. Read through <see cref="LifecycleState.Outcome"/>, never compared here.</summary>
+            internal readonly GateOutcome Outcome;
+            /// <summary>The producer's gate log - the FAIL/VOID lines the verdict points at when it says
+            /// "the line(s) above name them" - bounded by the producer before it is published, or null for
+            /// a stage whose verdict is the whole of what it measured.</summary>
+            internal readonly string Log;
 
             internal Snapshot(long runId, string stage, bool busy, bool cancelRequested,
                               bool cancelAcknowledged, SlimProgress progress, string result,
                               BakeDisposition how, string eligibility,
-                              bool restartRequired = false, bool applicable = true)
+                              bool restartRequired = false, bool applicable = true,
+                              GateOutcome outcome = GateOutcome.None, string log = null)
             {
                 RunId = runId; Stage = stage; Busy = busy; CancelRequested = cancelRequested;
                 CancelAcknowledged = cancelAcknowledged; Progress = progress; Result = result; How = how;
                 Eligibility = eligibility; RestartRequired = restartRequired; Applicable = applicable;
+                Outcome = outcome; Log = log;
             }
         }
 
@@ -98,7 +111,7 @@ namespace Morgott.ContentTool.Bake
                 if (!state.Busy || state.CancelRequested) return;
                 state = new Snapshot(state.RunId, state.Stage, true, true, state.CancelAcknowledged,
                                      state.Progress, state.Result, state.How, state.Eligibility,
-                                     state.RestartRequired, state.Applicable);
+                                     state.RestartRequired, state.Applicable, state.Outcome, state.Log);
             }
         }
 
@@ -109,7 +122,8 @@ namespace Morgott.ContentTool.Bake
                 if (!state.Busy || state.RunId != runId) return;
                 state = new Snapshot(state.RunId, state.Stage, true, state.CancelRequested,
                                      state.CancelAcknowledged, progress, state.Result, state.How,
-                                     state.Eligibility, state.RestartRequired, state.Applicable);
+                                     state.Eligibility, state.RestartRequired, state.Applicable,
+                                     state.Outcome, state.Log);
             }
         }
 
@@ -118,8 +132,12 @@ namespace Morgott.ContentTool.Bake
         /// the state did not move.</summary>
         /// <param name="eligibility">The producer's <c>StageReport.Eligibility</c>, for the stage that has
         /// one. It rides ALONGSIDE the verdict because the panel rebuilds the report from this snapshot.</param>
+        /// <param name="outcome">The producer's own <c>StageReport.Outcome</c>, or <c>None</c> when it has
+        /// none to state - a VOID whose run succeeded cannot be recovered from the disposition.</param>
+        /// <param name="log">The producer's bounded gate log, for the verdict that points at it.</param>
         internal bool Complete(long runId, string result, BakeDisposition how, string eligibility = null,
-                               bool restartRequired = false, bool applicable = true)
+                               bool restartRequired = false, bool applicable = true,
+                               GateOutcome outcome = GateOutcome.None, string log = null)
         {
             lock (gate)
             {
@@ -127,7 +145,7 @@ namespace Morgott.ContentTool.Bake
                 state = new Snapshot(state.RunId, state.Stage, false, state.CancelRequested,
                                      // RULE 3: only the producer's own Cancelled acknowledges it.
                                      how == BakeDisposition.Cancelled, state.Progress, result, how,
-                                     eligibility, restartRequired, applicable);
+                                     eligibility, restartRequired, applicable, outcome, log);
                 return true;
             }
         }
@@ -669,6 +687,24 @@ namespace Morgott.ContentTool.Bake
             return new StageReport(served == declared ? GateOutcome.Pass : GateOutcome.Void,
                                    StageText.S6(name, served, declared), BakeDisposition.Success,
                                    false, true, null);
+        }
+
+        /// <summary>
+        /// A ROW'S OUTCOME, and the only copy of the rule. The producer's own when it stated one
+        /// (<c>None</c> is "it did not"), and otherwise the disposition's: <c>Refused</c> and
+        /// <c>Cancelled</c> are VOID rows - nothing was proven and nothing failed.
+        ///
+        /// THE CARRIED ONE OUTRANKS THE DISPOSITION because it has to: <see cref="VerifyVerdict"/> answers
+        /// a mandatory VOID and a census shortfall with <c>BakeDisposition.Success</c> - the RUN succeeded,
+        /// the row proved nothing - so a consumer deriving the row from `How` alone published PASS, and
+        /// `Sequence.Report`'s VOID arm (which is what stops the chain before Package) never fired.
+        /// </summary>
+        internal static GateOutcome Outcome(GateOutcome carried, BakeDisposition how)
+        {
+            if (carried != GateOutcome.None) return carried;
+            return how == BakeDisposition.Success ? GateOutcome.Pass
+                 : how == BakeDisposition.Failed ? GateOutcome.Fail
+                 : GateOutcome.Void;
         }
 
         internal static Freshness Fresh(FreshnessObservation o)

@@ -68,7 +68,7 @@ namespace Morgott.ContentTool.Bake
                         "Route vii is LIVE now: 'ct_route7 apply <project>' redirects the bundle in " +
                         "memory and 'ct_route7 status' shows what is redirected. There is no " +
                         "catalog.json edit left to dry-run, verify on disk, revert or stack.");
-                default: return "usage: ct_route7 apply <project> | status";
+                default: return "usage: ct_route7 apply <project> | verify <project> | status";
             }
         }
 
@@ -363,8 +363,25 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         private static string VerifyProject(string projectName)
         {
+            // BY NAME, and the spec sanctions it for a console verb (plan:915) - but it is the same
+            // duplicate-name trap `ApplyRoot` exists for: `ProjectDir` resolves a NAME, so a sibling mod
+            // and one of our own subfolders answering to it resolve to the wrong folder. The dashboard
+            // binds a canonical ROOT for exactly that reason.
             Morgott.ContentTool.Project.ContentProject p =
                 Morgott.ContentTool.Project.ContentProject.Load(ContentToolMain.ProjectDir(projectName));
+
+            // R30 BEFORE ANY GATE, and it is the same fact `Admit` refuses the dashboard's Verify on: once
+            // the game has LOADED a declared bundle it keeps serving what it loaded, so the copies on disk
+            // - however correct - are not what is on screen, and a "Verify: PASS" over them is the tool
+            // vouching for a revision nobody can see. The dashboard carries that as `RestartRequired`
+            // (Apply's `Resident`); a console verb has no session receipt, so it reads the live residency
+            // itself - `BundleLive.ResidentNow`, the same call the install path samples per target.
+            foreach (Morgott.ContentTool.Project.ShippedReplacement row in p.Replace)
+            {
+                if (!string.IsNullOrEmpty(row.video) || string.IsNullOrEmpty(row.bundle)) continue;
+                if (BundleLive.ResidentNow(row.bundle)) return StageText.R30(p.Id);
+            }
+
             StringBuilder log = new StringBuilder();
             LifecycleState.StageReport r = ReadBack.Verify(p, ContentToolMain.PatchedDir(p.Id), log);
             return log.Append(r.Verdict).ToString();

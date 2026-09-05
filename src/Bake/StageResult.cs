@@ -136,10 +136,8 @@ namespace Morgott.ContentTool.Bake
         /// material row says so by passing null.</summary>
         internal bool MandatoryVoid(string target, RowKind kind, string bundle)
         {
-            string[] gates = kind == RowKind.Mesh ? MeshGates
-                           : kind == RowKind.Texture ? TextureGates
-                           : MaterialGates;
-            string key = kind == RowKind.Texture ? bundle : target;
+            string[] gates = Gates(kind);
+            string key = Key(target, kind, bundle);
             foreach (string gate in gates)
             {
                 bool proven = false;
@@ -151,6 +149,39 @@ namespace Morgott.ContentTool.Bake
                 if (!proven) return true;
             }
             return false;
+        }
+
+        /// <summary>The producer's own line for the first MANDATORY gate that came out VOID on this row,
+        /// or null when none did - the sentence a caller quotes instead of composing a second one.
+        ///
+        /// BY GATE AS WELL AS TARGET, which is the whole difference. `P4-ctl-shipped` is an UNCOUNTED
+        /// diagnostic recorded under the mesh's own name (ReadBack.cs:250), so a scan by target alone
+        /// returned its WARN sentence - "this control cannot tell them apart" - for a row whose actual
+        /// missing proof was `P4-bytes`, and the panel then blamed a control nobody has to act on.
+        ///
+        /// Same keys as <see cref="MandatoryVoid"/>, from the same two helpers: a lookup that answered
+        /// "unproven" and then quoted a line about a different gate would be two rules, not one.</summary>
+        internal string FirstMandatoryVoid(string target, RowKind kind, string bundle)
+        {
+            string key = Key(target, kind, bundle);
+            foreach (string gate in Gates(kind))
+                foreach (GateEntry e in Entries)
+                    if (e.Outcome == GateOutcome.Void &&
+                        string.Equals(e.Gate, gate, StringComparison.Ordinal) &&
+                        string.Equals(e.Target, key, StringComparison.Ordinal)) return e.Line;
+            return null;
+        }
+
+        private static string[] Gates(RowKind kind)
+        {
+            return kind == RowKind.Mesh ? MeshGates
+                 : kind == RowKind.Texture ? TextureGates
+                 : MaterialGates;
+        }
+
+        private static string Key(string target, RowKind kind, string bundle)
+        {
+            return kind == RowKind.Texture ? bundle : target;
         }
     }
 

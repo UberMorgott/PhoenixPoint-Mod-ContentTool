@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Morgott.ContentTool.Bake;
 using Morgott.ContentTool.Import;
@@ -212,18 +213,32 @@ namespace Morgott.ContentTool.Dev
             if (source == null)
                 return "refused: no " + FixtureSource + " beside " + mods + " - the fixtures are forks of " +
                        "that project, so it has to be on disk first.";
-            Fork(source, "DashboardValid", null);
+            // EVERY FIXTURE DECLARES THE SAME SHIPPED BUNDLE, because every one of them forks the same
+            // source - and Replace_Leftleg names exactly ONE target with exactly one asset, so retargeting
+            // a fixture's bundle can only produce a MissingTarget bake failure (which is
+            // DashboardPatchFail's job, not DashboardAuthor's). A previous session's `enable-resident`
+            // therefore leaves a REAL claim for 'acceptance.dashboardresident' standing on that bundle, and
+            // `ReadBack.Verify`'s census is PER TARGET: every other fixture then reports "the live claim is
+            // 'acceptance.dashboardresident'" and VOIDs. So the standing claim is DROPPED first - through
+            // the real uninstall body the checkbox calls (BundleLive.cs:148), never by editing the ledger,
+            // and never touching a claim that is not one of these fixtures'.
+            List<string> stale = new List<string>();
+            foreach (BundleClaim c in BundleClaims.All)
+                if (c.Mod != null && c.Mod.StartsWith("acceptance.", StringComparison.Ordinal) &&
+                    !stale.Contains(c.Mod)) stale.Add(c.Mod);
+            foreach (string mod in stale) BundleLive.Uninstall(mod);
+
+            string why = Fork(source, "DashboardValid", null);
             // A REAL MissingTarget (ProjectBake.cs:1807), not a fabricated FAIL: the row names an asset the
             // shipped bundle does not contain, so the bake fails the way a broken project fails.
-            Fork(source, "DashboardPatchFail",
+            why = why ?? Fork(source, "DashboardPatchFail",
                  delegate(string json) { return Retarget(json, "asset", "ContentToolNoSuchTarget"); });
             // ponytail: the plan words this fixture as "retargeted to a bundle no other fixture and no live
             // claim contests". Its own ID already is that: R38 asks whether THIS project's copy is being
             // served (Capture -> ProjectBake.Live over PatchedDir(id)\<bundle>), and a distinct id is a
-            // distinct copy path that nothing loads while the fixture is never applied. Retargeting the
-            // bundle without the asset would instead produce a MissingTarget - DashboardPatchFail's job.
-            Fork(source, "DashboardAuthor", null);
-            return null;
+            // distinct copy path that nothing loads while the fixture is never applied. The claim census is
+            // the OTHER contest, and it is the one released above.
+            return why ?? Fork(source, "DashboardAuthor", null);
         }
 
         /// <summary>Only the fixture that is SELECTED, and only one file of it.</summary>
@@ -280,15 +295,39 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>A fixture is a COPY of a real project carrying its own id, so two of them can be baked,
         /// applied and claimed without contesting each other. <paramref name="mutate"/> edits the manifest
-        /// TEXT, which is how a fixture that must fail gets its defect - a real row naming a real absence.</summary>
-        private static void Fork(string source, string name, Func<string, string> mutate)
+        /// TEXT, which is how a fixture that must fail gets its defect - a real row naming a real absence.
+        /// Returns a refusal, or null when the fork was made.</summary>
+        private static string Fork(string source, string name, Func<string, string> mutate)
         {
             string at = Path.Combine(Directory.GetParent(source).FullName, name);
+            // A RE-FORK DELETES THE TREE, and the panel may be BOUND to it: `root` and the capture taken
+            // from it come from an earlier Open of this same fixture, and deleting the folder out from
+            // under them left the selection Unavailable mid-suite - R27 over a project the scenario had
+            // just been told to rebuild. The author clears the selection first; this refuses rather than
+            // clearing it for them, because Open("") is theirs to press.
+            if (Under(root, at))
+                return "refused: '" + name + "' is the selected project (" + at + ") - re-forking it " +
+                       "would delete the tree the panel is bound to. Open(\"\") first, then prepare.";
             if (Directory.Exists(at)) Directory.Delete(at, true);
             Copy(source, at);
             string manifest = Path.Combine(at, ContentMods.Manifest);
             string json = Retarget(File.ReadAllText(manifest), "id", "acceptance." + name.ToLowerInvariant());
             File.WriteAllText(manifest, mutate == null ? json : mutate(json));
+            return null;
+        }
+
+        /// <summary>Is <paramref name="path"/> that directory, or inside it? Canonical and case-blind, like
+        /// every other path comparison on this route. An unresolvable path is not a proven overlap.</summary>
+        private static bool Under(string path, string dir)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            try
+            {
+                string a = Norm(path), b = Norm(dir);
+                return a.Equals(b, StringComparison.OrdinalIgnoreCase) ||
+                       a.StartsWith(b + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception) { return false; }
         }
 
         /// <summary>Rewrites the FIRST value of a named string field, in place, leaving every other byte of
@@ -335,10 +374,13 @@ namespace Morgott.ContentTool.Dev
             if (row != null)
             {
                 row.Verdict = now.Result;
-                row.Outcome = Outcome(now.How);
+                row.Outcome = LifecycleState.Outcome(now.Outcome, now.How);
                 row.Freshness = LifecycleState.Fresh(LifecycleJob.Seen);
             }
-            log = now.Result;
+            // The producer's gate log when it published one - Verify's FAIL/VOID lines are what its
+            // verdict points at - and the verdict itself for every stage whose verdict is the whole of
+            // what it measured.
+            log = now.Log ?? now.Result;
 
             // S1 IS A FACT ABOUT THE SESSION, NOT ABOUT A CHAIN (LifecycleState.cs:443). A STANDALONE Apply
             // never reaches `Sequence.Report`, so setting it only there left the button path's Verify
@@ -346,9 +388,9 @@ namespace Morgott.ContentTool.Dev
             if (now.RestartRequired) ctx.RestartRequired = true;
 
             if (chain == null) return;
-            chain.Report(ctx, new LifecycleState.StageReport(Outcome(now.How), now.Result, now.How,
-                                                             now.RestartRequired, now.Applicable,
-                                                             now.Eligibility));
+            chain.Report(ctx, new LifecycleState.StageReport(
+                                  LifecycleState.Outcome(now.Outcome, now.How), now.Result, now.How,
+                                  now.RestartRequired, now.Applicable, now.Eligibility));
             string next = chain.Next(Refresh(true));
             // A CHAIN THAT STOPPED HAS TO SAY SO SOMEWHERE. `Next` returns null both when the five stages
             // are done and when an ADMISSION refused one, and the refusal is only in `chain.Terminal` -
@@ -467,15 +509,6 @@ namespace Morgott.ContentTool.Dev
             dispatched = LifecycleJob.Run.Latest.RunId;
             if (row != null) row.Starts++;
             return Started(true, dispatched, null);
-        }
-
-        /// <summary>The producer's disposition, never its text (design:361). `Refused` and `Cancelled` are
-        /// VOID rows: nothing was proven and nothing failed.</summary>
-        private static GateOutcome Outcome(BakeDisposition how)
-        {
-            return how == BakeDisposition.Success ? GateOutcome.Pass
-                 : how == BakeDisposition.Failed ? GateOutcome.Fail
-                 : GateOutcome.Void;
         }
 
         private static string GameRoot()

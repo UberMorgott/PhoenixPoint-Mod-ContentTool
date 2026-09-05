@@ -76,6 +76,7 @@ namespace Morgott.ContentTool.Bake
                 List<KeyValuePair<string, ImportedMesh>> meshes = new List<KeyValuePair<string, ImportedMesh>>();
                 List<KeyValuePair<string, ShippedReplacement>> clips =
                     new List<KeyValuePair<string, ShippedReplacement>>();
+                int textureRows = 0;
                 foreach (ShippedReplacement r in Rows(p, bundleFile))
                 {
                     if (!string.IsNullOrEmpty(r.material))
@@ -101,11 +102,24 @@ namespace Morgott.ContentTool.Bake
                         if (im != null) meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));
                         continue;
                     }
+                    textureRows++;
                     ImportedTexture t = ProjectBake.Find(p, r.texture);
-                    if (t != null) want.Add(t);
+                    if (t != null) { want.Add(t); continue; }
+                    // A SOURCE THAT DID NOT IMPORT IS MISSING EVIDENCE, NOT ONE FEWER EXPECTATION. Dropping
+                    // the row left P1 measuring only the textures that DID resolve - and P1 is keyed on the
+                    // BUNDLE (ReadBackResult.MandatoryVoid), so one resolved sibling proved the whole
+                    // bundle and this row rode to PASS on a measurement nothing made about it. Recorded
+                    // BEFORE the bundle-level gates run, so the sentence the verdict quotes is the one that
+                    // names the texture rather than a gate that answered about something else.
+                    mandatoryVoid = true;
+                    string unresolved = "P1 VOID '" + r.texture + "' -> '" + r.asset + "' in " + bundleFile +
+                                        " did not import, so nothing measured it";
+                    log.AppendLine(unresolved);
+                    if (voidLine == null) voidLine = unresolved;
                 }
 
-                ReadBackResult measured = Run(log, bundleFile, shipped, copy, want, mats, meshes, clips);
+                ReadBackResult measured =
+                    Run(log, bundleFile, shipped, copy, want, mats, meshes, clips, textureRows);
                 failed += measured.Failed;
 
                 foreach (ShippedReplacement r in Rows(p, bundleFile))
@@ -118,7 +132,10 @@ namespace Morgott.ContentTool.Bake
                     if (!measured.MandatoryVoid(r.asset, kind, bundleFile)) continue;
                     mandatoryVoid = true;
                     if (voidLine != null) continue;
-                    voidLine = FirstVoid(measured, kind == RowKind.Texture ? bundleFile : r.asset);
+                    // BY GATE AND TARGET. A scan by target alone returned the optional `P4-ctl-shipped`
+                    // WARN recorded under the same mesh (:250) ahead of the mandatory `P4-bytes` VOID, so
+                    // the row blamed a control nobody has to act on for a proof that never ran.
+                    voidLine = measured.FirstMandatoryVoid(r.asset, kind, bundleFile);
                     if (voidLine != null) continue;
                     // The gate did not run AT ALL, so there is no line of its own to quote. Verify is the
                     // producer of this one and writes it to the log too, so the row and the log still
@@ -154,16 +171,6 @@ namespace Morgott.ContentTool.Bake
             }
         }
 
-        /// <summary>The first VOID line recorded against that key, so the verdict quotes the producer
-        /// rather than composing a second sentence about the same measurement.</summary>
-        private static string FirstVoid(ReadBackResult r, string key)
-        {
-            foreach (GateEntry e in r.Entries)
-                if (e.Outcome == GateOutcome.Void && string.Equals(e.Target, key, StringComparison.Ordinal))
-                    return e.Line;
-            return null;
-        }
-
         /// <summary>One spelling of a file path, so a claim's and ours can be compared - the claim is
         /// recorded with whatever separators the installer handed it.</summary>
         private static bool Same(string a, string b)
@@ -179,11 +186,16 @@ namespace Morgott.ContentTool.Bake
         /// exist yet when this returns, and the sole caller adds `.Failed` to a running count
         /// (ProjectBake.cs:1657) rather than holding the result. <see cref="ReadBackResult.Terminal"/> is
         /// therefore <c>null</c> here, which is what its own factory demands be said explicitly.</summary>
+        /// <param name="textureRows">how many texture rows this bundle DECLARES, when the caller knows -
+        /// the bake does not need to say (an unresolved source is a counted P1 REFUSED there,
+        /// ProjectBake.cs:1835), and Verify does: "0 declared" is untrue of a bundle whose rows all failed
+        /// to import, which is exactly the case the row above is about.</param>
         internal static ReadBackResult Run(StringBuilder log, string bundleFile, string shipped, string copy,
                                            List<ImportedTexture> want,
                                            List<KeyValuePair<string, string>> mats,
                                            List<KeyValuePair<string, ImportedMesh>> meshes,
-                                           List<KeyValuePair<string, ShippedReplacement>> clips)
+                                           List<KeyValuePair<string, ShippedReplacement>> clips,
+                                           int textureRows = 0)
         {
             List<GateEntry> entries = new List<GateEntry>();
 
@@ -194,7 +206,10 @@ namespace Morgott.ContentTool.Bake
             // bundle (ct_project 14:5x). A gate that cannot answer says VOID, never PASS or FAIL.
             if (want.Count == 0)
                 Void(log, entries, "P1", bundleFile,
-                     "P1 VOID 0 texture replacement(s) declared in " + bundleFile);
+                     textureRows > 0
+                     ? "P1 VOID " + textureRows + " texture replacement(s) declared in " + bundleFile +
+                       ", 0 of them resolved to a source - nothing was measured"
+                     : "P1 VOID 0 texture replacement(s) declared in " + bundleFile);
             else
             {
                 Gate(log, entries, "P1", bundleFile, ProjectBake.PixelsIn(copy, want),

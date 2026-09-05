@@ -63,6 +63,29 @@ internal static class LifecycleTests
                         "a mandatory gate with NO entry at all is VOID, not an implied pass");
         checks += Check(meshOk.MandatoryVoid("mesh_b", RowKind.Mesh, null),
                         "another target's proofs never satisfy this target");
+        // THE LINE A VOID ROW QUOTES IS THE MANDATORY GATE'S OWN. P4-ctl-shipped is an UNCOUNTED
+        // diagnostic recorded under the SAME target as P4-bytes (ReadBack.cs:250), so a scan by target
+        // alone picked its WARN sentence - and the row blamed a control that "cannot tell them apart"
+        // for a mesh whose buffers were never readable at all.
+        ReadBackResult twoVoids = ReadBackResult.Of(null,
+            GateEntry.Pass("P4", "Torso", "P4 PASS mesh 'Torso' in the copy IS heavy_torso"),
+            GateEntry.Void("P4-ctl-shipped", "Torso", "P4-ctl-shipped WARN cannot tell them apart"),
+            GateEntry.Void("P4-bytes", "Torso", "P4-bytes VOID mesh 'Torso' has no readable buffers"));
+        checks += Check(twoVoids.MandatoryVoid("Torso", RowKind.Mesh, null) &&
+                        twoVoids.FirstMandatoryVoid("Torso", RowKind.Mesh, null) ==
+                        "P4-bytes VOID mesh 'Torso' has no readable buffers",
+                        "the quoted VOID line is a MANDATORY gate's own, never an optional control's " +
+                        "that happens to share the target");
+        checks += Check(twoVoids.FirstMandatoryVoid("Other", RowKind.Mesh, null) == null &&
+                        ReadBackResult.Of(null, GateEntry.Pass("P4", "Torso", "x"))
+                            .FirstMandatoryVoid("Torso", RowKind.Mesh, null) == null,
+                        "a mandatory gate that never ran has NO line to quote - the caller composes " +
+                        "its own rather than borrowing another gate's");
+        checks += Check(ReadBackResult.Of(null,
+                            GateEntry.Void("P1", "a.bundle", "P1 VOID 2 declared, 0 resolved"))
+                            .FirstMandatoryVoid("tex_a", RowKind.Texture, "a.bundle") ==
+                        "P1 VOID 2 declared, 0 resolved",
+                        "a texture row quotes its BUNDLE's line - the same key MandatoryVoid asks by");
         // A TEXTURE ROW IS KEYED ON ITS BUNDLE. P1 and its control are recorded under the bundle file
         // (ReadBack.cs:51, :55, :57) because they measure every declared texture of that bundle at once,
         // so a lookup by the row's asset name matches nothing and calls every measured texture unproven.
@@ -272,11 +295,12 @@ internal static class LifecycleTests
         checks += Sections();
         checks += Validating();
         checks += Verifying();
+        checks += Producers();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
                "one file swap, the pre-import receipt, the publication ordering, one output owner, " +
                "the admission table, the cancel contract, the Run all chain, the bounded seam sections, " +
-               "the Validate producer, the Verify decision";
+               "the Validate producer, the Verify decision, the unlinkable producers' shape";
     }
 
     /// <summary>
@@ -328,6 +352,112 @@ internal static class LifecycleTests
                         failed.Verdict == StageText.VerifyFailed(
                             "2 load-back gate(s) failed for 'demo'; the FAIL line(s) above name them."),
                         "a counted FAILURE outranks every VOID - VerifyFailed, and the run is Failed");
+
+        // ---- THE OUTCOME IS A FACT OF ITS OWN, and the disposition cannot restate it. A mandatory
+        // VOID and a shortfall are both `How = Success` - a VOID is not a failed RUN - so a consumer
+        // that re-derived the row from the disposition alone published PASS over a target nothing
+        // proved, and `Run all` walked on into Package. One mapping, asked by both callers.
+        checks += Check(LifecycleState.Outcome(mandatory.Outcome, mandatory.How) == GateOutcome.Void &&
+                        LifecycleState.Outcome(shortfall.Outcome, shortfall.How) == GateOutcome.Void &&
+                        LifecycleState.Outcome(full.Outcome, full.How) == GateOutcome.Pass &&
+                        LifecycleState.Outcome(failed.Outcome, failed.How) == GateOutcome.Fail,
+                        "the producer's own outcome outranks its disposition - the whole reason " +
+                        "VerifyVerdict states one");
+        checks += Check(LifecycleState.Outcome(GateOutcome.None, BakeDisposition.Success) == GateOutcome.Pass &&
+                        LifecycleState.Outcome(GateOutcome.None, BakeDisposition.Failed) == GateOutcome.Fail &&
+                        LifecycleState.Outcome(GateOutcome.None, BakeDisposition.Refused) == GateOutcome.Void &&
+                        LifecycleState.Outcome(GateOutcome.None, BakeDisposition.Cancelled) == GateOutcome.Void,
+                        "and a producer that states NONE keeps the disposition's own mapping - " +
+                        "Refused and Cancelled are VOID rows, nothing proven and nothing failed");
+        return checks;
+    }
+
+    /// <summary>
+    /// THE PRODUCERS THAT CANNOT BE LINKED, read off the SOURCE - the arrangement `KeyCapture` and
+    /// `Sequencing` already use for `ProjectBake` and `LifecycleJob`, for the same reason: `ReadBack`,
+    /// `Route7` and `LifecycleDashboard` carry UnityEngine and AssetsTools types and can never join this
+    /// compile list. What is asserted here is the SHAPE of a fix whose EFFECT is Task 8's rows - each arm
+    /// names the file it read, so a green line that stopped measuring anything says where to look.
+    ///
+    /// Every arm is falsifiable by the shape that shipped: the string it looks for did not exist before,
+    /// or the one it forbids is exactly what was there.
+    /// </summary>
+    private static int Producers()
+    {
+        int checks = 0;
+        string src = SrcRoot();
+        checks += Check(src != null, "the repo's src\\ is where the arms below read their producers");
+
+        // ---- ReadBack: an UNRESOLVED texture row is missing evidence, not one fewer expectation. P1 is
+        // keyed on the BUNDLE (ReadBackResult.MandatoryVoid's own note), so a sibling texture that DID
+        // import proved it for the whole bundle and the dropped row rode to PASS on a measurement nothing
+        // made about it. And the VOID a row quotes is now looked up by gate AND target.
+        string readBack = Path.Combine(src, "Bake", "ReadBack.cs");
+        string rb = File.ReadAllText(readBack);
+        checks += Check(rb.IndexOf("did not import, so nothing measured it",
+                                   StringComparison.Ordinal) > 0 &&
+                        rb.IndexOf("mandatoryVoid = true", StringComparison.Ordinal) > 0,
+                        "an unresolved texture source is recorded as a mandatory VOID naming the " +
+                        "texture, never silently dropped from `want` -> " + readBack);
+        checks += Check(rb.IndexOf("FirstMandatoryVoid(", StringComparison.Ordinal) > 0 &&
+                        rb.IndexOf("private static string FirstVoid(", StringComparison.Ordinal) < 0,
+                        "and the quoted line comes from the carrier's gate-aware lookup, not a local " +
+                        "scan by target alone -> " + readBack);
+        checks += Check(rb.IndexOf("of them resolved to a source", StringComparison.Ordinal) > 0,
+                        "P1's empty-expectation line says how many rows were DECLARED and how many " +
+                        "resolved - '0 declared' was untrue of a bundle whose rows all failed to " +
+                        "import -> " + readBack);
+
+        // ---- Route7's console consumer asks residency before it composes a verdict. `Admit` refuses the
+        // dashboard's Verify with R30 while the game is still serving what it loaded; `ct_route7 verify`
+        // asked nobody and printed PASS over copies nothing is reading.
+        string route = Path.Combine(src, "Bake", "Route7.cs");
+        string r7 = File.ReadAllText(route);
+        int verifyAt = r7.IndexOf("private static string VerifyProject(", StringComparison.Ordinal);
+        int resident = verifyAt < 0 ? -1 : r7.IndexOf("BundleLive.ResidentNow(", verifyAt,
+                                                      StringComparison.Ordinal);
+        int r30 = verifyAt < 0 ? -1 : r7.IndexOf("StageText.R30(", verifyAt, StringComparison.Ordinal);
+        int gates = verifyAt < 0 ? -1 : r7.IndexOf("ReadBack.Verify(", verifyAt, StringComparison.Ordinal);
+        checks += Check(verifyAt > 0 && resident > verifyAt && r30 > resident && gates > r30,
+                        "ct_route7 verify checks residency and refuses with R30 BEFORE the gates run " +
+                        "-> " + route);
+        checks += Check(r7.IndexOf("usage: ct_route7 apply <project> | verify <project> | status",
+                                   StringComparison.Ordinal) > 0,
+                        "and the verb it grew is in the usage line - a verb nobody can discover is a " +
+                        "verb nobody uses -> " + route);
+
+        // ---- The dashboard's fixtures and its pump. Every fixture forks ONE source, so they all declare
+        // the same shipped bundle: a previous session's `enable-resident` leaves a REAL claim for
+        // 'acceptance.dashboardresident' on it and Verify's per-target census then VOIDs every other
+        // fixture. The claim is released through the real uninstall body, before anything is forked.
+        string dashboard = Path.Combine(src, "Dev", "LifecycleDashboard.cs");
+        string dash = File.ReadAllText(dashboard);
+        int prepare = dash.IndexOf("private static string Prepare(", StringComparison.Ordinal);
+        int release = prepare < 0 ? -1 : dash.IndexOf("BundleLive.Uninstall(", prepare,
+                                                      StringComparison.Ordinal);
+        int forked = prepare < 0 ? -1 : dash.IndexOf("Fork(source,", prepare, StringComparison.Ordinal);
+        checks += Check(prepare > 0 && release > prepare && forked > release,
+                        "prepare releases every standing acceptance.* claim before it forks a fixture " +
+                        "-> " + dashboard);
+        checks += Check(dash.IndexOf("LifecycleState.Outcome(now.Outcome, now.How)",
+                                     StringComparison.Ordinal) > 0 &&
+                        dash.IndexOf("now.Log", StringComparison.Ordinal) > 0 &&
+                        dash.IndexOf("Outcome(now.How)", StringComparison.Ordinal) < 0,
+                        "the pump publishes the producer's OWN outcome and its gate log, and no longer " +
+                        "re-derives a row from the disposition -> " + dashboard);
+
+        // ---- And the job: the gate log is published rather than dropped, and the manifest refusal does
+        // not name a button the Validate and Verify rows do not have.
+        string jobFile = Path.Combine(src, "Bake", "LifecycleJob.cs");
+        string job = File.ReadAllText(jobFile);
+        checks += Check(job.IndexOf("ReadBack.Verify(p, on.PatchedDir, new StringBuilder())",
+                                    StringComparison.Ordinal) < 0 &&
+                        job.IndexOf("StageResult.Tail(", StringComparison.Ordinal) > 0,
+                        "StartVerify keeps the gate log it asked the producer for and publishes a " +
+                        "bounded tail of it with the completion -> " + jobFile);
+        checks += Check(job.IndexOf("press Bake again", StringComparison.Ordinal) < 0,
+                        "and the unreadable-manifest refusal names no button - the same sentence " +
+                        "answers a Validate, an Apply and a Verify row -> " + jobFile);
         return checks;
     }
 
@@ -632,6 +762,28 @@ internal static class LifecycleTests
         checks += Check(!applied.Latest.RestartRequired && applied.Latest.Applicable,
                         "every other producer keeps the defaults - a bake needs no restart and always had " +
                         "a gate to answer");
+
+        // ---- THE OUTCOME AND THE GATE LOG RIDE THE SAME CARRIER, for the reason eligibility and S1 do.
+        // Verify's producer states a VOID with `How = Success`, and its FAIL/VOID lines are the only
+        // thing that NAMES the target - the verdict says "the line(s) above name them" and the panel
+        // had no above, because StartVerify handed the producer a StringBuilder it then dropped.
+        LifecycleRun verified = new LifecycleRun();
+        long ninth = verified.Begin("Verify");
+        string tail = "P4-bytes VOID mesh 'Torso' has no readable vertex/index buffers";
+        verified.Complete(ninth, "Verify: VOID", BakeDisposition.Success, null, false, true,
+                          GateOutcome.Void, tail);
+        checks += Check(verified.Latest.Outcome == GateOutcome.Void && verified.Latest.Log == tail &&
+                        LifecycleState.Outcome(verified.Latest.Outcome, verified.Latest.How) ==
+                        GateOutcome.Void,
+                        "a producer's VOID and its gate log reach the snapshot - without them the pump " +
+                        "published PASS over a target nothing proved, with no line to point at");
+        long tenth = verified.Begin("Bake");
+        verified.Complete(tenth, "ct_project: ALL PASS", BakeDisposition.Success);
+        checks += Check(verified.Latest.Outcome == GateOutcome.None && verified.Latest.Log == null &&
+                        LifecycleState.Outcome(verified.Latest.Outcome, verified.Latest.How) ==
+                        GateOutcome.Pass,
+                        "and neither is inherited - a producer that states no outcome keeps the " +
+                        "disposition's, and one with no gate log publishes none");
 
         // ---- A CANCEL WITH NOTHING RUNNING IS SILENCE, not a flag the next run inherits.
         run.Cancel();
@@ -1144,6 +1296,30 @@ internal static class LifecycleTests
         { return s == "Verify" ? Void("Verify: VOID - nothing proved it", true) : Pass("ok"); });
         checks += Check(ran.Count == 4 && !ran.Contains("Package"),
                         "an absent mandatory proof stays VOID and blocks completion - Package is not entered");
+
+        // ...and the WHOLE PATH of it, from the producer to the sequencer, with nothing re-implemented
+        // in between: `VerifyVerdict` states the VOID, `Complete` carries it, and the report the pump
+        // rebuilds from that snapshot is what stops the chain. Derived from `How` alone this row was a
+        // PASS and Package ran over a mesh nothing measured.
+        ran.Clear();
+        LifecycleRun verify = new LifecycleRun();
+        long vr = verify.Begin("Verify");
+        LifecycleState.StageReport produced = LifecycleState.VerifyVerdict(
+            "demo", 1, 1, true, "P4-bytes VOID mesh 'Torso' has no readable vertex/index buffers", 0);
+        verify.Complete(vr, produced.Verdict, produced.How, null, false, produced.Applicable,
+                        produced.Outcome);
+        LifecycleRun.Snapshot published = verify.Latest;
+        checks += Check(Drive(Fresh(), ran, delegate(string s)
+                        {
+                            return s == "Verify"
+                                ? new LifecycleState.StageReport(
+                                      LifecycleState.Outcome(published.Outcome, published.How),
+                                      published.Result, published.How, published.RestartRequired,
+                                      published.Applicable, published.Eligibility)
+                                : Pass("ok");
+                        }) == produced.Verdict && ran.Count == 4 && !ran.Contains("Package"),
+                        "a mandatory VOID published by the Verify producer stops Run all before " +
+                        "Package, in the gate's own words - VerifyVerdict -> Complete -> the sequencer");
 
         // ...but a VOID with no applicable gate at all is a reason, not a failure (design:281).
         ran.Clear();
