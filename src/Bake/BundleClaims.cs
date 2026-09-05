@@ -22,6 +22,12 @@ namespace Morgott.ContentTool.Bake
         internal uint Crc;
         /// <summary>True while <see cref="Crc"/> is suppressed to 0 on the live options object.</summary>
         internal bool CrcSuppressed;
+        /// <summary>The served copy is OLDER than <see cref="Path"/>: an install found the shipped bundle
+        /// already loaded while this claim stood, so what Unity is serving predates this claim's current
+        /// copy and only a restart replaces it. Written per target by <c>BundleLive.Install</c> from the
+        /// same <c>wasResident</c> sample <c>Route7.ApplyDisposition.Resident</c> is decided from, so the
+        /// console verb and the dashboard's <c>Admission.RestartRequired</c> answer ONE question.</summary>
+        internal bool Outdated;
 
         public override string ToString()
         {
@@ -269,6 +275,27 @@ namespace Morgott.ContentTool.Bake
             BundleClaim c = new BundleClaim { Mod = mod, Bundle = bundleFile, Path = path };
             Held.Add(c);
             return c;
+        }
+
+        /// <summary>
+        /// R30's WHOLE rule, in one pure function so both consumers ask it instead of each deciding:
+        /// does this mod's declared bundle need a restart before anything can be vouched for?
+        ///
+        /// RESIDENCY ALONE IS NOT "RESTART REQUIRED", and reading it that way refused a verify that
+        /// should pass. A mod enabled BEFORE its target was ever loaded redirects it first, and the
+        /// game then loads OUR patched copy through the transform func: the bundle is resident and the
+        /// resident copy IS the current one. <see cref="BundleLive.Register"/> refuses to claim over an
+        /// ALREADY loaded bundle (BundleLive.cs:109-113), so a standing claim of ours is precisely the
+        /// proof that the redirect was in force before the load - and <see cref="BundleClaim.Outdated"/>
+        /// carries the one case where it was not: an install that found the bundle already resident,
+        /// which is the same sample <c>ApplyDisposition.Resident</c> - and through it the dashboard's
+        /// <c>Admission.RestartRequired</c> - is decided from.
+        /// </summary>
+        internal static bool RestartRequired(string mod, string bundleFile, bool residentNow)
+        {
+            if (!residentNow) return false;
+            BundleClaim c = Find(bundleFile);
+            return c == null || !string.Equals(c.Mod, mod, StringComparison.Ordinal) || c.Outdated;
         }
 
         /// <summary>The patched path for a location we own, if we own it.</summary>

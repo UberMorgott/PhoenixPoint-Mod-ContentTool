@@ -414,13 +414,16 @@ internal static class LifecycleTests
         string route = Path.Combine(src, "Bake", "Route7.cs");
         string r7 = File.ReadAllText(route);
         int verifyAt = r7.IndexOf("private static string VerifyProject(", StringComparison.Ordinal);
+        int rule = verifyAt < 0 ? -1 : r7.IndexOf("BundleClaims.RestartRequired(", verifyAt,
+                                                  StringComparison.Ordinal);
         int resident = verifyAt < 0 ? -1 : r7.IndexOf("BundleLive.ResidentNow(", verifyAt,
                                                       StringComparison.Ordinal);
         int r30 = verifyAt < 0 ? -1 : r7.IndexOf("StageText.R30(", verifyAt, StringComparison.Ordinal);
         int gates = verifyAt < 0 ? -1 : r7.IndexOf("ReadBack.Verify(", verifyAt, StringComparison.Ordinal);
-        checks += Check(verifyAt > 0 && resident > verifyAt && r30 > resident && gates > r30,
-                        "ct_route7 verify checks residency and refuses with R30 BEFORE the gates run " +
-                        "-> " + route);
+        checks += Check(verifyAt > 0 && rule > verifyAt && resident > rule && r30 > resident && gates > r30,
+                        "ct_route7 verify asks the SHARED rule - residency plus this mod's standing " +
+                        "claim, gate S1-r30 - and refuses with R30 BEFORE the gates run; residency " +
+                        "alone refused a copy the redirect was already serving -> " + route);
         checks += Check(r7.IndexOf("usage: ct_route7 apply <project> | verify <project> | status",
                                    StringComparison.Ordinal) > 0,
                         "and the verb it grew is in the usage line - a verb nobody can discover is a " +

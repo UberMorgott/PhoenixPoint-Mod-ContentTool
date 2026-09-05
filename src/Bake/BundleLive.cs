@@ -76,11 +76,16 @@ namespace Morgott.ContentTool.Bake
                 bool wasResident = ResidentNow(c.Key);
                 string line = Register(modId, c.Key, c.Value);
                 BundleClaim mine = BundleClaims.Find(c.Key);
+                bool ours = mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal);
+                // THE SAME SAMPLE, written where a LATER reader can find it. The disposition below is a
+                // return value and dies with the press; `ct_route7 verify` arrives in a fresh call with no
+                // receipt at all, and residency by itself cannot tell "we were redirecting it before it
+                // loaded" (verify it) from "it loaded before we got there" (R30). The claim outlives both.
+                if (ours) mine.Outdated = wasResident;
                 per.Add(new Route7.TargetInstall(c.Key, line,
                     wasResident ? Route7.ApplyDisposition.Resident
-                    : mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal)
-                      ? Route7.ApplyDisposition.Redirected
-                      : Route7.ApplyDisposition.Refused));
+                    : ours ? Route7.ApplyDisposition.Redirected
+                           : Route7.ApplyDisposition.Refused));
                 lines.Add(line);
                 log.AppendLine(line);
             }

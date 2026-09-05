@@ -273,8 +273,10 @@ namespace Morgott.ContentTool.Dev
             {
                 if (!string.IsNullOrEmpty(r.video) || string.IsNullOrEmpty(r.bundle)) continue;
                 if (!BundleLive.ResidentNow(r.bundle)) continue;
-                Fork(source, "DashboardResident", null);
-                return null;
+                // THE FORK'S OWN REFUSAL, like `Prepare` returns it. Discarding it reported `ok:true` with
+                // nothing prepared - a re-fork of the SELECTED fixture refuses (Fork:308) and the
+                // acceptance row then read as a pass over a tree that was never made.
+                return Fork(source, "DashboardResident", null);
             }
             return "refused: the game has none of " + FixtureSource + "'s declared bundles loaded right " +
                    "now, so there is no resident target to fork onto.";

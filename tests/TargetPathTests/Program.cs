@@ -34,6 +34,7 @@ internal static class Program
         BundleClaimsArm();
         ResidencyArm();
         ReclaimCrcArm();
+        RestartRequiredArm();
         TwoRouteToggleArm();
         EnableOrderArm();
         LegacyDiskArm();
@@ -625,6 +626,65 @@ internal static class Program
         List<BundleClaim> gone = BundleClaims.Drop("mod.a");
         Check("S1-reclaim-drop", gone.Count == 1 && gone[0].Crc == 3735928559,
             "so the uninstall that follows can put the shipped crc back, not 0");
+    }
+
+    /// <summary>
+    /// Gate S1-r30, offline: WHICH resident bundle costs a restart, and the parity between the two
+    /// consumers that ask.
+    ///
+    /// Residency alone is not "restart required". A mod enabled BEFORE its target was ever loaded
+    /// redirects it first and the game then loads OUR patched copy through the transform func: the
+    /// bundle is resident and the resident copy is the current one, so `ct_route7 verify` must verify
+    /// it. `BundleLive.Register` refuses to claim over a bundle that is ALREADY loaded, so a standing
+    /// claim of ours is exactly the proof that the redirect was in force before the load - and
+    /// `BundleLive.Install` writes the same `wasResident` sample it decides
+    /// `ApplyDisposition.Resident` from onto <see cref="BundleClaim.Outdated"/>, so the console verb
+    /// and the dashboard's `Admission.RestartRequired` answer one question, not two.
+    ///
+    /// An implementation that refuses on residency alone (the bug) fails S1-r30-current; one that
+    /// trusts any claim fails S1-r30-stale; one that ignores the owner fails S1-r30-theirs.
+    /// </summary>
+    private static void RestartRequiredArm()
+    {
+        const string bundle = "px_equipment_assets_all.bundle";
+        string refusal;
+        BundleClaim evicted;
+
+        Check("S1-r30-loaded-nothing", !BundleClaims.RestartRequired("mod.a", bundle, false),
+            "a bundle the game has NOT loaded costs no restart, claimed or not");
+
+        Check("S1-r30-unclaimed", BundleClaims.RestartRequired("mod.a", bundle, true),
+            "a resident bundle nothing of ours redirects is the SHIPPED copy on screen - R30");
+
+        BundleClaim mine = BundleClaims.Claim("mod.a", bundle, @"C:\Mods\A\a.bundle", out refusal, out evicted);
+        mine.Outdated = false;
+        Check("S1-r30-current", !BundleClaims.RestartRequired("mod.a", bundle, true),
+            "but a resident bundle we were already redirecting when it loaded IS our patched copy - verify it");
+
+        mine.Outdated = true;
+        Check("S1-r30-stale", BundleClaims.RestartRequired("mod.a", bundle, true),
+            "while a claim whose last apply found the bundle already loaded serves an older copy - R30");
+
+        Check("S1-r30-theirs", BundleClaims.RestartRequired("mod.z", bundle, true),
+            "and another mod's redirect vouches for nothing of ours");
+        BundleClaims.Drop("mod.a");
+
+        // PARITY, the whole point: for the same live state the console verb and the dashboard's Apply
+        // receipt (ApplyDisposition.Resident -> Admission.RestartRequired) must say the same thing.
+        // Both halves come from ONE sample - BundleLive.Install:76-83 takes `wasResident` once, hands it
+        // to the disposition and writes it to the claim - which is what this arm pins.
+        foreach (bool wasResident in new[] { false, true })
+        {
+            BundleClaim held = BundleClaims.Claim("mod.a", bundle, @"C:\Mods\A\a.bundle",
+                                                  out refusal, out evicted);
+            held.Outdated = wasResident;                                   // what Install records per target
+            bool dashboard = wasResident;                                  // Resident -> RestartRequired
+            Check("S1-r30-parity-" + wasResident,
+                  BundleClaims.RestartRequired("mod.a", bundle, true) == dashboard,
+                "the console verb and the dashboard refuse the same live state (wasResident=" +
+                wasResident + ")");
+            BundleClaims.Drop("mod.a");
+        }
     }
 
     /// <summary>

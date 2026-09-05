@@ -376,10 +376,18 @@ namespace Morgott.ContentTool.Bake
             // vouching for a revision nobody can see. The dashboard carries that as `RestartRequired`
             // (Apply's `Resident`); a console verb has no session receipt, so it reads the live residency
             // itself - `BundleLive.ResidentNow`, the same call the install path samples per target.
+            //
+            // BUT RESIDENCY ALONE IS NOT THAT FACT, and refusing on it broke the parity it was added for.
+            // A mod enabled BEFORE its target ever loaded redirects it first and the game then loads OUR
+            // copy through the transform func: resident, and current. The dashboard verifies that state
+            // (Apply answered Redirected, so `RestartRequired` is false) and this verb refused it. The
+            // rule both now ask is `BundleClaims.RestartRequired` - resident AND not served through a
+            // standing claim of ours that was in force before the load.
             foreach (Morgott.ContentTool.Project.ShippedReplacement row in p.Replace)
             {
                 if (!string.IsNullOrEmpty(row.video) || string.IsNullOrEmpty(row.bundle)) continue;
-                if (BundleLive.ResidentNow(row.bundle)) return StageText.R30(p.Id);
+                if (BundleClaims.RestartRequired(p.Id, row.bundle, BundleLive.ResidentNow(row.bundle)))
+                    return StageText.R30(p.Id);
             }
 
             StringBuilder log = new StringBuilder();
