@@ -2104,6 +2104,19 @@ namespace Morgott.ContentTool.Dev
             private void Update()
             {
                 if (inputBroken) return;
+                // THE LIFECYCLE PUMP, BEFORE BOTH GATES and outside the bench's own try.
+                //
+                // Before the StillThere return at the bottom of this block, not merely before the `if (open)`
+                // drain: a run has nothing to do with the level, and abandoning it because a mission ended
+                // would strand a worker that is still writing files. Before the `open` gate for the same
+                // reason - a closed bench neither paints nor drains, and the Doctor's arrangement would
+                // abandon a lifecycle run the moment the window closed (design:323-:333).
+                //
+                // Its OWN try, like the Doctor drain's at :2133: a lifecycle bug must not set inputBroken and
+                // take the bench's mouse and hotkey down with it for the rest of the session.
+                try { LifecycleDashboard.Pump(open); }
+                catch (Exception ex)
+                { message = "ct_bench: lifecycle - " + ex.GetType().Name + ": " + ex.Message; }
                 try
                 {
                     // Let go BEFORE anything else looks at the bay: if the level went away this frame,
