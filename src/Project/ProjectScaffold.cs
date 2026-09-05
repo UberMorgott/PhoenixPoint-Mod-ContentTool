@@ -182,6 +182,24 @@ namespace Morgott.ContentTool.Project
                                                "holds no ppcontent.json, so it is not a ContentTool project " +
                                                "- pick another project name");
 
+            // R14. Content\Meshes\ is resolved BY STEM (ContentProject.Sources), so this stem under any OTHER
+            // supported mesh extension is not a second file - it is a collision that makes the bake SKIP BOTH,
+            // and the author loses the mesh already shipped as well as the one being shipped. The extension
+            // list is ContentProject's own, so a format added there can never go unguarded here.
+            string meshDir = Path.GetDirectoryName(result.MeshPath);
+            string shipping = Path.GetFileName(result.MeshPath);
+            foreach (string pattern in ContentMods.MeshPatterns)
+            {
+                string twin = stem + pattern.Substring(1);
+                if (string.Equals(twin, shipping, StringComparison.OrdinalIgnoreCase)) continue;
+                if (File.Exists(Path.Combine(meshDir, twin)))
+                    throw new InvalidDataException("Content\\Meshes\\" + twin + " is already there and a " +
+                                                   "replacement names only the stem '" + stem + "', so " +
+                                                   "shipping " + shipping + " beside it would make the bake " +
+                                                   "SKIP BOTH - delete " + twin + ", or rename the file you " +
+                                                   "are shipping");
+            }
+
             // R3, AND IT COMES FIRST. The refusal says "nothing was written", so it has to be true: read and
             // hash the source before a directory, a template or a meta exists, and a press that fails here
             // leaves an author with no folder to delete. The Doctor's verdict was about THESE bytes; a
@@ -254,13 +272,13 @@ namespace Morgott.ContentTool.Project
             // add its row never leaves a .glb behind that nothing references.
             result.RowAlreadyPresent = Reuses(file.Manifest, shippedBundle, shippedAsset, stem);
             if (!result.RowAlreadyPresent)
-            {
                 file.Manifest.AddMeshReplacement(shippedBundle, shippedAsset, stem);
-                // Save validates too (Manifest.cs:320), but Save now happens AFTER the copy - and a press
-                // that cannot add its row must not leave a .glb behind that nothing references. So R6 is
-                // asked for here, explicitly, before the first byte of content moves.
-                file.Manifest.Validate();
-            }
+            // Save validates too (Manifest.cs:320), but Save now happens AFTER the copy - and a press that
+            // cannot add its row must not leave a .glb behind that nothing references. So R6 is asked for
+            // here, explicitly, before the first byte of content moves - on BOTH arms. A row that is already
+            // there proves nothing about the manifest's OTHER entries: one element Save refuses (a bare
+            // number in "replace") used to be found only after the copy and the sidecar had landed.
+            file.Manifest.Validate();
 
             // R5. A sidecar already beside the copy, with an empty map in hand, would be applied by the bake
             // and by nothing the author ever looked at. SaveSidecar rewrites the whole "bones" object, so the

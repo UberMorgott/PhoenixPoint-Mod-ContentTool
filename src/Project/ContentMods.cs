@@ -24,6 +24,13 @@ namespace Morgott.ContentTool.Project
         /// <summary>The manifest that makes a folder a content project. Its PRESENCE is the declaration.</summary>
         internal const string Manifest = "ppcontent.json";
 
+    /// <summary>The mesh extensions Content\Meshes\ accepts, as GetFiles patterns - the list
+    /// ContentProject.Sources scans that folder with. It lives HERE, beside the manifest's own name and
+    /// UnityEngine-free, because ProjectScaffold has to refuse a same-stem file under any of the OTHERS
+    /// before it ships one, and a second spelling there would quietly stop guarding the day a format is
+    /// added. ContentProject.cs itself cannot join the offline compile list (see ObjCodecTests.csproj).</summary>
+    internal static readonly string[] MeshPatterns = { "*.obj", "*.glb" };
+
         /// <summary>
         /// Every ENABLED mod folder that carries <paramref name="marker"/> (a file or a directory,
         /// relative to the mod folder), with one line per refusal appended to <paramref name="log"/>

@@ -528,6 +528,59 @@ internal static class ProjectScaffoldTests
             checks += Check(withMap.MeshBytes != null &&
                             Same(withMap.MeshBytes, File.ReadAllBytes(withMap.MeshPath)),
                             "and Result.MeshBytes IS the copy's bytes - what the ship gate re-judges (§4.5)");
+
+            // ---- Scaffold_RefusesASameStemMeshUnderAnotherExtension. ContentProject.Sources resolves a
+            // replacement BY STEM, so body.obj and body.glb sharing one Content\Meshes\ make it SKIP BOTH
+            // (ContentProject.cs:577-584) - the press would cost the author the mesh already shipped as well
+            // as the one being shipped, and neither file says why.
+            string twinRoot = Path.Combine(mods, "Stem_Twin");
+            Directory.CreateDirectory(Path.Combine(Path.Combine(twinRoot, "Content"), "Meshes"));
+            File.WriteAllText(Path.Combine(twinRoot, "ppcontent.json"),
+                              "{\n  \"id\": \"Stem_Twin\",\n  \"bundle\": \"Stem_Twin.bundle\"\n}\n");
+            string twinMeshes = Path.Combine(Path.Combine(twinRoot, "Content"), "Meshes");
+            File.WriteAllText(Path.Combine(twinMeshes, "body.obj"), "o body\n");
+            string twinSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Stem_Twin", glb, sha, "a.bundle", "Twin", map);
+            }
+            catch (InvalidDataException refused) { twinSaid = refused.Message; }
+            checks += Check(twinSaid == "Content\\Meshes\\body.obj is already there and a replacement names " +
+                                        "only the stem 'body', so shipping body.glb beside it would make the " +
+                                        "bake SKIP BOTH - delete body.obj, or rename the file you are shipping",
+                            "a same-stem mesh under another supported extension is refused: " + twinSaid);
+            checks += Check(!File.Exists(Path.Combine(twinMeshes, "body.glb")) &&
+                            !File.Exists(AliasMap.SidecarPathOf(Path.Combine(twinMeshes, "body.glb"))) &&
+                            ManifestFile.Load(Path.Combine(twinRoot, "ppcontent.json"))
+                                        .Manifest.Replace.Count == 0,
+                            "and it left no .glb, no sidecar and no row");
+
+            // ---- Scaffold_ValidatesTheManifestOnTheReUSED row too. The reuse arm proves this ROW is already
+            // there; it proves nothing about the manifest's OTHER entries, and Save is far too late to find
+            // out - by then the .glb is copied and the sidecar overwritten.
+            string reuseRoot = Path.Combine(mods, "Reuse_Bad");
+            string reuseMeshes = Path.Combine(Path.Combine(reuseRoot, "Content"), "Meshes");
+            Directory.CreateDirectory(reuseMeshes);
+            File.WriteAllText(Path.Combine(reuseRoot, "ppcontent.json"),
+                              "{\n  \"id\": \"Reuse_Bad\",\n  \"bundle\": \"Reuse_Bad.bundle\",\n" +
+                              "  \"replace\": [ {\"bundle\":\"a.bundle\",\"asset\":\"Foo\",\"mesh\":\"body\"}, 1 ]\n}\n");
+            string reuseSidecar = AliasMap.SidecarPathOf(Path.Combine(reuseMeshes, "body.glb"));
+            File.WriteAllText(reuseSidecar, "{\"seeded\":true}");
+            byte[] sidecarWas = File.ReadAllBytes(reuseSidecar);
+            string reuseSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Reuse_Bad", glb, sha, "a.bundle", "Foo", map);
+            }
+            catch (InvalidDataException refused) { reuseSaid = refused.Message; }
+            checks += Check(reuseSaid != null &&
+                            reuseSaid.StartsWith("\"replace\" row REFUSED:", StringComparison.Ordinal) &&
+                            reuseSaid.EndsWith("got 1 - SKIPPED, this project's other rows still bake",
+                                               StringComparison.Ordinal),
+                            "a reused row does not buy the rest of the manifest a pass: " + reuseSaid);
+            checks += Check(!File.Exists(Path.Combine(reuseMeshes, "body.glb")) &&
+                            Same(File.ReadAllBytes(reuseSidecar), sidecarWas),
+                            "and the refusal came BEFORE the copy and before the sidecar was overwritten");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates";

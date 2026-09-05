@@ -320,7 +320,7 @@ namespace Morgott.ContentTool.Project
             // failures for one unreadable .glb.
             SourceImport.Each(Sources(root, "Textures", p.SourceRefusals, "*.png", "*.jpg", "*.jpeg"),
                               p.Textures, p.SourceRefusals, ImportTexture);
-            SourceImport.Each(Sources(root, "Meshes", p.SourceRefusals, "*.obj", "*.glb"),
+            SourceImport.Each(Sources(root, "Meshes", p.SourceRefusals, ContentMods.MeshPatterns),
                               p.Meshes, p.SourceRefusals, ImportMesh);
             SourceImport.Each(Sources(root, "Models", p.SourceRefusals, "*.glb"),
                               p.Models, p.SourceRefusals, ImportModel);
