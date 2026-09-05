@@ -295,6 +295,27 @@ namespace Morgott.ContentTool.Bake
                    " streamPath='" + mesh["m_StreamData"]["path"].AsString + "'";
         }
 
+        /// <summary>
+        /// The raw vertex + index BYTES as one hash - the question <see cref="Summary"/> deliberately
+        /// does not ask. Summary compares counts, index format and ROUNDED bounds, so a patch that wrote
+        /// nothing at all reads back identical to the mesh the game shipped; the buffers cannot.
+        /// A mesh that streams its vertices out of the .resS reports that path instead of a hash -
+        /// nothing this tool writes streams (<see cref="Fill"/> clears m_StreamData), so a streamed
+        /// answer can never equal a written one.
+        /// </summary>
+        internal static string Buffers(AssetTypeValueField mesh)
+        {
+            byte[] verts = mesh["m_VertexData"]["m_DataSize"].AsByteArray ?? new byte[0];
+            byte[] indices = mesh["m_IndexBuffer"]["Array"].AsByteArray ?? new byte[0];
+            AssetTypeValueField sd = mesh["m_StreamData"];
+            string path = sd == null || sd.IsDummy ? "" : (sd["path"].AsString ?? "");
+            if (verts.Length == 0 && path.Length != 0) return "streamed from '" + path + "'";
+            var all = new byte[verts.Length + indices.Length];
+            Buffer.BlockCopy(verts, 0, all, 0, verts.Length);
+            Buffer.BlockCopy(indices, 0, all, verts.Length, indices.Length);
+            return AliasMap.Sha256(all) + " vertexBytes=" + verts.Length + " indexBytes=" + indices.Length;
+        }
+
         private static void SetBytes(AssetTypeValueField field, byte[] bytes)
         {
             field.Value = new AssetTypeValue(bytes, false);

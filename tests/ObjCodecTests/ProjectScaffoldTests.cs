@@ -686,6 +686,80 @@ internal static class ProjectScaffoldTests
                             Same(File.ReadAllBytes(shared.SidecarPath), sharedWas) &&
                             ManifestFile.Load(sharedManifest).Manifest.Replace.Count == 2,
                             "and it wrote NOTHING - the sidecar's bytes, its mtime and the row list all stand");
+
+            // ---- R24 IN THE OTHER ORDER. The arm above needs an EXISTING loadable sidecar, so the reverse
+            // ordering was open: ship the stem for T1 with NO map, then the same stem for T2 WITH one, and
+            // SaveSidecar lands a map ContentProject.ImportMesh then applies to T1 as well - a rebind nobody
+            // asked for and nothing printed. The copy being there is no part of the question either: a
+            // deleted .glb or a hand-written row leaves the other row bound just the same.
+            ProjectScaffold.Result bare = ProjectScaffold.AddMeshReplacement(
+                modDir, "Alias_NoMapFirst", lone, loneSha, "a.bundle", "T1", null);
+            File.Delete(bare.MeshPath);   // no copy either: the row alone is what R24 answers to
+            string bareSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Alias_NoMapFirst", lone, loneSha,
+                                                   "a.bundle", "T2", map);
+            }
+            catch (InvalidDataException refused) { bareSaid = refused.Message; }
+            checks += Check(bareSaid == "no lone.glb.aliases.json sits beside the copy, so a map written now " +
+                                        "would bind \"T1\" in \"a.bundle\" to bindings it was shipped without, " +
+                                        "and this press ships the same file for \"T2\" in \"a.bundle\" - one " +
+                                        ".glb carries ONE alias map, so nothing was written; ship this .glb " +
+                                        "under another file name for that target",
+                            "R24 guards the sidecar a shared .glb was shipped WITHOUT: " + bareSaid);
+            checks += Check(!File.Exists(bare.SidecarPath) &&
+                            ManifestFile.Load(Path.Combine(bare.Root, "ppcontent.json"))
+                                        .Manifest.Replace.Count == 1,
+                            "and it wrote no sidecar and added no second row");
+
+            // ---- R24 ON A SIDECAR THAT NO LONGER LOADS. LoadSidecar returning null is not "no map": the
+            // other row still names this stem, and writing ours over it is the same silent rebind. The
+            // author gets LoadSidecar's OWN sentence - "a DIFFERENT bone map" names a difference nobody
+            // can see in a file that does not parse.
+            ProjectScaffold.Result staleProj = ProjectScaffold.AddMeshReplacement(
+                modDir, "Alias_Stale", lone, loneSha, "a.bundle", "T1", map);
+            File.WriteAllText(staleProj.SidecarPath, "{\"schema\": 2}\n");
+            byte[] staleWas = File.ReadAllBytes(staleProj.SidecarPath);
+            string staleSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Alias_Stale", lone, loneSha,
+                                                   "a.bundle", "T2", map);
+            }
+            catch (InvalidDataException refused) { staleSaid = refused.Message; }
+            checks += Check(staleSaid == "'" + staleProj.SidecarPath + "' declares schema 2 but this mod reads 1, " +
+                                         "so its aliases were NOT applied, and \"T1\" in \"a.bundle\" binds by " +
+                                         "it, and this press ships the same file for \"T2\" in \"a.bundle\" - " +
+                                         "one .glb carries ONE alias map, so nothing was written; ship this " +
+                                         ".glb under another file name for that target",
+                            "an UNLOADABLE sidecar is refused in its own words: " + staleSaid);
+            checks += Check(Same(File.ReadAllBytes(staleProj.SidecarPath), staleWas) &&
+                            ManifestFile.Load(Path.Combine(staleProj.Root, "ppcontent.json"))
+                                        .Manifest.Replace.Count == 1,
+                            "and the unreadable sidecar was left exactly as it was, with no second row");
+
+            // ---- R24 WITHOUT THE COPY. The refusal used to need result.MeshAlreadyPresent, so a project
+            // whose .glb had been deleted (or whose row was hand-written, or whose earlier press failed)
+            // took the copy AND a new sidecar in one press and rebound the row that was already there.
+            ProjectScaffold.Result gone = ProjectScaffold.AddMeshReplacement(
+                modDir, "Alias_NoCopy", lone, loneSha, "a.bundle", "T1", map);
+            byte[] goneWas = File.ReadAllBytes(gone.SidecarPath);
+            File.Delete(gone.MeshPath);
+            string goneSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Alias_NoCopy", lone, loneSha,
+                                                   "a.bundle", "T2", otherMap);
+            }
+            catch (InvalidDataException refused) { goneSaid = refused.Message; }
+            checks += Check(goneSaid != null &&
+                            goneSaid.StartsWith("lone.glb.aliases.json already sits beside the copy with a " +
+                                                "DIFFERENT bone map: it belongs to \"T1\" in \"a.bundle\", and " +
+                                                "this press ships the same file for \"T2\"",
+                                                StringComparison.Ordinal) &&
+                            Same(File.ReadAllBytes(gone.SidecarPath), goneWas),
+                            "a MISSING copy is no reason to skip R24: " + goneSaid);
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates, row append " +

@@ -284,21 +284,30 @@ namespace Morgott.ContentTool.Project
                 // R24. ONE .glb CARRIES ONE ALIAS MAP. Shipping the same file again for ANOTHER target with a
                 // different map used to overwrite the sidecar the first replacement is bound by: both rows name
                 // the same "mesh", ContentProject.ImportMesh reads that one sidecar for every row that names it,
-                // and the earlier target silently got the later target's bindings. Only asked when the copy was
-                // already there (so no bytes of this press moved) and another row still names this stem - a
-                // sidecar nothing references is the old overwrite, and R5 above covers the no-map case.
+                // and the earlier target silently got the later target's bindings. Asked whenever another row
+                // names this stem and the ONE sidecar is not already this press's map - the copy being there
+                // proves nothing (a deleted .glb or a hand-written row leaves the other row bound just the
+                // same), and the reverse orderings are the same overwrite: a stem shipped with NO map first
+                // would gain one nothing bound it to, and a sidecar that no longer loads (stale sha, unknown
+                // schema) would be replaced by ours unseen. R5 above still covers the no-map press.
                 string others = OtherTargets(file.Manifest, shippedBundle, shippedAsset, stem);
                 string whyNot;
-                AliasMap already = have == null ? null
-                                 : AliasMap.LoadSidecar(result.MeshPath, sha, out whyNot);
-                if (result.MeshAlreadyPresent && others != null && already != null &&
-                    !SameMap(already.Pairs, vetted.Pairs))
-                    throw new InvalidDataException(stem + ".glb.aliases.json already sits beside the copy with a " +
-                                                   "DIFFERENT bone map: it belongs to " + others + ", and this " +
-                                                   "press ships the same file for \"" + shippedAsset + "\" in \"" +
-                                                   shippedBundle + "\" - one .glb carries ONE alias map, so " +
-                                                   "nothing was written; ship this .glb under another file name " +
-                                                   "for that target");
+                AliasMap already = AliasMap.LoadSidecar(result.MeshPath, sha, out whyNot);
+                if (others != null && !(already != null && SameMap(already.Pairs, vetted.Pairs)))
+                {
+                    // The HEAD names what is actually wrong with the sidecar - an unloadable one gets
+                    // LoadSidecar's own sentence rather than a "DIFFERENT bone map" the author cannot see.
+                    string said = already != null
+                        ? stem + ".glb.aliases.json already sits beside the copy with a DIFFERENT bone map: " +
+                          "it belongs to " + others
+                        : have != null ? whyNot + ", and " + others + " binds by it"
+                        : "no " + stem + ".glb.aliases.json sits beside the copy, so a map written now would " +
+                          "bind " + others + " to bindings it was shipped without";
+                    throw new InvalidDataException(said + ", and this press ships the same file for \"" +
+                                                   shippedAsset + "\" in \"" + shippedBundle + "\" - one .glb " +
+                                                   "carries ONE alias map, so nothing was written; ship this " +
+                                                   ".glb under another file name for that target");
+                }
 
                 // BYTES, not maps: an identical rewrite is invisible in the file's content and LOUD in its
                 // mtime, which is what PatchCache.Key stamps (:43/:49) - so a second press of the same Ship

@@ -1705,6 +1705,16 @@ namespace Morgott.ContentTool.Bake
                         : "P4-ctl-shipped PASS the shipped " + bundleFile + "'s '" + mesh.Key + "' still has " +
                           "its own geometry -> " + ctl);
 
+                    // The arm that CAN tell them apart, and the one that catches a patch which silently
+                    // wrote NOTHING: equal buffers mean the copy still carries the game's own mesh. P4
+                    // above cannot see it (same Describe() prefix) and P5 is VOID unless the target is
+                    // rigged, so on an UNSKINNED mesh this is the only proof the replacement landed.
+                    string bytesCopy = BundleBaker.ReadMeshBuffers(copy, mesh.Key);
+                    failures += Check(log, "P4-bytes",
+                        bytesCopy != BundleBaker.ReadMeshBuffers(shipped, mesh.Key),
+                        "mesh '" + mesh.Key + "' in the copy carries DIFFERENT vertex/index bytes than the " +
+                        "shipped " + bundleFile + " -> " + bytesCopy);
+
                     // P5: the replacement is SKINNED to the target's own skeleton. The expected
                     // skeleton is not a constant - it is read off the SHIPPED file in this same run,
                     // so the arm asserts that the copy carries the exact bind poses, bone hashes and

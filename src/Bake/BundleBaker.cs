@@ -917,6 +917,24 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>
+        /// One Mesh's raw vertex + index bytes as a hash (<see cref="MeshFields.Buffers"/>) - the
+        /// P4-ctl-shipped oracle the SUMMARY cannot be: a patch that wrote nothing summarises exactly
+        /// like the mesh the game shipped, and on an unskinned target no other arm notices.
+        /// </summary>
+        internal static string ReadMeshBuffers(string bundlePath, string meshName)
+        {
+            return Read(bundlePath, (m, afile) =>
+            {
+                foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Mesh))
+                {
+                    AssetTypeValueField mesh = m.GetBaseField(afile, i);
+                    if (mesh["m_Name"].AsString == meshName) return MeshFields.Buffers(mesh);
+                }
+                return "no Mesh named " + meshName + " in " + bundlePath;
+            });
+        }
+
+        /// <summary>
         /// Every vertex's influences of a Mesh in a bundle FILE (<see cref="SkinFields.SkinInfluences"/>)
         /// - the P6 oracle, which needs WHICH bone each vertex went to and not just that one exists.
         /// </summary>
