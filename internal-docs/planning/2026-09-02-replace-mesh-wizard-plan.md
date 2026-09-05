@@ -2074,12 +2074,12 @@ src\Import\GlbReader.cs(6,27): error CS0234: ... "Bake" ... в простран�
 | W1 | Offline gates green | The four commands in the table above, all exit 0: build `Ошибок: 0` / `Предупреждений: 1` (CS0649 only), `ObjCodecTests` last line `DEMO BANKS: ALL PASS, 6 check(s)` with `PROJECT-SCAFFOLD PASS, 79 check(s)` present, `TargetPathTests` last line `R0: ALL PASS` (incl. the `S14-owntemp` / `S14-owntemp-not` arms at `tests\TargetPathTests\Program.cs:1213`, `:1216`, which pin `Package.IsOwnTemp`'s GUID-N `.tmp` exemption), `Package.csproj` `Ошибок: 0`. The two standalone tools are recorded above as **baseline known failures**, outside this row. |
 | W2 | Scaffold is exact | `PROJECT-SCAFFOLD PASS, 79 check(s)`. Arms: `Scaffold_CreatesProjectTemplates` `tests\ObjCodecTests\ProjectScaffoldTests.cs:69` (meta.json compared against the template spelled independently at `:649`), `Scaffold_QuotesAnAuthoredId` `:219` (the `com.test"quote` id), `Scaffold_KeepsAnAuthoredId` `:146`, `Scaffold_AppendsSecondRow` `:261` — the append into a hand-written manifest carrying a BOM, an unknown member and a nested value, `replace` span located independently before and after, prefix and suffix byte-compared, the original row one unbroken run inside the new span. |
 | W3 | No overwrite is possible | Same gate line. Arms: `Scaffold_MeshCollisionPolicy` `:397` (same SHA → `MeshAlreadyPresent`; different SHA → R4, destination bytes unchanged), `Scaffold_RefusesConflictingTarget` `:355` (R6 == `Manifest.Validate` E4, manifest bytes identical, no .glb copied), `Scaffold_RefusesAnUnrelatedFolder` `:235` (R2), `Scaffold_RefusesAnUnshippableMeta` `:162` (R13, the file not rewritten), `Scaffold_RefusesAStaleSourceBeforeWriting` `:481` (R3 creates no folder), plus `Scaffold_RefusesASameStemMeshUnderAnotherExtension` `:592` and `Scaffold_WritesNoMetaUntilTheRowLands` `:379`. |
-| W3b | A retry is a retry — OFFLINE HALF ONLY | `Scaffold_ReusesAnIdenticalRow` `:325`, in a FRESH project: the identical replacement run twice leaves EXACTLY ONE row, no R6, byte-identical manifest state after run two; `Scaffold_ValidatesTheManifestOnTheReUSED row too` `:618`. **The in-game half (the second press of Ship) is PENDING Task 8 step 8.** |
+| W3b | A retry is a retry — OFFLINE HALF ONLY | `Scaffold_ReusesAnIdenticalRow` `:325`, in a FRESH project: the identical replacement run twice leaves EXACTLY ONE row, no R6, byte-identical manifest state after run two; `Scaffold_ValidatesTheManifestOnTheReUSED row too` `:618`. **The in-game half (the second press of Ship) PASSED in game 2026-09-05** — same S1 sentence twice, `ppcontent.json` SHA-256 identical across the two presses, one row, no R6; Task 8's table. |
 | — | R8 seam, offline | `Fingerprint_APreviewIsNotAChangedRig` `:560`: all four mesh-derived fields differ → `SameAs` false AND `SameRigAs` true; a different renderer `:577` and a renamed bone `:583` are still a changed rig. This is what lets Task 8 ship with the preview live. |
-| W4 | Target derivation disk-proved | **PENDING Task 8** — `ShippedTarget` needs `UnityEngine` + `Base.Assets` + `BundleBaker` and is not test-linked; the build gate above is its only offline evidence. |
-| W5 | A failed bake installs nothing | **PENDING Task 8** (step 2.10, separate never-applied project). |
-| W6 | Honest end state, with the preview up | **PENDING Task 8** (steps 3 + 6 + 9). |
-| W7 | Owner visual check | **PENDING Task 8** (after the step-9 restart). |
+| W4 | Target derivation disk-proved | **PASS in game 2026-09-05** — `ShippedTarget` needs `UnityEngine` + `Base.Assets` + `BundleBaker` and is not test-linked, so the build gate is its only OFFLINE evidence; the derivation block, the resolved line and the matching bake row are in Task 8's table. |
+| W5 | A failed bake installs nothing | **PASS in game 2026-09-05** (step 2.10, `Replace_BadRow`, never applied, never enabled) — Task 8's table. |
+| W6 | Honest end state, with the preview up | **PASS in game 2026-09-05** (steps 3 + 6 + 9) — Task 8's table. |
+| W7 | Owner visual check | **PASS in game 2026-09-05** (after the step-9 restart) — Task 8's table. |
 
 ---
 
@@ -2116,7 +2116,7 @@ this plan deliberately spells none, because a stale command line in a plan is wo
 `D:\PP-Instance2` is the automation install — never the user's own game at
 `D:\Steam\steamapps\common\Phoenix Point`.
 
-- [ ] **Step 1: Build, deploy, activate.** `dotnet build -c Release`, then install the built
+- [x] **Step 1: Build, deploy, activate.** `dotnet build -c Release`, then install the built
   `bin\Release\ContentTool\ContentTool.dll` + `meta.json` into `D:\PP-Instance2`'s mods folder with no game
   running. Confirm `com.morgott.ContentTool` is in that profile's `MOD_ACTIVATED` array
   (`…LocalLow\Snapshot Games Inc\Phoenix Point\Steam\76561197996210592\Options.jopt` — **Instance2's OWN profile**;
@@ -2127,7 +2127,7 @@ this plan deliberately spells none, because a stale command line in a plan is wo
   dedicated automation profile; **rejected** — `…592` IS the dedicated automation profile, and the snapshot is
   the whole ceremony.) A deploy that silently leaves the old DLL makes every result below a ghost.
 
-- [ ] **Step 2: Drive it.** Launch that install through PPCLI and wait until `connect state` actually answers
+- [x] **Step 2: Drive it.** Launch that install through PPCLI and wait until `connect state` actually answers
   before sending anything. Then, in order — the design §8 sequence:
   1. `connect state` answers; start a campaign; open the bench (`ct_bench`).
   2. Through `call`, `FitBench.ShowPrototype`, wait until `PrototypeBusy` is false, take one `SlotTargets()` entry
@@ -2166,20 +2166,70 @@ this plan deliberately spells none, because a stale command line in a plan is wo
      is FALSE, and no `ct-cache.key` exists under its patched directory. Remove that project afterwards and record
      it under "Left behind / removed".
 
-- [ ] **Step 3: Record the evidence, then commit.** Fill this table in, in this file, with what the run actually
+- [x] **Step 3: Record the evidence, then commit.** Fill this table in, in this file, with what the run actually
   produced — a log excerpt, a screenshot path, the on-disk paths. An empty cell means the slice is not done.
+
+  **THE RUN, 2026-09-05.** ContentTool at HEAD `b0efae4`, `dotnet build -c Release` → `Ошибок: 0`, installed by the
+  repo's own `deploy.ps1` (default target `D:\PP-Instance2`, no `-PPRoot` needed) → `D:\PP-Instance2\Mods\ContentTool\ContentTool.dll`
+  (1 905 152 B, 05.09.2026 5:08). PPBridge redeployed in the same window, `build=97b11b25` in every reply, so no
+  result below is stale. Instance2 launched BY HAND —
+  `Start-Process 'D:\PP-Instance2\PhoenixPointWin64.exe' -ArgumentList '-mods','-logFile','D:\PP-Instance2\ct-task8.log'`
+  — never `ppcli run`; `-logFile` keeps this run out of the shared LocalLow `Player.log` the user's own install writes.
+  Gate: `connect state -PPRoot 'D:\PP-Instance2' -ProfileId 76561197996210592` answered
+  `{"phase":"menu","scene":"BaseScene"}` before anything else was sent. Geoscape from `plans\start-campaign.json`
+  (37 steps, 14 948 ms), then `ct_bench open`, `FitBench.doctorTab = true`, `FitBench.Prototypes()` →
+  `CHR_Human_Rig_Ready`, its ONE variant `Human`, `ShowPrototype` → 9 slot targets. Logs kept at
+  `D:\PP-Instance2\ct-task8.log` (run 1, before the restart) and `D:\PP-Instance2\ct-task8-run2.log` (run 2, after it).
+
+  **The file that was shipped, and why it is not one of the untracked drops as they came.** SHIP is gated on
+  `Ready.Outcome == ByName`, and `ReplacementPreflight.Judge` gives BY NAME only when `SkinCompatibility.Analyze`
+  returns ZERO issues — a single `MissingBone` is enough for NEAREST-BONE. Measured against the live
+  `Human_LeftLeg_SlotDef` renderer (11 bones): `CHR_PX_HVY_LL_M_V01_0fa9bde0c679e665.glb` has 10 of the 11 and is
+  short exactly `#R.UpLeg_Roll_2_Addon`; the torso pair is 5 short; `ct_extract mesh an_assault_assets_all.bundle
+  CHR_AN_Assault_M_Torso` writes a .glb whose joints are named `bone_2424243207`… (the bundle stores name HASHES),
+  so an extract cannot be fed back by name at all. So the run's source is `HeavyLeftLeg.glb`: the heavy left leg
+  from `APOCD GLBs for content tool without apply tranforms\` with ONE unweighted joint appended
+  (`#R.UpLeg_Roll_2_Addon => PX_Heavy_LeftLeg_BodyPartDef`, parented to `#R.UpLeg_Addon`, inverse bind matrix copied
+  from that parent, every vertex, weight and material untouched). The shipped copy of it is
+  `D:\PP-Instance2\Mods\Replace_Leftleg\Content\Meshes\HeavyLeftLeg.glb` (4 269 908 B). Nothing in the repo was
+  touched to make it, and the untracked drops were read only.
+
+  **A limit this run measured, worth carrying forward.** `PrototypeHarvest.Read` mints one variant per
+  `AddonsManagerDef` and picks the ordinal-lowest `TacCharacterDef` as its representative, so the human rig has
+  exactly ONE variant whose representative is `AN_Assault1_CharacterTemplateDef`. The bay can therefore only ever
+  stand an AN Assault soldier up, and the wizard can only derive `an_assault_assets_all.bundle` pairs on that rig —
+  the `px_heavy_assets_all.bundle` pairs the hand-written `Wizard.ApocDesignation\ppcontent.json` names are out of
+  the wizard's reach today. Not a defect of this slice; a scope note for whatever adds armour-set choice.
 
   | id | Check | Evidence |
   |---|---|---|
-  | W4 | Target derivation disk-proved: the stored pair equals the row the bake matched, and `WhyNot` answered `null` for **exactly one** bundle — evidence is the `Player.log` derivation block `[ContentTool] ShippedTarget: '<asset>' candidates (n): …` with one `WhyNot` outcome line per deduplicated candidate and a single `HOLDS IT (WhyNot == null)`, closed by `resolved '<asset>' -> <bundle> (1 of <present> present candidate(s) …)` | |
-  | W5 | A failed bake installs nothing, proved in a SEPARATE never-applied project before the step-9 restart: `ApplyDisposition.BakeFailed` → the exact R11 string in `shipResult`, `Holds(<its id>)` false, no `ct-cache.key` under its patched directory | |
-  | W6 | Honest end state, preview and all: shipped with `HasPreview` true and NOT refused as R8; S1 with no live swap this session; after restart + enable, `Holds` true and live mesh counts equal the GLB's | |
-  | W3b | The second press of an unchanged Ship ends green with ONE row, not R6 (step 8) | |
-  | W7 | Owner visual check: the replaced mesh is on the prototype after the restart in step 9 | |
+  | W4 | Target derivation disk-proved: the stored pair equals the row the bake matched, and `WhyNot` answered `null` for **exactly one** bundle — evidence is the `Player.log` derivation block `[ContentTool] ShippedTarget: '<asset>' candidates (n): …` with one `WhyNot` outcome line per deduplicated candidate and a single `HOLDS IT (WhyNot == null)`, closed by `resolved '<asset>' -> <bundle> (1 of <present> present candidate(s) …)` | **PASS.** Slot `Human_LeftLeg_SlotDef` read through `FitBench.SlotTargets()`: `ShippedBundle = an_assault_assets_all.bundle`, `ShippedAsset = CHR_AN_Assault_M_Leftleg`, `TargetRefusal = null`. `ct-task8.log`, in this order: `[ContentTool] ShippedTarget: 'CHR_AN_Assault_M_Leftleg' candidates (7): an_assault_assets_all.bundle, defaultlocalgroup_unitybuiltinshaders.bundle, _common_assets_all.bundle, _shaders_assets_all.bundle, nj_equipment_assets_all.bundle, kaos_content_assets_all.bundle, px_equipment_assets_all.bundle` → `ShippedTarget:   an_assault_assets_all.bundle: HOLDS IT (WhyNot == null)` → six `no Mesh named 'CHR_AN_Assault_M_Leftleg' in unity=2019.4.31f1 assets=… cldbTypes=320` lines, one per remaining candidate → `ShippedTarget: resolved 'CHR_AN_Assault_M_Leftleg' -> an_assault_assets_all.bundle (1 of 7 present candidate(s) answered WhyNot == null)`. The bake then matched the same pair: `patch an_assault_assets_all.bundle: mesh 'CHR_AN_Assault_M_Leftleg' <- heavyleftleg verts=12599 indices=34665 …`, and `ppcontent.json`'s row is `{"bundle":"an_assault_assets_all.bundle","asset":"CHR_AN_Assault_M_Leftleg","mesh":"HeavyLeftLeg"}`. (The same block for `CHR_AN_Assault_M_Torso` is in the log too, from the first slot tried — 7 candidates, one `HOLDS IT`.) |
+  | W5 | A failed bake installs nothing, proved in a SEPARATE never-applied project before the step-9 restart: `ApplyDisposition.BakeFailed` → the exact R11 string in `shipResult`, `Holds(<its id>)` false, no `ct-cache.key` under its patched directory | **PASS**, in `Replace_BadRow`, before the restart, never enabled. Shipped once green, then its patched directory `…\ContentTool\Patched\d29f58a2\Replace_BadRow\` was deleted (so the failing bake is that project's FIRST — otherwise the earlier success's own `ct-cache.key` makes the third assertion unfalsifiable) and a second, unbakeable row was hand-added to its `ppcontent.json`: `{"bundle":"an_assault_assets_all.bundle","asset":"CHR_AN_Assault_M_Rightleg","mesh":"NoSuchMesh"}`. Press Ship → `shipResult` byte for byte `NOT APPLIED: patching the shipped bundle(s) reported 1 failure(s), named in the P0/REFUSED line(s) above; nothing was installed and no copy was marked current. Fix the lines above and press Ship again.` The named line in `ct-task8.log` is `P4 REFUSED 'NoSuchMesh' is not a .obj or .glb under Content\Meshes\`. `BundleLive.Holds("Replace_BadRow")` → `false`. Its patched directory held `an_assault_assets_all.bundle` and **no `ct-cache.key`** (`Test-Path …\Replace_BadRow\ct-cache.key` → `False`). Project and patched directory both removed afterwards. |
+  | W6 | Honest end state, preview and all: shipped with `HasPreview` true and NOT refused as R8; S1 with no live swap this session; after restart + enable, `Holds` true and live mesh counts equal the GLB's | **PASS.** Verdict before the press: `verdict: BY NAME - your weights will be used`, zero rows, `bones: 11 live, 11 bind pose(s)`. `Enqueue("preview")` → `HasPreview` `true`, `Message` = `preview: skinned BY NAME onto the target's own 11 bones, carrying the file's own weights (bind poses from the shipped mesh, 11 joints matched, order remapped; vertex 0 is shared, weight0=0.609)`. Ship pressed WITH that preview live and NOT refused as R8; `shipResult` = `applied - restart the game and enable 'Replace_Leftleg' in the mod manager. Phoenix Point already loaded an_assault_assets_all.bundle. This session keeps showing your Doctor preview.` (S1 — `ApplyProject` answered `Resident`). Session log carries the honest refusal underneath: `REFUSED: restart required: an_assault_assets_all.bundle is already loaded (as '35151a9626b11fde9909637b2e38b7a1.bundle'). …` plus `installing 1 patched copy(ies) as 'Replace_Leftleg'` and `ct_project: ALL PASS - this project has no bundle of its own; the patched copy(ies) above are the whole output`. `connect console ct_project Replace_Leftleg` → `ct_project: ALL PASS …` with `P4/P4-ctl-shipped/P5/P6 PASS`. After the restart with `Replace_Leftleg` in `MOD_ACTIVATED`: `ct-task8-run2.log` → `Discovered mod Replace_Leftleg`, `redirected an_assault_assets_all.bundle -> …\Patched\d29f58a2\Replace_Leftleg\an_assault_assets_all.bundle for 'Replace_Leftleg', crc 2109966580 -> 0 (in memory)`, `1/1 bundle(s) redirected LIVE`; `BundleLive.Holds("Replace_Leftleg")` → `true` (it was `false` in the shipping session, as S1 claims). Live slot renderer, fresh Doctor with `HasPreview` `false`: `sharedMesh.name = CHR_AN_Assault_M_Leftleg`, `vertexCount = 12599`, `GetIndexCount(0) = 34665`, `bindposes.Length = 11` — equal to the bake's `P4 … verts=12599 indices=34665` and NOT the shipped geometry the control line records (`P4-ctl-shipped … verts=1886 indices=9318`). |
+  | W3b | The second press of an unchanged Ship ends green with ONE row, not R6 (step 8) | **PASS.** Nothing changed between the presses (`projectName` still read back `Replace_Leftleg`). Second `shipResult` is the SAME S1 sentence, no R6. `D:\PP-Instance2\Mods\Replace_Leftleg\ppcontent.json` SHA-256 `AEE08D4EF86D0C896ED8FA3A333A8BA81BE97AA80BA99C99BB7195946A651BB7` before and after — identical — and still holds exactly one `replace` row. |
+  | W7 | Owner visual check: the replaced mesh is on the prototype after the restart in step 9 | **PASS**, two screenshots, 1280x720, taken with `connect screenshot`. Before: `W7-preview-live.png` — the Doctor panel reading `BY NAME - your weights will be used` and `12599 verts, 11555 tris, 11 joints, 4 influence(s)/vertex`, preview live, both of the soldier's legs still the assault set. After the restart and enable: `W7-after-restart.png` — no preview loaded (`source -`, `pick a .glb to see what the bake would do with it`), and the standing AN Assault soldier now wears the brown heavy left leg against his unchanged assault right leg. Both are session scratch files; the durable evidence is the count triple in W6 and the redirect line in `ct-task8-run2.log`. |
 
   **Left behind / removed.** Record what the run created under `D:\PP-Instance2\Mods\` and whether it was deleted;
   a scratch project whose `id` collides with a shipped demo's must be removed, or two projects share one patched
   copy folder.
+
+  - **LEFT IN PLACE** — `D:\PP-Instance2\Mods\Replace_Leftleg\` (`meta.json`, `ppcontent.json`, `ppcontent.json.bak`,
+    `Content\Meshes\HeavyLeftLeg.glb`) and its patched copy `…\ContentTool\Patched\d29f58a2\Replace_Leftleg\`. It is
+    the run's evidence. Its id does not collide with any shipped demo. No alias sidecar was written: the map was
+    empty, because the verdict was BY NAME with nothing to alias.
+  - **LEFT IN PLACE** — `Replace_Leftleg` added to `MOD_ACTIVATED` in
+    `…\Steam\76561197996210592\Options.jopt` (Instance2's own profile, never `…591`), the duplicated count in
+    `ArrayDimensions.CollectionValues` moved 18 → 19 to match. Byte snapshots of that file before the run and
+    before the edit were kept beside the run's notes. W6's "enabled after a restart" arm depends on it, so it stays
+    on; deleting the folder and dropping that one string is the whole undo.
+  - **REMOVED** — `D:\PP-Instance2\Mods\Replace_BadRow\` and `…\ContentTool\Patched\d29f58a2\Replace_BadRow\`, both
+    deleted after W5 was read.
+  - **LEFT IN PLACE, harmless** — `D:\PP-Instance2\ct-task8.log` / `ct-task8-run2.log` (this run's own logs, kept
+    out of the shared `Player.log` on purpose) and
+    `…\ContentTool\Extracted\an_assault_assets_all\CHR_AN_Assault_M_Torso.glb`, the `ct_extract mesh` output whose
+    hashed joint names are quoted above.
+  - **PPCLI:** nothing to report. Every verb behaved as `PLAYBOOK.md` describes, so no entry was added to
+    `E:\DEV\PhoenixPoint\PPCLI\ISSUES.md`.
 
   - If PPCLI itself misbehaves during this run: append the entry to `E:\DEV\PhoenixPoint\PPCLI\ISSUES.md`
     (attempted → happened → expected → evidence → severity) and work around it. Do NOT edit PPCLI source, and never
