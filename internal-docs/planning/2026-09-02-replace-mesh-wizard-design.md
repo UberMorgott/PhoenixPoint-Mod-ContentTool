@@ -343,6 +343,7 @@ name array — everything except the four mesh-derived fields (`MeshInstanceId`,
 | R21 | `Resolve` step 4, all opens failed | `TARGET REFUSED: every bundle this addon loads refused to open (<list>) - <last error>` |
 | R22 | `Resolve` (catch-all) | `TARGET REFUSED: the addon's dependency graph could not be walked (<Type>: <message>) - see Player.log for the stack` |
 | R23 | ship gate, `Refused` | `baked, but NOT APPLIED: <bundle> was neither redirected nor already loaded - the log above names the refusal; the project folder is complete and can be enabled after a restart` |
+| R24 | `AddMeshReplacement`, copy already there + another target names this stem | `<stem>.glb.aliases.json already sits beside the copy with a DIFFERENT bone map: it belongs to "<asset>" in "<bundle>", and this press ships the same file for "<asset>" in "<bundle>" - one .glb carries ONE alias map, so nothing was written; ship this .glb under another file name for that target` |
 | S1 | ship gate, `Resident` (normal) | `baked OK - restart the game and enable '<name>' in the mod manager. Phoenix Point already loaded <bundle>, so this session keeps showing your Doctor preview.` |
 | S2 | ship gate, `Redirected` | `baked and redirected LIVE - <bundle> now loads from the patched copy on the next load` |
 

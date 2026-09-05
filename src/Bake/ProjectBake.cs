@@ -1690,10 +1690,20 @@ namespace Morgott.ContentTool.Bake
                     string got = BundleBaker.ReadMeshSummary(copy, mesh.Key);
                     failures += Check(log, "P4", got.StartsWith(want_, StringComparison.Ordinal),
                         "mesh '" + mesh.Key + "' in the copy IS " + mesh.Value.Name + " -> " + got);
-                    failures += Check(log, "P4-ctl-shipped",
-                        !BundleBaker.ReadMeshSummary(shipped, mesh.Key).StartsWith(want_, StringComparison.Ordinal),
-                        "the shipped " + bundleFile + "'s '" + mesh.Key + "' still has its own geometry -> " +
-                        BundleBaker.ReadMeshSummary(shipped, mesh.Key));
+                    // DIAGNOSTIC, NEVER COUNTED. Describe() compares vertex/index counts, index format and
+                    // ROUNDED BOUNDS - not one byte of the buffers - so a replacement that only moves UVs,
+                    // normals or weights summarises exactly like the shipped mesh, and this control then read
+                    // as "we patched the player's game" and BLOCKED a correctly written mesh: patchFailed != 0
+                    // sends route vii straight to BakeFailed (Route7.cs:342). P4 above is the arm that says the
+                    // copy carries the replacement, and the shipped file's own bytes are never opened for
+                    // writing at all - so a summary match here is worth PRINTING and worth nothing else.
+                    string ctl = BundleBaker.ReadMeshSummary(shipped, mesh.Key);
+                    log.AppendLine(ctl.StartsWith(want_, StringComparison.Ordinal)
+                        ? "P4-ctl-shipped WARN the shipped " + bundleFile + "'s '" + mesh.Key + "' SUMMARISES " +
+                          "the same as the replacement (counts, index format and rounded bounds only, not the " +
+                          "buffers), so this control cannot tell them apart -> " + ctl
+                        : "P4-ctl-shipped PASS the shipped " + bundleFile + "'s '" + mesh.Key + "' still has " +
+                          "its own geometry -> " + ctl);
 
                     // P5: the replacement is SKINNED to the target's own skeleton. The expected
                     // skeleton is not a constant - it is read off the SHIPPED file in this same run,

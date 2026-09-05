@@ -277,7 +277,35 @@ namespace Morgott.ContentTool.Project
             // Keyed on the COPY and on the COPY's sha, because that is the file the bake hashes
             // (AliasMap.LoadSidecar:196) - the source the author picked is gone from the story by now.
             if (vetted != null)
-                AliasMap.SaveSidecar(result.MeshPath, sha, bytes.LongLength, vetted.Pairs);
+            {
+                string want = AliasMap.SidecarText(sha, bytes.LongLength, vetted.Pairs);
+                string have = File.Exists(result.SidecarPath) ? File.ReadAllText(result.SidecarPath) : null;
+
+                // R24. ONE .glb CARRIES ONE ALIAS MAP. Shipping the same file again for ANOTHER target with a
+                // different map used to overwrite the sidecar the first replacement is bound by: both rows name
+                // the same "mesh", ContentProject.ImportMesh reads that one sidecar for every row that names it,
+                // and the earlier target silently got the later target's bindings. Only asked when the copy was
+                // already there (so no bytes of this press moved) and another row still names this stem - a
+                // sidecar nothing references is the old overwrite, and R5 above covers the no-map case.
+                string others = OtherTargets(file.Manifest, shippedBundle, shippedAsset, stem);
+                string whyNot;
+                AliasMap already = have == null ? null
+                                 : AliasMap.LoadSidecar(result.MeshPath, sha, out whyNot);
+                if (result.MeshAlreadyPresent && others != null && already != null &&
+                    !SameMap(already.Pairs, vetted.Pairs))
+                    throw new InvalidDataException(stem + ".glb.aliases.json already sits beside the copy with a " +
+                                                   "DIFFERENT bone map: it belongs to " + others + ", and this " +
+                                                   "press ships the same file for \"" + shippedAsset + "\" in \"" +
+                                                   shippedBundle + "\" - one .glb carries ONE alias map, so " +
+                                                   "nothing was written; ship this .glb under another file name " +
+                                                   "for that target");
+
+                // BYTES, not maps: an identical rewrite is invisible in the file's content and LOUD in its
+                // mtime, which is what PatchCache.Key stamps (:43/:49) - so a second press of the same Ship
+                // used to invalidate the cache and re-bake the whole project synchronously.
+                if (have != want)
+                    AliasMap.SaveSidecar(result.MeshPath, sha, bytes.LongLength, vetted.Pairs);
+            }
 
             // THE SPLICE LAST, deliberately: a manifest row pointing at a mesh file that is not there yet is
             // the one half-written state a retry cannot fix by pressing again (design §7, stages 6-8). The
@@ -438,6 +466,34 @@ namespace Morgott.ContentTool.Project
         /// thing that will READ it folds: the bundle case-blind (ProjectBake.cs:1534, Manifest.Validate:203),
         /// the asset ORDINAL (shipped names are folded nowhere), the mesh stem case-blind because
         /// ProjectBake.FindMesh:2152 resolves it that way and two spellings are one file on Windows.</summary>
+        /// <summary>The targets OTHER than this press's that already replace with this same stem, spelled the
+        /// way the refusal prints them, or null when there are none. Folded exactly as <see cref="Reuses"/>
+        /// folds, so the row this press just added (or reused) can never come back as "another target".</summary>
+        private static string OtherTargets(Manifest manifest, string bundle, string asset, string stem)
+        {
+            var seen = new List<string>();
+            foreach (ReplaceRow row in manifest.Replace)
+                if (row.Kind == "mesh" &&
+                    string.Equals(row.Mesh, stem, StringComparison.OrdinalIgnoreCase) &&
+                    !(string.Equals(row.Bundle, bundle, StringComparison.OrdinalIgnoreCase) &&
+                      string.Equals(row.Asset, asset, StringComparison.Ordinal)))
+                    seen.Add("\"" + row.Asset + "\" in \"" + row.Bundle + "\"");
+            return seen.Count == 0 ? null : string.Join(", ", seen.ToArray());
+        }
+
+        /// <summary>Same bone map? Compared as a MAP and not as text: the sidecar on disk may have been written
+        /// with its keys in another order, and refusing THAT as "a different map" would send an author off to
+        /// rename a file over their own formatting.</summary>
+        private static bool SameMap(IDictionary<string, string> a, IDictionary<string, string> b)
+        {
+            if (a.Count != b.Count) return false;
+            string mine;
+            foreach (KeyValuePair<string, string> e in a)
+                if (!b.TryGetValue(e.Key, out mine) || !string.Equals(mine, e.Value, StringComparison.Ordinal))
+                    return false;
+            return true;
+        }
+
         private static bool Reuses(Manifest manifest, string bundle, string asset, string stem)
         {
             foreach (ReplaceRow row in manifest.Replace)

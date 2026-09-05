@@ -233,7 +233,15 @@ namespace Morgott.ContentTool.Import
         /// </summary>
         internal static void SaveSidecar(string glbPath, string sha256, long bytes, IDictionary<string, string> map)
         {
-            string path = SidecarPathOf(glbPath);
+            AtomicFile.WriteText(SidecarPathOf(glbPath), SidecarText(sha256, bytes, map), new UTF8Encoding(false));
+        }
+
+        /// <summary>Exactly what <see cref="SaveSidecar"/> would put on disk, WITHOUT writing it - so a caller
+        /// can tell "the sidecar already says this" from "it says something else" by the bytes rather than by
+        /// a parse. Repeating a write of identical bytes is not free: the .glb's sidecar is an authored input
+        /// and PatchCache.Key stamps it by mtime, so a no-op rewrite invalidates the cache and re-bakes.</summary>
+        internal static string SidecarText(string sha256, long bytes, IDictionary<string, string> map)
+        {
             var sb = new StringBuilder();
             sb.Append("{\n  \"schema\": ").Append(Schema.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\n  \"source\": { \"sha256\": \"").Append(sha256).Append("\", \"bytes\": ")
@@ -247,8 +255,7 @@ namespace Morgott.ContentTool.Import
                 first = false;
             }
             sb.Append(first ? "}" : "\n  }").Append("\n}\n");
-
-            AtomicFile.WriteText(path, sb.ToString(), new UTF8Encoding(false));
+            return sb.ToString();
         }
 
         private static string Escape(string s)

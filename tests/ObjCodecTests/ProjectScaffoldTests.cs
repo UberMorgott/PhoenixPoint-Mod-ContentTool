@@ -641,6 +641,51 @@ internal static class ProjectScaffoldTests
             checks += Check(!File.Exists(Path.Combine(reuseMeshes, "body.glb")) &&
                             Same(File.ReadAllBytes(reuseSidecar), sidecarWas),
                             "and the refusal came BEFORE the copy and before the sidecar was overwritten");
+
+            // ---- Scaffold_OneGlbCarriesOneAliasMap (R24) and Scaffold_SkipsAnIdenticalSidecarRewrite.
+            // ContentProject.ImportMesh reads ONE sidecar per "mesh" file, so a second target shipping the SAME
+            // .glb with a different map silently rebound the first target; and an identical rewrite is invisible
+            // in the bytes and loud in the mtime PatchCache.Key stamps, which re-bakes the whole project.
+            ProjectScaffold.Result shared = ProjectScaffold.AddMeshReplacement(
+                modDir, "Alias_Share", lone, loneSha, "a.bundle", "T1", map);
+            string sharedManifest = Path.Combine(shared.Root, "ppcontent.json");
+            byte[] sharedWas = File.ReadAllBytes(shared.SidecarPath);
+            // STAMPED rather than sampled: two presses inside one filesystem tick would carry the same mtime
+            // on their own, and the arm below would pass over a sidecar that WAS rewritten.
+            var stamp = new DateTime(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(shared.SidecarPath, stamp);
+
+            ProjectScaffold.AddMeshReplacement(modDir, "Alias_Share", lone, loneSha, "a.bundle", "T1", map);
+            checks += Check(File.GetLastWriteTimeUtc(shared.SidecarPath) == stamp,
+                            "a second identical press does not touch the sidecar at all");
+
+            ProjectScaffold.AddMeshReplacement(modDir, "Alias_Share", lone, loneSha, "a.bundle", "T2", map);
+            checks += Check(File.GetLastWriteTimeUtc(shared.SidecarPath) == stamp &&
+                            Same(File.ReadAllBytes(shared.SidecarPath), sharedWas) &&
+                            ManifestFile.Load(sharedManifest).Manifest.Replace.Count == 2,
+                            "the SAME map for ANOTHER target is accepted, and the two rows share ONE sidecar");
+
+            var otherMap = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                { "Bip01_Head", "skull" }, { "Bip01_Neck", "neck" }
+            };
+            string sharedSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Alias_Share", lone, loneSha,
+                                                   "a.bundle", "T3", otherMap);
+            }
+            catch (InvalidDataException refused) { sharedSaid = refused.Message; }
+            checks += Check(sharedSaid == "lone.glb.aliases.json already sits beside the copy with a DIFFERENT " +
+                                          "bone map: it belongs to \"T1\" in \"a.bundle\", \"T2\" in " +
+                                          "\"a.bundle\", and this press ships the same file for \"T3\" in " +
+                                          "\"a.bundle\" - one .glb carries ONE alias map, so nothing was " +
+                                          "written; ship this .glb under another file name for that target",
+                            "R24 verbatim: " + sharedSaid);
+            checks += Check(File.GetLastWriteTimeUtc(shared.SidecarPath) == stamp &&
+                            Same(File.ReadAllBytes(shared.SidecarPath), sharedWas) &&
+                            ManifestFile.Load(sharedManifest).Manifest.Replace.Count == 2,
+                            "and it wrote NOTHING - the sidecar's bytes, its mtime and the row list all stand");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates, row append " +
