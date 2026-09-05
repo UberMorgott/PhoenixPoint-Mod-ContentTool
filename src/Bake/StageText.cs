@@ -14,7 +14,10 @@ namespace Morgott.ContentTool.Bake
     /// and :178), which cost two Compile lines in tools\Package and tests\TargetPathTests and removed the
     /// last pair of strings that existed twice. Package appends its own LEFT BEHIND tail to S7.
     ///
-    /// No string here is ever PARSED to classify an outcome. The outcome comes from the carrier.</summary>
+    /// ONE thing here IS parsed: the `ct_project: ALL PASS` PREFIX of S4, BakeNoOwnBundle and
+    /// BakeNothingPatched, which BundleResidency.cs:75/:99 classifies a bake by. That prefix is pinned by an
+    /// offline arm (LifecycleTests). Nothing else is parsed - every other outcome comes from the
+    /// carrier.</summary>
     internal static class StageText
     {
         /// <summary>An em dash: the idle row, a stage nobody has run yet.</summary>

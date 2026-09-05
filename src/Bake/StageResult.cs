@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 
 namespace Morgott.ContentTool.Bake
@@ -50,6 +51,30 @@ namespace Morgott.ContentTool.Bake
         {
             return new GateEntry(gate, target, line, GateOutcome.Void);
         }
+
+        /// <summary>P7's self-check: the failures the clip arms RETURNED and the failures their own lines
+        /// classify as are the same fact, and a mismatch means the slicing has stopped matching the producer
+        /// (ReadBack.cs:181).
+        ///
+        /// NEVER A THROW. That read-back runs inside ProjectBake.Patch on the player's checkbox path
+        /// (ProjectBake.cs:1657 &lt;- :112 &lt;- Route7.cs:340 &lt;- ModRoster.cs:283) and nothing catches an
+        /// exception before ModRoster: the whole bake log was lost, no PatchCache.Write, no disposition,
+        /// `Failed` never armed, and the same throw came back on every toggle. A disagreement is a counted
+        /// FAIL like any other gate and the run keeps going.
+        ///
+        /// It lives HERE, not beside its caller, because ReadBack carries UnityEngine types and cannot be
+        /// linked offline - this file can, so the arm is proven without a game session. The " FAIL " wording
+        /// is ProjectBake.Check's and is spelled out once more for that reason.</summary>
+        internal static void SelfCheck(StringBuilder log, List<GateEntry> entries, string clip,
+                                       int counted, int sliced)
+        {
+            if (sliced == counted) return;
+            string line = "P7 FAIL the clip read-back disagrees with itself: clip '" + clip +
+                          "' - its arms returned " + counted + " failure(s) and the lines they wrote " +
+                          "classify as " + sliced;
+            log.AppendLine(line);
+            entries.Add(Fail("P7", clip, line));
+        }
     }
 
     /// <summary>What a read-back measured, structured. <c>Failed &gt; 0</c> is a FAIL row; <c>Failed == 0</c>
@@ -98,9 +123,10 @@ namespace Morgott.ContentTool.Bake
         /// question about every declared texture of a bundle AT ONCE and are recorded under the bundle file
         /// (ReadBack.cs:51, :55, :57), so no P1 entry has ever carried a texture's own name and matching on
         /// one made this predicate answer "unproven" for every texture row ever measured. Mesh and material
-        /// rows keep their own key - P3/P4 are recorded per asset. <paramref name="bundle"/> left null is
-        /// therefore an unproven texture row, never an implied pass.</summary>
-        internal bool MandatoryVoid(string target, RowKind kind, string bundle = null)
+        /// rows keep their own key - P3/P4 are recorded per asset. <paramref name="bundle"/> has NO DEFAULT: a
+        /// texture caller that forgot it answered "unproven" silently, so every caller names it and a mesh or
+        /// material row says so by passing null.</summary>
+        internal bool MandatoryVoid(string target, RowKind kind, string bundle)
         {
             string[] gates = kind == RowKind.Mesh ? MeshGates
                            : kind == RowKind.Texture ? TextureGates

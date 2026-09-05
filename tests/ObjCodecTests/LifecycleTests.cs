@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using Morgott.ContentTool.Bake;
 using Morgott.ContentTool.IO;
 
@@ -33,7 +35,7 @@ internal static class LifecycleTests
         ReadBackResult allVoid = ReadBackResult.Of(null,
             GateEntry.Void("P4", "mesh_a", "P4 VOID mesh 'mesh_a' was not read back"),
             GateEntry.Void("P4-bytes", "mesh_a", "P4-bytes VOID mesh 'mesh_a' has no readable buffers"));
-        checks += Check(allVoid.Failed == 0 && allVoid.MandatoryVoid("mesh_a", RowKind.Mesh),
+        checks += Check(allVoid.Failed == 0 && allVoid.MandatoryVoid("mesh_a", RowKind.Mesh, null),
                         "zero failures with a mandatory VOID is VOID, never S6");
         checks += Check(allVoid.Void == 2 && allVoid.Passed == 0 && allVoid.Entries.Length == 2,
                         "the counts are structured, not parsed out of the log");
@@ -45,19 +47,19 @@ internal static class LifecycleTests
             GateEntry.Pass("P4-bytes", "mesh_a", "P4-bytes 12 vertices"),
             GateEntry.Void("P5", "mesh_a", "P5 VOID no bind poses"),
             GateEntry.Void("P6", "mesh_a", "P6 VOID same bone order"));
-        checks += Check(!meshOk.MandatoryVoid("mesh_a", RowKind.Mesh),
+        checks += Check(!meshOk.MandatoryVoid("mesh_a", RowKind.Mesh, null),
                         "P5/P6 VOID on a proven mesh row is allowed - only P4 and P4-bytes are mandatory");
         checks += Check(meshOk.Passed == 2 && meshOk.Void == 2 && meshOk.Failed == 0,
                         "pass/void/fail are counted apart");
         checks += Check(ReadBackResult.Of(null,
                             GateEntry.Pass("P4", "mesh_a", "x"),
-                            GateEntry.Void("P4-bytes", "mesh_a", "y")).MandatoryVoid("mesh_a", RowKind.Mesh),
+                            GateEntry.Void("P4-bytes", "mesh_a", "y")).MandatoryVoid("mesh_a", RowKind.Mesh, null),
                         "one mandatory gate VOID is enough - P4-bytes is not optional");
         // A gate that never ran is not a proof either: absence and VOID are the same answer here.
         checks += Check(ReadBackResult.Of(null, GateEntry.Pass("P4", "mesh_a", "x"))
-                            .MandatoryVoid("mesh_a", RowKind.Mesh),
+                            .MandatoryVoid("mesh_a", RowKind.Mesh, null),
                         "a mandatory gate with NO entry at all is VOID, not an implied pass");
-        checks += Check(meshOk.MandatoryVoid("mesh_b", RowKind.Mesh),
+        checks += Check(meshOk.MandatoryVoid("mesh_b", RowKind.Mesh, null),
                         "another target's proofs never satisfy this target");
         // A TEXTURE ROW IS KEYED ON ITS BUNDLE. P1 and its control are recorded under the bundle file
         // (ReadBack.cs:51, :55, :57) because they measure every declared texture of that bundle at once,
@@ -76,9 +78,19 @@ internal static class LifecycleTests
                             .MandatoryVoid("tex_a", RowKind.Texture, "a.bundle") &&
                         !texBundle.MandatoryVoid("tex_a", RowKind.Texture, "a.bundle"),
                         "a texture row needs P1 AND P1-ctl-shipped");
-        checks += Check(ReadBackResult.Of(null, GateEntry.Void("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material) &&
-                        !ReadBackResult.Of(null, GateEntry.Pass("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material),
+        checks += Check(ReadBackResult.Of(null, GateEntry.Void("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material, null) &&
+                        !ReadBackResult.Of(null, GateEntry.Pass("P3", "mat_a", "x")).MandatoryVoid("mat_a", RowKind.Material, null),
                         "a material row needs P3");
+        // A CLIP READ-BACK THAT DISAGREES WITH ITSELF IS A COUNTED FAIL, NEVER A THROW: it runs inside
+        // ProjectBake.Patch on the player's checkbox path (ProjectBake.cs:1657 <- Route7.cs:340), where an
+        // exception loses the whole bake log, writes no patch cache and arms no disposition.
+        StringBuilder disagreed = new StringBuilder();
+        List<GateEntry> selfCheck = new List<GateEntry>();
+        GateEntry.SelfCheck(disagreed, selfCheck, "clip_a", 1, 0);
+        GateEntry.SelfCheck(disagreed, selfCheck, "clip_b", 1, 1);   // agreement says nothing at all
+        checks += Check(selfCheck.Count == 1 && selfCheck[0].Outcome == GateOutcome.Fail &&
+                        disagreed.ToString().StartsWith("P7 FAIL the clip read-back disagrees with itself:"),
+                        "a P7 self-disagreement is one counted FAIL entry and no exception; agreement says nothing");
         ReadBackResult failed = ReadBackResult.Of(null, GateEntry.Fail("P4", "mesh_a", "P4 FAILED mesh 'mesh_a'"));
         checks += Check(failed.Failed == 1 && failed.Entries[0].Outcome == GateOutcome.Fail &&
                         failed.Entries[0].Gate == "P4" && failed.Entries[0].Target == "mesh_a" &&
@@ -115,9 +127,16 @@ internal static class LifecycleTests
                         "S2 - design:380, composed for ModelDoctor.cs:712");
         checks += Check(StageText.S3("Replace_Rifle") == "Validate: PASS - 'Replace_Rifle'.",
                         "S3 is NEW - design:381");
-        // S4/S5 and the three bake special cases have no arm here on purpose: ProjectBake composes them
-        // through StageText (`:128`-`:133`, `:402`), so a literal re-typed here would compare this file with
-        // itself. W18 proves that wording against the real producer, in game.
+        // S4/S5 and the three bake special cases have no WORDING arm here on purpose: ProjectBake composes
+        // them through StageText (`:128`-`:133`, `:402`), so a literal re-typed here would compare this file
+        // with itself. W18 proves that wording against the real producer, in game.
+        // Their PREFIX is another matter - it is the one string in StageText that is PARSED:
+        // BundleResidency.cs:75/:99 classifies a bake by `first.Contains("ALL PASS")`, so a reword of these
+        // three passing sentences would silently turn the B1 re-bake gate VOID (or read a pass as a failure).
+        checks += Check(StageText.S4("D:\\x\\Dist\\a.bundle").StartsWith("ct_project: ALL PASS") &&
+                        StageText.BakeNoOwnBundle().StartsWith("ct_project: ALL PASS") &&
+                        StageText.BakeNothingPatched(2).StartsWith("ct_project: ALL PASS"),
+                        "the three passing bake sentences keep the prefix BundleResidency parses");
         checks += Check(StageText.S6("Replace_Rifle", 2, 2) ==
                         "Verify: PASS - load-back gates passed; 2 of 2 declared target(s) served from this " +
                         "project's copies for 'Replace_Rifle'.",

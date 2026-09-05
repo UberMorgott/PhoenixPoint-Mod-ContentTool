@@ -178,12 +178,7 @@ namespace Morgott.ContentTool.Bake
                 // sliced back off the lines they wrote, and the two must agree or one of them is lying.
                 int counted = ProjectBake.Curves(log, c.Key, c.Value.clip, attribute, k, shipped, copy) +
                               ProjectBake.SampleClip(log, c.Key, attribute, k, shipped, copy);
-                int sliced = Clips(log, entries, c.Key, at);
-                if (sliced != counted)
-                    throw new InvalidOperationException(
-                        "the P7 read-back disagrees with itself for clip '" + c.Key + "': its arms returned " +
-                        counted + " failure(s) and the lines they wrote classify as " + sliced + " - " +
-                        log.ToString(at, log.Length - at).TrimEnd('\r', '\n'));
+                GateEntry.SelfCheck(log, entries, c.Key, counted, Clips(log, entries, c.Key, at));
             }
 
             return ReadBackResult.Of(null, entries.ToArray());   // no terminal line: see the note on Run
