@@ -6,6 +6,12 @@ using AssetsTools.NET.Extra;
 
 namespace Morgott.ContentTool.Bake
 {
+    /// <summary>Whether ONE object of a class carries a name, and when not, which way it failed -
+    /// <see cref="Addressable.Absent"/> (no such object) is a fact about this file, while
+    /// <see cref="Addressable.Ambiguous"/> (several) means the name is there and merely cannot be
+    /// addressed.</summary>
+    internal enum Addressable { Yes, Absent, Ambiguous }
+
     /// <summary>
     /// Reading a bundle's TABLE OF CONTENTS: what is in there, by type and by name. An author cannot
     /// extract what they cannot find, and the shipped names are nowhere else - the catalog addresses
@@ -107,17 +113,30 @@ namespace Morgott.ContentTool.Bake
         internal static AssetFileInfo FindUnique(AssetsManager m, AssetsFileInstance afile,
                                                  AssetClassID cls, string assetName, string where)
         {
-            AssetFileInfo found = null;
-            int hits = 0;
-            List<long> offenders = new List<long>();
-            foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(cls))
-                if (NameOf(m, afile, i) == assetName) { found = i; hits++; offenders.Add(i.PathId); }
-
-            if (hits == 0) throw new InvalidOperationException("no " + cls + " named '" + assetName + "' in " + where);
-            if (hits > 1) throw new InvalidOperationException(
-                hits + " " + cls + "s are named '" + assetName + "' (pathIds " + string.Join(", ", offenders) +
-                ") - refusing to guess which one to use");
+            List<long> offenders;
+            AssetFileInfo found = Scan(m, afile, cls, assetName, out offenders);
+            if (found == null) throw new InvalidOperationException(Why(cls, assetName, where, offenders));
             return found;
+        }
+
+        /// <summary>Every pathId carrying that name, and the object itself when there is EXACTLY one -
+        /// null for both nothing and several, which the caller tells apart by the offender count.</summary>
+        private static AssetFileInfo Scan(AssetsManager m, AssetsFileInstance afile, AssetClassID cls,
+                                          string assetName, out List<long> offenders)
+        {
+            AssetFileInfo found = null;
+            offenders = new List<long>();
+            foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(cls))
+                if (NameOf(m, afile, i) == assetName) { found = i; offenders.Add(i.PathId); }
+            return offenders.Count == 1 ? found : null;
+        }
+
+        /// <summary>The one sentence for a failed lookup, so the throw and the question share it.</summary>
+        private static string Why(AssetClassID cls, string assetName, string where, List<long> offenders)
+        {
+            if (offenders.Count == 0) return "no " + cls + " named '" + assetName + "' in " + where;
+            return offenders.Count + " " + cls + "s are named '" + assetName + "' (pathIds " +
+                   string.Join(", ", offenders) + ") - refusing to guess which one to use";
         }
 
         /// <summary>
@@ -129,8 +148,23 @@ namespace Morgott.ContentTool.Bake
         internal static string WhyNot(AssetsManager m, AssetsFileInstance afile, AssetClassID cls,
                                       string assetName, string where)
         {
-            try { FindUnique(m, afile, cls, assetName, where); return null; }
-            catch (InvalidOperationException ex) { return ex.Message; }
+            Addressable how;
+            return WhyNot(m, afile, cls, assetName, where, out how);
+        }
+
+        /// <summary>
+        /// The same answer WITH the reason classified. A caller searching SEVERAL bundles for one holder
+        /// needs the two failures apart: "not in here" rules a bundle out, while "in here twice" leaves it a
+        /// possible holder - dropping it and calling the next bundle the proven target is a guess. The
+        /// sentence is for the author; no caller should have to sniff its wording to learn which happened.
+        /// </summary>
+        internal static string WhyNot(AssetsManager m, AssetsFileInstance afile, AssetClassID cls,
+                                      string assetName, string where, out Addressable how)
+        {
+            List<long> offenders;
+            if (Scan(m, afile, cls, assetName, out offenders) != null) { how = Addressable.Yes; return null; }
+            how = offenders.Count == 0 ? Addressable.Absent : Addressable.Ambiguous;
+            return Why(cls, assetName, where, offenders);
         }
 
         private static bool Contains(string haystack, string needle)

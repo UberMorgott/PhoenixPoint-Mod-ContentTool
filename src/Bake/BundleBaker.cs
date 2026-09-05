@@ -46,25 +46,37 @@ namespace Morgott.ContentTool.Bake
                 throw new FileNotFoundException("source bundle not found", sourceBundlePath);
             this.modId = Normalize(modId);
 
-            // FINAL-PLAN 1.6: the class database comes out of our own assembly, never off a path -
-            // the bake writer has to work on a machine that has only the mod.
-            classData = ContentToolMain.ClassData();
-            if (classData == null)
-                throw new InvalidOperationException("classdata.tpk is missing from ContentTool.dll");
-            man.LoadClassPackage(classData);
+            // A ctor that throws is never `using`-bound, so nothing would ever unload what LoadBundleFile
+            // has already opened - and a shipped .bundle left mapped stays FILE-LOCKED for the rest of the
+            // session, which the author sees as the game refusing to be patched for no visible reason.
+            try
+            {
+                // FINAL-PLAN 1.6: the class database comes out of our own assembly, never off a path -
+                // the bake writer has to work on a machine that has only the mod.
+                classData = ContentToolMain.ClassData();
+                if (classData == null)
+                    throw new InvalidOperationException("classdata.tpk is missing from ContentTool.dll");
+                man.LoadClassPackage(classData);
 
-            bunInst = man.LoadBundleFile(sourceBundlePath, true);
-            afileInst = man.LoadAssetsFileFromBundle(bunInst, 0, false);
-            AssetsFile afile = afileInst.file;
-            man.LoadClassDatabaseFromPackage(afile.Metadata.UnityVersion);
+                bunInst = man.LoadBundleFile(sourceBundlePath, true);
+                afileInst = man.LoadAssetsFileFromBundle(bunInst, 0, false);
+                AssetsFile afile = afileInst.file;
+                man.LoadClassDatabaseFromPackage(afile.Metadata.UnityVersion);
 
-            foreach (AssetFileInfo a in afile.Metadata.AssetInfos)
-                if (a.PathId > nextPathId) nextPathId = a.PathId;
-            nextPathId += 1000;
+                foreach (AssetFileInfo a in afile.Metadata.AssetInfos)
+                    if (a.PathId > nextPathId) nextPathId = a.PathId;
+                nextPathId += 1000;
 
-            SourceInfo = "unity=" + afile.Metadata.UnityVersion +
-                         " assets=" + afile.Metadata.AssetInfos.Count +
-                         " cldbTypes=" + man.ClassDatabase.Classes.Count;
+                SourceInfo = "unity=" + afile.Metadata.UnityVersion +
+                             " assets=" + afile.Metadata.AssetInfos.Count +
+                             " cldbTypes=" + man.ClassDatabase.Classes.Count;
+            }
+            catch
+            {
+                man.UnloadAll();
+                classData?.Dispose();
+                throw;
+            }
         }
 
         /// <summary>
@@ -543,6 +555,13 @@ namespace Morgott.ContentTool.Bake
         internal string WhyNot(AssetClassID cls, string assetName)
         {
             return AssetIndex.WhyNot(man, afileInst, cls, assetName, SourceInfo);
+        }
+
+        /// <summary>The same, with the failure CLASSIFIED - for a caller that must tell "this bundle does
+        /// not hold it" from "this bundle holds it twice" (<see cref="Addressable"/>).</summary>
+        internal string WhyNot(AssetClassID cls, string assetName, out Addressable how)
+        {
+            return AssetIndex.WhyNot(man, afileInst, cls, assetName, SourceInfo, out how);
         }
 
         /// <summary>

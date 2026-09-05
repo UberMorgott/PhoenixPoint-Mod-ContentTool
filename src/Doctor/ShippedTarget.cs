@@ -42,8 +42,14 @@ namespace Morgott.ContentTool.Doctor
     {
         /// <summary>Null on success, having filled <paramref name="target"/>'s ShippedBundle/ShippedAsset; the
         /// refusal sentence otherwise, which is also stored on the target. NEVER throws: it runs once per slot
-        /// inside the bay rebuild, and one unresolvable slot must not take the rebuild down with it.</summary>
-        internal static string Resolve(Addon addon, SkinnedMeshRenderer smr, PrototypeTarget target)
+        /// inside the bay rebuild, and one unresolvable slot must not take the rebuild down with it.
+        ///
+        /// <paramref name="bakers"/> is the CALLER'S open-bundle cache for one whole rebuild, keyed by shipped
+        /// path case-blind: the BundleBaker ctor decompresses the archive on the main thread, and the slots of
+        /// one prototype name the same few bundles over and over. Resolve never disposes it - the caller opened
+        /// the pass, the caller closes it.</summary>
+        internal static string Resolve(Addon addon, SkinnedMeshRenderer smr, PrototypeTarget target,
+                                       Dictionary<string, BundleBaker> bakers)
         {
             target.ShippedBundle = null;
             target.ShippedAsset = null;
@@ -70,7 +76,7 @@ namespace Morgott.ContentTool.Doctor
                 Debug.Log("[ContentTool] ShippedTarget: '" + asset + "' candidates (" + files.Count + "): " +
                           Spell(files));
 
-                string last = null;
+                string last = null, unproven = null;
                 int present = 0, opened = 0;
                 var holders = new List<string>();
                 foreach (string file in files)
@@ -84,25 +90,38 @@ namespace Morgott.ContentTool.Doctor
                     present++;
                     try
                     {
-                        // ponytail: one BundleBaker per candidate per slot - fine for the handful a slot
-                        // depends on, O(bundles) if the panel ever resolves every slot eagerly. Cache by
-                        // bundle file then.
-                        using (BundleBaker baker = new BundleBaker(shipped, "ct.doctor"))
-                        {
-                            string gone = baker.WhyNot(AssetClassID.Mesh, asset);
-                            opened++;                              // the archive answered, whatever it said
-                            if (gone == null) holders.Add(file); else last = gone;
-                            Debug.Log("[ContentTool] ShippedTarget:   " + file + ": " +
-                                      (gone == null ? "HOLDS IT (WhyNot == null)" : gone));
-                        }
+                        BundleBaker baker;
+                        if (!bakers.TryGetValue(shipped, out baker))
+                            bakers[shipped] = baker = new BundleBaker(shipped, "ct.doctor");
+                        opened++;             // the archive IS open, whatever WhyNot then answers or throws
+                        Addressable how;
+                        string gone = baker.WhyNot(AssetClassID.Mesh, asset, out how);
+                        Debug.Log("[ContentTool] ShippedTarget:   " + file + ": " +
+                                  (gone == null ? "HOLDS IT (WhyNot == null)" : gone));
+                        if (how == Addressable.Yes) holders.Add(file);
+                        else if (how == Addressable.Absent) last = gone;
+                        else if (unproven == null) unproven = Unproven(file, asset, gone);
                     }
                     catch (Exception ex)
                     {
                         last = file + ": " + ex.GetType().Name + " - " + ex.Message;
                         Debug.Log("[ContentTool] ShippedTarget:   " + last);
+                        if (unproven == null)
+                            unproven = Unproven(file, asset, ex.GetType().Name + ": " + ex.Message);
                     }
                 }
 
+                if (present == 0)
+                    return Refuse(target, "TARGET REFUSED: this install ships none of the bundles this addon " +
+                                          "loads (" + Spell(files) + ") - verify the game files, then show " +
+                                          "the prototype again");                                     // R20
+                if (opened == 0)
+                    return Refuse(target, "TARGET REFUSED: every bundle this addon loads refused to open (" +
+                                          Spell(files) + ") - " + last);                              // R21
+                // BEFORE the exactly-one test, because that test is only sound when every OTHER candidate is
+                // a proven non-holder. WhyNot answers ADDRESSABILITY, not absence: a candidate holding the
+                // name twice, or one that would not read, may be exactly the bundle the renderer references.
+                if (unproven != null) return Refuse(target, unproven);
                 if (holders.Count == 1)
                 {
                     target.ShippedBundle = holders[0];
@@ -113,13 +132,6 @@ namespace Morgott.ContentTool.Doctor
                 }
                 if (holders.Count > 1)
                     return Refuse(target, R9(asset, holders));     // R9
-                if (present == 0)
-                    return Refuse(target, "TARGET REFUSED: this install ships none of the bundles this addon " +
-                                          "loads (" + Spell(files) + ") - verify the game files, then show " +
-                                          "the prototype again");                                     // R20
-                if (opened == 0)
-                    return Refuse(target, "TARGET REFUSED: every bundle this addon loads refused to open (" +
-                                          Spell(files) + ") - " + last);                              // R21
                 return Refuse(target, "TARGET REFUSED: none of the bundles this addon loads holds a Mesh named '" +
                                       asset + "' - " + last);                                         // R10
             }
@@ -139,6 +151,17 @@ namespace Morgott.ContentTool.Doctor
             return sentence;
         }
 
+        /// <summary>R9's family, for a candidate that could not be RULED OUT - it holds the name more than
+        /// once, or it would not read. The design's R-table has no number of its own for it; R9 is the closest
+        /// (an ambiguity ContentTool will not guess through), and WhyNot's own words are quoted so the author
+        /// sees which bundle blocked and why.</summary>
+        private static string Unproven(string file, string asset, string why)
+        {
+            return "TARGET REFUSED: '" + file + "' could not answer whether it holds a Mesh named '" + asset +
+                   "' (" + why + ") - ContentTool will not name another bundle as the target while this one " +
+                   "is unproven";
+        }
+
         private static string R9(string asset, List<string> holders)
         {
             return "TARGET REFUSED: a Mesh named '" + asset + "' is in " + holders.Count + " of the bundles " +
@@ -154,7 +177,11 @@ namespace Morgott.ContentTool.Doctor
             files = new List<string>();
             GameObject prefab = addon.VisualsSourcePrefab;
             AddonDef def = addon.AddonDef;
-            object skin = def == null ? null : def.SkinData;
+            // Compared in its DECLARED type: AddonSkinDataBase is a BaseDef, hence a UnityEngine.Object, and a
+            // DESTROYED one is null only through Unity's own operator. Boxed into `object` first, the check is
+            // a plain reference compare a destroyed skin passes - and the author is then sent to R16, a
+            // sentence about this addon's DATA, for what is really R15.
+            AddonSkinDataBase skin = def == null ? null : def.SkinData;
             if (prefab == null || skin == null)
                 return "TARGET REFUSED: this slot's addon carries no SkinData or was not built from a " +
                        "prefab, so there is no dependency graph to walk";                                 // R15

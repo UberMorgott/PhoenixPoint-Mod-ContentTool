@@ -20,6 +20,7 @@ using PhoenixPoint.Tactical.Entities;
 using PhoenixPoint.Tactical.Entities.Animations;
 using PhoenixPoint.Tactical.Entities.Equipments;
 using PhoenixPoint.Tactical.Entities.Weapons;
+using Morgott.ContentTool.Bake;
 using Morgott.ContentTool.Doctor;
 using Morgott.ContentTool.Tactical;
 using UnityEngine;
@@ -746,24 +747,36 @@ namespace Morgott.ContentTool.Dev
 
             Dictionary<string, KeyValuePair<Addon, SkinnedMeshRenderer>> live = LiveSlots();
             Transform root = bay.CharacterBuilder.transform;
-            foreach (PrototypeSlot slot in variant.Slots)
+            // ONE open per shipped .bundle for the whole pass, not one per slot: the BundleBaker ctor
+            // DECOMPRESSES the archive on the main thread, and the slots of one prototype name the same few
+            // bundles over and over. Every one of them is closed in the finally, whatever a slot does.
+            var bakers = new Dictionary<string, BundleBaker>(StringComparer.OrdinalIgnoreCase);
+            try
             {
-                var target = new PrototypeTarget
+                foreach (PrototypeSlot slot in variant.Slots)
                 {
-                    Record = record, Variant = variant,
-                    SlotDefName = slot.SlotDefName, Mode = VerifyMode.Replace
-                };
-                KeyValuePair<Addon, SkinnedMeshRenderer> made;
-                if (slot.SlotDefName != null && live.TryGetValue(slot.SlotDefName, out made) && made.Value != null)
-                {
-                    target.Live = ModelDoctor.Snapshot(made.Value, SeamSwap.RelativePath(root, made.Value.transform));
-                    // Stored, never thrown: the row that could not be derived says why, and every other slot
-                    // in this rebuild still gets its target.
-                    ShippedTarget.Resolve(made.Key, made.Value, target);
+                    var target = new PrototypeTarget
+                    {
+                        Record = record, Variant = variant,
+                        SlotDefName = slot.SlotDefName, Mode = VerifyMode.Replace
+                    };
+                    KeyValuePair<Addon, SkinnedMeshRenderer> made;
+                    if (slot.SlotDefName != null && live.TryGetValue(slot.SlotDefName, out made) && made.Value != null)
+                    {
+                        target.Live = ModelDoctor.Snapshot(made.Value, SeamSwap.RelativePath(root, made.Value.transform));
+                        // Stored, never thrown: the row that could not be derived says why, and every other slot
+                        // in this rebuild still gets its target.
+                        ShippedTarget.Resolve(made.Key, made.Value, target, bakers);
+                    }
+                    else
+                        target.Unavailable = "slot visual unavailable";
+                    slotTargets.Add(target);
                 }
-                else
-                    target.Unavailable = "slot visual unavailable";
-                slotTargets.Add(target);
+            }
+            finally
+            {
+                foreach (BundleBaker baker in bakers.Values)
+                    try { baker.Dispose(); } catch (Exception ex) { Debug.LogWarning("[ContentTool] Retarget: " + ex); }
             }
         }
 
