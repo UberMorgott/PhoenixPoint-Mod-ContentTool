@@ -273,6 +273,22 @@ namespace Morgott.ContentTool.Bake
                 // FIRST, like StartBake:155 - an armed barrier must park THIS run, not leak into the next.
                 Barrier.Wait(id);
                 Observe(on);                                   // A1 revalidate, on a worker
+                // NO TARGET, NO APPLY - decided from the DECLARATION and BEFORE anything runs. `Applicable`
+                // used to be read off `on.Declared` AFTER ApplyRoot, which conflated the two things that
+                // both come back with no targets: THIS row, which has no gate at all, and a GENUINE refusal
+                // ApplyRoot states on its way in - an R37 over an output directory another run holds. That
+                // refusal was published `Applicable false`, `Sequence.Report` walked past it and Verify's
+                // verdict displaced the reason. So a project with no non-video "replace" row never enters
+                // the live segment (nothing to claim, nothing to bake, nothing to redirect), and every
+                // refusal from ApplyRoot below is blocking.
+                //
+                // ON THE WORKER, not inside Park: a no-op has no Unity work to do, and parking it would
+                // make it wait for a painted panel to say "nothing to install".
+                if (on.Declared.Length == 0)
+                {
+                    Finish(id, StageText.S9(on.Id), BakeDisposition.Refused, null, false, false);
+                    return;
+                }
                 Park(delegate
                 {
                     // THE LAST CANCELLABLE INSTANT. Everything below bakes and installs live redirects and
@@ -306,14 +322,13 @@ namespace Morgott.ContentTool.Bake
                     // disposition is the only thing that knows it: read back out of `line` it would be a
                     // grep of a sentence, and hard-coded false at the pump it left Admit's R30 unreachable.
                     bool restart = how == Route7.ApplyDisposition.Resident;
-                    // ...and plan:870's `Applicable`, taken from the DECLARATION rather than from
-                    // `targets.Count`: a project with no non-video "replace" row has no Apply gate at all and
-                    // is VOID with a reason, while an R37/R38 or contended-output refusal ALSO comes back
-                    // with zero targets and is a real refusal that must stop the chain.
-                    bool applicable = on.Declared.Length > 0;
+                    // ...and plan:870's `Applicable`, UNCONDITIONALLY true here: the only row without a gate
+                    // was answered above, before ApplyRoot ran, so anything this segment reports - a pass, a
+                    // bake failure, R37/R38, a contended output - is a gate that answered and must stop the
+                    // chain when it refuses.
                     // Trailing observation FIRST, like the bake (:177): the completion is published with the
                     // freshness this very run produced, never with the one it started from.
-                    Worker(delegate { Observe(on); Finish(id, line, d, null, restart, applicable); });
+                    Worker(delegate { Observe(on); Finish(id, line, d, null, restart, true); });
                 }, true);
             });
             return null;

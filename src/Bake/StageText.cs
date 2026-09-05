@@ -80,6 +80,17 @@ namespace Morgott.ContentTool.Bake
                    "patched target - its row(s) are served live by ct_video.";
         }
 
+        /// <summary>Apply's twin of <see cref="S8"/> - a row with NO GATE AT ALL, not a blocking refusal.
+        /// It is stated by <c>LifecycleJob.StartApply</c> BEFORE the live segment, from the declaration
+        /// alone: a project that declares no non-video "replace" target has nothing to claim, bake or
+        /// redirect, so `ApplyRoot` is never entered and every refusal that DOES come out of it - R37, R38,
+        /// a contended output - is a real one that stops the chain.</summary>
+        internal static string S9(string name)
+        {
+            return "Apply: VOID - nothing to install for '" + name + "'; this project declares no " +
+                   "non-video replacement target.";
+        }
+
         /// <summary>Package PASS. Called from src\Project\Package.cs:178, which appends its own LEFT BEHIND
         /// tail to it.</summary>
         internal static string S7(int files, long bytes, string outDir)

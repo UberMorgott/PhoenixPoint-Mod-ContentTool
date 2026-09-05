@@ -176,6 +176,11 @@ internal static class LifecycleTests
                         "Verify: PASS - nothing to verify for 'IntroVideo'; this project declares no " +
                         "patched target - its row(s) are served live by ct_video.",
                         "S8 is NEW - design:390, the empty-census Verify");
+        checks += Check(StageText.S9("AddUiSounds") ==
+                        "Apply: VOID - nothing to install for 'AddUiSounds'; this project declares no " +
+                        "non-video replacement target.",
+                        "S9 is NEW - Apply's twin of S8, stated BEFORE ApplyRoot so the no-gate row and a " +
+                        "genuine R37 stop being the same sentence");
         checks += Check(StageText.PackageRefused("D:\\out") ==
                         "REFUSED: D:\\out already holds files. Name a folder that does not exist yet - a " +
                         "package is built from nothing, so no leftover of a previous run can be shipped by " +
@@ -1156,11 +1161,41 @@ internal static class LifecycleTests
                         {
                             return s == "Apply"
                                 ? new LifecycleState.StageReport(GateOutcome.Void,
-                                                                 "REFUSED: nothing to install",
+                                                                 StageText.S9("morgott.demo"),
                                                                  BakeDisposition.Refused, false, false, null)
                                 : Pass("ok");
                         }) == null && ran.Count == 5,
                         "a REFUSED row with no applicable gate does not stop the chain either - design:281");
+
+        // ---- AND THE ONE THAT LOOKS EXACTLY LIKE IT ON THE WIRE. A project that DOES declare a target,
+        // whose output directory another run holds, is refused by `OutputClaim.Take` with R37 and zero
+        // targets - the shape that used to be published `Applicable false` because the flag was derived
+        // after ApplyRoot. It has a gate, so it stops here and Verify never displaces the reason.
+        ran.Clear();
+        string held = StageText.R37("D:\\x\\Dist");
+        checks += Check(Drive(Fresh(), ran, delegate(string s)
+                        {
+                            return s == "Apply"
+                                ? new LifecycleState.StageReport(GateOutcome.Void, held,
+                                                                 BakeDisposition.Refused, false, true, null)
+                                : Pass("ok");
+                        }) == held && ran.Count == 3 && !ran.Contains("Verify"),
+                        "a contended output claim is a GENUINE refusal - it stops Run all at Apply");
+
+        // ---- WHICH OF THE TWO A RUN IS, DECIDED BEFORE THE LIVE SEGMENT. `LifecycleJob` carries
+        // UnityEngine and can never be linked here (KeyCapture:939), so the arrangement is the same one
+        // that arm uses: read the SOURCE. The old shape asked `on.Declared.Length > 0` AFTER
+        // `Route7.ApplyRoot` had already run and taken - or failed to take - the output claim.
+        string job = SrcRoot() == null ? null : Path.Combine(SrcRoot(), "Bake", "LifecycleJob.cs");
+        string jobText = job != null && File.Exists(job) ? File.ReadAllText(job) : null;
+        checks += Check(DecidedBeforeApply(jobText),
+                        "StartApply answers the no-target project and returns BEFORE Route7.ApplyRoot, and " +
+                        "derives `applicable` from the declaration nowhere after it -> " + job);
+        checks += Check(!DecidedBeforeApply("class J { void A() { line = Route7.ApplyRoot(root, null, " +
+                                            "out targets, out how); bool applicable = " +
+                                            "on.Declared.Length > 0; } }"),
+                        "while the shape that shipped fails the same check, so the arm above is a " +
+                        "measurement and not a blind pass");
         ran.Clear();
         checks += Check(Drive(Fresh(), ran, delegate(string s)
                         {
@@ -1403,6 +1438,17 @@ internal static class LifecycleTests
             seq.Report(ctx, producer(stage));
         }
         return seq.Stopped ? seq.Terminal : null;
+    }
+
+    /// <summary>Does this source state Apply's applicability from the DECLARATION, before the live segment,
+    /// and never re-derive it from the declaration after `ApplyRoot` has run?</summary>
+    private static bool DecidedBeforeApply(string text)
+    {
+        if (text == null) return false;
+        int decided = text.IndexOf("if (on.Declared.Length == 0)", StringComparison.Ordinal);
+        int applied = text.IndexOf("Route7.ApplyRoot(", StringComparison.Ordinal);
+        return decided >= 0 && applied > decided &&
+               text.IndexOf("bool applicable = on.Declared", StringComparison.Ordinal) < 0;
     }
 
     /// <summary>The repo's src\, walked up from the test binary - null when the suite runs from a
