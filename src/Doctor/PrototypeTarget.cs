@@ -42,6 +42,18 @@ namespace Morgott.ContentTool.Doctor
         /// "slot visual unavailable" and Replace is refused for it. Extend still works.</summary>
         internal string Unavailable;
 
+        /// <summary>The SHIPPED pair this slot's renderer replaces, derived by
+        /// <see cref="ShippedTarget.Resolve"/> when the bay rebuild produced the renderer: the .bundle FILE
+        /// name as BakeSelfCheck.ShippedBundlePath resolves it, and the Mesh's ordinal m_Name. Null until it
+        /// is derived, and null forever when it could not be - see <see cref="TargetRefusal"/>.</summary>
+        internal string ShippedBundle;
+        internal string ShippedAsset;
+
+        /// <summary>Why no shipped pair could be derived for this slot - the sentence the panel shows in place
+        /// of a target. Stored rather than thrown: one unresolvable slot must not cost the author the other
+        /// slots' rows.</summary>
+        internal string TargetRefusal;
+
         /// <summary>The names Analyze is run against: Live.BoneNames on Replace,
         /// Record.BindableBones on Extend. Null rather than a guess when there is no live renderer.</summary>
         internal IList<string> BoneNames()
