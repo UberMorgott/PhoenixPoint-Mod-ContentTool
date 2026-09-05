@@ -2,12 +2,61 @@ using System;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using Morgott.ContentTool.Import;
 using Morgott.ContentTool.Wwise;
 using UnityEngine;
 
 namespace Morgott.ContentTool.Project
 {
+    /// <summary>
+    /// THE ONE NARROW ENTRY a long-running caller needs into an import, and nothing more.
+    ///
+    /// <c>ContentProject.ImportModel</c> is private static (:691) and <c>ImportAudio</c> is a private
+    /// INSTANCE method taking <c>ref uint nextId</c> (:760) - neither is callable from a job - and
+    /// <c>Load</c> itself cannot be dispatched wholesale either: it calls <c>JsonUtility.FromJson</c> and
+    /// <c>ImportTexture</c>, which constructs a <c>Texture2D</c>, and both are main-thread. So instead of
+    /// moving anything, <c>Load(root)</c> becomes a wrapper over <c>Load(root, pump)</c> and the pump says
+    /// where the import has got to and whether the author has asked it to stop.
+    ///
+    /// THE ACCOUNTING IS PRESERVED BY CONSTRUCTION. Not one refusal line, media id or count moves: the
+    /// <c>ref uint next</c> loop, the ReplaceRefusals delta and the single
+    /// <c>ImportFailures = SourceRefusals.Count</c> stay exactly where they are, with checkpoints inserted
+    /// BETWEEN them and never inside them.
+    ///
+    /// ponytail: no marshal-to-main delegate. Nothing in this slice runs an import phase off the main
+    /// thread, and a marshal nobody invokes is a seam that cannot be shown to work. Add it with the first
+    /// phase that actually moves.
+    /// </summary>
+    internal sealed class LoadPump
+    {
+        internal readonly CancellationToken Cancel;
+        /// <summary>phase name, phases done, phases total. The total is REAL - a caller that shows a bar
+        /// needs a denominator it did not invent.</summary>
+        private readonly Action<string, int, int> phase;
+
+        internal LoadPump(CancellationToken cancel, Action<string, int, int> onPhase)
+        {
+            Cancel = cancel; phase = onPhase;
+        }
+
+        /// <summary>A phase boundary: refuse to start it when the run is cancelled, then say so. SlimJob's
+        /// own checkpoint (SlimJob.cs:428), which is what the job's other producers already use.</summary>
+        internal void At(string name, int done, int total)
+        {
+            Cancel.ThrowIfCancellationRequested();
+            Say(name, done, total);
+        }
+
+        /// <summary>Report only. Used where a THROW would be the wrong exit - the bake's B4 boundary owns
+        /// its own cancel answer, because only it knows which temps to discard, and a checkpoint that threw
+        /// past it would leak them.</summary>
+        internal void Say(string name, int done, int total)
+        {
+            if (phase != null) phase(name, done, total);
+        }
+    }
+
     /// <summary>
     /// One shipped object this project replaces, declared in ppcontent.json. Three plain fields, no
     /// grammar to learn: which shipped bundle, which object inside it, which source file. Everything
@@ -304,6 +353,18 @@ namespace Morgott.ContentTool.Project
         /// <summary>Reads ppcontent.json and imports every source file under Content\.</summary>
         internal static ContentProject Load(string root)
         {
+            return Load(root, null);
+        }
+
+        /// <param name="pump">the dashboard's phase/cancel channel, or null for the console verb and the
+        /// mod-manager checkbox, which have neither a progress bar nor a stop button. Every checkpoint sits
+        /// BETWEEN existing statements - see <see cref="LoadPump"/> for why that is the whole discipline.
+        /// A cancelled load throws <c>OperationCanceledException</c>, which the job turns into
+        /// <c>BakeDisposition.Cancelled</c>; nothing has been written at that point.</param>
+        internal static ContentProject Load(string root, LoadPump pump)
+        {
+            const int phases = 7;
+            if (pump != null) pump.At("manifest", 0, phases);
             string metaPath = Path.Combine(root, "ppcontent.json");
             if (!File.Exists(metaPath)) throw new FileNotFoundException("no ppcontent.json in " + root, metaPath);
             // JsonUtility: Unity's own reader, so no JSON dependency enters the tool.
@@ -325,12 +386,16 @@ namespace Morgott.ContentTool.Project
             // The return of Each is NOT added here any more: every refusal below - thrown or not - is
             // counted once, in ONE place, at the end of this method. Adding it twice would report two
             // failures for one unreadable .glb.
+            if (pump != null) pump.At("textures", 1, phases);
             SourceImport.Each(Sources(root, "Textures", p.SourceRefusals, "*.png", "*.jpg", "*.jpeg"),
                               p.Textures, p.SourceRefusals, ImportTexture);
+            if (pump != null) pump.At("meshes", 2, phases);
             SourceImport.Each(Sources(root, "Meshes", p.SourceRefusals, ContentMods.MeshPatterns),
                               p.Meshes, p.SourceRefusals, ImportMesh);
+            if (pump != null) pump.At("models", 3, phases);
             SourceImport.Each(Sources(root, "Models", p.SourceRefusals, "*.glb"),
                               p.Models, p.SourceRefusals, ImportModel);
+            if (pump != null) pump.At("videos", 4, phases);
             p.Videos.AddRange(ImportVideos(root));
             // A manifest NOTHING can read is a SOURCE refusal, never a patch failure: it is refused
             // before ParseReplace can tell whether "replace" is even declared, so a project with no
@@ -338,6 +403,7 @@ namespace Morgott.ContentTool.Project
             // "patching the shipped bundle(s) reported 1 failure(s)" over zero declared patches.
             // ReplaceRefusals is assigned INSIDE the try, so only refusals past the "replace" gate
             // enter the delta; the message still lands in the one list ImportFailures counts.
+            if (pump != null) pump.At("declarations", 5, phases);
             int beforeReplace = p.SourceRefusals.Count;
             try
             {
@@ -362,6 +428,10 @@ namespace Morgott.ContentTool.Project
             string refused = RefuseUnsupported(Path.Combine(Path.Combine(root, "Content"), "Audio"));
             if (refused != null) p.SourceRefusals.Add(refused);
 
+            // THE LAST CHECKPOINT. Nothing below it: the media-id loop hands out ids from `next` in file
+            // order and a cancel inside it would leave a project whose sounds are numbered from a run that
+            // never finished. It is short, it writes nothing, and it is not worth a torn count.
+            if (pump != null) pump.At("audio", 6, phases);
             uint next = MediaIdBase;
             foreach (string f in Sources(root, "Audio", p.SourceRefusals, "*.wav", "*.ogg", "*.mp3"))
             {

@@ -134,15 +134,29 @@ namespace Morgott.ContentTool.Bake
             // key is stale by definition, which is the right answer for it.
             List<string> sources = new List<string>();
             foreach (string b in declared) sources.Add(BakeSelfCheck.ShippedBundlePath(b));
-            string key = Project.PatchCache.Key(projectRoot, sources);
+            return Observe(patched, projectRoot, declared, sources);
+        }
+
+        /// <summary>The same observation with every Unity-derived path ALREADY RESOLVED - what a worker
+        /// gets. <c>ContentToolMain.PatchedDir</c> reads Application.persistentDataPath and
+        /// <c>BakeSelfCheck.ShippedBundlePath</c> reads streamingAssetsPath; both are main-thread facts, so
+        /// the overload above reads them on main and this one takes them as strings. Everything left here -
+        /// the SHA-1 of the manifest, a stat of every source under Content\ and a File.Exists per declared
+        /// copy - is plain System.IO and is the slowest non-Unity work in the whole stage, which is exactly
+        /// what belongs on a worker (design section 4).</summary>
+        internal static FreshnessObservation Observe(string patched, string projectRoot,
+                                                     IList<string> declared, IList<string> shippedPaths)
+        {
+            string key = Project.PatchCache.Key(projectRoot, shippedPaths);
 
             List<string> missing = new List<string>();
             foreach (string b in declared)
                 if (!File.Exists(Path.Combine(patched, b))) missing.Add(b);
 
+            string[] names = new string[declared.Count];
+            declared.CopyTo(names, 0);
             return new FreshnessObservation(key, Project.PatchCache.Fresh(patched, key),
-                                            Directory.Exists(patched),
-                                            declared.ToArray(), missing.ToArray());
+                                            Directory.Exists(patched), names, missing.ToArray());
         }
 
         internal static string Toggle(string modDir, bool on)

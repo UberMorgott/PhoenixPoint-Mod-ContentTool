@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Morgott.ContentTool.Bake;
+using Morgott.ContentTool.Import;
 using Morgott.ContentTool.IO;
 
 /// <summary>The lifecycle dashboard's CARRIER and its one verdict formatter.
@@ -233,9 +234,11 @@ internal static class LifecycleTests
         checks += Ordering();
         checks += Ownership();
         checks += Admission();
+        checks += Cancelling();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
-               "one file swap, the publication ordering, one output owner, the admission table";
+               "one file swap, the publication ordering, one output owner, the admission table, " +
+               "the cancel contract";
     }
 
     /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per
@@ -385,6 +388,89 @@ internal static class LifecycleTests
                         "does not match - Declared.Length != 0 guards it");
         checks += Check(LifecycleState.Fresh(good) == Freshness.Fresh && good.HaveAll,
                         "receipt matches and every declared copy is there - this is Route7's `haveAll`");
+        return checks;
+    }
+
+    /// <summary>G4 - A CANCEL THAT NEVER LIES. The bookkeeping is pure and lives on the reducer, so the arms
+    /// below drive the very object `LifecycleJob` holds; the job is Unity-bound and its thread split is
+    /// proven in game (Task 8, W12/W13), but WHAT IT REMEMBERS is proven here.
+    ///
+    /// The four facts, each an arm: one terminal result per run; busy is retained until the worker actually
+    /// finishes, not until Cancel is pressed; a cancel that arrives after the work succeeded does NOT
+    /// relabel it; and a late completion from an older run can never overwrite a newer one's state.</summary>
+    private static int Cancelling()
+    {
+        int checks = 0;
+        LifecycleRun run = new LifecycleRun();
+
+        checks += Check(!run.Latest.Busy && run.Latest.RunId == 0 && run.Latest.Stage == null,
+                        "a fresh run state is idle - no run id, no stage, nothing to report");
+
+        // ---- CANCEL BEFORE DISPATCH. The id is handed out, the flag is up before the worker's first
+        // checkpoint, and BUSY IS STILL TRUE: the worker has not stopped yet and saying otherwise would
+        // let the panel start the next stage over a run that is still touching files.
+        long first = run.Begin("Bake");
+        checks += Check(first != 0 && run.Latest.Busy && run.Latest.Stage == "Bake" &&
+                        !run.Latest.CancelRequested,
+                        "Begin hands out a run id and marks the seam busy");
+        checks += Check(run.Begin("Apply") == 0 && run.Latest.Stage == "Bake",
+                        "a second stage is REFUSED while one is in flight - Admit's R26 is advisory, this " +
+                        "is the authoritative one, and it cannot race");
+        run.Cancel();
+        run.Cancel();
+        checks += Check(run.Latest.CancelRequested && !run.Latest.CancelAcknowledged && run.Latest.Busy,
+                        "a repeated Cancel is one request, unacknowledged until the producer says so, and " +
+                        "the seam stays BUSY - a cancel is not a completion");
+        checks += Check(run.Begin("Apply") == 0,
+                        "and no next stage is dispatched while the cancelled run is still running");
+        checks += Check(run.Complete(first, "stopped", BakeDisposition.Cancelled) &&
+                        !run.Latest.Busy && run.Latest.CancelAcknowledged &&
+                        run.Latest.Result == "stopped" && run.Latest.How == BakeDisposition.Cancelled,
+                        "the producer's own Cancelled disposition is what acknowledges the cancel, and only " +
+                        "then is the seam free");
+
+        // ---- CANCEL AFTER SUCCESS. B5 is non-cancellable, so a cancel raised while it ran is answered by
+        // a SUCCESSFUL result. The request is remembered - it happened - but it is NOT acknowledged, or the
+        // panel would report "cancelled" over output that was published.
+        long second = run.Begin("Bake");
+        run.Cancel();
+        checks += Check(run.Complete(second, "ct_project: ALL PASS", BakeDisposition.Success) &&
+                        run.Latest.How == BakeDisposition.Success &&
+                        run.Latest.CancelRequested && !run.Latest.CancelAcknowledged,
+                        "a cancel that lost the race to a completed publication does not relabel it - the " +
+                        "request is remembered, the acknowledgement is not invented");
+
+        // ---- NO LATE RESULT OVERWRITES A NEWER RUN. The stale worker's completion is dropped whole:
+        // result, disposition and progress. This is the run handle the seam's poll protocol rests on.
+        long third = run.Begin("Verify");
+        checks += Check(third != second && !run.Complete(second, "the old one finished", BakeDisposition.Failed) &&
+                        run.Latest.Busy && run.Latest.Stage == "Verify" && run.Latest.Result == null,
+                        "a completion carrying an OLD run id is dropped - it can never overwrite the run " +
+                        "that is actually in flight");
+        run.Progress(second, new SlimProgress("stale", 3, 4, "from the old run"));
+        checks += Check(run.Latest.Progress == null,
+                        "and neither can its progress");
+        run.Progress(third, new SlimProgress("reading back", 1, 2, "px_equipment_assets_all.bundle"));
+        checks += Check(run.Latest.Progress != null && run.Latest.Progress.Stage == "reading back" &&
+                        run.Latest.Progress.Done == 1 && run.Latest.Progress.Total == 2,
+                        "the running run's own progress lands, with a KNOWN denominator - a phase with no " +
+                        "count publishes the phase, never an invented percentage");
+        checks += Check(run.Complete(third, "Verify: PASS", BakeDisposition.Success) &&
+                        !run.Latest.CancelRequested,
+                        "a new run starts with a clean cancel flag - the previous run's request is not " +
+                        "inherited");
+
+        // ---- ONE TERMINAL RESULT. A second completion of the same run is refused too: the producer that
+        // already reported is the one the panel shows.
+        checks += Check(!run.Complete(third, "Verify: FAIL", BakeDisposition.Failed) &&
+                        run.Latest.Result == "Verify: PASS" && run.Latest.How == BakeDisposition.Success,
+                        "one terminal result per run - a second completion cannot rewrite the first");
+
+        // ---- A CANCEL WITH NOTHING RUNNING IS SILENCE, not a flag the next run inherits.
+        run.Cancel();
+        long fourth = run.Begin("Package");
+        checks += Check(!run.Latest.CancelRequested && run.Latest.Result == null && fourth != third,
+                        "Cancel with no run in flight changes nothing, and the next Begin starts clean");
         return checks;
     }
 

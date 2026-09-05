@@ -1,7 +1,124 @@
 using System;
+using System.Threading;
+using Morgott.ContentTool.Import;
 
 namespace Morgott.ContentTool.Bake
 {
+    /// <summary>
+    /// ONE RUN AT A TIME, and a cancel that never lies.
+    ///
+    /// The segmented job (LifecycleJob) is Unity-bound and can never be linked into the offline gate, so
+    /// everything it REMEMBERS lives here instead: the run handle, busy, the cancel request and its
+    /// acknowledgement, the last progress snapshot and the one terminal result. G4 drives this object; the
+    /// job only calls it.
+    ///
+    /// THE FOUR RULES, and each exists because breaking it produces a lie on screen:
+    ///   1. ONE terminal result per run - a second completion cannot rewrite the first.
+    ///   2. BUSY survives Cancel. A cancel is a request to a worker that is still touching files; freeing
+    ///      the seam on the press would let the next stage start over it.
+    ///   3. A cancel is ACKNOWLEDGED only by a producer that returned <c>Cancelled</c>. B5 is
+    ///      non-cancellable, so a cancel that lost the race to a completed publication is remembered as a
+    ///      request and never as an outcome.
+    ///   4. A completion or progress carrying an OLD run id is DROPPED. That is the whole run-handle
+    ///      protocol: a poll compares ids, so it can never read a newer run's state as this run's answer.
+    ///
+    /// The state is one IMMUTABLE snapshot behind a volatile field, replaced under a lock - SlimPanel's
+    /// arrangement (SlimPanel.cs:74-:77), for the same reason: the worker writes, the UI thread reads, and
+    /// a repaint must never catch half a transition. No filesystem, no Unity, no console.
+    /// </summary>
+    internal sealed class LifecycleRun
+    {
+        /// <summary>What the panel and the seam read. Every field is set once, in the constructor.</summary>
+        internal sealed class Snapshot
+        {
+            /// <summary>0 when nothing has ever run. Non-zero ids are never reused.</summary>
+            internal readonly long RunId;
+            internal readonly string Stage;
+            internal readonly bool Busy, CancelRequested, CancelAcknowledged;
+            /// <summary>The worker's last published phase, or null. Reuses <see cref="SlimProgress"/> rather
+            /// than a second four-field record with the same fields (SlimJob.cs:13).</summary>
+            internal readonly SlimProgress Progress;
+            /// <summary>The producer's OWN terminal line, verbatim. Null until it returns one.</summary>
+            internal readonly string Result;
+            internal readonly BakeDisposition How;
+
+            internal Snapshot(long runId, string stage, bool busy, bool cancelRequested,
+                              bool cancelAcknowledged, SlimProgress progress, string result,
+                              BakeDisposition how)
+            {
+                RunId = runId; Stage = stage; Busy = busy; CancelRequested = cancelRequested;
+                CancelAcknowledged = cancelAcknowledged; Progress = progress; Result = result; How = how;
+            }
+        }
+
+        private readonly object gate = new object();
+        private long ids;
+        private volatile Snapshot state =
+            new Snapshot(0, null, false, false, false, null, null, BakeDisposition.Success);
+
+        internal Snapshot Latest { get { return state; } }
+
+        /// <summary>Claims the seam for one stage. Returns the run's id, or 0 when one is already in flight
+        /// - THE AUTHORITATIVE refusal. <c>LifecycleState.Admit</c>'s R26 is the one the author reads; this
+        /// is the one that cannot race, because it takes the id under the same lock that publishes busy.
+        /// A new run starts clean: no inherited cancel request, no previous result.</summary>
+        internal long Begin(string stage)
+        {
+            lock (gate)
+            {
+                if (state.Busy) return 0;
+                long id = ++ids;
+                state = new Snapshot(id, stage, true, false, false, null, null, BakeDisposition.Success);
+                return id;
+            }
+        }
+
+        /// <summary>The author asked to stop. Silence when nothing is running - a request with no run to
+        /// carry it must not be inherited by the next Begin.</summary>
+        internal void Cancel()
+        {
+            lock (gate)
+            {
+                if (!state.Busy || state.CancelRequested) return;
+                state = new Snapshot(state.RunId, state.Stage, true, true, state.CancelAcknowledged,
+                                     state.Progress, state.Result, state.How);
+            }
+        }
+
+        internal void Progress(long runId, SlimProgress progress)
+        {
+            lock (gate)
+            {
+                if (!state.Busy || state.RunId != runId) return;
+                state = new Snapshot(state.RunId, state.Stage, true, state.CancelRequested,
+                                     state.CancelAcknowledged, progress, state.Result, state.How);
+            }
+        }
+
+        /// <summary>The producer's terminal line and disposition. False when this run is no longer the one
+        /// in flight, or already reported - the caller has nothing to do about it, and the point is that
+        /// the state did not move.</summary>
+        internal bool Complete(long runId, string result, BakeDisposition how)
+        {
+            lock (gate)
+            {
+                if (!state.Busy || state.RunId != runId) return false;
+                state = new Snapshot(state.RunId, state.Stage, false, state.CancelRequested,
+                                     // RULE 3: only the producer's own Cancelled acknowledges it.
+                                     how == BakeDisposition.Cancelled, state.Progress, result, how);
+                return true;
+            }
+        }
+
+        /// <summary>The token a producer checks. One source per run, cancelled by <see cref="Cancel"/>
+        /// through the job that owns it - this class holds no CancellationTokenSource, because a reducer
+        /// that owned a disposable would stop being one.</summary>
+        internal static CancellationToken TokenOf(CancellationTokenSource cts)
+        {
+            return cts == null ? CancellationToken.None : cts.Token;
+        }
+    }
+
     /// <summary>
     /// ONE FILESYSTEM OBSERVATION, taken by the caller and handed in.
     ///
