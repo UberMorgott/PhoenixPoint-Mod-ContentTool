@@ -7,11 +7,13 @@ namespace Morgott.ContentTool.Bake
     /// A second copy that only a test reads would be a second truth, and the gate would then prove the two
     /// copies agree while the producer drifted from both.
     ///
-    /// The rest are read-only quotations of producers this slice does not own yet - S4/S5 and the three bake
-    /// special cases (ProjectBake.cs:126-135, :405-406), S7 and the Package refusal (Package.cs:78-80, :180).
-    /// Those producers keep composing their own line and the dashboard forwards it verbatim; the copy here is
-    /// what the panel needs to RECOGNISE, never to substitute. ponytail: route ProjectBake through S4/S5 when
-    /// Task 2 opens that file anyway - Package.cs is on the plan's "NOT modified" list and stays quoted.
+    /// S4/S5 and the three bake special cases are now COMPOSED here for ProjectBake too (it calls S4, S5,
+    /// BakeNothingToBake, BakeNoOwnBundle and BakeNothingPatched at :125-133 and :400), so bake's console
+    /// line and the panel's row are the same string and cannot drift apart.
+    /// S7 and the Package refusal stay read-only quotations of a producer this slice does not own -
+    /// Package.cs is on the plan's "NOT modified" list, so it keeps composing its own line and the
+    /// dashboard forwards it verbatim; the copy here is what the panel needs to RECOGNISE, never to
+    /// substitute.
     ///
     /// No string here is ever PARSED to classify an outcome. The outcome comes from the carrier.</summary>
     internal static class StageText

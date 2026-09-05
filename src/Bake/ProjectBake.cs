@@ -122,17 +122,15 @@ namespace Morgott.ContentTool.Bake
                 // and saying "nothing to bake" for it reports the symptom as if it were the state of
                 // an empty folder - the run has to end on the count.
                 failed = failures;
+                // The wording lives in StageText, which the dashboard also reads: one producer per
+                // sentence, so the panel cannot show a line this command never printed.
                 return log.Append(failures != 0
-                    ? "ct_project: " + failures + " FAILURE(S)"
+                    ? StageText.S5(failures)
                     : p.Replace.Count == 0
-                        ? "nothing to bake - put .png/.jpg under Content\\Textures\\, " +
-                          ".glb under Content\\Models\\ or .wav under Content\\Audio\\"
+                        ? StageText.BakeNothingToBake()
                         : patchedBundles > 0
-                            ? "ct_project: ALL PASS - this project has no bundle of its own; the patched " +
-                              "copy(ies) above are the whole output"
-                            : "ct_project: ALL PASS - nothing needed patching: none of this project's " +
-                              p.Replace.Count + " replacement(s) names a shipped bundle, so no copy was " +
-                              "written - the video row(s) above are served live by ct_video").ToString();
+                            ? StageText.BakeNoOwnBundle()
+                            : StageText.BakeNothingPatched(p.Replace.Count)).ToString();
             }
             failures += ClipNamesDeclared(p, log);
             failures += CreatureScaffold(p, log);
@@ -401,9 +399,7 @@ namespace Morgott.ContentTool.Bake
             }
 
             failed = failures;
-            return log.Append(failures == 0
-                ? "ct_project: ALL PASS - " + outPath
-                : "ct_project: " + failures + " FAILURE(S)").ToString();
+            return log.Append(failures == 0 ? StageText.S4(outPath) : StageText.S5(failures)).ToString();
         }
 
         /// <summary>
