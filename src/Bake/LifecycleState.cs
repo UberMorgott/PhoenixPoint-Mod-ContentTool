@@ -141,13 +141,21 @@ namespace Morgott.ContentTool.Bake
                    stage == "Verify" || stage == "Package" || stage == "All";
         }
 
-        /// <summary>Evidence age from the caller's one observation. No receipt at all is `never`; a receipt
-        /// whose key does not match, or over an output that vanished, is `stale`; everything present and
-        /// answering to the key is `fresh`.</summary>
+        /// <summary>Evidence age from the caller's one observation. No receipt at all is `never`; so is a
+        /// directory in which EVERY declared copy is absent - design:199 reads "absent -> never, key
+        /// mismatch -> stale", and Verify's R28 must say which of the two the author is looking at. A
+        /// receipt whose key does not match, or over an output only PARTLY on disk, is `stale`; everything
+        /// present and answering to the key is `fresh`.
+        ///
+        /// The `Declared.Length != 0` term is not decoration: a project with no declared target (all rows
+        /// are video) has an empty census, so `Missing.Length == Declared.Length` is trivially true and a
+        /// key mismatch would have reported `never`.</summary>
         internal static Freshness Fresh(FreshnessObservation o)
         {
             if (o == null || !o.CacheDirExists) return Freshness.Never;
-            return o.HaveAll ? Freshness.Fresh : Freshness.Stale;
+            if (o.HaveAll) return Freshness.Fresh;
+            return o.Declared.Length != 0 && o.MissingCopies.Length == o.Declared.Length
+                ? Freshness.Never : Freshness.Stale;
         }
     }
 }

@@ -538,6 +538,21 @@ and its claimed/resident predicate. `ProjectBake`'s B5 becomes a call into it, a
   `Route7.ApplyProject(root, out IList<TargetInstall>, out ApplyDisposition)` aggregating conservatively (any refusal
   survives; any S1 survives; no blanket LIVE). Lands **here**, before Task 7's badges consume it.
 
+- [ ] **Step 4c: three MUSTs carried over from the Task 3 review — none of them optional.**
+  - **(a) Publish the freshness key at the SHARED bake completion, inside B5, while the output dirs are still
+    claimed.** Today the ONLY `PatchCache.Write` is inside Apply (`Route7.cs:350`), so a standalone Bake leaves
+    `Route7.Observe` reading `never`/`stale` and `LifecycleState.Admit("Verify")` refuses R28 over copies that were
+    just baked — Verify would require an Apply, i.e. a change to game state, to become admissible at all (Codex P2 on
+    `b81b43b`). After this step a standalone Bake leaves the observation FRESH and Verify is admitted with no Apply.
+  - **(b) Probe R38 and resolve the patched directory ON MAIN, before the job reaches the worker.**
+    `BundleClaims.Find` walks the unlocked static list main mutates (`ProjectBake.cs:1986`), and
+    `ContentToolMain.PatchedDir` reads `Application.persistentDataPath` — both are main-thread facts. Capture the
+    R38 verdict and the resolved directory on MAIN and hand them in as values, the same rule as the three captures in
+    Step 2.
+  - **(c) One test line for `BakeDisposition.Cancelled` precedence** when its producer lands: `Route7.cs:392` already
+    treats `Refused` and `Cancelled` alike (return before `patchFailed` is read), so the arm asserts a cancelled bake
+    never reaches `Failed.Add` and never installs.
+
 - [ ] **Step 5: GREEN.**
   - Run: `dotnet build -c Release` → `Ошибок: 0`, `Предупреждений: 1`
   - Run: `dotnet run --project tests\ObjCodecTests -c Release` → `LIFECYCLE PASS, ~78` (+24: 8 cancel arms, 16 G7
@@ -559,6 +574,11 @@ Needs Tasks 3 and 4. **≈380 impl lines** (sequencer ~90, seam + JSON sectionin
 ~110, Package destination resolver ~15) — over ≤300, so **four green commits** (Step 6). Files:
 `src\Bake\LifecycleState.cs` (the sequencer), `src\Dev\LifecycleDashboard.cs` (new — seam + `Acceptance` only, no
 drawing yet), `src\Dev\FitBench.cs` `:2104`, `tests\ObjCodecTests\LifecycleTests.cs`.
+
+**The sequencer MUST NOT re-implement §4.6's graph.** The `Run all` column conditions — Bake after Validate PASS, Apply
+after a Bake that did not FAIL, Verify after Apply and S1 → R30 — become fields of `Admission` and arms of `Admit`
+(`LifecycleState.cs:102`) **in Task 5's first commit**, and the sequencer only reads them. A second copy of the
+dependency graph in the coordinator is the exact drift §4.6 exists to prevent.
 
 - [ ] **Step 1: RED — G5 sequence.** All succeeds; each stage fails in turn; the S1 barrier; a prerequisite refusal;
   cancellation. Assert invocation order and count, first stop position, earlier receipts unchanged, and that

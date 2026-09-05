@@ -189,12 +189,13 @@ internal static class LifecycleTests
         checks += Check(StageText.R37("D:\\x\\Dist") ==
                         "ct_project: 'D:\\x\\Dist' is already being written by another run - nothing was " +
                         "baked. Wait for it to finish, then bake again.",
-                        "R37 - design:377, NO PRODUCER YET: ProjectBake.cs:69 / ContentToolMain.cs:480 / " +
-                        "Route7.cs:341 must call it when Task 3 lands the guard");
+                        "R37 - design:377, produced by ProjectBake.cs:104 and Route7.cs:335 when the " +
+                        "output claim is contended");
         checks += Check(StageText.R38("a.bundle") ==
                         "ct_project: 'a.bundle' is being served to the game right now, so it was not " +
                         "rewritten - restart the game and bake again.",
-                        "R38 - design:378, no producer yet either - Task 3 Step 4");
+                        "R38 - design:378, produced by ProjectBake.cs:1992 (LiveReader) for a copy this " +
+                        "mod is serving right now");
         checks += Check(StageText.ValidateFailed("the manifest is not JSON") ==
                         "Validate: FAIL - the manifest is not JSON" &&
                         StageText.VerifyFailed("the copy vanished") == "Verify: FAIL - the copy vanished",
@@ -363,15 +364,24 @@ internal static class LifecycleTests
         FreshnessObservation gone = new FreshnessObservation("k", false, false, new string[0], new string[0]);
         FreshnessObservation wrongKey = new FreshnessObservation("k", false, true, new[] { "a.bundle" }, new string[0]);
         FreshnessObservation missing = new FreshnessObservation("k", true, true, new[] { "a.bundle" }, new[] { "a.bundle" });
+        FreshnessObservation partly = new FreshnessObservation("k", true, true, new[] { "a.bundle", "b.bundle" },
+                                                              new[] { "b.bundle" });
         FreshnessObservation good = new FreshnessObservation("k", true, true, new[] { "a.bundle" }, new string[0]);
         checks += Check(LifecycleState.Fresh(gone) == Freshness.Never && !gone.HaveAll,
                         "no cache directory is 'never' - there is no receipt to be stale");
         checks += Check(LifecycleState.Fresh(wrongKey) == Freshness.Stale && !wrongKey.HaveAll,
                         "a cache directory whose key does not match - or that has none at all - is STALE, " +
                         "not never (PatchCache.cs:84)");
-        checks += Check(LifecycleState.Fresh(missing) == Freshness.Stale && !missing.HaveAll,
-                        "a matching key over a declared copy that vanished is stale - the census is the " +
-                        "other half of the answer, Fresh() compares key text only");
+        checks += Check(LifecycleState.Fresh(missing) == Freshness.Never && !missing.HaveAll,
+                        "EVERY declared copy absent is 'never', not stale - design:199, and it is what " +
+                        "Verify's R28 sentence tells the author to do next");
+        checks += Check(LifecycleState.Fresh(partly) == Freshness.Stale && !partly.HaveAll,
+                        "SOME copies absent is stale - the census is the other half of the answer, " +
+                        "Fresh() compares key text only");
+        checks += Check(LifecycleState.Fresh(new FreshnessObservation("k", false, true, new string[0],
+                                                                     new string[0])) == Freshness.Stale,
+                        "a bundle-less project's empty census must not read as 'never' over a key that " +
+                        "does not match - Declared.Length != 0 guards it");
         checks += Check(LifecycleState.Fresh(good) == Freshness.Fresh && good.HaveAll,
                         "receipt matches and every declared copy is there - this is Route7's `haveAll`");
         return checks;

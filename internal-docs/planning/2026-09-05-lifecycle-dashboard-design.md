@@ -199,6 +199,10 @@ when a stage would otherwise have to read evidence that is not on disk.
 | Verify | requires the copies it reads to exist — the declared-copy census (`Route7.cs:310`–`:311`). Absent → R28 with `{prerequisite}` = `patched copies` / `never`; key mismatch → R28 `stale`. It requires **no session receipt** | after Apply; S1 → R30 | admitted — evidence is re-derived from disk, the key and live claims, which is what makes W15 possible | no applicable gate for a row → that gate VOID, §4.4's mandatory-proof rule decides the row | needs the mod enabled for the live-claim half; not enabled → live half VOID, disk half still reported |
 | Package | requires a payload on disk and an empty destination — both refused by `Package.Run` itself (`:78`), not re-checked here | only if the chain did not stop; a VOID Verify stops it (§5) | admitted | n/a | irrelevant |
 
+The `Run all` column above is **not** a second graph for the sequencer to re-implement: those conditions — Bake after
+Validate PASS, Apply after a Bake that did not FAIL, Verify after Apply and S1 → R30 — land as fields of `Admission`
+and arms of `Admit` (`LifecycleState.cs:102`) in Task 5's first commit, and the coordinator only reads them.
+
 ## 5. Progress, cancellation and the publication boundary
 One job, one CTS. The worker callback replaces a volatile immutable progress reference; completion publishes the result
 **before** clearing `running`; main `Tick` alone touches UI and log output. Copy `SlimPanel`'s three volatile fields + CTS

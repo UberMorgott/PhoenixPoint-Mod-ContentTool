@@ -103,10 +103,10 @@ namespace Morgott.ContentTool.Bake
                    "written - the video row(s) above are served live by ct_video";
         }
 
-        // ---- R: the refusals. R25-R36 are dashboard guards. R37 and R38 are meant to be PRODUCER guards,
-        // but NO PRODUCER EMITS THEM YET - design:377/:378 mark both NEW and Task 3 lands them:
-        // ProjectBake.cs:69 (the claim), ContentToolMain.cs:480 (the console verb) and Route7.cs:341 (the
-        // mod-manager checkbox) must call these when the guards land. Until then they are formatter-only.
+        // ---- R: the refusals. R25-R36 are dashboard guards. R37 and R38 are PRODUCER guards and Task 3
+        // landed them - design:377/:378. Their live call sites: R37 from ProjectBake.cs:104 (the bake takes
+        // the output claim) and Route7.cs:335 (the mod-manager checkbox takes it across bake+install);
+        // R38 from ProjectBake.cs:1992 (LiveReader, a copy this mod is serving right now).
         internal static string R25() { return "Lifecycle: select a ContentMods project."; }
 
         internal static string R26(string stage) { return "Lifecycle: busy running " + stage + "."; }

@@ -2001,7 +2001,13 @@ namespace Morgott.ContentTool.Bake
             catch (Exception) { return path.Replace('/', '\\').TrimEnd('\\'); }
         }
 
-        /// <summary>Distinct shipped bundles named by the project, in declaration order.</summary>
+        /// <summary>Distinct shipped bundles named by the project, in declaration order.
+        ///
+        /// CASE-BLIND, exactly like <c>Route7.Observe</c>'s census (Route7.cs:127) over the same rows: an
+        /// Ordinal dedup here let two spellings of one bundle survive, so Observe declared ONE target while
+        /// the patch ran a SECOND BundleBaker pass into the same file and `patchedBundles` (Patch, :172)
+        /// counted two. Not offline-linkable - this file carries UnityEngine, so ObjCodecTests cannot link
+        /// it; the build gate is the only check this arm gets.</summary>
         private static List<string> Bundles(ContentProject p)
         {
             List<string> names = new List<string>();
@@ -2011,7 +2017,9 @@ namespace Morgott.ContentTool.Bake
                 // registered live by ct_video. Without this they would enter the list as "" and the baker
                 // would be handed an empty shipped-bundle path.
                 if (!string.IsNullOrEmpty(r.video)) continue;
-                if (!names.Contains(r.bundle)) names.Add(r.bundle);
+                string bundle = r.bundle;
+                if (!names.Exists(n => string.Equals(n, bundle, StringComparison.OrdinalIgnoreCase)))
+                    names.Add(bundle);
             }
             return names;
         }
