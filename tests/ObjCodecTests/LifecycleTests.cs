@@ -211,9 +211,10 @@ internal static class LifecycleTests
 
         checks += Publication();
         checks += Ownership();
+        checks += Admission();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
-               "one file swap, one output owner";
+               "one file swap, one output owner, the admission table";
     }
 
     /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per
@@ -257,6 +258,103 @@ internal static class LifecycleTests
         OutputClaim.Release(mine);
         checks += Check(OutputClaim.Take(mine, out refusal), "Release is idempotent - a double release is not a leak");
         OutputClaim.Release(mine);
+        return checks;
+    }
+
+    /// <summary>G6, the admission table - design:194-:200 row by row, plus the one freshness observation
+    /// both `Route7.ApplyProject` and this reducer read.
+    ///
+    /// THE TWO ARMS THAT CATCH THE DESIGN'S OWN TRAP: Apply is NEVER R28 for a stale bake (ApplyProject
+    /// re-bakes it itself, Route7.cs:311-:351), and Verify IS refused for absent copies. Everything else
+    /// here is the governing rule - "a stage that can regenerate its own input is never refused for missing
+    /// evidence" - stated once per row.
+    ///
+    /// The reducer is FILESYSTEM-FREE by construction (plan finding 11): the PatchCache observation is taken
+    /// by the caller and passed IN, which is why this gate can link it at all.</summary>
+    private static int Admission()
+    {
+        int checks = 0;
+        string[] stages = { "Validate", "Bake", "Apply", "Verify", "Package" };
+
+        // A selected, resolvable project, nothing running, nothing wrong: every stage is admitted. This is
+        // also the ACTIVATION row - `Disabled` is reported by Validate as a field and blocks no stage - and
+        // the AFTER A RESTART column, where there is no session receipt at all (W15).
+        LifecycleState.Admission ok = new LifecycleState.Admission
+        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo", Copies = Freshness.Fresh };
+        bool all = true;
+        foreach (string s in stages) all &= LifecycleState.Admit(s, ok) == null;
+        checks += Check(all, "a resolvable selection admits every stage - activation never blocks, and a " +
+                             "restart with no session receipt admits all five (design:196-:200)");
+        checks += Check(LifecycleState.Admit("All", ok) == null,
+                        "'All' is admitted here and re-asked per stage as the sequencer reaches it (design:187)");
+
+        // Bake does not read Validate's receipts - it loads and validates the manifest itself.
+        LifecycleState.Admission never = new LifecycleState.Admission
+        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo", Copies = Freshness.Never };
+        checks += Check(LifecycleState.Admit("Validate", never) == null &&
+                        LifecycleState.Admit("Bake", never) == null,
+                        "a 'never' Validate is not R28 for Bake - design:197");
+        checks += Check(LifecycleState.Admit("Apply", never) == null &&
+                        LifecycleState.Admit("Apply", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, Copies = Freshness.Stale }) == null,
+                        "APPLY IS NEVER R28 FOR A STALE BAKE - the ApplyProject fallback owns it " +
+                        "(design:198, Route7.cs:311-:351)");
+        checks += Check(LifecycleState.Admit("Verify", never) ==
+                        StageText.R28("Verify", "patched copies", Freshness.Never) &&
+                        LifecycleState.Admit("Verify", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, Copies = Freshness.Stale }) ==
+                        StageText.R28("Verify", "patched copies", Freshness.Stale),
+                        "VERIFY IS REFUSED for absent or stale copies - design:199, it reads them");
+        checks += Check(LifecycleState.Admit("Package", never) == null,
+                        "Package's payload and empty-destination refusals are Package.Run's alone " +
+                        "(Package.cs:78) - never re-checked here (design:200)");
+
+        // Selection, and the three ways it fails: nothing selected, a folder that is gone, a name two
+        // projects answer to. The reducer never touches the filesystem, so the caller resolves it to one
+        // of three answers and this maps them.
+        checks += Check(LifecycleState.Admit("Bake", new LifecycleState.Admission()) == StageText.R25(),
+                        "no selection is R25, before anything else is asked");
+        checks += Check(LifecycleState.Admit("Bake", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Unavailable }) == StageText.R27(),
+                        "a deleted, moved or ambiguous project is R27 - refresh the list");
+        checks += Check(LifecycleState.Admit("Bake", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, RunningStage = "Bake" }) ==
+                        StageText.R26("Bake"),
+                        "a stage already running is R26, naming the stage that holds the seam");
+        checks += Check(LifecycleState.Admit("Ship", ok) == StageText.R33("Ship"),
+                        "the accepted tokens are exactly the five stages and All - anything else is R33");
+
+        // Apply's own three, all of them producer facts the caller supplies.
+        checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo",
+                          RetryHint = "'ct_route7 apply Demo'." }) ==
+                        StageText.R29("morgott.demo", "'ct_route7 apply Demo'."),
+                        "Route7's session Failed set suppresses Apply through R29 - the hint comes from " +
+                        "Route7.RetryHint, the only thing that knows which argument resolves back");
+        checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, LegacyDiskActive = true }) == StageText.R36() &&
+                        LifecycleState.Admit("Apply", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, WriteOutsideRoots = true }) == StageText.R34(),
+                        "legacy on-disk patching is R36 and a write outside the apply path or author " +
+                        "output is R34 - design:198");
+
+        // ---- The ONE freshness observation. Route7.cs:308-:310 computes `fresh && Directory.Exists(patched)`
+        // and then clears it for every declared copy that is absent; `HaveAll` IS that expression and
+        // ApplyProject now asks it here, so the panel and the checkbox cannot drift by a single term.
+        FreshnessObservation gone = new FreshnessObservation("k", false, false, new string[0], new string[0]);
+        FreshnessObservation wrongKey = new FreshnessObservation("k", false, true, new[] { "a.bundle" }, new string[0]);
+        FreshnessObservation missing = new FreshnessObservation("k", true, true, new[] { "a.bundle" }, new[] { "a.bundle" });
+        FreshnessObservation good = new FreshnessObservation("k", true, true, new[] { "a.bundle" }, new string[0]);
+        checks += Check(LifecycleState.Fresh(gone) == Freshness.Never && !gone.HaveAll,
+                        "no cache directory is 'never' - there is no receipt to be stale");
+        checks += Check(LifecycleState.Fresh(wrongKey) == Freshness.Stale && !wrongKey.HaveAll,
+                        "a cache directory whose key does not match - or that has none at all - is STALE, " +
+                        "not never (PatchCache.cs:84)");
+        checks += Check(LifecycleState.Fresh(missing) == Freshness.Stale && !missing.HaveAll,
+                        "a matching key over a declared copy that vanished is stale - the census is the " +
+                        "other half of the answer, Fresh() compares key text only");
+        checks += Check(LifecycleState.Fresh(good) == Freshness.Fresh && good.HaveAll,
+                        "receipt matches and every declared copy is there - this is Route7's `haveAll`");
         return checks;
     }
 

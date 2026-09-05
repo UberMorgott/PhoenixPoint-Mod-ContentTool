@@ -93,6 +93,58 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         private static readonly HashSet<string> Failed = new HashSet<string>(StringComparer.Ordinal);
 
+        /// <summary>READ-ONLY view of that set, for admission (R29). The set itself is never handed out and
+        /// there is no bypass: the only thing that clears an entry is <c>Failed.Remove(modId)</c> after a
+        /// successful Install (:405), exactly as before.</summary>
+        internal static bool IsFailed(string modId)
+        {
+            return !string.IsNullOrEmpty(modId) && Failed.Contains(modId);
+        }
+
+        /// <summary>
+        /// THE ONE FRESHNESS OBSERVATION, and the only place the filesystem is asked.
+        ///
+        /// <c>ApplyProject</c> computed this inline (`fresh &amp;&amp; Directory.Exists(patched)`, then the
+        /// declared-copy census) and the dashboard needs the same answer for the same folder; two copies of
+        /// it would be two answers, and the failure mode of the disagreeing one is a stale copy displayed as
+        /// current. So the census, the key and the `haveAll` verdict live in <see cref="FreshnessObservation"/>
+        /// and BOTH callers read it here.
+        ///
+        /// VIDEO ROWS ARE NOT DECLARED TARGETS - they carry no "bundle" at all (ContentProject.ParseReplace
+        /// exempts them), so taking one keyed the hash on ShippedBundlePath(null) and threw out of
+        /// Path.Combine(patched, null). Case-blind, like every other bundle-name comparison on this route:
+        /// Ordinal made a row whose casing changed list the same file twice and then fail the membership
+        /// test against the copy already on disk, so the apply ended in "nothing to install" permanently.
+        /// </summary>
+        internal static FreshnessObservation Observe(Morgott.ContentTool.Project.ContentProject project,
+                                                     string projectRoot)
+        {
+            string patched = ContentToolMain.PatchedDir(project.Id);
+            List<string> declared = new List<string>();
+            foreach (Morgott.ContentTool.Project.ShippedReplacement r in project.Replace)
+            {
+                if (!string.IsNullOrEmpty(r.video)) continue;
+                if (!declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) declared.Add(r.bundle);
+            }
+
+            // FRESHNESS, not existence (S3). "Every declared file is there" said nothing about WHICH
+            // version of the game, of this mod or of ContentTool's own bake format produced them, so a game
+            // update, a mod update or a format change kept serving last month's copy out of AppData
+            // forever, silently. The key covers all three; a folder written by a ContentTool that had no
+            // key is stale by definition, which is the right answer for it.
+            List<string> sources = new List<string>();
+            foreach (string b in declared) sources.Add(BakeSelfCheck.ShippedBundlePath(b));
+            string key = Project.PatchCache.Key(projectRoot, sources);
+
+            List<string> missing = new List<string>();
+            foreach (string b in declared)
+                if (!File.Exists(Path.Combine(patched, b))) missing.Add(b);
+
+            return new FreshnessObservation(key, Project.PatchCache.Fresh(patched, key),
+                                            Directory.Exists(patched),
+                                            declared.ToArray(), missing.ToArray());
+        }
+
         internal static string Toggle(string modDir, bool on)
         {
             if (string.IsNullOrEmpty(modDir) ||
@@ -154,7 +206,9 @@ namespace Morgott.ContentTool.Bake
         /// of a path (ContentToolMain.ProjectDir's note) and the folder name is not a sibling. Asked of
         /// ProjectDir itself rather than re-derived, so the hint cannot drift from the resolver.
         /// </summary>
-        private static string RetryHint(string modDir)
+        /// <summary>Internal, not private, since admission reads it: R29 needs the hint from the ONE thing
+        /// that knows which argument resolves back to that folder, never a re-derived guess.</summary>
+        internal static string RetryHint(string modDir)
         {
             string folder = Path.GetFileName(modDir.TrimEnd('\\', '/'));
             // NORMALISED on both sides. ProjectDir builds with Path.Combine (no trailing separator),
@@ -293,42 +347,15 @@ namespace Morgott.ContentTool.Bake
             string modId = project.Id;
             string patched = ContentToolMain.PatchedDir(modId);
 
-            // What the project DECLARES today, not whatever .bundle the folder still holds: a copy
-            // left by an older revision of the same project would otherwise be installed forever,
-            // and a target that has been retargeted away collides with whoever owns it now.
-            // CASE-BLIND, like every other bundle-name comparison on this route (BundleClaims.Find:224,
-            // the forBundle arms below, File.Exists itself on Windows). Ordinal made a row whose casing
-            // changed - "MyMod.Bundle" for "mymod.bundle" - list the same file twice here and, worse,
-            // fail the :311 membership test against the patched copy already on disk, so the apply
-            // ended in "REFUSED: nothing to install" permanently.
-            List<string> declared = new List<string>();
-            foreach (Morgott.ContentTool.Project.ShippedReplacement r in project.Replace)
+            // The declared targets and the freshness verdict are ONE observation now (Observe above), so
+            // the panel and this checkbox read the same `haveAll` rather than each computing it. The census
+            // and its case-blindness moved with it, comments and all.
+            FreshnessObservation seen = Observe(project, projectRoot);
+            List<string> declared = new List<string>(seen.Declared);
+            string key = seen.Key;
+            if (!seen.HaveAll)
             {
-                // A VIDEO row carries no "bundle" at all - the cutscenes are loose files behind
-                // Catalog.json and belong to ct_video (ContentProject.ParseReplace:429 exempts them
-                // from the bundle/asset requirement, so r.bundle is null). Taken here it keyed the
-                // freshness hash on ShippedBundlePath(null) and then threw ArgumentNullException out
-                // of Path.Combine(patched, null) below, killing the checkbox and Ship for any project
-                // with one video row. Mirrors ProjectBake.Bundles:2122, which already skips them.
-                if (!string.IsNullOrEmpty(r.video)) continue;
-                if (!declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) declared.Add(r.bundle);
-            }
-
-            // FRESHNESS, not existence (S3). "Every declared file is there" said nothing about
-            // WHICH version of the game, of this mod or of ContentTool's own bake format produced
-            // them, so a game update, a mod update or a format change kept serving last month's copy
-            // out of AppData forever, silently. The key covers all three; a folder written by the
-            // ContentTool that had no key is stale by definition, which is the right answer for it.
-            List<string> sources = new List<string>();
-            foreach (string b in declared) sources.Add(BakeSelfCheck.ShippedBundlePath(b));
-            string key = Project.PatchCache.Key(projectRoot, sources);
-            bool fresh = Project.PatchCache.Fresh(patched, key);
-            bool haveAll = fresh && Directory.Exists(patched);
-            foreach (string b in declared)
-                if (!File.Exists(Path.Combine(patched, b))) haveAll = false;
-            if (!haveAll)
-            {
-                pre.AppendLine(Directory.Exists(patched) && !fresh
+                pre.AppendLine(seen.CacheDirExists && !seen.KeyMatches
                     ? "the patched copies in " + patched + " were built from a different project, game " +
                       "build or ContentTool format - re-baking them"
                     : "no patched copies yet - baking them from YOUR installation");
