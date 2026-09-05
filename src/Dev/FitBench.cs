@@ -247,7 +247,10 @@ namespace Morgott.ContentTool.Dev
         /// <summary>The Model Doctor tab. One session per bench visit; <see cref="Close"/> gives its
         /// meshes back and puts the shipped ones on again.</summary>
         private static readonly ModelDoctor doctor = new ModelDoctor();
-        private static bool doctorTab;
+        /// <summary>Which of the three columns is drawn. ONE int, not two bools: two flags can both be
+        /// true, and "the Doctor and the Lifecycle at once" is a layout stack nobody balances.</summary>
+        private const int TabFit = 0, TabDoctor = 1, TabLifecycle = 2;
+        private static int tab;
         /// <summary>The file utilities that sit under the Doctor's Advanced toggle (design §6). It
         /// owns no Unity object, so unlike <see cref="doctor"/> it survives a close untouched apart
         /// from the run <see cref="Close"/> cancels.</summary>
@@ -1131,7 +1134,7 @@ namespace Morgott.ContentTool.Dev
             // renderers are still the ones on screen. It is a Step like the rest - a throw in here is
             // reported and retried by a second close, not swallowed, and NOT placed at the end where
             // the partial-failure return above would skip it.
-            Step(failed, "the Model Doctor's preview meshes", () => { doctor.Dispose(); doctorTab = false; });
+            Step(failed, "the Model Doctor's preview meshes", () => { doctor.Dispose(); tab = TabFit; });
             // THE BAY'S OWN SOLDIER. AFTER the Doctor has given the shipped meshes back - restoring
             // first would rebuild the rig out from under the renderers it still has to un-swap - and
             // BEFORE both FitAnim.Release, which plays a default state on the animator this restore
@@ -1669,12 +1672,25 @@ namespace Morgott.ContentTool.Dev
             // DEAD WHILE THE DOCTOR HAS A PRESS ARMED. Its two-frame gate closes on a PAINT of its own
             // SHIP label, and leaving the tab stops Draw being called at all while Tick keeps running
             // below - so the press would sit armed and fire whenever the author came back.
-            GUI.enabled = !doctor.ShipPending;
-            if (GUILayout.Toggle(!doctorTab, " FIT", GUILayout.Width(70f))) doctorTab = false;
-            if (GUILayout.Toggle(doctorTab, " MODEL DOCTOR", GUILayout.Width(130f))) doctorTab = true;
+            // DEAD WHILE A LIFECYCLE RUN OWNS THE JOB, for the second half of the same reason: a blocking
+            // main segment waits for THIS tab to be open and painted, so walking away from it mid-run parks
+            // the segment behind a panel that is no longer being drawn.
+            GUI.enabled = !doctor.ShipPending && !LifecycleDashboard.Busy;
+            if (GUILayout.Toggle(tab == TabFit, " FIT", GUILayout.Width(70f))) tab = TabFit;
+            if (GUILayout.Toggle(tab == TabDoctor, " MODEL DOCTOR", GUILayout.Width(130f))) tab = TabDoctor;
+            if (GUILayout.Toggle(tab == TabLifecycle, " LIFECYCLE", GUILayout.Width(100f))) tab = TabLifecycle;
             GUI.enabled = true;
             GUILayout.EndHorizontal();
-            if (doctorTab)
+            if (tab == TabLifecycle)
+            {
+                LifecycleDashboard.Draw();
+                GUILayout.EndScrollView();
+                GUILayout.EndArea();
+                if (leaving) message = Close();
+                else if (resetting) message = ResetView();
+                return;
+            }
+            if (tab == TabDoctor)
             {
                 doctor.Draw(BenchList.ContentWidth(w));
                 // The SAME toggle the fit side uses, drawn again here because that one lives on the
@@ -2114,7 +2130,7 @@ namespace Morgott.ContentTool.Dev
                 //
                 // Its OWN try, like the Doctor drain's at :2133: a lifecycle bug must not set inputBroken and
                 // take the bench's mouse and hotkey down with it for the rest of the session.
-                try { LifecycleDashboard.Pump(open); }
+                try { LifecycleDashboard.Pump(open && tab == TabLifecycle); }
                 catch (Exception ex)
                 {
                     // `message` is drawn only while the bench is OPEN, and the pump runs closed too - the
@@ -2329,12 +2345,12 @@ namespace Morgott.ContentTool.Dev
                     // areas do not nest.
                     // The Doctor goes with it ONLY on its own tab: the strip's header row carries §6's
                     // [Skeleton] toggle there, and nothing at all on FIT.
-                    FitAnim.Draw(PanelWidth, doctorTab ? doctor : null);
+                    FitAnim.Draw(PanelWidth, tab == TabDoctor ? doctor : null);
                     // AFTER the strip, so the strip's own pixels are already the strip's, and after the
                     // panel, so the inspector it draws sits on top of the scene rather than under it.
                     // It takes no hotControl: a joint pick is a click, and a bare left press is
                     // ViewGesture.None anyway, so there is nothing for the orbit to stand down from.
-                    if (doctorTab)
+                    if (tab == TabDoctor)
                         doctor.Overlay(cam, PanelWidth,
                                        BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
                     // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.

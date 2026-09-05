@@ -4,6 +4,7 @@ using System.IO;
 using Morgott.ContentTool.Bake;
 using Morgott.ContentTool.Import;
 using Morgott.ContentTool.Project;
+using UnityEngine;
 
 namespace Morgott.ContentTool.Dev
 {
@@ -94,7 +95,9 @@ namespace Morgott.ContentTool.Dev
             try
             {
                 string refusal = LifecycleState.Admit(stage, Refresh(stage == "All"));
-                if (refusal != null) return Started(false, 0, refusal);
+                // THE PANEL'S LINE, taken here because a button press ends in this return too: an admission
+                // refusal that only went back down the wire left the panel silent about the press.
+                if (refusal != null) { message = refusal; return Started(false, 0, refusal); }
 
                 if (stage == "All")
                 {
@@ -360,13 +363,15 @@ namespace Morgott.ContentTool.Dev
         /// closed-window policy allows it, then harvests one completed run - and, inside `Run all`, asks the
         /// sequencer for the next stage.
         ///
-        /// <paramref name="panelReady"/> is "the panel is open and has painted". Until Task 6 draws the tab
-        /// the bench's own openness is the honest answer to that.
+        /// <paramref name="panelReady"/> is the bench's half of "the panel is open and has painted" - the
+        /// Lifecycle tab is the selected one. <see cref="Painted"/> is the other half, and it is ANDed HERE
+        /// rather than at the call site so the paint gate cannot be forgotten by a second caller.
         /// </summary>
         internal static void Pump(bool panelReady)
         {
+            Drain();
             LifecycleJob.PumpRegistered = true;
-            LifecycleJob.Tick(panelReady);
+            LifecycleJob.Tick(panelReady && Painted);
 
             LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
             if (now.Busy || now.RunId == 0 || now.RunId == harvested || now.RunId != dispatched) return;
@@ -401,9 +406,203 @@ namespace Morgott.ContentTool.Dev
             Dispatch(next);
         }
 
+        // ---- the panel ---------------------------------------------------------------------------------
+
+        /// <summary>The canonical project roots the selector offers, and the label each one shows.</summary>
+        private static string[] roots = new string[0], labels = new string[0];
+        /// <summary>Index into <see cref="roots"/> of the bound project, or -1: NOT a second selection.
+        /// `root` is the binding; this is only where the arrows currently stand, and a `Refresh` that no
+        /// longer finds the bound root leaves it at -1 rather than sliding the selection onto a neighbour.</summary>
+        private static int chosen = -1;
+        private static bool rescan = true;
+
+        /// <summary>The panel's transient line - a refusal, a queued stage, a cancel note. NEVER a verdict:
+        /// those live in the rows, and only a producer writes one.</summary>
+        private static string message;
+
+        /// <summary>A press, taken during a layout pass and acted on by <see cref="Drain"/> one frame later.
+        /// Same discipline as the Doctor's and the slim panel's intent queues: starting a producer between
+        /// IMGUI's Layout and Repaint passes edits the very state the Repaint is about to lay out.</summary>
+        private static string intent;
+        private static int select = int.MinValue;
+
+        private static UnityEngine.Vector2 tailScroll;
+        private static int paintedFrame = -2;
+
+        /// <summary>The panel has PAINTED within a frame of now - what a blocking main segment waits for
+        /// (design:323-:333), and the same two-frame shape as SHIP's arming gate (ModelDoctor.cs:443).</summary>
+        private static bool Painted { get { return UnityEngine.Time.frameCount - paintedFrame <= 1; } }
+
+        /// <summary>
+        /// MAIN, from FitBench's Lifecycle tab. It DRAWS and it records presses; it decides nothing. Every
+        /// line is a producer's string, a <see cref="StageText"/> line or a placeholder, and the control
+        /// sequence is CONSTANT - five rows, both buttons and the tail exist before anything has ever run,
+        /// disabled rather than absent, so nothing about the layout moves when a result arrives.
+        /// </summary>
+        internal static void Draw()
+        {
+            if (UnityEngine.Event.current.type == UnityEngine.EventType.Repaint)
+                paintedFrame = UnityEngine.Time.frameCount;
+
+            LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
+            bool owned = now.Busy || Pending(now);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Project", GUILayout.Width(60f));
+            GUI.enabled = !owned && roots.Length > 0;
+            if (GUILayout.Button("<", GUILayout.Width(26f))) select = chosen - 1;
+            GUI.enabled = true;
+            GUILayout.Label(chosen >= 0 && chosen < labels.Length ? labels[chosen] : "(none)");
+            GUI.enabled = !owned && roots.Length > 0;
+            if (GUILayout.Button(">", GUILayout.Width(26f))) select = chosen + 1;
+            GUI.enabled = !owned;
+            if (GUILayout.Button("Refresh", GUILayout.Width(80f))) rescan = true;
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label("Session  " + (now.Busy
+                ? now.CancelRequested ? StageText.CancelRequested(now.Stage) : StageText.Running(now.Stage)
+                : "Ready."));
+
+            foreach (LifecycleView.Row r in view.Rows)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(r.Stage, GUILayout.Width(70f));
+                GUILayout.Label(LifecycleView.Word(r.Freshness), GUILayout.Width(56f));
+                GUILayout.Label(LifecycleView.Word(r.Outcome), GUILayout.Width(48f));
+                GUILayout.Label(Dash(r.Installation), GUILayout.Width(150f));
+                GUI.enabled = !owned;
+                if (GUILayout.Button("Run", GUILayout.Width(60f))) intent = r.Stage;
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
+                // The row's OWN verdict, never the tail's last line: the two answer different questions and
+                // reading one for the other is how a panel invents a verdict.
+                GUILayout.Label("  " + Dash(r.Verdict));
+            }
+
+            SlimProgress p = now.Progress;
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Progress", GUILayout.Width(60f));
+            float done = p == null || p.Total <= 0 ? 0f : (float)p.Done / p.Total;
+            // A FIXED TRACK with the fill inside it, so the phase label beside it does not walk left and
+            // right as the bar grows. SlimPanel.cs:270's bar, unchanged.
+            GUILayout.BeginHorizontal(GUILayout.Width(240f));
+            GUILayout.Box("", GUILayout.Width(Mathf.Max(1f, 240f * done)), GUILayout.Height(6f));
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+            GUILayout.Label(p == null ? "—" : p.Stage + " " + p.Done + "/" + p.Total);
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUI.enabled = !owned;
+            if (GUILayout.Button("Run all", GUILayout.Width(80f))) intent = "All";
+            // A CANCEL IS A REQUEST, and only until one is outstanding. `owned && !busy` is the producer's
+            // publication - it has stated its verdict and the pump has not served it yet - which is exactly
+            // the window in which there is nothing left to interrupt.
+            GUI.enabled = now.Busy && !now.CancelRequested;
+            if (GUILayout.Button("Cancel", GUILayout.Width(80f))) intent = "Cancel";
+            GUI.enabled = true;
+            GUILayout.Label(Dash(owned && !now.Busy ? StageText.CancelUnavailable(now.Stage) : message));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label("Log tail");
+            tailScroll = GUILayout.BeginScrollView(tailScroll, GUILayout.Height(120f));
+            GUILayout.Label(string.IsNullOrEmpty(log) ? "—" : StageResult.Tail(log, 12));
+            GUILayout.EndScrollView();
+        }
+
+        private static string Dash(string s) { return string.IsNullOrEmpty(s) ? "—" : s; }
+
+        /// <summary>MAIN, from the pump: the enumeration and every press happen HERE, outside drawing.</summary>
+        private static void Drain()
+        {
+            if (rescan) { rescan = false; Scan(); }
+            int pick = select; select = int.MinValue;
+            string want = intent; intent = null;
+            // CANCEL IS THE ONE PRESS THAT BELONGS TO A RUNNING JOB, so it is answered before the busy
+            // guard below rather than dropped by it.
+            if (want == "Cancel") { Cancel(); return; }
+            if (Busy) return;
+            if (pick != int.MinValue) Choose(pick);
+            if (want != null) Run(want);
+        }
+
+        /// <summary>
+        /// Every root that CARRIES a manifest: ContentTool's own children, the siblings under Mods\ and the
+        /// mod manager's roster (`ContentMods.Candidates`, the one enumerator the routes already share),
+        /// canonicalized and deduped.
+        ///
+        /// Deliberately NOT `ContentMods.Enabled` and NOT `ContentToolMain.LiveProjectIds`: both answer
+        /// "what has the player switched on", and an author's DISABLED project is exactly what this picker
+        /// exists to reach. `LoadDeclared` when one is chosen, never the source-importing `Load` - listing
+        /// projects must not decode anybody's textures.
+        /// </summary>
+        private static void Scan()
+        {
+            string mods = ContentToolMain.ModDir;
+            List<string> found = new List<string>();
+            try
+            {
+                if (!string.IsNullOrEmpty(mods) && Directory.Exists(mods))
+                    foreach (string dir in Directory.GetDirectories(mods)) Offer(found, dir);
+                foreach (string dir in ContentMods.Candidates(mods, ModRoster.Build())) Offer(found, dir);
+            }
+            catch (Exception ex) { message = "lifecycle: " + ex.GetType().Name + ": " + ex.Message; }
+            found.Sort(StringComparer.OrdinalIgnoreCase);
+
+            roots = found.ToArray();
+            labels = new string[roots.Length];
+            for (int i = 0; i < roots.Length; i++)
+            {
+                string name = Path.GetFileName(roots[i]);
+                bool duplicate = false;
+                for (int j = 0; j < roots.Length && !duplicate; j++)
+                    duplicate = j != i &&
+                        string.Equals(Path.GetFileName(roots[j]), name, StringComparison.OrdinalIgnoreCase);
+                // TWO PROJECTS MAY ANSWER TO ONE NAME - a sibling mod and one of our own subfolders - and
+                // the picker has to say WHICH root it bound, which is the ambiguity `Open` refuses outright.
+                labels[i] = duplicate ? name + "  [" + roots[i] + "]" : name;
+            }
+            chosen = -1;
+            for (int i = 0; i < roots.Length; i++) if (Under(root, roots[i])) { chosen = i; break; }
+        }
+
+        private static void Offer(List<string> found, string dir)
+        {
+            try
+            {
+                if (!File.Exists(Path.Combine(dir, ContentMods.Manifest))) return;
+                string full = Norm(dir);
+                foreach (string had in found)
+                    if (had.Equals(full, StringComparison.OrdinalIgnoreCase)) return;
+                found.Add(full);
+            }
+            // A roster entry pointing at a path this process cannot resolve is one project missing from the
+            // list, never a picker that throws out of the pump.
+            catch (Exception) { }
+        }
+
+        /// <summary>Binds the ABSOLUTE root, which is what Apply is handed - never a name rebuilt from the
+        /// label. A manifest that will not load leaves the previous binding alone and says why.</summary>
+        private static void Choose(int i)
+        {
+            if (roots.Length == 0) return;
+            i = ((i % roots.Length) + roots.Length) % roots.Length;
+            try
+            {
+                string modId = ContentProject.LoadDeclared(roots[i]).Id;
+                chosen = i;
+                Bind(roots[i], modId);
+                message = null;
+            }
+            catch (Exception ex) { message = roots[i] + ": " + ex.Message; }
+        }
+
         // ---- the plumbing ------------------------------------------------------------------------------
 
-        private static bool Busy
+        /// <summary>Internal because the BENCH asks it too: a tab change while a run owns the job is refused
+        /// at FitBench.cs's toggle row, and asking there means asking this, not a second idea of busy.</summary>
+        internal static bool Busy
         {
             get { LifecycleRun.Snapshot now = LifecycleJob.Run.Latest; return now.Busy || Pending(now); }
         }
@@ -503,6 +702,7 @@ namespace Morgott.ContentTool.Dev
                 // that was refused never entered.
                 if (row != null) { row.Verdict = refusal; row.Outcome = GateOutcome.Void; }
                 log = refusal;
+                message = refusal;
                 // null eligibility, explicitly: a stage that was REFUSED never asked the mod manager.
                 if (chain != null) chain.Report(ctx, new LifecycleState.StageReport(
                     GateOutcome.Void, refusal, BakeDisposition.Refused, false, true, null));
@@ -510,6 +710,7 @@ namespace Morgott.ContentTool.Dev
             }
             dispatched = LifecycleJob.Run.Latest.RunId;
             if (row != null) row.Starts++;
+            message = StageText.Queued(stage);
             return Started(true, dispatched, null);
         }
 

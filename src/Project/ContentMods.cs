@@ -113,7 +113,7 @@ namespace Morgott.ContentTool.Project
         /// It runs first only so a local mod keeps the on-disk spelling of its own name in the log
         /// (roster keys are normalised lower-case, see <see cref="ModGate.Key"/>).
         /// </summary>
-        private static IEnumerable<string> Candidates(string modDir, IDictionary<string, bool> roster)
+        internal static IEnumerable<string> Candidates(string modDir, IDictionary<string, bool> roster)
         {
             DirectoryInfo mods = string.IsNullOrEmpty(modDir) ? null : Directory.GetParent(modDir);
             if (mods != null && mods.Exists)

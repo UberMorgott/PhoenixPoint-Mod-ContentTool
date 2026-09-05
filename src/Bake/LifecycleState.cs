@@ -367,11 +367,13 @@ namespace Morgott.ContentTool.Bake
         }
 
         private static int Len(string s) { return s == null ? 0 : s.Length; }
-        private static string Word(Freshness f)
+        /// <summary>The wire's word for a column, and the PANEL's too - `internal` so the drawing shows the
+        /// same "stale" the poll does. A second spelling in the UI is a row that disagrees with the RPC.</summary>
+        internal static string Word(Freshness f)
         {
             return f == Freshness.Never ? "never" : f == Freshness.Stale ? "stale" : "fresh";
         }
-        private static string Word(GateOutcome o)
+        internal static string Word(GateOutcome o)
         {
             return o == GateOutcome.Pass ? "pass" : o == GateOutcome.Fail ? "fail"
                  : o == GateOutcome.Void ? "void" : "none";
