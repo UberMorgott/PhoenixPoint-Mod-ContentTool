@@ -121,19 +121,26 @@ staged bake core, with the continuation returning to main before installation; r
 `fresh` means this receipt's key and current claims still match — **residency alone never proves which revision is
 visible**. Sample residency before install (`:397`) and keep the existing precedence. For multiple targets: install once,
 collect per-target structured dispositions inside the existing loop (`BundleLive.cs:60`) and aggregate conservatively.
+That needs an OWNER, which v2 left unassigned: `Install` `:55` builds one line per target and discards the list at `:66`,
+and `ApplyProject(name, null, out how)` leaves `how` at its initial `Refused` (`:271`). So add a minimal structured
+overload to each — `BundleLive.Install(..., out IList<TargetInstall>)` and the matching `Route7.ApplyProject` — keeping
+both existing wrappers untouched.
 Never call `ApplyProject` repeatedly, and never let a null's default `Refused` stand as the project verdict. Mixed results
 keep each refusal and each S1; no blanket LIVE.
 
 ### 4.4 Verify
-There is no `ct_verify` in `src` or `tools`. A shared read-back helper is **extracted** from `Patch` (the block
-`ProjectBake.cs:1661`–`:1930`) and called by BOTH bake and Verify: it receives the captured project expectations, shipped
-paths and existing copy paths. It never rewrites and never installs. Gates: P1 `:1665`, P3 `:1677`, P4 `:1694`, P4-bytes
-`:1722` (VOID on unreadable data), P5 `:1740`, P6 with VOID arms `:1832`/`:1917` and the counted comparison `:1924` — v1
-cited `:1924` as a VOID arm, which is wrong — plus the applicable clip gates through the same extraction, Unity sampling
-on main.
+There is no `ct_verify` in `src` or `tools`. A shared read-back helper is **extracted** from `Patch` and called by BOTH
+bake and Verify: it receives the captured project expectations, shipped paths and existing copy paths. It never rewrites
+and never installs. **The extraction is not one range** (plan review 2026-09-05, finding 6): `Patch` ENDS at `:1800`, so
+`:1661`–`:1930` spans a method boundary. What moves is the gate body `:1656`–`:1768` plus `Live` `:1821` and `ByName`
+`:1827`–`:1952`; `Check` `:2251`, `PixelsIn` `:2228`, `SamePixels` `:2241`, `Skeleton` `:2161`, `ParseClipEdit` `:1967`,
+`Curves` `:1997` and `SampleClip` `:2052` stay in `ProjectBake` and only become `internal` (`Check` alone has 25+ other
+callers there). Gates: P1 `:1665`, P3 `:1677`, P4 `:1695`, P4-bytes `:1722` (VOID on unreadable data), P5 `:1752`, P6
+with **seven** VOID arms `:1832`/`:1849`/`:1862`/`:1872`/`:1892`/`:1920`/`:1939` and the counted comparison `:1946` —
+plus the applicable clip gates through the same extraction, Unity sampling on main.
 
 **The carrier is structured, never parsed text** (finding 2). A failure count plus a log cannot tell PASS from all-VOID:
-every VOID arm returns `0` exactly like a pass (`:1835`, `:1844`, `:1851`, `:1872`, `:1901`, `:1920`). So the helper
+every VOID arm returns `0` exactly like a pass (`:1835`, `:1852`, `:1866`, `:1873`, `:1894`, `:1923`, `:1942`). So the helper
 returns a small struct — no interface, no builder, one type with one producer:
 
 - `Failed`, `Passed`, `Void` counts;
@@ -147,7 +154,7 @@ failing the row.
 
 **Mandatory proofs for S6** — for every declared non-video replacement row, in its own applicable subset:
 - a mesh row: `P4` **and** `P4-bytes` non-VOID (`P5`/`P6` may be VOID — a skinless or same-order source has nothing to
-  measure, `:1832`/`:1917`);
+  measure, `:1832`/`:1939`);
 - a texture row: `P1` **and** `P1-ctl-shipped` non-VOID;
 - a material row: `P3` non-VOID;
 - plus the live-claim census of §7 S6.
@@ -241,9 +248,11 @@ today leaves output nobody can classify. Proposed bake steps:
 its **own** unique temp (`:19`) and cannot publish the temp B2 already streamed — so B5 does not "call `AtomicFile.Write`"
 for bundles. Extend the existing class with one operation, `Publish(tempPath, path, backupPath)`, holding the swap that
 `Write` already performs: `File.Replace(tmp, path, backupPath)` when the destination exists (`:31`), `File.Move` when it
-does not (`:32`), and the same `finally` that deletes an orphaned temp (`:39`). `Write` is then two lines — write the
-bytes to its temp, call `Publish` — so there is exactly ONE swap in the codebase and the byte overload keeps its current
-behaviour, flush included (`:29`). Where a file must be created and never overwritten, the absent-only `File.Move` arm is
+does not (`:32`), with its OWN orphan-temp `finally`. `Write` is then two lines — write the bytes to its temp, call
+`Publish` — **while KEEPING its existing outer cleanup `:34`–`:40`**: that guard also covers a failed stream open, write
+or flush, none of which ever reach `Publish`, so moving it wholesale would strand `Write`'s temp on exactly the paths it
+protects today. One swap, two temps, each cleaned by its own owner. The byte overload keeps its current behaviour, flush
+included (`:29`). `Publish` returns `void`. Where a file must be created and never overwritten, the absent-only `File.Move` arm is
 used directly, as the wizard slice already requires. The key itself is a string and keeps using `WriteText` `:45`.
 
 Cancelling before B5 deletes only owned temps and preserves the previous outputs. Once B5 begins it finishes and reports
@@ -253,11 +262,12 @@ publication ordering, **not** an atomic multi-file transaction and not a crash r
 
 Apply follows the same shape: **A1** complete and revalidate the disk work; **A2** final cancel check; **A3** the
 main-thread `Install` loop, with no cancellation and no yields; **A4** publish the dispositions, then release the claim.
-A late cancel stops later stages, never a completed redirect. No automatic `Uninstall` — it restores routing and CRC but
-loaded assets survive (`BundleLive.cs:138`).
+A late cancel stops later stages, never a completed redirect. No automatic `Uninstall` (`BundleLive.cs:127`) — it
+restores routing and CRC but loaded assets survive (`:138`–`:141`).
 
 **The live-reader refusal is general, not a stale-bake special case.** ANY replacement of a claimed file is refused while
-this mod's claims (`BundleClaims.Held`, queried per target, not `Holds`' any-claim answer) or resident copies could be
+this mod's claims (**`BundleClaims.Find(bundleFile)` `:221`, comparing `c.Mod` and `c.Path` — `Held` `:182` is a private
+`List<BundleClaim>` and is not a per-target query**; not `Holds`' any-claim answer) or resident copies could be
 consuming it — a stale bake, a fresh bake, an explicitly forced same-key Bake, and a repair bake alike. The refusal is
 R38 and the answer is a restart boundary, never rewriting beneath live readers.
 
@@ -416,7 +426,7 @@ Run: `dotnet run --project tests\ObjCodecTests -c Release` → exit 0, the curre
 | G4 cancel | Cancel before dispatch; while the worker is at a cooperative boundary; after successful publication; repeated Cancel. One terminal result, busy retained until worker completion, no next-stage dispatch, no false rollback, no late result overwriting a newer run |
 | G5 sequence | All succeeds; each stage fails in turn; the S1 barrier; a prerequisite refusal; cancellation. Invocation order and count, first stop position, earlier receipts unchanged; Package is not entered after `Run all` stops at Verify |
 | G6 admission | The §4.6 table row by row: standalone / `Run all` / post-restart / unsupported-route / activation for each stage, plus missing, deleted and duplicate project names; key changed before commit; Failed suppression; nonempty package output; a write routed outside the allowed roots. Apply is **not** refused for a stale bake (the fallback owns it); Verify is refused for absent copies. Rejection happens before the write callback is entered |
-| G7 publication faults | **Real files in a temp directory**, plain `System.IO`, no Unity — the reducer proves none of this. Key invalidation fails → nothing published, previous outputs intact; a failure between two copy replacements → the completed files are complete, the key is absent, the row is FAIL and Apply is refused until a repair bake; the key write itself fails → same; cancel requested at B4 → temps deleted, previous outputs byte-identical; cancel requested inside B5 → publication completes and the run reports completion; a competing admission (R37) while a claim is held → refused immediately, the holder's bytes untouched; the claim is released on success, on refusal and on exception. Assert **actual bytes**, key presence/content, and ownership release in every arm |
+| G7 publication faults | **Real files in a temp directory**, plain `System.IO`, no Unity — the reducer proves none of this. **Driven through the production publication file** (plan review, blocker 2): the B5 ordering lives in a UnityEngine-free `src/Bake/Publication.cs` that is LINKED into `ObjCodecTests` beside `Package.cs`/`Manifest.cs`, and faults are injected into it. A gate that reimplements invalidate/swap/key stays green while the real bake stamps the key first, and the already-linked `AtomicFile.Publish` only covers ONE file, not the ordering. Key invalidation fails → nothing published, previous outputs intact; a failure between two copy replacements → the completed files are complete, the key is absent, the row is FAIL and Apply is refused until a repair bake; the key write itself fails → same; cancel requested at B4 → temps deleted, previous outputs byte-identical; cancel requested inside B5 → publication completes and the run reports completion; a competing admission (R37) while a claim is held → refused immediately, the holder's bytes untouched; the claim is released on success, on refusal and on exception. Assert **actual bytes**, key presence/content, and ownership release in every arm |
 
 ### 8.2 In-game, PPCLI on `D:\PP-Instance2`
 `connect state` proves readiness, not installation identity (`E:/DEV/PhoenixPoint/PPCLI/src/PPBridgeMain.cs:205`–`:212`).
@@ -449,8 +459,20 @@ namespace follows `src/Dev/ModelDoctor.cs:13` and `src/Dev/FitBench.cs:28`. Ever
 `Run`/`Acceptance` denotes **bounded polling until that run reports `busy=false`**; a timeout is a failed row, not a pass.
 Capture queued/running screenshots before waiting where specified.
 
+**The seam's transport is fixed by PPCLI, not chosen** (plan review, blocker 3). `Reflect.Project` `:1080` never
+enumerates or walks properties: a non-trivial reference returns `{h, type}` and a collection a handle plus a count, with
+only primitives, strings, enums and a ≤4-primitive-field value type inlined (`:1150`–`:1156`). A snapshot object would
+therefore arrive as one unusable handle. So **every seam method is `public static` and returns a bounded JSON `string`**
+— static because `Invoke` filters to statics when no target is given (`:479`–`:480`), bounded because `Protocol.Clip`
+truncates at 2000 chars (`PPCLI/src/Protocol.cs:56`, `:256`) into JSON that will not parse. `Snapshot` is consequently
+**sectioned**: `Snapshot("")` is a compact poll header (ids, `busy`, `stage`, cancel flags, `claimHeld`, `barrierArmed`,
+`barrierRunId`, and per row only stage/freshness/outcome), and `Snapshot("<stage>")` / `("log")` / `("s1s2")` fetch one
+verbatim payload at a time. `Run` returns the accepted `runId` and every poll matches it, so a poll cannot read a newer
+run's state. The mod composes these with the existing `Morgott.ContentTool.Import.JsonWriter` (`src/Import/Json.cs`), so
+no JSON dependency is added.
+
 The public static seam on the dashboard class is `Open(string projectName)`, `Run(string stage)`, `Cancel()`,
-`Snapshot()`. `Open("")` clears the selection explicitly and is never passed to the existing name resolver, whose
+`Snapshot(string section)`, `Acceptance(string scenario)` — all returning `string`. `Open("")` clears the selection explicitly and is never passed to the existing name resolver, whose
 empty-name default is Sample (`ContentMods.cs:153`–`:154`); a unique name resolves to a canonical root before
 `LoadDeclared`, which takes a root holding `ppcontent.json`, not a name (`ContentProject.cs:289`–`:296`); an ambiguous name
 is rejected. `Run` enqueues the same intent as the button, returns promptly and never performs a synchronous Apply from the
@@ -464,13 +486,16 @@ into a sleep. `Snapshot` is observational and cannot validate, apply or clear an
 Test-only `Acceptance(string scenario)` lives on the same class and refuses any game root but the test instance. Scenarios
 prepare isolated named fixtures, arm narrow gates and call the public seam and the real producers — never installing a
 fabricated PASS/FAIL snapshot and never setting `Failed`, residency, `Holds` or verdict fields directly. `prepare` creates
-only `DashboardValid` and `DashboardPatchFail`; `resident` prepares `DashboardResident` and actually loads its target
+`DashboardValid`, `DashboardPatchFail` and `DashboardAuthor` (the never-applied fixture the baking rows use, see
+**Fixture isolation** below); `resident` prepares `DashboardResident` and actually loads its target
 bundle; `cancel-bake` arms the worker barrier at the first supported cancellation boundary; `change-source` changes only
 the selected fixture; `ship` drives the real Doctor fixture through its existing selection and `Enqueue` path;
 `enable-resident` invokes the actual mod-manager enable callback after a restart. `arm-cancel-bake` **arms** the worker
-barrier for the next run and returns immediately, publishing its armed state and run id through `Snapshot`; it releases
-the barrier on the same `Cancel()` the UI calls and lets normal worker completion publish VOID — no sleep-based race, no
-`Thread.Abort`, no synthetic success, no detached worker.
+barrier for the next run and returns immediately, publishing its armed state and run id through `Snapshot` — and
+`barrierArmed` is published only once a worker is ACTUALLY parked, never on arming alone, or W13's first poll passes
+before the run exists. It parks a **worker** and never the main-thread RPC pump, which would make `Snapshot`
+unanswerable. It releases the barrier on the same `Cancel()` the UI calls and lets normal worker completion publish VOID
+— no sleep-based race, no `Thread.Abort`, no synthetic success, no detached worker.
 
 W8 onward continues the wizard's W1–W7 baseline; W5 failed-bake isolation, W6 restart/enable proof and W7 owner visual
 inspection are retained (`2026-09-02-replace-mesh-wizard-design.md:431`–`:433`). New screenshots use an enabled upscaler as
@@ -483,18 +508,27 @@ the owner requires; no rendering-setting workaround is part of this slice.
 | W10 happy chain | `D 'Open' @('DashboardValid')`; `D 'Run' @('All')`; `Shot 'W10-running'`; `D 'Snapshot'`; `Shot 'W10'` | Clean process, target not resident: five rows PASS, Apply S2, exact producer strings, Package writes a new external path. A resident target makes this run W12 instead — it cannot count as W10 |
 | W11 first failure | `D 'Open' @('DashboardPatchFail')`; `D 'Run' @('All')`; `D 'Snapshot'`; `Shot 'W11'` | Fixture passes manifest validation but causes a real bake patch-gate failure. Bake FAIL; Apply/Verify/Package start counts stay zero for this run; prior receipts retained |
 | W12 restart required | `D 'Acceptance' @('resident')`; `D 'Open' @('DashboardResident')`; `D 'Run' @('All')`; `D 'Snapshot'`; `Shot 'W12'` | A really resident bundle: Apply PASS/S1 with the exact S1 text, Verify VOID/R30, no Package dispatch, no forced unload |
-| W13 cancel | `D 'Open' @('DashboardValid')`; `D 'Acceptance' @('arm-cancel-bake')` (arms the barrier for the NEXT run and returns at once — it never waits for a completion that Cancel is what produces); `D 'Run' @('Bake')`; **bounded poll** `D 'Snapshot'` until `barrierArmed=true` **and** `barrierRunId` equals this run's id; `Shot 'W13-armed'`; `D 'Cancel'`; **bounded terminal poll** `D 'Snapshot'` until `busy=false`; `D 'Cancel'` again; `D 'Snapshot'`; `Shot 'W13'` | v1's row waited for completion without ever issuing Cancel, and the barrier only releases on Cancel (§5) while Snapshot polling waits for `busy=false` — a guaranteed deadlock. Fixed order above. Assertions: the first poll observes THIS run parked at the barrier (a timeout is a failed row, not a pass); Cancel is the same entry point the button calls; the terminal poll ends in R31/VOID with one terminal receipt; later stage start counts stay zero; busy clears only after acknowledgement **and** worker completion; the second Cancel produces no duplicate result and no second receipt; the previous outputs are byte-identical |
+| W13 cancel | `D 'Open' @('DashboardAuthor')`; `D 'Acceptance' @('arm-cancel-bake')` (arms the barrier for the NEXT run and returns at once — it never waits for a completion that Cancel is what produces); `D 'Run' @('Bake')`; **bounded poll** `D 'Snapshot'` until `barrierArmed=true` **and** `barrierRunId` equals this run's id; `Shot 'W13-armed'`; `D 'Cancel'`; **bounded terminal poll** `D 'Snapshot'` until `busy=false`; `D 'Cancel'` again; `D 'Snapshot'`; `Shot 'W13'` | v1's row waited for completion without ever issuing Cancel, and the barrier only releases on Cancel (§5) while Snapshot polling waits for `busy=false` — a guaranteed deadlock. Fixed order above. Assertions: the first poll observes THIS run parked at the barrier (a timeout is a failed row, not a pass); Cancel is the same entry point the button calls; the terminal poll ends in R31/VOID with one terminal receipt; later stage start counts stay zero; busy clears only after acknowledgement **and** worker completion; the second Cancel produces no duplicate result and no second receipt; the previous outputs are byte-identical |
 | W14 Failed block | `C 'ct_route7' @('apply','DashboardPatchFail')`; `D 'Open' @('DashboardPatchFail')`; `D 'Run' @('Apply')`; `D 'Snapshot'`; `Shot 'W14'` | Console setup really sets `Failed` through a patch failure. Dashboard admission R29; Apply and `Run all` disabled, no direct retry, no set clearing. Validate/refresh cannot clear the badge |
 | W15 restart proof | After a normal restart and the identity preflight: `D 'Acceptance' @('enable-resident')`; `D 'Snapshot'`; `D 'Open' @('DashboardResident')`; `D 'Run' @('Verify')`; `D 'Snapshot'`; `Shot 'W15'` | The real enable callback, fresh load-back and the **per-target** claim/path census of S6 (not `Holds`); S6 only if all pass, and a partially claimed fixture must produce VOID naming the unserved target. New-session `Failed` observed clear. Missing fresh evidence yields a refusal, never an inherited green row; Validate/Bake may be run first if §4 cannot re-derive their receipts |
 | W16 stale | `D 'Open' @('DashboardValid')`; `D 'Acceptance' @('change-source')`; `D 'Run' @('Verify')`; `D 'Snapshot'`; `Shot 'W16'` | The existing receipt becomes stale; Verify is blocked by an actual key comparison. No old PASS promoted to fresh, no automatic Apply. Run after W10 in the same process |
 | W17 SHIP landing | `D 'Acceptance' @('ship')`; `D 'Snapshot'`; `Shot 'W17'` | A real successful Doctor SHIP opens Lifecycle after GUI dispatch, selects exactly `made.Root`, transfers the same Apply string and disposition, and launches no duplicate bake/apply/package |
-| W18 console parity/package | `D 'Open' @('DashboardValid')`; `D 'Run' @('Validate')`; `D 'Snapshot'`; `C 'ct_project' @('DashboardValid')`; `D 'Run' @('Bake')`; `D 'Snapshot'`; `D 'Run' @('Package')`; `D 'Snapshot'`; `C 'ct_route7' @('verify','DashboardValid')`; `D 'Run' @('Verify')`; `D 'Snapshot'`; `Shot 'W18'` | Final bake payload matches for the same unchanged project and key. Package matches its captured producer payload with `ok=true` and writes only a new external directory; the previous package stays intact. **Verify parity:** the console verb's terminal line and the dashboard's Verify verdict are the **same string, character for character**, both out of the one producer of §4.4; the console call installs nothing and writes nothing; `ct_route7 dryrun/revert/stacktest` still print the unchanged removal text (`src/Bake/Route7.cs:60`–`:63`) |
-| W19 closed-window run | `D 'Open' @('DashboardValid')`; `D 'Run' @('Bake')`; close the bench with the chord while it runs; bounded poll `D 'Snapshot'` until `busy=false`; reopen; `D 'Snapshot'`; `Shot 'W19'` | §6's pump: the run completes with the window closed, the receipt and log are recorded, and reopening SHOWS the terminal result without re-running anything. `Cancel` is reachable through the seam while closed. A run parked waiting for a blocking main-thread segment says so and resumes when the panel is reopened and has painted |
-| W20 competing producer | `D 'Open' @('DashboardValid')`; `D 'Acceptance' @('arm-cancel-bake')`; `D 'Run' @('Bake')`; poll until parked at the barrier; `C 'ct_project' @('DashboardValid')`; `D 'Cancel'`; poll until `busy=false`; `D 'Snapshot'`; `Shot 'W20'` | The blocker fix, proven from the OTHER entry point: the console verb hits R37 and returns immediately, writing nothing — no second bake, no key stamped over the parked run's copies. After the cancel the claim is released and a plain `C 'ct_project'` succeeds |
+| W18 console parity/package | `D 'Open' @('DashboardAuthor')`; `D 'Run' @('Validate')`; `D 'Snapshot'`; `C 'ct_project' @('DashboardAuthor')`; `D 'Run' @('Bake')`; `D 'Snapshot'`; `D 'Run' @('Package')`; `D 'Snapshot'`; `C 'ct_route7' @('verify','DashboardAuthor')`; `D 'Run' @('Verify')`; `D 'Snapshot'`; `Shot 'W18'` | Final bake payload matches for the same unchanged project and key, **and matches the baseline captured before task 2's extraction, bytes and gate log**. Package matches its captured producer payload with `ok=true` and writes only a new external directory; the previous package stays intact. **Verify parity:** the console verb's terminal line and the dashboard's Verify verdict are the **same string, character for character**, both out of the one producer of §4.4; the console call installs nothing and writes nothing; `ct_route7 dryrun/revert/stacktest` still print the unchanged removal text (`src/Bake/Route7.cs:60`–`:63`) |
+| W19a closed run, worker-only | `D 'Open' @('DashboardAuthor')`; `D 'Run' @('Package')`; close the bench with the chord while it runs; bounded poll until `busy=false`; reopen; `D 'Snapshot'`; `Shot 'W19a'` | `Package` is plain `System.IO` end to end (`Package.cs:15`) and has no main-thread final segment, so it can genuinely finish closed. §6's pump: the run completes with the window closed, the receipt and log are recorded, and reopening SHOWS the terminal result without re-running anything. `Cancel` is reachable through the seam while closed |
+| W19b closed run, main-thread arm | `D 'Open' @('DashboardAuthor')`; `D 'Run' @('Bake')`; close the bench while it runs; `D 'Snapshot' @('')` **once** (assert `busy=true` and the parked-for-paint state — do NOT terminal-poll); reopen and let it paint; then poll until `busy=false`; `Shot 'W19b'` | v1's single row deadlocked by design: it terminal-polled a run whose final phase waits for an open, painted panel (`:316`–`:319`), so `busy=false` could never arrive. Split. While closed the row reports it is waiting for a painted panel and nothing is re-run; after reopening it resumes and terminates once |
+| W20 competing producer | `D 'Open' @('DashboardAuthor')`; `D 'Acceptance' @('arm-cancel-bake')`; `D 'Run' @('Bake')`; poll until parked at the barrier; `C 'ct_project' @('DashboardAuthor')`; `D 'Cancel'`; poll until `busy=false`; `D 'Snapshot'`; `Shot 'W20'` | The blocker fix, proven from the OTHER entry point: the console verb hits R37 and returns immediately, writing nothing — no second bake, no key stamped over the parked run's copies. After the cancel the claim is released and a plain `C 'ct_project'` succeeds |
 
-Suite order: W8 → W9 → W10 → W16 → W11 → W13 → W20 → W19 → W14 → W12 → restart → W15 → W17 → W18. Rebuild and revalidate after W16
-before further success cases. W12/W15 are a pair — preserve the fixture. For W18, explicitly reopen and revalidate
-`DashboardValid` if SHIP selected another project.
+Suite order: W8 → W9 → W10 → W16 → W11 → W13 → W20 → W19a → W19b → W14 → W12 → restart → W15 → W17 → W18. Rebuild and
+revalidate after W16 before further success cases. W12/W15 are a pair — preserve the fixture. For W18, explicitly reopen
+and revalidate `DashboardAuthor` if SHIP selected another project.
+
+**Fixture isolation** (plan review, blocker 4). W10's Apply installs `DashboardValid` and the claim survives the process
+(`BundleLive.cs:96` → `BundleClaims.cs:270`, same-mod re-claim kept `:258`–`:267`), so §5's R38 correctly refuses every
+later re-bake of it. `prepare` therefore also creates **`DashboardAuthor`**, an uncontested fixture that is never
+applied, and the baking rows W13, W18, W19a/b and W20 use it. `DashboardValid` stays with W9, W10 and W16 — W16 runs
+`Verify` only, which never rewrites, and needs W10's receipt to make stale. W10 additionally runs against an **enabled**
+fixture (W9's disabled-fixture arm is about listing, not verifying; §4.6's activation column requires enablement for
+Verify's live half).
 A screenshot response with `ok=true` is **not** panel proof: inspect the PNG for all five rows, the status text, progress,
 tail and disabled controls. Response fields are documented at `E:/DEV/PhoenixPoint/PPCLI/src/Screenshot.cs:162`, and the
 targetTexture branch may also write a separate `.scene.png` (`:169`–`:175`) — use the image that actually contains IMGUI.
@@ -537,13 +571,13 @@ providing the first substantive proof of anything.
 | # | Ownership | Finish condition / ordering reason |
 |---|---|---|
 | 1 | The structured result carrier and the shared exact verdict formatter — the two-count `ProjectBake.Run` result, the §4.4 per-gate `PASS/FAIL/VOID` entries plus the exact terminal line, `Route7` dispositions, Doctor S1/S2 in one formatter; ≤250 lines | G1's carrier arms and G2 pass. Doctor, console and the returned result agree on the existing strings, and an all-VOID carrier is distinguishable from a PASS without reading text. **First: the carrier every later task calls** |
-| 2 | Shared read-back extraction out of `Patch` (`ProjectBake.cs:1661`–`:1930`) behind that carrier, and `AtomicFile.Publish(temp, path, backup)` with `Write` rerouted through it; ≤300 lines | Bake's output and its printed lines are byte-identical before and after the extraction (existing `--bake` harness), and the one swap in the codebase is `Publish`. **Both seams exist before any caller reaches for them** |
-| 3 | Producer ownership (the in-flight claim in `ProjectBake.Run:69`, R37, the general live-reader refusal R38), §4.6 admission at the shared entry point, and freshness (key + declared-copy census, canonical project selection); ≤280 lines | G6 passes; the console verb and the checkbox get R37/R38 too. No UI IO, no second dependency model. Needs task 1's outcomes |
-| 4 | Segmented producers: the §4 thread split with Unity-derived paths captured on main, `SlimJob`-compatible progress, cancellation bookkeeping, and the §5 B1–B5 publication boundary on task 2's primitive; ≤300 lines | G4 **and G7** pass — the filesystem fault arms ship with the code that can fail them, not after it. Cancellation cannot release busy early and cannot interrupt publication |
-| 5 | `Run all` coordinator, the main-thread arming gate, the seam `Open`/`Run`/`Cancel`/`Snapshot` (barrier observation included), the §6 pump on `FitBench.Update:2104` with the closed-window policy, and the test-instance-only `Acceptance` fixtures with the worker barrier; ≤300 lines | G5 passes; RPC and buttons enqueue one path; a run survives a closed window. Fixture hooks are test-instance-only and bounded. Needs tasks 3 and 4. Several green commits allowed |
+| 2 | Shared read-back extraction out of `Patch` (gates `ProjectBake.cs:1656`–`:1768` + `ByName` `:1827`–`:1952`; the six shared helpers become `internal` in place) behind that carrier, and `AtomicFile.Publish(temp, path, backup)` with `Write` rerouted through it while keeping its own cleanup guard; ≈330 lines, three commits | Bake's output and its printed lines are byte-identical before and after the extraction, proven against a baseline captured BEFORE the move and re-baked through the extracted producer — **not** by the `--bake` harness, which dispatches the sound-bank path (`tests/ObjCodecTests/Program.cs:22`–`:34`) and never reaches `Patch`. The one swap in the codebase is `Publish`. **Both seams exist before any caller reaches for them** |
+| 3 | Producer ownership (the in-flight claim in `ProjectBake.Run:69`, R37, the general live-reader refusal R38), §4.6 admission at the shared entry point, and freshness (one filesystem observation taken OUTSIDE the pure reducer and passed in, plus the read-only `Route7.Failed` query and `RetryHint` that admission needs — both pulled forward from task 7), the `BakeResult` disposition (Success/Refused/Cancelled/Failed, so a zero-count R37/R38 refusal cannot read as a successful bake at `Route7.cs:341`), and atomic acquisition of both output directories; ≈340 lines, two commits | G6 passes; the console verb and the checkbox get R37/R38 too. No UI IO, no second dependency model. Needs task 1's outcomes |
+| 4 | Segmented producers: the §4 thread split with Unity-derived paths captured on main, ONE narrow phased-import entry under `ContentProject.Load:305` (both importers are private and `Load` itself is main-thread-bound), `SlimJob`-compatible progress, cancellation bookkeeping, the §5 B1–B5 publication boundary extracted into the linkable `Publication.cs`, and the structured multi-target Apply overload; ≈520 lines, four commits | G4 **and G7** pass — the filesystem fault arms ship with the code that can fail them, not after it, and they drive the production publication file. Cancellation cannot release busy early and cannot interrupt publication |
+| 5 | `Run all` coordinator, the main-thread arming gate, the sectioned JSON-string seam `Open`/`Run`/`Cancel`/`Snapshot`/`Acceptance` (barrier observation included), the safe external Package destination resolver (settled here, where `Run("Package")` first becomes reachable), the §6 pump on `FitBench.Update:2104` with the closed-window policy, and the test-instance-only `Acceptance` fixtures with the WORKER barrier; ≈380 lines, four commits | G5 passes; RPC and buttons enqueue one path; a run survives a closed window; `Snapshot("")` provably stays under PPCLI's 2000-char clip. Fixture hooks are test-instance-only and bounded. Needs tasks 3 and 4 |
 | 6 | Lifecycle drawing and the third FitBench tab; ≤280 lines | Five rows, placeholders, fixed tail and progress, controls drawn in every state. Build plus seam/panel smoke checks. Needs task 5's snapshots |
 | 7 | Doctor SHIP handoff, S1 and Failed badges, checkbox-equivalent admission, and the safe external Package output path; ≤250 lines | Build plus admission/handoff smoke checks against a real result and root. Needs the panel and the existing producer guards; no install-copy helper |
-| 8 | PPCLI acceptance script, screenshots and log receipts, final memo corrections; ≤250 lines | W8–W20 run with the exact commands and results preserved, PASS distinguished from unverified visual work. **Last, and confirmatory: every gate it exercises has already passed offline in the task that owns it** |
+| 8 | PPCLI acceptance script, screenshots and log receipts, final memo corrections; ≤250 lines | W8–W20 run with the exact commands and results preserved, PASS distinguished from unverified visual work. **Last, and MOSTLY confirmatory** — three proofs genuinely land here for the first time and must be labelled as such rather than claimed as re-runs: the read-back extraction's byte/log identity (task 2), the thread split and main-thread `Install` loop (task 4), and the seam/pump/fixtures in a real session (task 5) |
 
 ## 11. Follow-ups (`ponytail:` ledger)
 - `ponytail:` **ZIP release** — Z1 `Package.Run` into a private staging folder; Z2 require `ok` and unchanged package
