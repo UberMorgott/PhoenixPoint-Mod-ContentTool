@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using Morgott.ContentTool.Import;
 using Morgott.ContentTool.Project;
 
@@ -192,6 +193,104 @@ internal static class ProjectScaffoldTests
                 modDir, "EmptyOne", glb, sha, "a.bundle", "Foo", empty);
             checks += Check(filled.Created && File.Exists(filled.ManifestPath),
                             "an empty folder of that name counts as new and is filled in");
+
+            // ---- Scaffold_AppendsSecondRow. The first press is the one made above; this is what it left.
+            ManifestFile one = ManifestFile.Load(made.ManifestPath);
+            checks += Check(one.Manifest.Replace.Count == 1 &&
+                            one.Manifest.Replace[0].Bundle == "px_equipment_assets_all.bundle" &&
+                            one.Manifest.Replace[0].Asset == "WPN_PX_RG_Assault_Rifle_T01_V01" &&
+                            one.Manifest.Replace[0].Mesh == "body",
+                            "the first press left exactly one mesh row, mesh = the .glb's own stem");
+
+            string second = Path.Combine(dir, "hand.glb");
+            File.WriteAllBytes(second, new byte[] { 4, 5, 6, 7 });
+            string secondSha = AliasMap.Sha256(File.ReadAllBytes(second));
+
+            // The append is proved against a HAND-WRITTEN manifest, not one this tool authored: the template
+            // has no unknown member, no nested value and no BOM, so a splice that lost any of those would
+            // still pass a check made against it. The row's own bytes are asserted INSIDE an independently
+            // located span, and everything outside that span is compared byte for byte - a substring search
+            // alone proves nothing about what moved elsewhere.
+            string handAt = Path.Combine(mods, "Handwritten");
+            Directory.CreateDirectory(handAt);
+            string handManifest = Path.Combine(handAt, "ppcontent.json");
+            const string handwritten =
+                "\uFEFF{\n  \"id\": \"Handwritten\",\n  \"bundle\": \"Handwritten.bundle\",\n" +
+                "  \"note\": \"\u00FCnknown member, kept verbatim\",\n" +
+                "  \"replace\": [ {\"bundle\":\"px_equipment_assets_all.bundle\"," +
+                "\"asset\":\"WPN_PX_RG_Assault_Rifle_T01_V01\",\"mesh\":\"body\"} ],\n" +
+                "  \"nested\": { \"a\": [ 1, 2, { \"b\": true } ] }\n}\n";
+            File.WriteAllText(handManifest, handwritten, new UTF8Encoding(false));
+            string beforeAppend = File.ReadAllText(handManifest);
+            ProjectScaffold.Result grew = ProjectScaffold.AddMeshReplacement(
+                modDir, "Handwritten", second, secondSha,
+                "px_equipment_assets_all.bundle", "WPN_PX_Hand", empty);
+            checks += Check(!grew.Created && grew.Root == handAt,
+                            "the SECOND press joins the AUTHORED project instead of making another one");
+            string afterAppend = File.ReadAllText(handManifest);
+            // Located independently in each text - the '[' after the "replace" key through its ']' - so the
+            // comparison never borrows the writer's own idea of where it wrote.
+            int wasOpen = beforeAppend.IndexOf('[', beforeAppend.IndexOf("\"replace\"", StringComparison.Ordinal));
+            int wasClose = beforeAppend.IndexOf(']', wasOpen);
+            int isOpen = afterAppend.IndexOf('[', afterAppend.IndexOf("\"replace\"", StringComparison.Ordinal));
+            int isClose = afterAppend.IndexOf(']', isOpen);
+            checks += Check(beforeAppend.Substring(0, wasOpen) == afterAppend.Substring(0, isOpen) &&
+                            beforeAppend.Substring(wasClose) == afterAppend.Substring(isClose),
+                            "every byte OUTSIDE the replace span is unchanged - BOM, unknown member, nested " +
+                            "value, prefix AND suffix");
+            const string firstRow = "{\"bundle\":\"px_equipment_assets_all.bundle\"," +
+                                    "\"asset\":\"WPN_PX_RG_Assault_Rifle_T01_V01\",\"mesh\":\"body\"}";
+            checks += Check(afterAppend.Substring(isOpen, isClose - isOpen)
+                                .IndexOf(firstRow, StringComparison.Ordinal) >= 0,
+                            "and the original row survived INSIDE the new span as ONE unbroken byte run");
+            ManifestFile two = ManifestFile.Load(handManifest);
+            checks += Check(two.Manifest.Replace.Count == 2 && two.Manifest.Replace[1].Mesh == "hand" &&
+                            two.Manifest.Id == "Handwritten" && two.Manifest.Bundle == "Handwritten.bundle",
+                            "two rows now, id and bundle untouched: " + two.Manifest.Replace.Count);
+            checks += Check(File.ReadAllText(Path.Combine(handAt, "meta.json")) == Template("Handwritten"),
+                            "and the meta written beside it is the §4.2 template on the MANIFEST's id");
+
+            // ---- Scaffold_ReusesAnIdenticalRow. THE RETRY PATH, in a FRESH project, so the assertion is
+            // "exactly ONE row after two identical runs" rather than "two rows, one of them older". Every
+            // "fix it and press Ship again" in the design meets a row this tool already committed; if that
+            // read as R6 the author could never retry anything.
+            ProjectScaffold.Result once = ProjectScaffold.AddMeshReplacement(
+                modDir, "Replace_Twice", second, secondSha,
+                "px_equipment_assets_all.bundle", "WPN_PX_Hand", empty);
+            byte[] afterFirst = File.ReadAllBytes(once.ManifestPath);
+            ProjectScaffold.Result reused = ProjectScaffold.AddMeshReplacement(
+                modDir, "Replace_Twice", second, secondSha,
+                "PX_EQUIPMENT_ASSETS_ALL.BUNDLE", "WPN_PX_Hand", empty);
+            checks += Check(reused.RowAlreadyPresent && !reused.Created && reused.Root == once.Root,
+                            "the IDENTICAL press reuses the row instead of refusing it");
+            checks += Check(ManifestFile.Load(once.ManifestPath).Manifest.Replace.Count == 1,
+                            "and the file holds exactly ONE row after two identical runs");
+            checks += Check(Same(File.ReadAllBytes(once.ManifestPath), afterFirst),
+                            "the manifest bytes did not move at all - a reuse writes nothing");
+
+            // ---- Scaffold_RefusesConflictingTarget (R6 == Manifest.Validate's E4, verbatim). The same
+            // target with a DIFFERENT mesh is the case R6 was written for, and the only one left.
+            string dupSrc = Path.Combine(dir, "dupsrc.glb");
+            File.WriteAllBytes(dupSrc, new byte[] { 8, 9 });
+            byte[] beforeDup = File.ReadAllBytes(once.ManifestPath);
+            string dup = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Replace_Twice", dupSrc,
+                                                   AliasMap.Sha256(File.ReadAllBytes(dupSrc)),
+                                                   "PX_EQUIPMENT_ASSETS_ALL.BUNDLE", "WPN_PX_Hand", empty);
+            }
+            catch (InvalidDataException refused) { dup = refused.Message; }
+            checks += Check(dup == "ppcontent.json already replaces \"WPN_PX_Hand\" in " +
+                                   "\"PX_EQUIPMENT_ASSETS_ALL.BUNDLE\" with a mesh, so a second row for the " +
+                                   "same target was NOT written - edit the existing row instead",
+                            "R6 is E4 verbatim, the bundle folded case-blind: " + dup);
+            checks += Check(Same(File.ReadAllBytes(once.ManifestPath), beforeDup),
+                            "the manifest bytes are identical after the refusal");
+            checks += Check(!File.Exists(Path.Combine(once.Root, "Content", "Meshes", "dupsrc.glb")),
+                            "and the refused row copied no .glb - Validate runs before the first byte moves");
+            checks += Check(ManifestFile.Load(once.ManifestPath).Manifest.Replace.Count == 1,
+                            "a conflicting press leaves the one row that was already there");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates";

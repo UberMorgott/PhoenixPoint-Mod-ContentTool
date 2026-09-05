@@ -181,6 +181,21 @@ namespace Morgott.ContentTool.Project
                                                    "or ship into another project");
             }
 
+            // IDEMPOTENT REUSE, not a refusal. A row that is EXACTLY this one is what the PREVIOUS press
+            // left, and every "fix it and press Ship again" in the design walks straight into it - reading
+            // that as R6 would make the retry the design promises impossible. R6 stays for a CONFLICTING
+            // row (same target, different mesh), and it lands HERE, before the copy, so a press that cannot
+            // add its row never leaves a .glb behind that nothing references.
+            result.RowAlreadyPresent = Reuses(file.Manifest, shippedBundle, shippedAsset, stem);
+            if (!result.RowAlreadyPresent)
+            {
+                file.Manifest.AddMeshReplacement(shippedBundle, shippedAsset, stem);
+                file.Manifest.Validate();
+            }
+            // The splice, the .bak and the E5 fingerprint are ManifestFile's; nothing outside the "replace"
+            // value span moves - and with nothing pending, Save validates and writes NOTHING (Manifest.cs:321).
+            file.Save();
+
             // THE POST-CONDITION, asserted rather than assumed: this is what makes `ct_project <name>` and
             // `ct_route7 apply <name>` find the folder that was just written (ContentMods.Sibling:128).
             if (!string.Equals(ContentMods.ProjectDir(modDir, name), result.Root,
@@ -207,6 +222,21 @@ namespace Morgott.ContentTool.Project
                    "  \"Version\": \"1.0.0\",\n" +
                    "  \"Name\": [ { \"Key\": \"English\", \"Value\": " + quoted + " } ],\n" +
                    "  \"Dependencies\": [ \"" + Package.EngineId + "\" ]\n}\n";
+        }
+
+        /// <summary>Does the project ALREADY declare exactly this replacement? Each field folded the way the
+        /// thing that will READ it folds: the bundle case-blind (ProjectBake.cs:1534, Manifest.Validate:203),
+        /// the asset ORDINAL (shipped names are folded nowhere), the mesh stem case-blind because
+        /// ProjectBake.FindMesh:2152 resolves it that way and two spellings are one file on Windows.</summary>
+        private static bool Reuses(Manifest manifest, string bundle, string asset, string stem)
+        {
+            foreach (ReplaceRow row in manifest.Replace)
+                if (row.Kind == "mesh" &&
+                    string.Equals(row.Bundle, bundle, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(row.Asset, asset, StringComparison.Ordinal) &&
+                    string.Equals(row.Mesh, stem, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
         }
 
         private static bool Usable(string name)
