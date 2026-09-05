@@ -1,4 +1,9 @@
-# Lifecycle dashboard — implementation plan (carrier → extraction → ownership → producers → coordinator → panel → SHIP → acceptance)
+# Lifecycle dashboard — implementation plan (carrier → extraction → ownership → producers → coordinator → stage producers → panel → SHIP → acceptance)
+
+> **Task order: `1 → 2 → 3 → 4 → 5 → 5b → 6 → 7 → 8`.** Task **5b** was added while Task 5 was being executed, which is
+> what exposed it: `LifecycleJob.Start` wires Bake and Package and answers Validate, Apply and Verify with
+> `"Lifecycle: <stage> is not wired to the dashboard yet."` (`LifecycleJob.cs:191`), and no task owned those three
+> producers. It sits between 5 and 6 because Task 6 draws rows those producers fill.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -105,7 +110,8 @@ paragraph and 5 wrong facts. **All 15 accepted**, all 5 wrong facts applied. Not
 | 14 | major | every task bounded by explicit files and sub-task commits; T2/T3/T4 re-estimated |
 | 15 | minor | `Route7` routes R29/R35 THROUGH `StageText` — no test-only second copy — Task 1 |
 
-**Sequencing (accepted, task NUMBERS unchanged, `1 → 2 → 3 → 4 → 5 → 6 → 7 → 8` retained):** the read-only `Route7.Failed`
+**Sequencing (accepted, task NUMBERS unchanged, `1 → 2 → 3 → 4 → 5 → 6 → 7 → 8` retained; **5b** inserted after 5 by
+the gap Task 5's execution found — see the note under the title):** the read-only `Route7.Failed`
 query and the freshness contract move INTO Task 3, where admission first needs them, instead of first appearing in Task 7;
 the phased import, the publication core and the structured multi-target Apply/Verify move INTO Task 4; Task 7's safe
 external Package destination is settled before Task 5 exposes `Run("Package")`; Task 7 consumes producers Tasks 3–4
@@ -133,7 +139,8 @@ P:420), which is now labelled instead of claimed away.
 | `src\Bake\LifecycleState.cs` | The pure reducer: receipts, freshness (`never`/`stale`/`fresh`), `Admit(stage)` (§4.6 table), the `Run all` sequencer, cancel bookkeeping. **No filesystem, no Unity.** Test-linked — this is what G1/G5/G6 exercise |
 | `src\Bake\LifecycleJob.cs` | Segmented producers: the main→worker→main split, captured Unity-derived paths, `SlimJob`-shaped ThreadPool dispatch, progress, cancellation, the B1–B5 publication boundary. Unity → build gate + G7 (which tests the publication primitive, not this file) |
 | `src\Dev\LifecycleDashboard.cs` | The panel + the public static seam `Open(string)` / `Run(string)` / `Cancel()` / `Snapshot()` + test-instance-only `Acceptance(string)`. Namespace `Morgott.ContentTool.Dev` (`ModelDoctor.cs:13`, `FitBench.cs:28`) |
-| `tests\ObjCodecTests\LifecycleTests.cs` | G1–G7. Prints `LIFECYCLE PASS, N check(s) - …` |
+| `src\Bake\StageValidate.cs` | **Task 5b.** The Validate producer: `ManifestFile.Load` → `Manifest.Validate()` → `PatchCache.Key`, plus `ModGate.Decide`/`Why` as an eligibility FIELD. The roster arrives as an `IDictionary<string,bool>` captured on main, so nothing here touches Unity. **Test-linked** — G8 drives it |
+| `tests\ObjCodecTests\LifecycleTests.cs` | G1–G9. Prints `LIFECYCLE PASS, N check(s) - …` |
 
 **Modified**
 
@@ -669,9 +676,282 @@ dependency graph in the coordinator is the exact drift §4.6 exists to prevent.
 
 ---
 
+### Task 5b: stage producers — Validate, Apply, Verify (+ `ct_route7 verify`)
+
+**The gap Task 5 exposed, and it has no other owner.** `LifecycleJob.Start` (`src\Bake\LifecycleJob.cs:182`) wires
+`Bake` `:184` and `Package` `:185` and answers every other token with `"Lifecycle: " + stage + " is not wired to the
+dashboard yet."` `:191` — a line that is not a producer verdict and not a refusal, on three of the panel's five rows.
+`ct_route7 verify` still refuses through the `dryrun|verify|revert|stacktest` arm (`src\Bake\Route7.cs:56`–`:63`), so
+§4.4's "one Verify producer, two consumers" has neither consumer. And Task 5 left two `Admission` fields with no writer:
+`LegacyDiskActive` (`LifecycleState.cs:394`) and `WriteOutsideRoots` (`:397`) are read by `Admit` `:540`–`:541` and set
+by nobody, so **R36 and R34 are unreachable code**.
+
+Needs Tasks 3, 4 and 5. **≈390 impl lines** (`StageValidate.cs` ~70, `LifecycleJob` three starts + `Captured` ~95,
+`ReadBack.Verify` ~75, `LifecycleState.VerifyVerdict` ~18, `Route7` verify verb + root entry + legacy accessor ~45,
+`Acceptance` scenarios ~70, `LifecycleDashboard` capture reorder ~12) plus ~120 test lines — over the ≤300 this task was
+scoped at, so it lands as **three green commits** (Step 7). The fat one is (c); `Acceptance('ship')` is deliberately NOT
+in it (Step 6). Files: `src\Bake\StageValidate.cs` (new), `src\Bake\LifecycleJob.cs`, `src\Bake\ReadBack.cs`,
+`src\Bake\ProjectBake.cs` (three `private`→`internal`), `src\Bake\Route7.cs`, `src\Bake\LifecycleState.cs`,
+`src\Dev\LifecycleDashboard.cs`, `tests\ObjCodecTests\LifecycleTests.cs`, `ObjCodecTests.csproj`.
+
+**Five facts this task is built on, read at the current head rather than assumed:**
+
+1. **§4.1's four calls are all UnityEngine-free and three of their files are ALREADY linked** into `ObjCodecTests`
+   (`Manifest.cs` `:38`, `ModGate.cs` `:94`, `PatchCache.cs` `:58`). `ManifestFile.Load(path)` is `Manifest.cs:290`,
+   `Manifest.Validate()` `:200` (throws `InvalidDataException`), `PatchCache.Key(root, shippedPaths)` `:43`,
+   `ModGate.Decide(modFolder, roster)` `ModGate.cs:34` and `ModGate.Why(v)` `:57`. The ONE Unity-bound half is
+   `ModRoster.Build()` (`ModRoster.cs:53`, `ModManager.Mods`), which is why §4.1 splits exactly there: **main captures
+   the roster dictionary, the worker validates.** That split is what makes the Validate producer offline-armable.
+2. **`ReadBack.Run` is already the shared producer** (`src\Bake\ReadBack.cs:37`), takes
+   `(StringBuilder log, string bundleFile, string shipped, string copy, List<ImportedTexture> want,
+   List<KeyValuePair<string,string>> mats, List<KeyValuePair<string,ImportedMesh>> meshes,
+   List<KeyValuePair<string,ShippedReplacement>> clips)` and returns `ReadBackResult` with a **null** `Terminal` — the
+   terminal line is the CALLER's to compose. Bake's only call site is `ProjectBake.cs:1879`, against the B2 temp.
+3. **The expectation lists cannot be reused from `Patch`.** They are filled inside the patch loop, interleaved with the
+   writer: `want.Add(t)` `:1842` after `baker.ReplaceTexture2D` `:1841`, `meshes.Add` `:1822` after `baker.ReplaceMesh`
+   `:1810`, `mats.Add` `:1771`, `clips.Add` `:1790`. Verify must build the same four lists from the imported project
+   ALONE — `Bundles(p)` `:2223`, `Find(p, r.texture)` `:2268`, `FindMesh(p, r.mesh)` `:2275`, all three `private` today —
+   and never construct a `BundleBaker`, so nothing is opened for writing and `baker.WhyNot` is not asked (the gates
+   measure the copy directly).
+4. **`Route7.ApplyProject` takes a NAME, not a root.** Every overload (`:347`, `:357`, `:365`) funnels into the private
+   `:371`, which resolves `ContentToolMain.ProjectDir(projectName)` `:376` — and `ProjectDir` is
+   `ContentMods.ProjectDir(ModDir, name)` (`ContentToolMain.cs:37`), a NAME lookup by construction (the game console
+   eats backslashes, `:28`–`:32`). The dashboard binds a canonical ROOT (Task 5 Step 2) and a duplicate name resolves to
+   the wrong folder, so Apply needs a root-taking entry. The structured overload T4 landed —
+   `Route7.ApplyProject(string projectName, out IList<TargetInstall> targets, out ApplyDisposition how)` `:357`, over
+   `BundleLive.Install(modId, bundleToCopy, out IList<Route7.TargetInstall> targets)` `BundleLive.cs:66`, with
+   `TargetInstall { Bundle, Line, Outcome }` `Route7.cs:326` and `ApplyDisposition { Redirected, Resident, Refused,
+   BakeFailed }` `:319` — but it resolves by name like the others.
+5. **`Route7.LegacyDisk(modId)` is `private static string`** (`Route7.cs:259`), returning the refusal text or `null`.
+   `LegacyPub` `:247` is the OTHER route (published keys) and is **not** what R36 is about.
+
+**Three design claims corrected against disk** (§4.1's anchors all hold; these do not):
+
+| Design says | Disk at this head |
+|---|---|
+| §4.3 "Main entry `Route7.ApplyProject(root, forBundle, out how)` `:269`", `Refused` default `:271` | the entry is `:365` and the default is `:375` (Task 4 moved them); and it takes a **name**, not a root — fact 4 |
+| §4.6 "fields of `Admission` and arms of `Admit` (`LifecycleState.cs:102`)" | `Admission` is `LifecycleState.cs:383`, `Admit` is `:519`. Behaviour as described |
+| §4.4 "the declared-copy census (`Route7.cs:310`–`:311`)", §7 R29 "reuse `RetryHint` `:158`" | the census became `Route7.Observe(patched, projectRoot, declared, shippedPaths)` `:147`–`:160` returning `FreshnessObservation`; `RetryHint` is `:225` and R29 is composed by `StageText.R29` (`StageText.cs:161`). Both are Task 1/3 moves, not errors |
+
+**One ordering defect Task 5 shipped, fixed in commit (b).** `LifecycleDashboard.Refresh` (`:248`) builds the
+`Admission` and `Run` `:95` calls `Admit` with it — but `captured` is only filled in `Dispatch` `:266`, which runs
+**after** the admission verdict. Every captured fact admission needs (fact 5's legacy verdict, the write-root check)
+would therefore be read one run late, or never on the first press. The capture moves into `Refresh`, before `Admit`;
+`Dispatch` keeps its `captured.Root != root` guard so nothing is captured twice.
+
+- [ ] **Step 1: RED — G8 (Validate) offline, on the pure core.** Add to `LifecycleTests.Run()`. `StageValidate` is
+  UnityEngine-free and linked, so every arm here drives production code. Shape, disk wins:
+  ```csharp
+  // ---- G8 Validate: the pure half, with the roster handed in as a dictionary exactly as MAIN captures it.
+  // Real files in a temp directory, System.IO only - ManifestFile.Load reads bytes (Manifest.cs:292).
+  LifecycleState.StageReport ok = StageValidate.Run(root, Path.Combine(root, ContentMods.Manifest),
+                                                    new[] { shippedA }, roster);
+  checks += Check(ok.Outcome == GateOutcome.Pass && ok.Verdict == StageText.S3("DashboardValid"),
+                  "S3 verbatim, and Validate PASS is the producer's own line");
+  checks += Check(ok.Eligibility == ModGate.Why(ModVerdict.Disabled),
+                  "a DISABLED project still validates - eligibility is a field, never the verdict (design:103)");
+  ```
+  Arms: a manifest that validates → `S3` + `Pass`; a duplicated target (E4, `Manifest.cs:205`) → `Fail` +
+  `StageText.ValidateFailed(ex.Message)`; a missing `ppcontent.json` → `IOException` → the same fallback, one line;
+  `roster == null` → `NoRoster` eligibility, outcome still `Pass`; a roster that lists the folder as disabled →
+  `Disabled` eligibility, outcome still `Pass`; the key is computed and non-empty. **A throw never escapes** — the
+  producer answers with `ValidateFailed`, the same rule `LifecycleJob.Capture` `:88`–`:98` already applies.
+  - Expected RED: no `StageValidate` type, then a compiling run that fails on the wrong verdict.
+
+- [ ] **Step 2: The Validate producer.** `src\Bake\StageValidate.cs` — new, UnityEngine-free, added to
+  `ObjCodecTests.csproj` beside `LifecycleState.cs` `:51`. No new type where `StageReport` (`LifecycleState.cs:426`)
+  already carries what the pump consumes; it gains **one** field. Shape, disk wins:
+  ```csharp
+  // src\Bake\StageValidate.cs - 4.1, and nothing more: declaration structure plus activation eligibility.
+  // It does NOT prove assets import or targets exist (design:102) and it never writes.
+  internal static LifecycleState.StageReport Run(string projectRoot, string manifestPath,
+                                                 IList<string> shippedPaths,
+                                                 IDictionary<string, bool> roster)
+  {
+      string name = Path.GetFileName(projectRoot.TrimEnd('\\', '/'));
+      try
+      {
+          ManifestFile mf = ManifestFile.Load(manifestPath);   // Manifest.cs:290 - E1/E2/E8
+          mf.Manifest.Validate();                              // :200 - E3 row, E4 duplicate target
+          PatchCache.Key(projectRoot, shippedPaths);           // :43 - it must be computable, not stored here
+      }
+      catch (Exception ex) when (ex is IOException || ex is InvalidDataException || ex is ArgumentException)
+      {
+          return new LifecycleState.StageReport(GateOutcome.Fail, StageText.ValidateFailed(ex.Message),
+                                                BakeDisposition.Failed, false, true, null);
+      }
+      // DISABLED IS NOT MALFORMED (design:103): its own field, never folded into the verdict.
+      return new LifecycleState.StageReport(GateOutcome.Pass, StageText.S3(name), BakeDisposition.Success,
+                                            false, true, ModGate.Why(ModGate.Decide(projectRoot, roster)));
+  }
+  ```
+  `StageReport` gains `internal readonly string Eligibility;` as the sixth constructor argument — Task 6 draws it beside
+  the Validate row and **`Admit` never reads it**, because `Disabled` blocks nothing (§4.6's activation column).
+  Catch BY TYPE, the three §4.1 can produce; anything else is a bug in here and reaches `LifecycleJob.Worker`'s handler
+  (`:289`–`:299`), which says a stage threw and keeps the exception.
+
+- [ ] **Step 3: Wire it into `LifecycleJob.Start`, and capture the roster on MAIN.** `Captured` (`:60`–`:64`) gains
+  `internal IDictionary<string, bool> Roster;` filled in `Capture` `:106`–`:114` with `ModRoster.Build()` — main-thread,
+  like the three path captures at `:110`/`:113`/`:115`. Then:
+  ```csharp
+  internal static string StartValidate(Captured on)
+  {
+      long id = Run.Begin("Validate");
+      if (id == 0) return StageText.R26(Run.Latest.Stage);
+      // WHOLLY A WORKER, like StartPackage (:203): the roster is already a dictionary and the other three
+      // calls are plain System.IO. No parked main segment, so it completes with the bench closed.
+      Worker(delegate
+      {
+          LifecycleState.StageReport r = StageValidate.Run(on.Root, Path.Combine(on.Root, ContentMods.Manifest),
+                                                          on.Shipped, on.Roster);
+          Observe(on);
+          Run.Complete(id, r.Verdict, r.How);
+      });
+      return null;
+  }
+  ```
+  and `Start` `:182` grows `if (stage == "Validate") return StartValidate(on);` above the Bake arm. The `ponytail:`
+  block `:186`–`:191` loses its Validate sentence; the fallback line stays until commit (c) deletes the last of it.
+  Unity-only half: **compiler + Task 8 rows W9, W18.**
+
+- [ ] **Step 4: GREEN + commit (a).**
+  - Run: `dotnet build -c Release` → `Ошибок: 0`, `Предупреждений: 1`
+  - Run: `dotnet run --project tests\ObjCodecTests -c Release` → `LIFECYCLE PASS, ~98` (+6 G8 arms), everything else
+    unchanged. The temp fixture directory is deleted in a `finally`, like G7's.
+  - `git -C E:\DEV\PhoenixPoint\ContentTool add src\Bake\StageValidate.cs src\Bake\LifecycleState.cs src\Bake\LifecycleJob.cs tests\ObjCodecTests\LifecycleTests.cs tests\ObjCodecTests\ObjCodecTests.csproj && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "feat(bake): the Validate producer - a manifest checked and eligibility reported, with the roster captured on main"`
+
+- [ ] **Step 5: The Apply producer, and the two admission fields nobody set.** Four small pieces, one commit.
+  - **(a) A root-taking entry, because the panel binds a root and `ApplyProject` resolves a NAME** (fact 4). The private
+    body `:371`–`:389` already receives `projectRoot` at `:376`; split it there — everything from
+    `ContentProject.Load(projectRoot)` `:377` down keeps its claim take/release exactly as it is and becomes
+    `ApplyRoot(string projectRoot, string forBundle, out IList<TargetInstall> targets, out ApplyDisposition how)`, and
+    the name overloads become `ApplyRoot(ContentToolMain.ProjectDir(name), …)`. **No behaviour change, no second claim
+    path**, and the console verb `:51` keeps resolving by name.
+  - **(b) The smallest legacy accessor.** Beside `LegacyDisk` `:259`, one line:
+    `internal static bool LegacyActive(string modId) { return LegacyDisk(modId) != null; }` — a bool, never the text.
+    R36's wording is `StageText.R36()` `:199` and the panel must not print a producer refusal it did not receive.
+  - **(c) `WriteOutsideRoots`, decided on MAIN with the paths already captured.** `Captured` gains
+    `internal bool LegacyDiskActive, WriteOutsideRoots;`. In `Capture`, after `OutputDirs` `:113`: the apply's two
+    sanctioned roots are `ContentToolMain.PatchedRoot` (`ContentToolMain.cs:59`, `persistentDataPath`) and the project
+    root itself; any captured output dir whose `Path.GetFullPath` is under neither sets the flag. `Route7.LegacyActive(d.Id)`
+    fills the other. Both are main-thread facts (`persistentDataPath`, the static edits ledger), same rule as the R38
+    verdict at `:117`–`:125`.
+  - **(d) `Refresh` reads them, before `Admit` runs.** In `LifecycleDashboard.Refresh` `:248`, move the capture up
+    (`if (captured == null || captured.Root != root) captured = LifecycleJob.Capture(root);`, the line `Dispatch` `:266`
+    holds today) and add `ctx.LegacyDiskActive = captured != null && captured.LegacyDiskActive;` /
+    `ctx.WriteOutsideRoots = captured != null && captured.WriteOutsideRoots;`. That is what makes `Admit` `:540`–`:541`
+    reachable at all.
+  Then the producer itself, parked on MAIN because `Install` is a Unity segment with no yields (§5's A3):
+  ```csharp
+  internal static string StartApply(Captured on)
+  {
+      long id = Run.Begin("Apply");
+      if (id == 0) return StageText.R26(Run.Latest.Stage);
+      cts = new CancellationTokenSource();
+      Worker(delegate
+      {
+          Observe(on);                                   // A1 revalidate, on a worker
+          Park(delegate                                  // A3: no cancellation, no yields inside
+          {
+              IList<Route7.TargetInstall> targets; Route7.ApplyDisposition how;
+              string line = Route7.ApplyRoot(on.Root, null, out targets, out how);
+              // The DISPOSITION classifies, never the text (design:361). Resident is a PASS that needs a
+              // restart - S1 - and that is what arms R30 for Verify; Refused is VOID, not a failure.
+              Run.Complete(id, line, how == Route7.ApplyDisposition.BakeFailed ? BakeDisposition.Failed
+                                   : how == Route7.ApplyDisposition.Refused ? BakeDisposition.Refused
+                                   : BakeDisposition.Success);
+              Worker(delegate { Observe(on); });
+          }, true);
+      });
+      return null;
+  }
+  ```
+  The pump's `StageReport` for this row carries `RestartRequired = how == Resident` and
+  `Applicable = targets.Count > 0` — a project with no non-video target is "VOID with a reason" and does **not** stop
+  the chain (§4.6's Apply row). **No automatic `Uninstall`**, and `ApplyRoot` is called exactly once per run.
+  RED→GREEN split: the disposition mapping is Unity-side → **compiler + W10, W12, W14, W17**; the offline arms are on
+  `Admit`, which is linked — R36 fires with `LegacyDiskActive`, R34 with `WriteOutsideRoots`, R36 **before** R34 before
+  R29 (the order at `:540`–`:542`), and neither fires with both false. +4 G6 arms.
+  - Run: `dotnet run --project tests\ObjCodecTests -c Release` → `LIFECYCLE PASS, ~102`
+  - `git … add src\Bake\Route7.cs src\Bake\LifecycleJob.cs src\Dev\LifecycleDashboard.cs tests\ObjCodecTests\LifecycleTests.cs && git … commit -m "feat(bake): the Apply producer on the structured overload, and the two admission fields that made R34/R36 dead code"`
+
+- [ ] **Step 6: The Verify producer, ONE of it, and the console path that shares it** (§4.4 item 9).
+  - **The producer lands in `ReadBack.cs`**, beside the gates it drives — not in a third file that would have to reach
+    into them. `Bundles` `ProjectBake.cs:2223`, `Find` `:2268` and `FindMesh` `:2275` become `internal` in place, the
+    same disposition Task 2 gave `Check`/`PixelsIn`/`SamePixels`; nothing moves.
+    ```csharp
+    // src\Bake\ReadBack.cs - THE Verify producer. Two consumers, one string: the dashboard row and
+    // `ct_route7 verify <name>` both print what this returns, which is what W18 compares byte for byte.
+    // It READS: no BundleBaker is constructed, so nothing is opened for writing and `WhyNot` is never asked.
+    internal static LifecycleState.StageReport Verify(ContentProject p, string patchedDir, StringBuilder log)
+    ```
+    Per declared bundle from `ProjectBake.Bundles(p)`: `shipped = BakeSelfCheck.ShippedBundlePath(b)`,
+    `copy = Path.Combine(patchedDir, b)`. An absent `copy` is a **census miss** — the target is named and NO gate is run
+    over a file that is not there. Otherwise build the four lists from `p`'s rows for that bundle with `Find`/`FindMesh`
+    (fact 3 — the resolution is rebuilt, the WORDING is not: every line still comes out of `Run`), call
+    `Run(log, b, shipped, copy, want, mats, meshes, clips)` and accumulate `Failed` and the entries.
+    Then the **per-target claim census, never `BundleLive.Holds`** (`BundleLive.cs:166` → `BundleClaims.Holds` `:296`,
+    which returns true on ONE matching `c.Mod` — design:388): for every declared bundle, `BundleClaims.Find(b)` `:221`
+    must be non-null, `.Mod == p.Id` and `.Path` must be this project's `copy`.
+  - **The decision is pure and linked, so both consumers are proven offline.** `LifecycleState` gains
+    ```csharp
+    internal static StageReport VerifyVerdict(string name, int served, int declared,
+                                              bool mandatoryVoid, string voidLine, int failed)
+    ```
+    with the §4.4/§7 rules in ONE place: `failed > 0` → `Fail` + `StageText.VerifyFailed`; `mandatoryVoid` → `Void` with
+    **the gate's own line** (`voidLine`, never relabelled); `declared == 0` → `Pass` + `StageText.S8(name)`;
+    otherwise `StageText.S6(name, served, declared)`, which is already the function that refuses to word a shortfall as
+    PASS (`StageText.cs:60`–`:68`) — `served == declared` → `Pass`, else `Void`. `ReadBack.Verify` gathers and calls it;
+    it composes no verdict of its own.
+  - **The console path.** In `Route7.Run`'s switch, `verify` leaves the removal arm — `dryrun`, `revert` and
+    `stacktest` keep `:56`–`:63`'s text **unchanged**, which W18 re-checks:
+    ```csharp
+    case "verify":
+        return args != null && args.Length > 1
+            ? VerifyProject(args[1])
+            : "usage: ct_route7 verify <project> - re-read this project's patched copies. It installs " +
+              "nothing and writes nothing.";
+    ```
+    `VerifyProject(name)` = `ContentProject.Load(ContentToolMain.ProjectDir(name))` →
+    `ReadBack.Verify(p, ContentToolMain.PatchedDir(p.Id), log)` → print `log` then `r.Verdict`. **No install, no write,
+    no key.**
+  - **The dashboard consumer.** `LifecycleJob.StartVerify(Captured on)`: a `Park(…, true)` main segment (the gates
+    sample Unity), `ContentProject.Load(on.Root, pump)` for the expectations, `ReadBack.Verify(p, on.PatchedDir, log)`,
+    `Run.Complete(id, r.Verdict, r.How)`. `Start` `:182` gains its arm and **the `ponytail:` fallback line `:191` is
+    deleted with it** — every token now reaches a producer.
+  - **`Acceptance`, the scenarios that are decidable now** (`LifecycleDashboard.cs:164`–`:188`). The bench already has
+    `Mods\Replace_Leftleg` from the wizard slice on Instance2, so a fixture no longer has to be invented — it is
+    COPIED. One helper (`Fork(source, name, mutate)`: copy the tree, rewrite `"id"` in `ppcontent.json`, return the
+    root) serves three of the four:
+    | Scenario | What it needs, exactly |
+    |---|---|
+    | `prepare` | `Mods\Replace_Leftleg` present beside `ContentToolMain.ModDir`; refuses NAMING that path when absent. Forks it into `DashboardValid` (unchanged rows), `DashboardPatchFail` (`"asset"` retargeted to a name the shipped bundle does not contain → a real `MissingTarget` P4 failure, `ProjectBake.cs:1807`) and `DashboardAuthor` (retargeted to a bundle no other fixture and no live claim contests, so R38 cannot fire on its bakes — Task 8's fixture table) |
+    | `change-source` | only the already-forked fixture. Rewrites one source byte under `Content\`, which is what `PatchCache.Key` stats (`Route7.Observe` `:150`) → the receipt goes stale by an actual key comparison, not by a flag |
+    | `resident` | a bundle the running game has ALREADY loaded. It does not invent one: it asks `BundleLive.ResidentNow(b)` (`BundleLive.cs:174`) over the shipped names and forks `DashboardResident` onto the first that answers true — and refuses, saying so, when none does. That refusal is the honest answer, not a fixture bug |
+    | `enable-resident` | `DashboardResident` on disk from the previous session, then the REAL checkbox body `Route7.Toggle(modDir, true)` (`Route7.cs:162`) — not a roster edit and not a fabricated claim |
+    `ship` stays UNIMPLEMENTED here, and for a reason that belongs to another task: it needs a Doctor with a loaded
+    preview and its `made.Root` (`ModelDoctor.cs:653`), which **Task 7 Step 1** is what wires. Its refusal names Task 7.
+
+- [ ] **Step 7: GREEN and the three commits.**
+  - Run: `dotnet build -c Release` → `Ошибок: 0`, `Предупреждений: 1`
+  - Run: `dotnet run --project tests\ObjCodecTests -c Release` → `LIFECYCLE PASS, ~108` (+6 G9 verdict arms:
+    empty census → S8; shortfall → S6's VOID wording; a mandatory VOID → the gate's own line, unrelabelled;
+    `failed > 0` → `VerifyFailed`; full census → S6 PASS; and a shortfall that ALSO has a mandatory VOID reports the
+    VOID line, not the census sentence). `PROJECT-SCAFFOLD 89`, `MANIFEST 53`, `ALIAS 32`, `REFUSAL-COUNT 17`,
+    `PACKAGE-GATE 7`, `R0: ALL PASS` unchanged.
+  - Run: `dotnet run --project tests\TargetPathTests -c Release` → `R0: ALL PASS`
+  - Unity-only halves — the read-back over an existing copy, the claim census, the console verb, the fixtures:
+    **compiler + Task 8 rows W15, W16, W17, W18**. W18's parity assertion (console terminal line == dashboard verdict,
+    character for character) is now structurally true: one producer, one `VerifyVerdict`.
+  - (c) `git … add src\Bake\ReadBack.cs src\Bake\ProjectBake.cs src\Bake\Route7.cs src\Bake\LifecycleState.cs src\Bake\LifecycleJob.cs src\Dev\LifecycleDashboard.cs tests\ObjCodecTests\LifecycleTests.cs && git … commit -m "feat(bake): one Verify producer for the panel and ct_route7 verify, and the acceptance fixtures that are forks of a real project"`
+- [ ] **Review gate:** as Task 1.
+
+---
+
 ### Task 6: the drawing and the third FitBench tab
 
-Needs Task 5's snapshots. ≤280 lines. Files: `src\Dev\LifecycleDashboard.cs` (the `Draw` half), `src\Dev\FitBench.cs`
+Needs Task 5's snapshots and **Task 5b's producers** — five rows cannot be drawn over three stages that answer
+"not wired to the dashboard yet". ≤280 lines. Files: `src\Dev\LifecycleDashboard.cs` (the `Draw` half), `src\Dev\FitBench.cs`
 `:1672`–`:1674`. **Unity-only → the gate is the compiler plus Task 8 rows W8, W9, W10, W11, W12.**
 
 - [ ] **Step 1: The third tab.** `bool doctorTab` (`FitBench.cs:1674`) becomes a three-state selector; keep the
@@ -812,16 +1092,16 @@ commit anything in that repo from this session.
 | Row | Calls (from design §8.2) | Required evidence | Result |
 |---|---|---|---|
 | W8 empty | `Open('')`; `Run('Validate')`; `Snapshot`; `Shot 'W8'` | Open-empty allowed; R25. Five `never / —` rows, placeholders, unavailable actions disabled, no layout exception | |
-| W9 selector/Validate | `Acceptance('prepare')`; `Open('DashboardValid')`; `Run('Validate')`; `Snapshot`; `Shot 'W9'` | Disabled fixture included, exact root bound, S3; prev/next/Refresh share the selection path; duplicate name disambiguated by root | |
-| W10 happy chain | enable `DashboardValid` in the mod manager; `Open('DashboardValid')`; `Run('All')`; `Shot 'W10-running'`; `Snapshot`; `Shot 'W10'` | Clean process, target not resident: five rows PASS, Apply S2, exact producer strings, Package writes a new external path. A resident target makes this W12, not W10. **The fixture is ENABLED** — Verify's live half needs it (W9's disabled-fixture arm is about listing, not verifying). This install is what makes `DashboardValid` un-re-bakeable for the rest of the process; every later baking row uses `DashboardAuthor` | |
-| W11 first failure | `Open('DashboardPatchFail')`; `Run('All')`; `Snapshot`; `Shot 'W11'` | Real bake patch-gate failure. Bake FAIL; Apply/Verify/Package start counts stay zero; prior receipts retained | |
-| W12 restart required | `Acceptance('resident')`; `Open('DashboardResident')`; `Run('All')`; `Snapshot`; `Shot 'W12'` | A really resident bundle: Apply PASS/S1 with the exact S1 text, Verify VOID/R30, no Package dispatch, no forced unload | |
+| W9 selector/Validate | `Acceptance('prepare')`; `Open('DashboardValid')`; `Run('Validate')`; `Snapshot`; `Shot 'W9'` | **Validate producer lands in T5b.** Disabled fixture included, exact root bound, S3; eligibility shown as its own field and `Disabled` blocks nothing; prev/next/Refresh share the selection path; duplicate name disambiguated by root | |
+| W10 happy chain | enable `DashboardValid` in the mod manager; `Open('DashboardValid')`; `Run('All')`; `Shot 'W10-running'`; `Snapshot`; `Shot 'W10'` | **Validate/Apply/Verify producers land in T5b** — before it, three of these five rows cannot report at all. Clean process, target not resident: five rows PASS, Apply S2, exact producer strings, Package writes a new external path. A resident target makes this W12, not W10. **The fixture is ENABLED** — Verify's live half needs it (W9's disabled-fixture arm is about listing, not verifying). This install is what makes `DashboardValid` un-re-bakeable for the rest of the process; every later baking row uses `DashboardAuthor` | |
+| W11 first failure | `Open('DashboardPatchFail')`; `Run('All')`; `Snapshot`; `Shot 'W11'` | **Validate producer lands in T5b** (the chain's first stage). Real bake patch-gate failure. Bake FAIL; Apply/Verify/Package start counts stay zero; prior receipts retained | |
+| W12 restart required | `Acceptance('resident')`; `Open('DashboardResident')`; `Run('All')`; `Snapshot`; `Shot 'W12'` | **Apply and Verify producers land in T5b**, and `Acceptance('resident')` with them. A really resident bundle: Apply PASS/S1 with the exact S1 text, Verify VOID/R30, no Package dispatch, no forced unload | |
 | W13 cancel | `Open('DashboardAuthor')`; `Acceptance('arm-cancel-bake')`; `Run('Bake')`; **poll** `Snapshot('')` until `barrierArmed=true` AND `barrierRunId`==the `runId` `Run` returned; `Shot 'W13-armed'`; `Cancel`; **terminal poll** until `busy=false`; `Cancel` again; `Snapshot`; `Shot 'W13'` | **`DashboardAuthor`, never `DashboardValid`** — W10 installed the latter and R38 would refuse this bake before it ever reached the barrier. The barrier parks a WORKER, never the main-thread RPC pump, or the poll itself cannot be answered. The first poll observes THIS run parked (timeout = failed row); Cancel is the button's entry point; terminal poll ends R31/VOID with ONE receipt; later start counts zero; busy clears only after acknowledgement AND worker completion; the second Cancel adds nothing; previous outputs byte-identical | |
-| W14 Failed block | `C 'ct_route7' @('apply','DashboardPatchFail')`; `Open('DashboardPatchFail')`; `Run('Apply')`; `Snapshot`; `Shot 'W14'` | Console setup really sets `Failed`; dashboard admission R29; Apply and `Run all` disabled, no retry, no clearing; Validate/refresh cannot clear the badge | |
-| W15 restart proof | after restart + identity preflight: `Acceptance('enable-resident')`; `Snapshot`; `Open('DashboardResident')`; `Run('Verify')`; `Snapshot`; `Shot 'W15'` | Real enable callback, fresh load-back, the **per-target** claim/path census of S6 (not `Holds`); a partially claimed fixture must produce VOID naming the unserved target; new-session `Failed` clear | |
-| W16 stale | `Open('DashboardValid')`; `Acceptance('change-source')`; `Run('Verify')`; `Snapshot`; `Shot 'W16'` | **Stays on `DashboardValid` deliberately** — it needs W10's receipt to make stale, and `Verify` never rewrites, so R38 is unreachable here. Receipt becomes stale by an actual key comparison; no old PASS promoted, no automatic Apply. Run after W10 in the same process | |
-| W17 SHIP landing | `Acceptance('ship')`; `Snapshot`; `Shot 'W17'` | A real successful SHIP opens Lifecycle after GUI dispatch, selects exactly `made.Root`, transfers the same Apply string and disposition, launches no duplicate bake/apply/package | |
-| W18 console parity/package | `Open('DashboardAuthor')`; `Run('Validate')`; `Snapshot`; `C 'ct_project' @('DashboardAuthor')`; `Run('Bake')`; `Snapshot`; `Run('Package')`; `Snapshot`; `C 'ct_route7' @('verify','DashboardAuthor')`; `Run('Verify')`; `Snapshot`; `Shot 'W18'` | **`DashboardAuthor`** — this row bakes twice, which R38 forbids on the installed `DashboardValid`. Bake payload matches for the same unchanged project and key, **and matches the pre-extraction baseline captured at the head of Task 2, bytes and gate log** (this is Task 2's extraction proof, reaching it for the first time). Package matches its producer payload with `ok=true`, writes only a new external directory, previous package intact. **Verify parity: the console verb's terminal line and the dashboard's verdict are the same string character for character**, both out of the one producer; the console call installs and writes nothing; `dryrun/revert/stacktest` still print the unchanged removal text (`Route7.cs:57`–`:63`) | |
+| W14 Failed block | `C 'ct_route7' @('apply','DashboardPatchFail')`; `Open('DashboardPatchFail')`; `Run('Apply')`; `Snapshot`; `Shot 'W14'` | **Apply producer lands in T5b**, with `LegacyDiskActive`/`WriteOutsideRoots` — R34/R36 are unreachable before it. Console setup really sets `Failed`; dashboard admission R29; Apply and `Run all` disabled, no retry, no clearing; Validate/refresh cannot clear the badge | |
+| W15 restart proof | after restart + identity preflight: `Acceptance('enable-resident')`; `Snapshot`; `Open('DashboardResident')`; `Run('Verify')`; `Snapshot`; `Shot 'W15'` | **Verify producer and `Acceptance('enable-resident')` land in T5b.** Real enable callback (`Route7.Toggle`), fresh load-back, the **per-target** claim/path census of S6 (not `Holds`); a partially claimed fixture must produce VOID naming the unserved target; new-session `Failed` clear | |
+| W16 stale | `Open('DashboardValid')`; `Acceptance('change-source')`; `Run('Verify')`; `Snapshot`; `Shot 'W16'` | **Verify producer and `Acceptance('change-source')` land in T5b.** **Stays on `DashboardValid` deliberately** — it needs W10's receipt to make stale, and `Verify` never rewrites, so R38 is unreachable here. Receipt becomes stale by an actual key comparison; no old PASS promoted, no automatic Apply. Run after W10 in the same process | |
+| W17 SHIP landing | `Acceptance('ship')`; `Snapshot`; `Shot 'W17'` | **Apply producer lands in T5b; `Acceptance('ship')` stays with Task 7**, which is what wires the Doctor handoff. A real successful SHIP opens Lifecycle after GUI dispatch, selects exactly `made.Root`, transfers the same Apply string and disposition, launches no duplicate bake/apply/package | |
+| W18 console parity/package | `Open('DashboardAuthor')`; `Run('Validate')`; `Snapshot`; `C 'ct_project' @('DashboardAuthor')`; `Run('Bake')`; `Snapshot`; `Run('Package')`; `Snapshot`; `C 'ct_route7' @('verify','DashboardAuthor')`; `Run('Verify')`; `Snapshot`; `Shot 'W18'` | **Validate and Verify producers, and `ct_route7 verify` itself, land in T5b** — the parity half of this row cannot run before it. **`DashboardAuthor`** — this row bakes twice, which R38 forbids on the installed `DashboardValid`. Bake payload matches for the same unchanged project and key, **and matches the pre-extraction baseline captured at the head of Task 2, bytes and gate log** (this is Task 2's extraction proof, reaching it for the first time). Package matches its producer payload with `ok=true`, writes only a new external directory, previous package intact. **Verify parity: the console verb's terminal line and the dashboard's verdict are the same string character for character**, both out of the one producer; the console call installs and writes nothing; `dryrun/revert/stacktest` still print the unchanged removal text (`Route7.cs:57`–`:63`) | |
 | W19a closed run, **worker-only** | `Open('DashboardAuthor')`; `Run('Package')`; close the bench with the chord while it runs; poll `Snapshot('')` until `busy=false`; reopen; `Snapshot`; `Shot 'W19a'` | `Package` is the one stage that is plain `System.IO` end to end (`Package.cs:15`), so it has NO main-thread final segment and can genuinely finish with the window closed. The run completes, receipt and log recorded, reopening SHOWS the terminal result without re-running. `Cancel` reachable while closed | |
 | W19b closed run, **main-thread arm** | `Open('DashboardAuthor')`; `Run('Bake')`; close the bench while it runs; `Snapshot('')` **once** — assert `busy=true` and the parked-for-paint state, do NOT terminal-poll; reopen and let it paint; THEN poll until `busy=false`; `Snapshot`; `Shot 'W19b'` | v1's single row deadlocked by construction: it terminal-polled a run whose final phase waits for an open, painted panel, so `busy=false` could never arrive. Split here. Assertions: while closed the row reports it is waiting for a painted panel and nothing is re-run; after reopening it resumes and reaches its terminal result once | |
 | W20 competing producer | `Open('DashboardAuthor')`; `Acceptance('arm-cancel-bake')`; `Run('Bake')`; poll until parked; `C 'ct_project' @('DashboardAuthor')`; `Cancel`; poll until `busy=false`; `Snapshot`; `Shot 'W20'` | **`DashboardAuthor`** — an R38 refusal from the installed `DashboardValid` would mask the R37 this row exists to prove. The console verb hits R37 and returns immediately, writing nothing — no second bake, no key stamped over the parked run's copies. After the cancel the claim is released and a plain `C 'ct_project'` succeeds | |
@@ -847,7 +1127,9 @@ gate written after its code is a gate written to pass.
 | G5 sequence | Task 5 | 14 | |
 | G6 admission | Task 3 | 22 | |
 | G7 publication faults (**real files, plain `System.IO`, no Unity**) | Task 4 | 16 | |
-| **Total `LIFECYCLE PASS`** | — | **~92** | |
+| G8 Validate (S3, the two fallbacks, eligibility incl. `Disabled`/`NoRoster`, the key) | Task 5b | 6 | |
+| G9 Verify verdict + R34/R36 admission (`VerifyVerdict`'s five rules; `LegacyDiskActive`/`WriteOutsideRoots` and their precedence) | Task 5b | 6 + 4 | |
+| **Total `LIFECYCLE PASS`** | — | **~108** | |
 
 Unchanged throughout: `PROJECT-SCAFFOLD 89`, `MANIFEST 53`, `ALIAS 32`, `REFUSAL-COUNT 17`, `PACKAGE-GATE 7`,
 `MESH extract 57+`, `R0: ALL PASS`, build `Ошибок: 0` / `Предупреждений: 1`. **A changed count in any of those is a
