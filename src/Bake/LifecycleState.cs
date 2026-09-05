@@ -166,6 +166,193 @@ namespace Morgott.ContentTool.Bake
     }
 
     /// <summary>
+    /// WHAT THE SEAM SHOWS, AND HOW IT FITS DOWN THE WIRE.
+    ///
+    /// The transport is not a choice. `connect call` returns what `PPCLI/src/Reflect.cs` can project, and
+    /// `Project` (:1080) never enumerates or walks properties: a non-trivial reference comes back as a
+    /// `{h, type}` handle, so an object of five rows would arrive as one useless number. Every seam method
+    /// therefore returns a JSON STRING. And `Protocol.Clip` truncates a reply at `MaxOutputLineChars = 2000`
+    /// (`PPCLI/src/Protocol.cs:56`) and appends " ...(clipped)" - SILENTLY, mid-token, producing JSON that
+    /// `ConvertFrom-Json` refuses with an error nowhere near the cause. So the snapshot is SECTIONED and
+    /// every section bounds ITSELF: the header is the poll and carries no verdict text at all, and one
+    /// section at a time carries one verbatim payload.
+    ///
+    /// THIS LIVES BESIDE THE REDUCER, NOT IN THE PANEL, for the reason the offline gate exists: composing
+    /// the sections is the half that can be proven without Unity, and `LifecycleDashboard` pulls
+    /// UnityEngine and can never be linked into `ObjCodecTests`. The panel fills these fields; this file
+    /// turns them into strings that fit.
+    /// </summary>
+    internal sealed class LifecycleView
+    {
+        /// <summary>PPCLI's own limit is 2000; the margin absorbs the transport's framing so a payload that
+        /// measured as fitting cannot arrive clipped anyway.</summary>
+        internal const int MaxPayload = 1900;
+        /// <summary>How much of a header string field is worth showing. Five rows plus these fields is a
+        /// header of roughly 1200 chars, which is what keeps the poll bounded BY CONSTRUCTION rather than by
+        /// a retry.</summary>
+        private const int FieldRoom = 200;
+
+        internal sealed class Row
+        {
+            internal string Stage, Verdict, Installation;
+            internal Freshness Freshness;
+            internal GateOutcome Outcome;
+            /// <summary>How many times THIS run entered this stage. W11 asserts the later stages' counts stay
+            /// zero when the chain stopped early, which a verdict of "-" cannot express.</summary>
+            internal int Starts;
+        }
+
+        internal string GameRoot, Root, Id, Stage, FailedMember, ClaimHeld, Log;
+        /// <summary>Apply's own installation lines. PROPERTIES, not fields, for the reason `Admission`'s are:
+        /// nothing assigns them until Apply has a producer, and a field would be a NEW CS0649 over the gate's
+        /// one known warning.</summary>
+        internal string S1 { get; set; }
+        internal string S2 { get; set; }
+        internal long RunId, BarrierRunId;
+        internal bool Busy, CancelRequested, CancelAcknowledged, BarrierArmed, ParkedForPaint;
+        internal readonly Row[] Rows;
+
+        internal LifecycleView()
+        {
+            Rows = new Row[LifecycleState.Sequence.Stages.Length];
+            for (int i = 0; i < Rows.Length; i++)
+                Rows[i] = new Row { Stage = LifecycleState.Sequence.Stages[i] };
+        }
+
+        internal Row Of(string stage)
+        {
+            foreach (Row r in Rows) if (r.Stage == stage) return r;
+            return null;
+        }
+
+        /// <summary>"" is the poll header; a stage token, "log" or "s1s2" is one payload. Anything else is a
+        /// parseable refusal - never an exception, which would reach PPCLI as a transport error.</summary>
+        internal string Section(string name)
+        {
+            if (name == null) name = "";
+            if (name == "") return Header();
+            if (name == "log") return Bounded(Log, delegate(string text, bool cut)
+            {
+                Import.JsonWriter w = Open("log");
+                return w.Key("log").Val(text).Key("bytes").Val(Len(Log)).Key("truncated").Val(cut)
+                        .EndObj().ToString();
+            });
+            if (name == "s1s2")
+            {
+                Import.JsonWriter w = Open("s1s2");
+                w.Key("s1"); Text(w, S1);
+                w.Key("s2"); Text(w, S2);
+                return w.Key("bytes").Val(Len(S1) + Len(S2)).Key("truncated").Val(false).EndObj().ToString();
+            }
+            Row row = Of(name);
+            if (row == null)
+            {
+                return new Import.JsonWriter().Obj().Key("ok").Val(false).Key("section").Val(name)
+                    .Key("error").Val("unknown section '" + Clip(name, 60) + "' - ask for \"\", a stage " +
+                                      "name, \"log\" or \"s1s2\"").EndObj().ToString();
+            }
+            return Bounded(row.Verdict, delegate(string text, bool cut)
+            {
+                Import.JsonWriter w = Open(name);
+                w.Key("stage").Val(row.Stage)
+                 .Key("freshness").Val(Word(row.Freshness))
+                 .Key("outcome").Val(Word(row.Outcome))
+                 .Key("starts").Val(row.Starts);
+                w.Key("installation"); Text(w, row.Installation);
+                w.Key("verdict"); if (row.Verdict == null) w.Null(); else w.Val(text);
+                return w.Key("bytes").Val(Len(row.Verdict)).Key("truncated").Val(cut).EndObj().ToString();
+            });
+        }
+
+        /// <summary>The poll. Row TEXT is deliberately absent - only its length, so the caller knows whether
+        /// a section is worth fetching. Every string field is clipped to <see cref="FieldRoom"/> first, which
+        /// is what makes the total bounded without a retry loop.</summary>
+        private string Header()
+        {
+            Import.JsonWriter w = Open("");
+            w.Key("gameRoot").Val(Clip(GameRoot, FieldRoom))
+             .Key("root").Val(Clip(Root, FieldRoom))
+             .Key("id").Val(Clip(Id, FieldRoom))
+             .Key("runId").Num(RunId)
+             .Key("busy").Val(Busy);
+            w.Key("stage"); Text(w, Stage);
+            w.Key("cancelRequested").Val(CancelRequested)
+             .Key("cancelAcknowledged").Val(CancelAcknowledged)
+             .Key("parkedForPaint").Val(ParkedForPaint);
+            w.Key("failedMember"); Text(w, Clip(FailedMember, FieldRoom));
+            w.Key("claimHeld"); Text(w, Clip(ClaimHeld, FieldRoom));
+            w.Key("barrierArmed").Val(BarrierArmed).Key("barrierRunId").Num(BarrierRunId);
+
+            w.Key("rows").Arr();
+            foreach (Row r in Rows)
+                w.Obj().Key("stage").Val(r.Stage)
+                       .Key("freshness").Val(Word(r.Freshness))
+                       .Key("outcome").Val(Word(r.Outcome))
+                       .Key("starts").Val(r.Starts)
+                       .Key("verdictLength").Val(Len(r.Verdict))
+                       .EndObj();
+            w.EndArr();
+
+            string json = w.Key("bytes").Val(0).Key("truncated").Val(false).EndObj().ToString();
+            if (json.Length <= MaxPayload) return json;
+            // Unreachable with the clips above; kept because "unreachable" is exactly what a 2000-char
+            // silent truncation always was before someone measured it.
+            return new Import.JsonWriter().Obj().Key("ok").Val(true).Key("section").Val("")
+                .Key("runId").Num(RunId).Key("busy").Val(Busy).Key("bytes").Val(json.Length)
+                .Key("truncated").Val(true).EndObj().ToString();
+        }
+
+        private static Import.JsonWriter Open(string section)
+        {
+            return new Import.JsonWriter().Obj().Key("ok").Val(true).Key("section").Val(section);
+        }
+
+        /// <summary>A string field that is genuinely absent stays null - an empty string would read as "the
+        /// producer returned a blank line", which is a different fact.</summary>
+        private static void Text(Import.JsonWriter w, string value)
+        {
+            if (value == null) w.Null(); else w.Val(value);
+        }
+
+        private static int Len(string s) { return s == null ? 0 : s.Length; }
+        private static string Word(Freshness f)
+        {
+            return f == Freshness.Never ? "never" : f == Freshness.Stale ? "stale" : "fresh";
+        }
+        private static string Word(GateOutcome o)
+        {
+            return o == GateOutcome.Pass ? "pass" : o == GateOutcome.Fail ? "fail"
+                 : o == GateOutcome.Void ? "void" : "none";
+        }
+
+        /// <summary>Composes a payload and shrinks its ONE variable-length field until the whole thing fits.
+        /// ponytail: a geometric clip rather than budget arithmetic, because the escaping is what decides the
+        /// final width (a newline is two chars, a control char six) and computing that exactly costs more
+        /// code than the dozen iterations this takes; make it exact if a section is ever measured as hot.</summary>
+        private static string Bounded(string text, Func<string, bool, string> compose)
+        {
+            string full = compose(text ?? "", false);
+            if (full.Length <= MaxPayload || text == null) return full;
+            for (int room = text.Length; room > 0; )
+            {
+                room = room * 3 / 4;
+                string json = compose(Clip(text, room), true);
+                if (json.Length <= MaxPayload) return json;
+            }
+            return compose("", true);
+        }
+
+        /// <summary>Cuts to a character budget, never through a surrogate pair - half of one is not a
+        /// character and the reply would stop being valid UTF-8 on the way back.</summary>
+        private static string Clip(string s, int room)
+        {
+            if (s == null || s.Length <= room) return s;
+            if (room > 0 && char.IsHighSurrogate(s[room - 1])) room--;
+            return s.Substring(0, room);
+        }
+    }
+
+    /// <summary>
     /// The dashboard's reducer: what a stage is allowed to do, and how old the evidence is. PURE - no
     /// filesystem, no Unity, no console. Everything it needs is a value the caller measured.
     ///

@@ -263,10 +263,11 @@ internal static class LifecycleTests
         checks += Admission();
         checks += Cancelling();
         checks += Sequencing();
+        checks += Sections();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
                "one file swap, the pre-import receipt, the publication ordering, one output owner, " +
-               "the admission table, the cancel contract, the Run all chain";
+               "the admission table, the cancel contract, the Run all chain, the bounded seam sections";
     }
 
     /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per
@@ -976,6 +977,107 @@ internal static class LifecycleTests
                         "a session block refuses Apply mid-chain; the earlier receipts stand and nothing " +
                         "clears the block");
         return checks;
+    }
+
+    /// <summary>THE ARM THAT STOPS PPCLI FROM SILENTLY EATING A POLL. `Protocol.Clip` truncates a reply at
+    /// `MaxOutputLineChars = 2000` (`PPCLI/src/Protocol.cs:56`) and appends " ...(clipped)" mid-token, which
+    /// produces JSON that `ConvertFrom-Json` refuses - with no error anywhere near the cause. So the seam
+    /// SECTIONS its snapshot and every section bounds itself, and this gate proves both offline, where the
+    /// only thing needed is a parser: `Json.Parse` is the one the mod already ships.
+    ///
+    /// The header is the poll, so it carries no verdict TEXT at all - only each row's `verdictLength`, and
+    /// the caller fetches the one row it wants. That is what keeps five maximum-length verdicts from ever
+    /// reaching the wire together.</summary>
+    private static int Sections()
+    {
+        int checks = 0;
+        LifecycleView view = new LifecycleView
+        {
+            GameRoot = "D:\\PP-Instance2",
+            Root = "D:\\PP-Instance2\\Mods\\DashboardAuthor",
+            Id = "morgott.dashboardauthor",
+            RunId = 7,
+            Busy = true,
+            Stage = "Bake",
+            BarrierArmed = true,
+            BarrierRunId = 7,
+            ClaimHeld = "C:\\pd\\ContentTool\\Patched\\aabbccdd\\morgott.dashboardauthor",
+            Log = "line one\r\nline two",
+            S1 = "applied - restart the game",
+            S2 = null
+        };
+        // Five MAXIMUM-length verdicts: the case the header exists to survive.
+        string huge = new string('v', 4000);
+        foreach (LifecycleView.Row row in view.Rows)
+        {
+            row.Verdict = huge;
+            row.Freshness = Freshness.Stale;
+            row.Outcome = GateOutcome.Fail;
+            row.Starts = 2;
+        }
+
+        string header = view.Section("");
+        checks += Check(header.Length < 2000, "the poll header stays under PPCLI's 2000-char clip - " +
+                                              "with five 4000-char verdicts loaded");
+        Dictionary<string, object> h = Obj(header);
+        checks += Check(h != null && (bool)h["ok"] && (string)h["section"] == "",
+                        "the header parses as JSON - the whole point of bounding it");
+        checks += Check(!header.Contains(huge.Substring(0, 64)),
+                        "no verdict TEXT is in the header; the caller asks for the row it wants");
+        List<object> rows = (List<object>)h["rows"];
+        checks += Check(rows.Count == 5 &&
+                        (string)((Dictionary<string, object>)rows[0])["stage"] == "Validate" &&
+                        (string)((Dictionary<string, object>)rows[4])["stage"] == "Package",
+                        "five rows, in the displayed order the panel draws");
+        Dictionary<string, object> first = (Dictionary<string, object>)rows[0];
+        checks += Check((double)first["verdictLength"] == 4000d && (string)first["freshness"] == "stale" &&
+                        (string)first["outcome"] == "fail" && (double)first["starts"] == 2d,
+                        "a row reports its length, freshness, outcome and start count - never its text");
+        checks += Check((double)h["runId"] == 7d && (bool)h["busy"] && (string)h["stage"] == "Bake" &&
+                        !(bool)h["cancelRequested"] && !(bool)h["cancelAcknowledged"],
+                        "the run handle and the cancel flags are in the poll, so a poll can match its run");
+        checks += Check((bool)h["barrierArmed"] && (double)h["barrierRunId"] == 7d,
+                        "W13's barrier observation is a header field - 'parked' is not guessed from a sleep");
+
+        // ---- ONE ROW, VERBATIM, and bounded on its own.
+        string bake = view.Section("Bake");
+        Dictionary<string, object> b = Obj(bake);
+        checks += Check(bake.Length < 2000 && b != null && (bool)b["truncated"] &&
+                        (double)b["bytes"] == 4000d,
+                        "an over-long verdict is clipped, says so, and reports the FULL length it clipped from");
+        checks += Check(((string)b["verdict"]).Length > 0 && huge.StartsWith((string)b["verdict"]),
+                        "what does arrive is the producer's own leading text, never a summary of it");
+
+        view.Of("Bake").Verdict = "ct_project: ALL PASS - D:\\out";
+        Dictionary<string, object> small = Obj(view.Section("Bake"));
+        checks += Check((string)small["verdict"] == "ct_project: ALL PASS - D:\\out" &&
+                        !(bool)small["truncated"],
+                        "a verdict that fits arrives VERBATIM, backslashes and all");
+
+        // ---- The other two sections, and the refusal.
+        Dictionary<string, object> log = Obj(view.Section("log"));
+        checks += Check((string)log["log"] == "line one\r\nline two",
+                        "the log section round-trips CRLF through the parser unchanged");
+        view.Log = huge;
+        Dictionary<string, object> big = Obj(view.Section("log"));
+        checks += Check(view.Section("log").Length < 2000 && (bool)big["truncated"],
+                        "an over-long tail is clipped to fit rather than clipped by PPCLI into broken JSON");
+        Dictionary<string, object> s = Obj(view.Section("s1s2"));
+        checks += Check((string)s["s1"] == "applied - restart the game" && s["s2"] == null,
+                        "S1/S2 have their own section, and an absent S2 is null - not an empty string");
+        Dictionary<string, object> no = Obj(view.Section("Nonsense"));
+        checks += Check(!(bool)no["ok"] && ((string)no["error"]).Length > 0,
+                        "an unknown section is a parseable refusal, never an exception across the wire");
+
+        foreach (string section in new[] { "", "Validate", "Bake", "Apply", "Verify", "Package", "log", "s1s2" })
+            checks += Check(view.Section(section).Length < 2000 && Obj(view.Section(section)) != null,
+                            "every section fits and parses: " + (section == "" ? "<header>" : section));
+        return checks;
+    }
+
+    private static Dictionary<string, object> Obj(string json)
+    {
+        return Json.Parse(json, 32) as Dictionary<string, object>;
     }
 
     private static LifecycleState.Admission Fresh()

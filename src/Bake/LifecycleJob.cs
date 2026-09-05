@@ -43,6 +43,13 @@ namespace Morgott.ContentTool.Bake
         /// because the worker writes it and main reads it, and it is taken with Interlocked so two Ticks in
         /// one frame cannot run it twice.</summary>
         private static volatile Action parked;
+        /// <summary>Does the parked segment BLOCK (Unity work that freezes a frame)? Written before
+        /// <see cref="parked"/> and read after it, so the pump never sees a segment without its policy.</summary>
+        private static volatile bool parkedNeedsPaint;
+
+        /// <summary>What the seam's poll header reports while a blocking segment waits for an open, painted
+        /// panel - W19b's "the row says it is waiting" rather than a run that merely looks stuck.</summary>
+        internal static bool ParkedForPaint { get { return parked != null && parkedNeedsPaint; } }
         /// <summary>The last observation, for the panel. Replaced whole, never mutated.</summary>
         private static volatile FreshnessObservation seen;
 
@@ -129,8 +136,12 @@ namespace Morgott.ContentTool.Bake
             // ---- the WORKER segment: the freshness observation, from captured paths only.
             Worker(delegate
             {
+                // The acceptance barrier, if a scenario armed one. It is the FIRST thing on the worker so
+                // the run is genuinely parked before it has touched anything, and Cancel is what frees it.
+                Barrier.Wait(id);
                 Observe(on);
-                // ---- park the MAIN segment. The bake is Unity from end to end; Tick runs it.
+                // ---- park the MAIN segment. The bake is Unity from end to end (bundle loads, rig
+                // instantiation), so it BLOCKS a frame and waits for an open, painted panel - W19b.
                 Park(delegate
                 {
                     BakeResult r;
@@ -150,16 +161,91 @@ namespace Morgott.ContentTool.Bake
                     // ---- back to a WORKER for the trailing observation, so the panel's freshness is the
                     // one this run just produced and the completion is published with it.
                     Worker(delegate { Observe(on); Run.Complete(id, r.Terminal, r.How); });
-                });
+                }, true);
             });
             return null;
         }
 
+        /// <summary>
+        /// MAIN. The stage dispatcher the seam and the `Run all` sequencer share, so a button, an RPC and a
+        /// chain all enter a producer by the same door. Returns the refusal when the stage could not start,
+        /// null when it did - never a verdict, which only a producer may state.
+        /// </summary>
+        internal static string Start(string stage, Captured on)
+        {
+            if (stage == "Bake") return StartBake(on);
+            if (stage == "Package") return StartPackage(on);
+            // ponytail: Validate, Apply and Verify have no segmented producer yet - 4.1's ManifestFile/
+            // ModGate pair, Route7.ApplyProject's structured overload and 4.4's read-back producer are
+            // three separate pieces of work, none of them budgeted here (Task 5 is the coordinator, the
+            // seam and the pump). This says so instead of inventing a verdict for a stage nothing ran.
+            // Wire them where their panel rows land, and delete this line with the last of them.
+            return "Lifecycle: " + stage + " is not wired to the dashboard yet.";
+        }
+
+        /// <summary>
+        /// MAIN, then WHOLLY A WORKER. `Package` is plain System.IO by construction (Package.cs:15), so it
+        /// is the one stage with no main-thread final segment - which is exactly what makes W19a a real
+        /// closed-window proof rather than a wait for someone to reopen the bench.
+        ///
+        /// It writes OUTSIDE the game installation and never through the console wrapper, whose
+        /// `Directory.Delete(outDir, true)` (ContentToolMain.cs:511) destroys the previous package.
+        /// `Package.Run` refuses a nonempty destination itself (:78) and stays the sole authority on that.
+        /// </summary>
+        internal static string StartPackage(Captured on)
+        {
+            long id = Run.Begin("Package");
+            if (id == 0) return StageText.R26(Run.Latest.Stage);
+            string outDir = PackageDir(on.Id, id);
+            // Resolved before dispatch, like every other path: a null is Package.Run's own "no DLL" case
+            // and it reports that itself, so a throw here must not become the run's verdict.
+            string dll = null;
+            try { dll = Package.BuiltAssembly(on.Root); }
+            catch (Exception) { }
+            Worker(delegate
+            {
+                bool ok;
+                string line;
+                try { line = Package.Run(on.Root, outDir, dll, out ok); }
+                catch (Exception ex)
+                {
+                    Run.Complete(id, "ct_package THREW: " + ex.Message, BakeDisposition.Failed);
+                    return;
+                }
+                // `ok` authorizes the FOLDER (design:180); a refusal is not a failure and keeps its own text.
+                Run.Complete(id, line, ok ? BakeDisposition.Success : BakeDisposition.Refused);
+            });
+            return null;
+        }
+
+        /// <summary>A NEW directory per run under %LOCALAPPDATA%, outside the game installation
+        /// (design:355). The run id alone would collide across sessions - it restarts at 1 in every process
+        /// - and a timestamp alone can collide inside one second, so the name carries both.</summary>
+        internal static string PackageDir(string projectId, long runId)
+        {
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string name = string.IsNullOrEmpty(projectId) ? "project" : projectId;
+            foreach (char bad in Path.GetInvalidFileNameChars()) name = name.Replace(bad, '_');
+            return Path.Combine(Path.Combine(Path.Combine(local, "ContentTool"), "Packages"),
+                                Path.Combine(name,
+                                             DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + runId));
+        }
+
         /// <summary>MAIN. Drains at most ONE parked segment per call: a Unity segment can freeze a frame,
         /// and running two of them back to back would freeze two. Its own try, like the Doctor drain's - a
-        /// lifecycle bug must not take the bench's input down with it.</summary>
-        internal static void Tick()
+        /// lifecycle bug must not take the bench's input down with it.
+        ///
+        /// THE CLOSED-WINDOW POLICY, and the whole of it (design:323-:333): a worker keeps running and
+        /// publishes its result with the bench closed, and so does any main segment that only needs a FRAME.
+        /// A BLOCKING main segment waits for <paramref name="panelReady"/> - the panel open and painted -
+        /// exactly as SHIP's two-frame arming does (ModelDoctor.cs:443), because freezing a frame behind a
+        /// window nobody can see is indistinguishable from a hang. Nothing is re-run to produce the result
+        /// when the bench comes back; the segment is still sitting here.
+        /// </summary>
+        internal static void Tick(bool panelReady)
         {
+            if (parked == null) return;
+            if (parkedNeedsPaint && !panelReady) return;
             Action next = Interlocked.Exchange(ref parked, null);
             if (next == null) return;
             try { next(); }
@@ -177,6 +263,9 @@ namespace Morgott.ContentTool.Bake
             Run.Cancel();
             CancellationTokenSource c = cts;
             if (c != null) try { c.Cancel(); } catch (ObjectDisposedException) { }
+            // AFTER the token, never before: the released worker must find a cancelled token, or it walks
+            // on into a bake that completes normally and W13 loses the thing it is measuring.
+            Barrier.Release();
         }
 
         /// <summary>The freshness observation, WORKER-SAFE by construction: every path it touches was
@@ -213,12 +302,61 @@ namespace Morgott.ContentTool.Bake
         /// <summary>MAIN SEGMENT, handed to the pump. A worker calls this, so the throw below lands in
         /// <see cref="Worker"/>'s catch and the run ends FAILED with that sentence - loudly, at once,
         /// instead of parking work nothing drains.</summary>
-        private static void Park(Action body)
+        private static void Park(Action body, bool needsPaint)
         {
             if (!PumpRegistered)
                 throw new InvalidOperationException("no lifecycle pump registered — FitBench.Update must " +
                                                     "call LifecycleJob.Tick");
+            parkedNeedsPaint = needsPaint;
             parked = body;
+        }
+
+        /// <summary>
+        /// THE ACCEPTANCE BARRIER, and the two rules that keep W13 from being a sleep.
+        ///
+        /// It parks a WORKER and never the main-thread pump: parking the pump would make `Snapshot`
+        /// unanswerable and W13/W20 unpollable by construction. And <see cref="Parked"/> is published only
+        /// once a worker is ACTUALLY sitting in <see cref="Wait"/>, never on arming alone, or the first poll
+        /// passes before the run exists.
+        ///
+        /// It releases on the same `Cancel()` the button calls and lets NORMAL worker completion publish the
+        /// verdict: the released worker walks on into a bake whose token is already cancelled and B4 returns
+        /// `Cancelled` on its own. No Thread.Abort, no synthetic success, no detached worker.
+        /// </summary>
+        internal static class Barrier
+        {
+            private static volatile ManualResetEvent gate;
+            /// <summary>A worker is sitting in <see cref="Wait"/> right now, and this is its run.</summary>
+            internal static volatile bool Parked;
+            internal static long ParkedRunId;
+
+            internal static bool Armed { get { return gate != null; } }
+
+            internal static void Arm()
+            {
+                Release();
+                gate = new ManualResetEvent(false);
+            }
+
+            /// <summary>WORKER ONLY. Returns at once unless a scenario armed the barrier.</summary>
+            internal static void Wait(long runId)
+            {
+                ManualResetEvent g = gate;
+                if (g == null) return;
+                ParkedRunId = runId;
+                Parked = true;
+                // Never disposed, so this cannot race a Release into ObjectDisposedException; one event per
+                // armed scenario is a handle a test session can afford.
+                try { g.WaitOne(); }
+                finally { Parked = false; ParkedRunId = 0; }
+            }
+
+            internal static void Release()
+            {
+                ManualResetEvent g = gate;
+                gate = null;
+                if (g != null) g.Set();
+            }
         }
     }
 }
