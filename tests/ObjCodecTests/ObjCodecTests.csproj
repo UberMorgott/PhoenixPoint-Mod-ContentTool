@@ -39,6 +39,10 @@
     <Compile Include="ManifestTests.cs" />
     <Compile Include="..\..\src\Project\ProjectScaffold.cs" Link="ProjectScaffold.cs" />
     <Compile Include="ProjectScaffoldTests.cs" />
+    <!-- The lifecycle CARRIER and the one verdict formatter carry no UnityEngine type on purpose (the
+         dashboard's producers run on a worker), so "an all-VOID read-back is not a PASS" and every
+         verdict string are proven here against the production types instead of by reading a panel. -->
+    <Compile Include="LifecycleTests.cs" />
     <Compile Include="PreflightTests.cs" />
     <!-- The PROTOTYPE CATALOG carries no UnityEngine type on purpose, so which rigs are one binding
          prototype - and that Crabman and Oilcrab are NOT, despite 34 shared names - is proven against
