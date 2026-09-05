@@ -149,7 +149,11 @@ namespace Morgott.ContentTool.Dev
             // in the other. z is the DEPTH along the view axis, not the distance - the same number the
             // projection divides by.
             float depth = Vector3.Dot(pivot - cam.transform.position, cam.transform.forward);
-            size = BenchList.WorldSize(BenchList.GizmoPixels, depth, cam.fieldOfView, cam.pixelHeight);
+            // Screen.height, not cam.pixelHeight: the arrows are hit-tested and clipped in the pixels
+            // WorldToScreenPoint reports, which are the BACKBUFFER's. An upscaler (Renderforge/DLSS)
+            // makes the camera's own target smaller than the window, and sizing by it would shrink the
+            // handle by the upscale ratio while the picture on screen stayed the same size.
+            size = BenchList.WorldSize(BenchList.GizmoPixels, depth, cam.fieldOfView, Screen.height);
             return size > 1e-6f;
         }
 
@@ -459,7 +463,7 @@ namespace Morgott.ContentTool.Dev
         /// mirror image of where it is drawn.</summary>
         private static float Flip(float guiY)
         {
-            return (cam == null ? Screen.height : cam.pixelHeight) - guiY;
+            return Screen.height - guiY;
         }
 
         /// <summary>Everything the drag will be measured against, frozen at the press. Frozen because

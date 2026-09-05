@@ -1019,14 +1019,20 @@ namespace Morgott.ContentTool.Dev
                 if (!skeleton || cam == null) return;
                 bool press = e.type == EventType.MouseDown && e.button == 0;
                 if (e.type != EventType.Repaint && !press) return;
-                if (cam.pixelWidth - panelWidth < 1f || cam.pixelHeight < 1f) return;   // no room to draw in
+                // BACKBUFFER PIXELS, never the camera's own render target. With an upscaler in front of
+                // us (Renderforge/DLSS) cam.pixelWidth/Height is the LOW-RES target - 1707x960 while the
+                // window is 2560x1440 - yet WorldToScreenPoint, Event.current.mousePosition and every GUI
+                // rect are all still in the 2560x1440 backbuffer. Sizing the pixel matrix by the camera
+                // stretched every gizmo by exactly that ratio. One basis for the picture, the cull and
+                // the press: Screen.
+                if (Screen.width - panelWidth < 1f || Screen.height < 1f) return;   // no room to draw in
                 if (joints.Length == 0) return;
                 // THE SAME arithmetic for the picture and for the press, run in both passes rather than
                 // remembered from one: a hit test projected differently from what is drawn is the classic
                 // gizmo bug, and it is invisible until somebody clicks.
                 Project(cam, panelWidth, stripTopGui);
-                if (press) Press(e, cam, panelWidth, stripTopGui);
-                else Paint(cam, panelWidth, stripTopGui);
+                if (press) Press(e, panelWidth, stripTopGui);
+                else Paint(panelWidth, stripTopGui);
             }
             catch (Exception)
             {
@@ -1042,7 +1048,7 @@ namespace Morgott.ContentTool.Dev
             // The two half-planes the overlay may draw in. Both are CONVEX, which is what makes the
             // "both ends visible" rule enough on its own: a segment between two points that are each
             // right of the panel and above the strip cannot cross into either.
-            float strip = stripTopGui >= cam.pixelHeight ? 0f : cam.pixelHeight - stripTopGui;
+            float strip = stripTopGui >= Screen.height ? 0f : Screen.height - stripTopGui;
             for (int i = 0; i < joints.Length; i++)
             {
                 jointVisible[i] = false;
@@ -1052,13 +1058,13 @@ namespace Morgott.ContentTool.Dev
                 // A joint BEHIND the camera projects to a mirrored point somewhere plausible - the
                 // same trap FitGizmo.AxisVisible guards - so it is neither drawn nor pickable.
                 jointVisible[i] = p.z > cam.nearClipPlane &&
-                                  p.x >= panelWidth && p.x <= cam.pixelWidth &&
-                                  p.y >= strip && p.y <= cam.pixelHeight;
+                                  p.x >= panelWidth && p.x <= Screen.width &&
+                                  p.y >= strip && p.y <= Screen.height;
             }
         }
 
         /// <summary>The lines, the dots, the picked joint's marker and the legend. Repaint only.</summary>
-        private void Paint(Camera cam, float panelWidth, float stripTopGui)
+        private void Paint(float panelWidth, float stripTopGui)
         {
             Material m = FitGizmo.Colored();
             if (m == null) return;                     // no shader in this build; the gizmo already said so
@@ -1068,9 +1074,10 @@ namespace Morgott.ContentTool.Dev
             try
             {
                 // PIXEL SPACE, stated rather than left to the default: the projection above is the
-                // camera's own screen convention (origin BOTTOM-left) and these four arguments - left,
-                // right, bottom, top - are the matrix that agrees with it.
-                GL.LoadPixelMatrix(0f, cam.pixelWidth, 0f, cam.pixelHeight);
+                // BACKBUFFER's screen convention (origin BOTTOM-left) and these four arguments - left,
+                // right, bottom, top - are the matrix that agrees with it. Screen, not cam.pixel*, or
+                // an upscaler's low-res camera target scatters every gizmo by the upscale ratio.
+                GL.LoadPixelMatrix(0f, Screen.width, 0f, Screen.height);
 
                 GL.Begin(GL.LINES);
                 for (int i = 0; i < joints.Length; i++)
@@ -1118,8 +1125,8 @@ namespace Morgott.ContentTool.Dev
                           "' - click a ringed bone, Esc to cancel";
             if (line.Length > 0)
                 GUI.Label(new Rect(panelWidth + 8f,
-                                   Mathf.Min(stripTopGui, cam.pixelHeight) - 20f,
-                                   cam.pixelWidth - panelWidth - 16f, 18f), line);
+                                   Mathf.Min(stripTopGui, Screen.height) - 20f,
+                                   Screen.width - panelWidth - 16f, 18f), line);
         }
 
         private static void Dot(float x, float y, float r, Color c)
@@ -1141,14 +1148,14 @@ namespace Morgott.ContentTool.Dev
         /// (OrbitCamera.Classify), so the orbit was never going to act on it. ALT+LEFT, which the orbit
         /// DOES claim, is refused below rather than fought over.
         /// </summary>
-        private void Press(Event e, Camera cam, float panelWidth, float stripTopGui)
+        private void Press(Event e, float panelWidth, float stripTopGui)
         {
             if (e.mousePosition.x <= panelWidth) return;      // the panel wins, always
             if (e.mousePosition.y >= stripTopGui) return;     // ... and so does the transport
             if (e.alt) return;                                // ALT+LEFT is the orbit's gesture
             // IMGUI measures y from the TOP; the camera, FitGizmo's picks and this pass's projection all
             // measure it from the BOTTOM. One conversion, here, for both questions asked below it.
-            float x = e.mousePosition.x, y = cam.pixelHeight - e.mousePosition.y;
+            float x = e.mousePosition.x, y = Screen.height - e.mousePosition.y;
             if (FitGizmo.WouldGrab(x, y)) return;             // the handles get first refusal
             int hit;
             if (!BoneOverlay.Nearest(x, y, jointX, jointY, jointVisible,
