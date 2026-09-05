@@ -14,7 +14,7 @@ namespace Morgott.ContentTool.Project
     /// It AUTHORS nothing itself. Every byte goes out through ManifestFile.Save (atomic splice, .bak, the E5
     /// fingerprint) and AliasMap.SaveSidecar, which is why an existing project's own formatting, key order
     /// and unknown keys survive a press by construction. The three files that must NOT already exist - the
-    /// two templates and the mesh copy - go out through FileMode.CreateNew instead, never through
+    /// two templates and the mesh copy - go out through <see cref="CreateNew"/> instead, never through
     /// AtomicFile's upsert writer.
     ///
     /// PLACEMENT IS THE WHOLE POINT: the SIBLING Mods\&lt;name&gt;, never ContentMods.ProjectDir's
@@ -87,7 +87,11 @@ namespace Morgott.ContentTool.Project
                 DirectoryInfo mods = Directory.GetParent(Normalized(modDir));
                 return mods == null ? null : Path.Combine(mods.FullName, name);
             }
-            catch (Exception) { return null; }
+            // Narrow on purpose: only the exceptions a PATH can raise mean "no root". Anything else -
+            // an OOM, a security refusal - is a real failure and must not come back as a tidy null.
+            catch (Exception bad) when (bad is ArgumentException || bad is NotSupportedException ||
+                                        bad is PathTooLongException || bad is IOException)
+            { return null; }
         }
 
         /// <summary>ModDir made absolute with its trailing separator off. Directory.GetParent("...\Mods\
@@ -119,8 +123,27 @@ namespace Morgott.ContentTool.Project
                 throw new InvalidDataException("no shipped target was derived for this slot, so there is no " +
                                                "row to write - pick the slot again");
 
-            if (!string.IsNullOrEmpty(modDir)) modDir = Normalized(modDir);
-            DirectoryInfo mods = string.IsNullOrEmpty(modDir) ? null : Directory.GetParent(modDir);
+            // THE MAP IS VETTED BEFORE ANYTHING IS WRITTEN, by the same judge that will READ it back.
+            // SaveSidecar writes whatever it is handed, and LoadSidecar then refuses an empty name or two
+            // file bones on one game bone (AliasMap.cs:212-218) - so an unvetted press leaves a sidecar the
+            // bake silently drops. Of also NORMALIZES: what goes out is its ordinal copy, not the caller's
+            // dictionary. Null here means "no map", which is R5's business further down.
+            AliasMap vetted = AliasMap.Of(aliases);
+            if (vetted == null && aliases != null && aliases.Count != 0)
+                throw new InvalidDataException("the bone map sends two of the file's bones onto one of the " +
+                                               "game's, or leaves a name empty, so nothing was written - the " +
+                                               "bake would refuse the sidecar this press produced; fix the " +
+                                               "map, then press Ship again");
+
+            // Normalized THROWS on a ModDir no path can be made of, and this is the press an author drives:
+            // a raw ArgumentException out of the Ship button names nothing, while "no root" is exactly what
+            // that spelling means - the same answer RootOf's null already stands for.
+            DirectoryInfo mods = null;
+            if (!string.IsNullOrEmpty(modDir))
+                try { modDir = Normalized(modDir); mods = Directory.GetParent(modDir); }
+                catch (Exception bad) when (bad is ArgumentException || bad is NotSupportedException ||
+                                            bad is PathTooLongException || bad is IOException)
+                { }
             if (mods == null)
                 throw new InvalidDataException("ContentTool's own mod folder is not known, so there is nowhere " +
                                                "beside it to put a project");
@@ -130,6 +153,22 @@ namespace Morgott.ContentTool.Project
             result.ManifestPath = Path.Combine(result.Root, ContentMods.Manifest);
             result.MetaPath = Path.Combine(result.Root, "meta.json");
             string stem = Path.GetFileNameWithoutExtension(sourceGlb);
+            // THE STEM IS A NAME TOO, and the name table above only ever saw the PROJECT's. This one becomes
+            // the copy's file name and the row's "mesh" value: empty, it writes mesh:"" and comes back as
+            // Manifest's E3 naming no cause the author can act on; a device name is a file Windows refuses
+            // to create, and that failure reads like a bug in this tool.
+            if (string.IsNullOrEmpty(stem))
+                throw new InvalidDataException("'" + sourceGlb + "' has no name before its extension, so " +
+                                               "there is no mesh name to write into the row - rename the " +
+                                               "file, then press Ship again");
+            int stemDot = stem.IndexOf('.');
+            string bareStem = stemDot < 0 ? stem : stem.Substring(0, stemDot);
+            foreach (string device in Devices)
+                if (string.Equals(bareStem, device, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("'" + stem + ".glb' would be the copy under Content\\" +
+                                                   "Meshes\\, and Windows reserves '" + bareStem + "' with " +
+                                                   "or without an extension, so that file cannot be created " +
+                                                   "- rename the file, then press Ship again");
             result.MeshPath = Path.Combine(result.Root, "Content", "Meshes", stem + ".glb");
             result.SidecarPath = AliasMap.SidecarPathOf(result.MeshPath);
             result.Created = !File.Exists(result.ManifestPath);
@@ -163,7 +202,8 @@ namespace Morgott.ContentTool.Project
                 {
                     { "id", name }, { "bundle", name + ".bundle" }
                 };
-                CreateNew(result.ManifestPath, new JsonWriter().Val(tree).ToString() + "\n");
+                CreateNew(result.ManifestPath,
+                          new UTF8Encoding(false).GetBytes(new JsonWriter().Val(tree).ToString() + "\n"));
             }
 
             // THE MANIFEST FIRST, and its ID rather than the folder name. "id == name" is true of a project
@@ -225,7 +265,7 @@ namespace Morgott.ContentTool.Project
             // R5. A sidecar already beside the copy, with an empty map in hand, would be applied by the bake
             // and by nothing the author ever looked at. SaveSidecar rewrites the whole "bones" object, so the
             // only safe answers are "write mine" or "refuse".
-            if ((aliases == null || aliases.Count == 0) && File.Exists(result.SidecarPath))
+            if (vetted == null && File.Exists(result.SidecarPath))
                 throw new InvalidDataException(stem + ".glb.aliases.json already sits beside the copy but this " +
                                                "Doctor session has no bone map, so the bake would silently use " +
                                                "mappings you never saw - delete it, or set the map");
@@ -234,8 +274,8 @@ namespace Morgott.ContentTool.Project
             result.MeshAlreadyPresent = CopyOrVerify(result.MeshPath, bytes, sha, stem);
             // Keyed on the COPY and on the COPY's sha, because that is the file the bake hashes
             // (AliasMap.LoadSidecar:196) - the source the author picked is gone from the story by now.
-            if (aliases != null && aliases.Count != 0)
-                AliasMap.SaveSidecar(result.MeshPath, sha, bytes.LongLength, aliases);
+            if (vetted != null)
+                AliasMap.SaveSidecar(result.MeshPath, sha, bytes.LongLength, vetted.Pairs);
 
             // THE SPLICE LAST, deliberately: a manifest row pointing at a mesh file that is not there yet is
             // the one half-written state a retry cannot fix by pressing again (design §7, stages 6-8). The
@@ -247,7 +287,7 @@ namespace Morgott.ContentTool.Project
             // refusal or a failed Save above leaves the press with nothing added, and a meta.json written
             // before that decision would hand the author a mod id for a project that gained no row.
             if (!File.Exists(result.MetaPath))
-                CreateNew(result.MetaPath, Meta(id));
+                CreateNew(result.MetaPath, new UTF8Encoding(false).GetBytes(Meta(id)));
 
             // THE POST-CONDITION, asserted rather than assumed: this is what makes `ct_project <name>` and
             // `ct_route7 apply <name>` find the folder that was just written (ContentMods.Sibling:128).
@@ -283,19 +323,11 @@ namespace Morgott.ContentTool.Project
         /// served last bake's copy.
         ///
         /// "Absent" is decided by the CREATE ITSELF, never by a File.Exists that another writer can falsify
-        /// between the question and the write: AtomicFile.Write ends in File.Replace, which would happily
-        /// overwrite a file created in that window - the one thing this method exists to forbid.
-        /// FileMode.CreateNew is the stdlib's own create-only-or-fail, one line and atomic; the loser of a
-        /// race re-reads the winner and judges it by the same SHA, so two presses agree.</summary>
+        /// between the question and the write - see <see cref="CreateNew"/>. The loser of a race re-reads the
+        /// winner and judges it by the same SHA, so two presses agree.</summary>
         private static bool CopyOrVerify(string meshPath, byte[] bytes, string sha, string stem)
         {
-            try
-            {
-                using (var made = new FileStream(meshPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    made.Write(bytes, 0, bytes.Length);
-                return false;
-            }
-            catch (IOException) when (File.Exists(meshPath)) { }
+            if (CreateNew(meshPath, bytes)) return false;
             string have = AliasMap.Sha256(File.ReadAllBytes(meshPath));
             if (string.Equals(have, sha, StringComparison.OrdinalIgnoreCase)) return true;
             throw new IOException("Content\\Meshes\\" + stem + ".glb already holds DIFFERENT bytes (sha " +
@@ -303,20 +335,30 @@ namespace Morgott.ContentTool.Project
                                   "are shipping, or ship into another project");
         }
 
-        /// <summary>The absent-only twin of AtomicFile.WriteText, for the two TEMPLATES. Same reason as
-        /// CopyOrVerify: the upsert writer must never be the one deciding "it was not there a moment ago".
-        /// A file that appeared in the meantime is left exactly as its writer left it, and the caller reads
-        /// it back - ManifestFile.Load for the manifest, Json.Parse + Package.MetaRefusal for the meta - so
-        /// the winner is validated rather than trusted.</summary>
-        private static void CreateNew(string path, string text)
+        /// <summary>The absent-only writer for all three files that must NOT already exist - the mesh copy
+        /// and the two templates. True when THIS call created it; false when someone else got there first,
+        /// and the caller then reads the winner back rather than trusting it (the SHA for the copy,
+        /// ManifestFile.Load for the manifest, Json.Parse + Package.MetaRefusal for the meta).
+        ///
+        /// WRITTEN WHOLE, THEN MOVED, so the destination never exists half-written: FileMode.CreateNew alone
+        /// created the file at its final name and only then started copying into it, and a press killed at
+        /// that moment left a truncated .glb that every later press met as R4 forever - unrecoverable by
+        /// pressing again, which is the one state this whole class is arranged to avoid. The temp is a GUID
+        /// in the SAME directory (a cross-volume Move is a copy, not a rename), and File.Move with no
+        /// overwrite flag is the stdlib's own atomic create-or-throw. Anything that is not that collision -
+        /// a full disk, a denied write - propagates, so a failure is never read as "it was already there".
+        /// The temp goes either way; a leftover .tmp is inert, since nothing here ever scans the folder.</summary>
+        private static bool CreateNew(string path, byte[] bytes)
         {
-            byte[] bytes = new UTF8Encoding(false).GetBytes(text);
+            string temp = Path.Combine(Path.GetDirectoryName(path), Guid.NewGuid().ToString("N") + ".tmp");
             try
             {
-                using (var made = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    made.Write(bytes, 0, bytes.Length);
+                File.WriteAllBytes(temp, bytes);
+                try { File.Move(temp, path); }
+                catch (IOException) when (File.Exists(path)) { return false; }
+                return true;
             }
-            catch (IOException) when (File.Exists(path)) { }
+            finally { try { File.Delete(temp); } catch (IOException) { } }
         }
 
         /// <summary>Does the project ALREADY declare exactly this replacement? Each field folded the way the

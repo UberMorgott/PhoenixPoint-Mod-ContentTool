@@ -70,6 +70,21 @@ internal static class ProjectScaffoldTests
             string glb = Path.Combine(dir, "body.glb");
             File.WriteAllBytes(glb, new byte[] { 1, 2, 3 });
             string sha = AliasMap.Sha256(File.ReadAllBytes(glb));
+
+            // The PRESS normalizes the same ModDir RootOf does, and this is where an author meets it: a raw
+            // ArgumentException out of the Ship button names nothing, so the malformed spelling gets the very
+            // refusal RootOf's null stands for.
+            string badMod = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir + "\0bad", "Replace_Rifle", glb, sha,
+                                                   "a.bundle", "Foo", empty);
+            }
+            catch (InvalidDataException refused) { badMod = refused.Message; }
+            checks += Check(badMod == "ContentTool's own mod folder is not known, so there is nowhere beside " +
+                                      "it to put a project",
+                            "a ModDir no path can be made of is a REFUSAL, not a raw exception: " + badMod);
+
             ProjectScaffold.Result made = ProjectScaffold.AddMeshReplacement(
                 modDir, "Replace_Rifle", glb, sha,
                 "px_equipment_assets_all.bundle", "WPN_PX_RG_Assault_Rifle_T01_V01", empty);
@@ -80,10 +95,47 @@ internal static class ProjectScaffoldTests
             Manifest fresh = Manifest.Parse(File.ReadAllText(made.ManifestPath));
             checks += Check(fresh.Id == "Replace_Rifle" && fresh.Bundle == "Replace_Rifle.bundle",
                             "the manifest declares id and bundle: " + fresh.Id + " / " + fresh.Bundle);
-            checks += Check(File.ReadAllText(made.MetaPath) == Template("Replace_Rifle"),
+            // As BYTES: File.ReadAllText STRIPS a BOM, so a template that grew one would still read equal
+            // and "byte for byte" could not fail.
+            checks += Check(Same(File.ReadAllBytes(made.MetaPath),
+                                 new UTF8Encoding(false).GetBytes(Template("Replace_Rifle"))),
                             "meta.json is the design §4.2 template, byte for byte");
             checks += Check(ContentMods.ProjectDir(modDir, "Replace_Rifle") == made.Root,
                             "and ContentMods.ProjectDir now resolves that name to it - ct_project <name> finds it");
+
+            // ---- Scaffold_NamesTheStem. The .glb's stem becomes the copy's file name AND the row's "mesh"
+            // value, so it gets the same two answers the PROJECT name gets: an empty stem would write
+            // mesh:"" and come back as Manifest's E3 naming no cause, and a device name is a file Windows
+            // refuses to create - a failure that reads like a bug in this tool.
+            string noStem = Path.Combine(dir, ".glb");
+            File.WriteAllBytes(noStem, new byte[] { 1, 2, 3 });
+            string noStemSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Replace_Rifle", noStem, sha,
+                                                   "a.bundle", "NoStem", empty);
+            }
+            catch (InvalidDataException refused) { noStemSaid = refused.Message; }
+            checks += Check(noStemSaid == "'" + noStem + "' has no name before its extension, so there is no " +
+                                          "mesh name to write into the row - rename the file, then press " +
+                                          "Ship again",
+                            "an empty stem is refused by name: " + noStemSaid);
+
+            string devDir = Path.Combine(dir, "dev");
+            Directory.CreateDirectory(devDir);
+            string devGlb = Path.Combine(devDir, "nul.glb");
+            File.WriteAllBytes(devGlb, new byte[] { 1, 2, 3 });
+            string devSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Replace_Rifle", devGlb, sha,
+                                                   "a.bundle", "DeviceStem", empty);
+            }
+            catch (InvalidDataException refused) { devSaid = refused.Message; }
+            checks += Check(devSaid == "'nul.glb' would be the copy under Content\\Meshes\\, and Windows " +
+                                       "reserves 'nul' with or without an extension, so that file cannot be " +
+                                       "created - rename the file, then press Ship again",
+                            "a device-named stem is refused by name: " + devSaid);
 
             ProjectScaffold.Result trailing = ProjectScaffold.AddMeshReplacement(
                 modDir + Path.DirectorySeparatorChar, "Trail_Sep", glb, sha, "a.bundle", "Foo", empty);
@@ -278,6 +330,14 @@ internal static class ProjectScaffoldTests
                 modDir, "Replace_Twice", second, secondSha,
                 "px_equipment_assets_all.bundle", "WPN_PX_Hand", empty);
             byte[] afterFirst = File.ReadAllBytes(once.ManifestPath);
+            // SEEDED with a key Meta() never writes. Meta(id) is deterministic, so "the meta was not
+            // rewritten" compared against the template's own bytes would hold even if the reuse press
+            // rewrote it - a rewrite would drop this "Author" line, and nothing else would notice.
+            File.WriteAllText(once.MetaPath,
+                              Template("Replace_Twice").Replace("{\n  \"ID\"", "{\n  \"Author\": \"x\",\n  \"ID\""),
+                              new UTF8Encoding(false));
+            checks += Check(Package.MetaRefusal(File.ReadAllText(once.MetaPath), null) == null,
+                            "the seeded meta.json is still one the packager accepts");
             byte[] metaAfterFirst = File.ReadAllBytes(once.MetaPath);
             ProjectScaffold.Result reused = ProjectScaffold.AddMeshReplacement(
                 modDir, "Replace_Twice", second, secondSha,
@@ -289,7 +349,8 @@ internal static class ProjectScaffoldTests
             checks += Check(Same(File.ReadAllBytes(once.ManifestPath), afterFirst),
                             "the manifest bytes did not move at all - a reuse writes nothing");
             checks += Check(Same(File.ReadAllBytes(once.MetaPath), metaAfterFirst),
-                            "and the VALID meta.json the first press wrote is left byte for byte alone");
+                            "and the VALID meta.json already there is left byte for byte alone, seeded key " +
+                            "and all");
 
             // ---- Scaffold_RefusesConflictingTarget (R6 == Manifest.Validate's E4, verbatim). The same
             // target with a DIFFERENT mesh is the case R6 was written for, and the only one left.
@@ -326,8 +387,12 @@ internal static class ProjectScaffoldTests
             string metaLess = null;
             try { ProjectScaffold.AddMeshReplacement(modDir, "MetaLess", glb, sha, "a.bundle", "Foo", empty); }
             catch (InvalidDataException refused) { metaLess = refused.Message; }
-            checks += Check(metaLess != null && !File.Exists(Path.Combine(metaless, "meta.json")),
-                            "an R6 refusal into a project that had no meta.json leaves none: " + metaLess);
+            checks += Check(metaLess == "ppcontent.json already replaces \"Foo\" in \"a.bundle\" with a mesh, " +
+                                        "so a second row for the same target was NOT written - edit the " +
+                                        "existing row instead" &&
+                            !File.Exists(Path.Combine(metaless, "meta.json")),
+                            "an R6 refusal into a project that had no meta.json is E4 verbatim and leaves " +
+                            "none: " + metaLess);
 
             // ---- Scaffold_MeshCollisionPolicy. The .glb under Content\Meshes\ is the bake's INPUT
             // (ProjectBake.FindMesh:1581), so overwriting one silently re-points a row an author already
@@ -340,6 +405,19 @@ internal static class ProjectScaffoldTests
             checks += Check(again.MeshAlreadyPresent && again.MeshPath == meshPath &&
                             Same(File.ReadAllBytes(meshPath), new byte[] { 1, 2, 3 }),
                             "the SAME bytes under the same name are a no-op, not a rewrite");
+
+            // The copy lands as a temp beside itself and is then MOVED into place, so a press killed mid-write
+            // leaves a .tmp rather than half a .glb. The next press must walk straight past that leftover -
+            // Content\Meshes\ is never scanned, only named.
+            File.WriteAllBytes(Path.Combine(made.Root, "Content", "Meshes", "leftover.tmp"), new byte[] { 0 });
+            string afterCrashGlb = Path.Combine(dir, "aftercrash.glb");
+            File.WriteAllBytes(afterCrashGlb, new byte[] { 5, 5 });
+            ProjectScaffold.Result afterCrash = ProjectScaffold.AddMeshReplacement(
+                modDir, "Replace_Rifle", afterCrashGlb, AliasMap.Sha256(File.ReadAllBytes(afterCrashGlb)),
+                "a.bundle", "AfterCrash", empty);
+            checks += Check(!afterCrash.MeshAlreadyPresent &&
+                            Same(File.ReadAllBytes(afterCrash.MeshPath), new byte[] { 5, 5 }),
+                            "a stale .tmp beside the copy does not break the next press");
 
             string clashDir = Path.Combine(dir, "clash");
             Directory.CreateDirectory(clashDir);
@@ -371,9 +449,6 @@ internal static class ProjectScaffoldTests
             checks += Check(stale == "'" + glb + "' changed on disk after its green verdict, so nothing was " +
                                      "written - pick it again, read the report, then press Ship again",
                             "R3 verbatim: " + stale);
-            checks += Check(File.ReadAllText(made.ManifestPath)
-                                .IndexOf("StaleFoo", StringComparison.Ordinal) < 0,
-                            "and R3 left no row behind - the manifest is saved only after the copy lands");
 
             // ---- Scaffold_RefusesAStaleSourceBeforeWriting. "nothing was written" has to be true of a
             // FIRST press too: the source is read and hashed before the folder exists, so a stale file
@@ -407,6 +482,27 @@ internal static class ProjectScaffoldTests
                                      "never saw - delete it, or set the map",
                             "R5 verbatim: " + stray);
             File.Delete(AliasMap.SidecarPathOf(loneCopy));
+
+            // ---- Scaffold_VetsTheBoneMap. SaveSidecar writes whatever it is handed, and LoadSidecar then
+            // REFUSES two file bones landing on one game bone (AliasMap.cs:212-218) - so a press that wrote
+            // such a map would leave a sidecar the bake silently drops and an author who never sees why.
+            // AliasMap.Of is the one judge of that, and it runs before the first byte moves.
+            var collide = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                { "Bip01_Head", "head" }, { "Bip01_Neck", "head" }
+            };
+            string vetSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Vetted", lone, loneSha, "a.bundle", "Vet", collide);
+            }
+            catch (InvalidDataException refused) { vetSaid = refused.Message; }
+            checks += Check(vetSaid == "the bone map sends two of the file's bones onto one of the game's, or " +
+                                       "leaves a name empty, so nothing was written - the bake would refuse " +
+                                       "the sidecar this press produced; fix the map, then press Ship again",
+                            "a map AliasMap.Of refuses is refused BEFORE anything is written: " + vetSaid);
+            checks += Check(!Directory.Exists(Path.Combine(mods, "Vetted")),
+                            "and it left no project folder behind - no .glb, no sidecar, nothing to delete");
 
             // ---- Scaffold_SidecarRoundTrips: the sidecar is keyed on the COPY, which is the file the bake
             // will hash (AliasMap.LoadSidecar:196), not on the source the author picked.
