@@ -28,15 +28,37 @@ namespace Morgott.ContentTool.IO
                     // under a name that says it is the author's manifest.
                     stream.Flush(true);
                 }
-                if (File.Exists(path)) File.Replace(tmp, path, backupPath);
-                else File.Move(tmp, path);
+                Publish(tmp, path, backupPath);
             }
             finally
             {
-                // A successful swap moved it away, so this is a no-op; any failure above - the open, the
-                // write, the flush or the commit - is cleaned up here. Best effort either way: the
-                // exception the caller needs is the one from the try, never one from this line.
+                // KEPT, even though Publish now has a guard of its own. This one also covers a failed
+                // open, a failed write and a failed flush - none of which ever reach Publish - so
+                // moving it wholesale would strand this method's temp on exactly the paths that have
+                // one today. Two temps, two owners. Best effort either way: the exception the caller
+                // needs is the one from the try, never one from this line.
                 try { File.Delete(tmp); } catch (Exception) { }
+            }
+        }
+
+        /// <summary>Publish a temp the CALLER streamed. <see cref="Write"/> makes its own temp (:19) and
+        /// so cannot be handed one - a bake that streams a bundle straight into a sibling temp needs the
+        /// swap without the buffer. ONE swap in the codebase, so a publication cannot drift from a write.
+        ///
+        /// Throws when there is no temp to publish: silently doing nothing there would leave the previous
+        /// file in place and read, from the outside, exactly like a successful publication.</summary>
+        internal static void Publish(string tempPath, string path, string backupPath = null)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Replace(tempPath, path, backupPath);
+                else File.Move(tempPath, path);
+            }
+            finally
+            {
+                // A successful swap moved it away, so this is a no-op; a failed one leaves the caller's
+                // temp behind, and nobody else knows its name.
+                try { File.Delete(tempPath); } catch (Exception) { }
             }
         }
 

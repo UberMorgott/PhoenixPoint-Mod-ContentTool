@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using Morgott.ContentTool.Bake;
+using Morgott.ContentTool.IO;
 
 /// <summary>The lifecycle dashboard's CARRIER and its one verdict formatter.
 ///
@@ -193,7 +195,86 @@ internal static class LifecycleTests
         string wide = new string('x', 5000);
         checks += Check(StageResult.Tail(wide, 1) == wide, "one very long line comes back whole");
 
-        return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail";
+        checks += Publication();
+
+        return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
+               "one file swap";
+    }
+
+    /// <summary>G4 - the ONE swap. AtomicFile.Write makes its own temp (AtomicFile.cs:19) and so cannot
+    /// publish one a bake already streamed; Publish takes that temp and performs the same two-armed swap.
+    /// Real files, System.IO only - the thing under test IS the filesystem call.
+    ///
+    /// The last two arms are the regression this split could introduce: Write's own cleanup guard covers a
+    /// failed open, write or flush, NONE of which ever reach Publish, so moving that guard wholesale would
+    /// strand Write's temp on exactly the paths that have one today.</summary>
+    private static int Publication()
+    {
+        int checks = 0;
+        string dir = Path.Combine(Path.GetTempPath(), "ct_publish_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            byte[] streamed = { 1, 2, 3, 4, 5 };
+            byte[] older = { 9, 9 };
+
+            // Over an ABSENT destination - the File.Move arm.
+            string dest = Path.Combine(dir, "absent.bundle");
+            string tmp = dest + ".streamed.tmp";
+            File.WriteAllBytes(tmp, streamed);
+            AtomicFile.Publish(tmp, dest);          // void, so it is a STATEMENT, never an expression
+            checks += Check(Same(File.ReadAllBytes(dest), streamed) && !File.Exists(tmp),
+                            "Publish moves the caller's temp onto a destination that does not exist");
+
+            // Over an EXISTING destination - the File.Replace arm.
+            File.WriteAllBytes(dest, older);
+            File.WriteAllBytes(tmp, streamed);
+            AtomicFile.Publish(tmp, dest);
+            checks += Check(Same(File.ReadAllBytes(dest), streamed) && !File.Exists(tmp),
+                            "Publish replaces an existing destination and leaves no temp behind");
+
+            // The backup is honoured on the replace arm - the same contract Write already had.
+            string backup = Path.Combine(dir, "absent.bundle.bak");
+            File.WriteAllBytes(dest, older);
+            File.WriteAllBytes(tmp, streamed);
+            AtomicFile.Publish(tmp, dest, backup);
+            checks += Check(Same(File.ReadAllBytes(dest), streamed) && Same(File.ReadAllBytes(backup), older),
+                            "the backupPath keeps the bytes the swap displaced");
+
+            // A temp that is not there is the caller's bug and must be LOUD: publishing nothing over a
+            // live file would otherwise look like a successful bake.
+            bool threw = false;
+            try { AtomicFile.Publish(Path.Combine(dir, "nothing.tmp"), dest); }
+            catch (Exception) { threw = true; }
+            checks += Check(threw && Same(File.ReadAllBytes(dest), streamed),
+                            "publishing an absent temp throws and does not touch the destination");
+
+            // Write still writes - it is now two lines over Publish, and MANIFEST/ALIAS/PROJECT-SCAFFOLD
+            // all ride on it.
+            string written = Path.Combine(dir, "written.bin");
+            AtomicFile.Write(written, streamed);
+            AtomicFile.Write(written, older);
+            checks += Check(Same(File.ReadAllBytes(written), older) &&
+                            Directory.GetFiles(dir, "*.tmp").Length == 0,
+                            "Write publishes over its own path twice and cleans up after itself");
+
+            // Write's OWN guard, which Publish never sees: the stream is open, the write throws.
+            bool wrote = false;
+            try { AtomicFile.Write(Path.Combine(dir, "midwrite.bin"), null); }
+            catch (Exception) { wrote = true; }
+            checks += Check(wrote && Directory.GetFiles(dir, "*.tmp").Length == 0,
+                            "a Write that throws mid-write strands no .tmp - Write keeps its own cleanup");
+        }
+        finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
+        return checks;
+    }
+
+    private static bool Same(byte[] a, byte[] b)
+    {
+        // NEVER `a == b`: that compares references and passes on two arrays that differ.
+        if (a == null || b == null || a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+        return true;
     }
 
     private static int Check(bool condition, string what)
