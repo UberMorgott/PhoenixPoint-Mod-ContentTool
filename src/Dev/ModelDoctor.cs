@@ -7,6 +7,7 @@ using System.Threading;
 using Morgott.ContentTool.Doctor;
 using Morgott.ContentTool.Import;
 using Morgott.ContentTool.IO;
+using Morgott.ContentTool.Project;
 using UnityEngine;
 
 namespace Morgott.ContentTool.Dev
@@ -26,7 +27,7 @@ namespace Morgott.ContentTool.Dev
     /// </summary>
     internal sealed class ModelDoctor
     {
-        private enum Intent { Preview, Revert, Save, SkelPlan }
+        private enum Intent { Preview, Revert, Save, SkelPlan, Ship }
 
         private readonly ConcurrentQueue<Intent> intents = new ConcurrentQueue<Intent>();
         /// <summary>Navigation and alias edits the DRAW pass asked for. OnGUI runs twice per frame
@@ -68,6 +69,29 @@ namespace Morgott.ContentTool.Dev
         internal PrototypeTarget Prototype;
         internal ReplacementPreflightResult Ready;
         internal string Message = "";
+
+        // ---------------------------------------------------------------- SHIP
+        /// <summary>The project name the author is editing. Seeded from the resolved target on the first
+        /// Layout pass that has one, then owned by the text field.</summary>
+        private string projectName = "";
+        /// <summary>The two-frame gate. The bake blocks the main thread for seconds, so the label has to be
+        /// PAINTED before it starts: Tick N+1 arms, Draw paints during Repaint, Tick N+2 runs. SlimPanel's
+        /// volatile-snapshot pattern does not apply here - no worker changes state between Layout and
+        /// Repaint, the main thread simply stops.</summary>
+        private bool shipPending, shipLabelPainted;
+        private string shipPhase = "", shipResult = "", shipPath = "", shipTail = "";
+        /// <summary>Everything the run needs, copied when the intent drains, so a click on the browser while
+        /// the bake runs cannot change what is being shipped.</summary>
+        private string shipName, shipSource, shipSha, shipBundle, shipAsset;
+        private Dictionary<string, string> shipAliases;
+        private PrototypeTarget shipProto;
+        private RigTarget shipTargetWas;
+        private SkinnedMeshRenderer shipRenderer;
+        /// <summary>The Doctor generation this press was armed on (<see cref="gen"/>, bumped by Restart, by
+        /// the slot change and by Dispose). The two-frame gate spans a frame the AUTHOR can act in -
+        /// retarget, pick another file, close the bench - and every one of those moves `gen`, so an armed
+        /// press whose generation no longer matches is abandoned before it writes anything.</summary>
+        private int shipGen = -1;
 
         /// <summary>The mesh this Doctor put on the renderer, and the one it took off, so Revert puts
         /// back the OBJECT rather than something that looks like it.</summary>
@@ -231,6 +255,7 @@ namespace Morgott.ContentTool.Dev
             else if (what == "revert") intents.Enqueue(Intent.Revert);
             else if (what == "save") intents.Enqueue(Intent.Save);
             else if (what == "skelplan") intents.Enqueue(Intent.SkelPlan);
+            else if (what == "ship") intents.Enqueue(Intent.Ship);
         }
 
         /// <summary>
@@ -402,7 +427,17 @@ namespace Morgott.ContentTool.Dev
                 if (intent == Intent.Preview) Message = DoPreview();
                 else if (intent == Intent.Revert) Message = Revert();
                 else if (intent == Intent.SkelPlan) Message = DoWriteSkelPlan();
+                else if (intent == Intent.Ship) ArmShip();
                 else Message = DoSave();
+            }
+
+            // FRAME N+2. The label armed above has been painted by now, so the freeze happens under a panel
+            // that already says it is happening.
+            if (shipPending && shipLabelPainted)
+            {
+                shipPending = false;
+                shipLabelPainted = false;
+                DoShip();
             }
         }
 
@@ -520,6 +555,161 @@ namespace Morgott.ContentTool.Dev
                        " - open Advanced > SKEL to apply it";
             }
             catch (Exception ex) { return "could not write the plan: " + ex.Message; }
+        }
+
+        /// <summary>FRAME N+1: take a copy of every input and put the panel into its "working" state. Nothing
+        /// is written here - the point of this frame is that it ends with a repaint.</summary>
+        private void ArmShip()
+        {
+            if (shipPending) return;
+            shipName = (projectName ?? "").Trim();
+            shipSource = Path;
+            shipSha = Ready == null ? null : Ready.Sha256;
+            shipBundle = Prototype == null ? null : Prototype.ShippedBundle;
+            shipAsset = Prototype == null ? null : Prototype.ShippedAsset;
+            shipAliases = new Dictionary<string, string>(aliases, StringComparer.Ordinal);
+            shipProto = Prototype;
+            shipTargetWas = Target;
+            shipRenderer = Renderer;
+            shipGen = gen;                      // the generation this press belongs to
+            shipResult = ""; shipPath = ""; shipTail = "";
+            shipPhase = "creating the project, baking and applying - the game freezes for a few seconds";
+            shipPending = true;
+            shipLabelPainted = false;
+        }
+
+        /// <summary>
+        /// FRAME N+2, and every byte of it. Order is design §4.5: the source is re-read and compared against
+        /// the verdict's own hash, the project is written, the COPY is re-judged, the renderer is
+        /// re-snapshotted, and only then does the bake run. That binds the VERDICT to what is on disk - the
+        /// bake's own target lookup, bundle I/O and material-slot mapping can still refuse, and its result
+        /// stays authoritative.
+        ///
+        /// Nothing is rolled back after a failure: the copy, the sidecar and the row are authored project
+        /// state, cheap and retryable on the next press, and a three-writer rollback would be the more
+        /// dangerous code (design §7).
+        /// </summary>
+        private void DoShip()
+        {
+            shipPhase = "";
+            // CANCEL BEFORE THE FIRST BYTE. One frame stands between arming and running, and the author owns
+            // it: retargeting bumps gen, picking another file bumps it through Restart, closing the bench
+            // bumps it in Dispose. Shipping the snapshot anyway would write a project for the OLD slot under
+            // a panel already showing the new one - a mod folder the author never asked for, named after a
+            // target they have moved away from.
+            if (shipGen != gen)
+            {
+                shipGen = -1;
+                shipResult = "the slot or the file changed before the bake started, so nothing was written - " +
+                             "press Ship again";
+                return;
+            }
+            shipGen = -1;
+            string root = null;
+            try
+            {
+                // R3 belongs to the SCAFFOLD, which raises it BEFORE it creates a directory, a manifest or a
+                // meta - which is what lets its sentence say "nothing was written" and be true. Re-reading
+                // the source here as well would only hash the same file twice and answer the same question.
+                ProjectScaffold.Result made = ProjectScaffold.AddMeshReplacement(
+                    ContentToolMain.ModDir, shipName, shipSource, shipSha, shipBundle, shipAsset, shipAliases);
+                root = made.Root;
+                shipPath = made.Root;
+
+                // R7. The bake reads the COPY, so the COPY is what has to be green - including the sidecar
+                // that was just written beside it. made.MeshBytes ARE the copy's bytes: the scaffold hashed
+                // them against the verdict before writing, and CopyOrVerify proved an existing file equal to
+                // them. Judging those is judging what is on disk, without re-opening the question.
+                ReplacementPreflightResult copied =
+                    ReplacementPreflight.Run(made.MeshBytes, made.MeshPath, shipProto);
+                if (copied.Outcome != Outcome.ByName || copied.Report.Count(Severity.Blocking) != 0)
+                {
+                    shipResult = "the COPIED glb did not re-read green (" + copied.Outcome + "), so nothing was " +
+                                 "baked - the project on disk is complete, fix the file and press Ship again";
+                    return;
+                }
+
+                // R8, AND IT HAS TO KNOW ABOUT THE PREVIEW. Target was snapshotted when the slot was picked;
+                // DoPreview then put OUR mesh on that renderer. A plain SameAs is therefore false for the
+                // whole time a preview is on screen - which is exactly the state an author ships from, so a
+                // naive guard would refuse every real press. With a preview live the mesh's IDENTITY is not
+                // evidence about the rig; that the mesh is OUR preview object is.
+                RigTarget now = shipTargetWas == null ? null : Snapshot(shipRenderer, shipTargetWas.TransformPath);
+                bool same = now != null && (HasPreview
+                    ? ReferenceEquals(shipRenderer == null ? null : shipRenderer.sharedMesh, preview) &&
+                      now.SameRigAs(shipTargetWas)
+                    : now.SameAs(shipTargetWas));
+                if (!same)
+                {
+                    shipResult = "the slot's renderer changed while Ship was running, so nothing was baked - " +
+                                 "pick the slot again";
+                    return;
+                }
+
+                // ApplyProject and NOT ProjectBake.Run: it loads the project, computes PatchCache.Key,
+                // re-bakes when stale and installs, and Run does not write the freshness key - calling both
+                // would bake twice. The ABSOLUTE root is idempotent through ContentToolMain.ProjectDir, so
+                // the two cannot disagree about which folder was baked. The DISPOSITION is asked for, not
+                // read out of the log: zero claims taken can mean residency, a catalog Locate failure or
+                // another mod owning that bundle, and only one of the three is S1.
+                Bake.Route7.ApplyDisposition how;
+                string log = Bake.Route7.ApplyProject(made.Root, shipBundle, out how);
+                ContentToolMain.Say(log);
+                shipTail = Tail(log, 10);
+                if (how == Bake.Route7.ApplyDisposition.BakeFailed)
+                    // R11. ApplyProject's own NOT APPLIED line names the count and where to read the
+                    // failures; it deliberately states no next step, because the console verb and the mod
+                    // manager print it too. THIS caller has one.
+                    shipResult = Tail(log, 1) + " Fix the lines above and press Ship again.";
+                else if (how == Bake.Route7.ApplyDisposition.Resident)
+                    // S1, THE NORMAL OUTCOME. The bay rendered this very mesh, so the bundle is resident and
+                    // BundleLive.Register refuses before taking a claim. No forced unload: it would pull the
+                    // archive out from under live objects, which is what that refusal exists to prevent.
+                    shipResult = "baked OK - restart the game and enable '" + shipName + "' in the mod manager. " +
+                                 "Phoenix Point already loaded " + shipBundle + ", so this session keeps showing " +
+                                 "your Doctor preview.";
+                else if (how == Bake.Route7.ApplyDisposition.Redirected)
+                    shipResult = "baked and redirected LIVE - " + shipBundle + " now loads from the patched copy " +
+                                 "on the next load";
+                else                                    // R23
+                    shipResult = "baked, but NOT APPLIED: " + shipBundle + " was neither redirected nor already " +
+                                 "loaded - the log above names the refusal; the project folder is complete and " +
+                                 "can be enabled after a restart";
+            }
+            catch (InvalidDataException refused) { shipResult = refused.Message; }   // R1, R2, R5, R6, R13
+            catch (IOException refused) { shipResult = refused.Message; }            // R3, R4, E5, E6
+            catch (Exception ex)                                                     // R12
+            {
+                // OBSERVED, never assumed. This catch is reachable BEFORE anything exists - a modDir that
+                // resolves nowhere, a source that cannot be read - so it asks the disk rather than sending an
+                // author to look at a folder that was never created.
+                string where = root ?? ProjectScaffold.RootOf(ContentToolMain.ModDir, shipName);
+                bool there = where != null && Directory.Exists(where);
+                shipResult = "SHIP THREW: " + ex.GetType().Name + ": " + ex.Message + " - " +
+                             (there
+                              ? "'" + where + "' is on disk and the files already written there were retained"
+                              : "no project folder was created") + "; see Player.log for the stack";
+                Debug.LogError("[ContentTool] Model Doctor Ship: " + ex);
+            }
+        }
+
+        /// <summary>The last few lines of the bake log, for the panel. The WHOLE log went to
+        /// ContentToolMain.Say, which is where an author reads the rows one by one.
+        ///
+        /// THE TRAILING EMPTY ELEMENT IS DISCARDED BEFORE THE COUNT. ApplyProject ends in AppendLine, so
+        /// Split('\n') always produces one empty element at the end; taking "the last 1" then selected that
+        /// empty string and Tail(log, 1) answered "", which is exactly the R11 path - the panel would report
+        /// a failed bake with a BLANK result line. Trim the tail first, then take N.</summary>
+        private static string Tail(string log, int lines)
+        {
+            if (string.IsNullOrEmpty(log)) return "";
+            string[] all = log.Replace("\r\n", "\n").Split('\n');
+            int end = all.Length;
+            while (end > 0 && all[end - 1].Length == 0) end--;      // the AppendLine's own empty tail
+            var kept = new StringBuilder();
+            for (int i = Math.Max(0, end - lines); i < end; i++)
+                if (all[i].Length != 0) kept.AppendLine(all[i]);
+            return kept.ToString().TrimEnd();
         }
 
         /// <summary>The file's ONE scene root, or null when it has none or several. A plan's Root is
@@ -1697,6 +1887,20 @@ namespace Morgott.ContentTool.Dev
             seeded.Clear();
             seededFor = null;
             canSave = false;
+            // An armed Ship MUST NOT survive the bench closing: it would run on the next Doctor, against a
+            // renderer that is gone and a project name nobody typed. Dispose bumps gen above, so the
+            // generation check would catch it too; clearing the fields is what stops the NEXT Doctor from
+            // opening on the last one's result text.
+            shipPending = false;
+            shipLabelPainted = false;
+            shipGen = -1;
+            shipName = shipSource = shipSha = shipBundle = shipAsset = null;
+            shipAliases = null;
+            shipProto = null;
+            shipTargetWas = null;
+            shipRenderer = null;
+            projectName = "";
+            shipPhase = shipResult = shipPath = shipTail = "";
         }
     }
 }
