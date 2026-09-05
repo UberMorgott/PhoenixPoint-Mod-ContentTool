@@ -101,7 +101,7 @@ namespace Morgott.ContentTool.Dev
                     ctx.InRunAll = true;
                     ctx.ValidateOutcome = ctx.BakeOutcome = ctx.ApplyOutcome = GateOutcome.None;
                     string next = chain.Next(ctx);
-                    if (next == null) return Started(false, 0, chain.Terminal);
+                    if (next == null) { log = chain.Terminal; return Started(false, 0, chain.Terminal); }
                     return Dispatch(next);
                 }
                 chain = null;
@@ -116,14 +116,15 @@ namespace Morgott.ContentTool.Dev
         public static string Cancel()
         {
             LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
+            // NOTHING TO CANCEL IS NOT AN ACCEPTED CANCEL. `ok:true, acknowledged:false` is exactly what a
+            // cancel the producer lost the race to looks like, so answering it with no run at all left a
+            // caller polling for an acknowledgement that will never come.
+            if (!now.Busy) return Cancelled(false, now.RunId, false, "nothing is running.");
             // The CHAIN is not touched here: it stops when the cancelled stage REPORTS `Cancelled` through
             // the pump, which is the producer saying so - a cancel the producer lost the race to is a
             // request, never an outcome (LifecycleRun's rule 3).
             LifecycleJob.Cancel();
-            return new JsonWriter().Obj().Key("ok").Val(true)
-                .Key("runId").Num(now.RunId)
-                .Key("acknowledged").Val(LifecycleJob.Run.Latest.CancelAcknowledged)
-                .EndObj().ToString();
+            return Cancelled(true, now.RunId, LifecycleJob.Run.Latest.CancelAcknowledged, null);
         }
 
         /// <summary>Observational, and it cannot validate, apply or clear anything. "" is the poll header;
@@ -137,14 +138,18 @@ namespace Morgott.ContentTool.Dev
                 view.Root = root;
                 view.Id = id;
                 view.RunId = now.RunId;
-                view.Busy = now.Busy;
+                // BUSY UNTIL THE RESULT IS SERVED, not until the producer stopped. Between `Run.Complete`
+                // and the next `Pump` the row and the log still hold the PREVIOUS run's answer (or none at
+                // all, which is what a synchronous refusal looked like), so `busy:false` there invited a
+                // poller to read a stale row as this run's verdict.
+                view.Busy = now.Busy || Pending(now);
                 view.Stage = now.Stage;
                 view.CancelRequested = now.CancelRequested;
                 view.CancelAcknowledged = now.CancelAcknowledged;
                 view.ParkedForPaint = LifecycleJob.ParkedForPaint;
                 view.FailedMember = Route7.IsFailed(id) ? id : null;
                 view.ClaimHeld = HeldDir();
-                view.BarrierArmed = LifecycleJob.Barrier.Parked;
+                view.BarrierParked = LifecycleJob.Barrier.Parked;
                 view.BarrierRunId = LifecycleJob.Barrier.ParkedRunId;
                 view.Log = log;
                 return view.Section(section);
@@ -219,18 +224,36 @@ namespace Morgott.ContentTool.Dev
             chain.Report(ctx, new LifecycleState.StageReport(Outcome(now.How), now.Result, now.How,
                                                              false, true));
             string next = chain.Next(Refresh(true));
-            if (next != null) Dispatch(next);
+            // A CHAIN THAT STOPPED HAS TO SAY SO SOMEWHERE. `Next` returns null both when the five stages
+            // are done and when an ADMISSION refused one, and the refusal is only in `chain.Terminal` -
+            // dropping it left a `Run all` that stopped at Verify's R28 reporting nowhere at all.
+            if (next == null) { if (chain.Stopped) log = chain.Terminal; return; }
+            Dispatch(next);
         }
 
         // ---- the plumbing ------------------------------------------------------------------------------
 
-        private static bool Busy { get { return LifecycleJob.Run.Latest.Busy; } }
+        private static bool Busy
+        {
+            get { LifecycleRun.Snapshot now = LifecycleJob.Run.Latest; return now.Busy || Pending(now); }
+        }
+
+        /// <summary>A run the producer has finished but the pump has not yet moved into the row and the log.
+        /// It counts as busy everywhere the seam is observed or admitted, so a new run cannot evict a result
+        /// nobody has been served.</summary>
+        private static bool Pending(LifecycleRun.Snapshot now)
+        {
+            return !now.Busy && now.RunId != 0 && now.RunId == dispatched && now.RunId != harvested;
+        }
 
         private static void Bind(string newRoot, string newId)
         {
             root = newRoot;
             id = newId;
             captured = null;
+            // D: the freshness memory belongs to the project that was baked, not to the panel. Carrying it
+            // into the next selection would admit Verify on B with A's copies.
+            LifecycleJob.Look(null);
             chain = null;
             log = null;
             foreach (LifecycleView.Row r in view.Rows)
@@ -243,31 +266,73 @@ namespace Morgott.ContentTool.Dev
             ctx.RestartRequired = false;
         }
 
-        /// <summary>Everything admission is allowed to know, measured now. The chain's own fields are NOT
-        /// touched here - they are receipts of this run and only `Sequence.Report` writes them.</summary>
+        /// <summary>
+        /// Everything admission is allowed to know, measured now - Unity facts included. The chain's own
+        /// fields are NOT touched here; they are receipts of this run and only `Sequence.Report` writes them.
+        ///
+        /// THE CAPTURE IS TAKEN HERE, BEFORE EVERY RUN, and never reused across one: a manifest error the
+        /// first Bake captured was refused forever after the author fixed the file, and the declared-bundle
+        /// list went stale with it. The freshness observation is taken from THAT capture for the same
+        /// reason, one project at a time.
+        /// </summary>
         private static LifecycleState.Admission Refresh(bool inChain)
         {
             LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
             ctx.Selection = string.IsNullOrEmpty(root) ? LifecycleState.Selection.None
                           : Directory.Exists(root) ? LifecycleState.Selection.Ok
                           : LifecycleState.Selection.Unavailable;
-            ctx.RunningStage = now.Busy ? now.Stage : null;
+            ctx.RunningStage = now.Busy || Pending(now) ? now.Stage : null;
             ctx.ProjectId = id;
             ctx.RetryHint = Route7.IsFailed(id) ? Route7.RetryHint(root) : null;
-            ctx.Copies = LifecycleState.Fresh(LifecycleJob.Seen);
+            captured = ctx.Selection == LifecycleState.Selection.Ok ? LifecycleJob.Capture(root) : null;
+            ctx.Copies = LifecycleState.Fresh(LifecycleJob.Look(captured));
+            ctx.LegacyDiskActive = Route7.LegacyDiskActive(id);
+            ctx.WriteOutsideRoots = OutsideRoots();
             ctx.InRunAll = inChain;
             return ctx;
         }
 
-        /// <summary>MAIN. Captures the Unity-derived facts, then hands the stage to the one dispatcher the
+        /// <summary>
+        /// R34, from the ONE thing Apply's destinations are derived from: `ProjectBake.OutputDirs` is the
+        /// only owner of them (ProjectBake.cs), and both must land under the mod manager's own patched root
+        /// or under the author's project. A mod id or a root carrying `..` escapes both - which is the write
+        /// this refuses BEFORE anything is opened, rather than after.
+        /// </summary>
+        private static bool OutsideRoots()
+        {
+            if (captured == null || captured.OutputDirs == null) return false;
+            try
+            {
+                string patched = Norm(ContentToolMain.PatchedRoot), project = Norm(root);
+                foreach (string dir in captured.OutputDirs)
+                {
+                    string at = Norm(dir);
+                    if (!at.StartsWith(patched, StringComparison.OrdinalIgnoreCase) &&
+                        !at.StartsWith(project, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+                return false;
+            }
+            // An unresolvable path is not a proven escape, and refusing Apply over one would be a guess.
+            catch (Exception) { return false; }
+        }
+
+        private static string Norm(string path) { return Path.GetFullPath(path).TrimEnd('\\', '/'); }
+
+        /// <summary>MAIN. Hands the stage - and the capture `Refresh` just took - to the one dispatcher the
         /// buttons will use too.</summary>
         private static string Dispatch(string stage)
         {
-            if (captured == null || captured.Root != root) captured = LifecycleJob.Capture(root);
+            if (captured == null) captured = LifecycleJob.Capture(root);
             LifecycleView.Row row = view.Of(stage);
             string refusal = LifecycleJob.Start(stage, captured);
             if (refusal != null)
             {
+                // THE ROW SAYS IT, not just the return value: a button press and a chain step both land
+                // here, and a refusal that only went back down the wire left the row blank. VOID, because
+                // nothing was proven and nothing failed - and `Starts` stays where it was, since a stage
+                // that was refused never entered.
+                if (row != null) { row.Verdict = refusal; row.Outcome = GateOutcome.Void; }
+                log = refusal;
                 if (chain != null) chain.Report(ctx, new LifecycleState.StageReport(
                     GateOutcome.Void, refusal, BakeDisposition.Refused, false, true));
                 return Started(false, 0, refusal);
@@ -311,6 +376,14 @@ namespace Morgott.ContentTool.Dev
         {
             JsonWriter w = new JsonWriter().Obj().Key("ok").Val(ok).Key("runId").Num(runId);
             w.Key("refusal"); if (refusal == null) w.Null(); else w.Val(refusal);
+            return w.EndObj().ToString();
+        }
+
+        private static string Cancelled(bool ok, long runId, bool acknowledged, string error)
+        {
+            JsonWriter w = new JsonWriter().Obj().Key("ok").Val(ok).Key("runId").Num(runId)
+                                                 .Key("acknowledged").Val(acknowledged);
+            w.Key("error"); if (error == null) w.Null(); else w.Val(error);
             return w.EndObj().ToString();
         }
 

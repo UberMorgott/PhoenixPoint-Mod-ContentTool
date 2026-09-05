@@ -1014,7 +1014,7 @@ internal static class LifecycleTests
             RunId = 7,
             Busy = true,
             Stage = "Bake",
-            BarrierArmed = true,
+            BarrierParked = true,
             BarrierRunId = 7,
             ClaimHeld = "C:\\pd\\ContentTool\\Patched\\aabbccdd\\morgott.dashboardauthor",
             Log = "line one\r\nline two",
@@ -1051,7 +1051,7 @@ internal static class LifecycleTests
         checks += Check((double)h["runId"] == 7d && (bool)h["busy"] && (string)h["stage"] == "Bake" &&
                         !(bool)h["cancelRequested"] && !(bool)h["cancelAcknowledged"],
                         "the run handle and the cancel flags are in the poll, so a poll can match its run");
-        checks += Check((bool)h["barrierArmed"] && (double)h["barrierRunId"] == 7d,
+        checks += Check((bool)h["barrierParked"] && (double)h["barrierRunId"] == 7d,
                         "W13's barrier observation is a header field - 'parked' is not guessed from a sleep");
 
         // ---- ONE ROW, VERBATIM, and bounded on its own.
@@ -1080,6 +1080,27 @@ internal static class LifecycleTests
         Dictionary<string, object> s = Obj(view.Section("s1s2"));
         checks += Check((string)s["s1"] == "applied - restart the game" && s["s2"] == null,
                         "S1/S2 have their own section, and an absent S2 is null - not an empty string");
+
+        // ---- THE TWO FIELDS THAT WERE OUTSIDE THE BUDGET. S1/S2 are producer lines with no length bound
+        // of their own and the section used to hardcode `truncated:false` over them; `installation` is
+        // Apply's, and it sat outside the row's shrink loop entirely. Either one over ~1900 chars arrived
+        // clipped by PPCLI mid-token instead - JSON `ConvertFrom-Json` refuses, far from the cause.
+        view.S1 = huge; view.S2 = huge;
+        Dictionary<string, object> pair = Obj(view.Section("s1s2"));
+        checks += Check(view.Section("s1s2").Length < 2000 && pair != null && (bool)pair["truncated"] &&
+                        (double)pair["bytes"] == 8000d && ((string)pair["s1"]).Length > 0 &&
+                        huge.StartsWith((string)pair["s1"]) && huge.StartsWith((string)pair["s2"]),
+                        "s1s2 shrinks BOTH lines to fit, verbatim, and reports the length it clipped from");
+
+        LifecycleView.Row apply = view.Of("Apply");
+        apply.Verdict = null;
+        apply.Installation = huge;
+        Dictionary<string, object> inst = Obj(view.Section("Apply"));
+        checks += Check(view.Section("Apply").Length < 2000 && inst != null && (bool)inst["truncated"] &&
+                        (double)inst["bytes"] == 4000d && inst["verdict"] == null &&
+                        ((string)inst["installation"]).Length > 0 &&
+                        huge.StartsWith((string)inst["installation"]),
+                        "an over-long installation line shrinks with the verdict, not outside the budget");
         Dictionary<string, object> no = Obj(view.Section("Nonsense"));
         checks += Check(!(bool)no["ok"] && ((string)no["error"]).Length > 0,
                         "an unknown section is a parseable refusal, never an exception across the wire");

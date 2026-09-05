@@ -2116,7 +2116,13 @@ namespace Morgott.ContentTool.Dev
                 // take the bench's mouse and hotkey down with it for the rest of the session.
                 try { LifecycleDashboard.Pump(open); }
                 catch (Exception ex)
-                { message = "ct_bench: lifecycle - " + ex.GetType().Name + ": " + ex.Message; }
+                {
+                    // `message` is drawn only while the bench is OPEN, and the pump runs closed too - the
+                    // one arrangement in which this catch was guaranteed to swallow the failure it exists
+                    // to report. The console line is what a closed bench can still be told.
+                    message = "ct_bench: lifecycle - " + ex.GetType().Name + ": " + ex.Message;
+                    ContentToolMain.Say(message);
+                }
                 try
                 {
                     // Let go BEFORE anything else looks at the bay: if the level went away this frame,

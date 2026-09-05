@@ -263,6 +263,15 @@ namespace Morgott.ContentTool.Bake
             return BundleClaims.LegacyRefusal(modId, bundles, EditsFile, Catalog);
         }
 
+        /// <summary>R36's one fact, and the only thing outside this file needs from the legacy ledger: is an
+        /// older ContentTool's on-disk edit still recorded for this mod? Read-only, like the whole route.
+        /// An unreadable ledger is NOT a legacy edit - it is a missing file, which is every clean install.</summary>
+        internal static bool LegacyDiskActive(string modId)
+        {
+            try { return !string.IsNullOrEmpty(modId) && LegacyDisk(modId) != null; }
+            catch (Exception) { return false; }
+        }
+
         /// <summary>The game's own Addressables catalog. READ ONLY - nothing here ever opens it for
         /// writing; it is named so a refusal can tell the player which file to verify.</summary>
         private static string Catalog =>

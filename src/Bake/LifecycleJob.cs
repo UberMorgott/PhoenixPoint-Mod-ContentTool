@@ -135,7 +135,7 @@ namespace Morgott.ContentTool.Bake
             // The captured R38 verdict, answered before a worker exists. Not a count and not a failure.
             if (on.LiveRefusal != null)
             {
-                Run.Complete(id, on.LiveRefusal, BakeDisposition.Refused);
+                Finish(id, on.LiveRefusal, BakeDisposition.Refused);
                 return null;
             }
             cts = new CancellationTokenSource();
@@ -163,12 +163,12 @@ namespace Morgott.ContentTool.Bake
                     {
                         // A throw out of a producer is a FAILED run with the producer's own words, never a
                         // seam left busy for the rest of the session.
-                        Run.Complete(id, "ct_project THREW: " + ex.Message, BakeDisposition.Failed);
+                        Finish(id, "ct_project THREW: " + ex.Message, BakeDisposition.Failed);
                         return;
                     }
                     // ---- back to a WORKER for the trailing observation, so the panel's freshness is the
                     // one this run just produced and the completion is published with it.
-                    Worker(delegate { Observe(on); Run.Complete(id, r.Terminal, r.How); });
+                    Worker(delegate { Observe(on); Finish(id, r.Terminal, r.How); });
                 }, true);
             });
             return null;
@@ -217,11 +217,11 @@ namespace Morgott.ContentTool.Bake
                 try { line = Package.Run(on.Root, outDir, dll, out ok); }
                 catch (Exception ex)
                 {
-                    Run.Complete(id, "ct_package THREW: " + ex.Message, BakeDisposition.Failed);
+                    Finish(id, "ct_package THREW: " + ex.Message, BakeDisposition.Failed);
                     return;
                 }
                 // `ok` authorizes the FOLDER (design:180); a refusal is not a failure and keeps its own text.
-                Run.Complete(id, line, ok ? BakeDisposition.Success : BakeDisposition.Refused);
+                Finish(id, line, ok ? BakeDisposition.Success : BakeDisposition.Refused);
             });
             return null;
         }
@@ -253,14 +253,26 @@ namespace Morgott.ContentTool.Bake
         internal static void Tick(bool panelReady)
         {
             if (parked == null) return;
-            if (parkedNeedsPaint && !panelReady) return;
+            if (parkedNeedsPaint && !panelReady)
+            {
+                // A CANCEL DOES NOT WAIT FOR A WINDOW. The segment is blocking Unity work that has not
+                // begun, so with the bench closed the token alone changes nothing: the run stayed
+                // `busy:true`, `cancelAcknowledged:false` and refused every later stage with R26 until
+                // somebody happened to reopen the panel. Dropping the unrun segment IS the cancellation,
+                // and rule 3 still holds - nothing produced a verdict, so nothing is being overruled.
+                LifecycleRun.Snapshot now = Run.Latest;
+                if (!now.Busy || !now.CancelRequested) return;
+                Interlocked.Exchange(ref parked, null);
+                Finish(now.RunId, StageText.R31(now.Stage), BakeDisposition.Cancelled);
+                return;
+            }
             Action next = Interlocked.Exchange(ref parked, null);
             if (next == null) return;
             try { next(); }
             catch (Exception ex)
             {
                 LifecycleRun.Snapshot now = Run.Latest;
-                if (now.Busy) Run.Complete(now.RunId, "lifecycle: " + ex.Message, BakeDisposition.Failed);
+                if (now.Busy) Finish(now.RunId, "lifecycle: " + ex.Message, BakeDisposition.Failed);
             }
         }
 
@@ -268,6 +280,10 @@ namespace Morgott.ContentTool.Bake
         /// producer says what happened, and B5 finishes whatever it started.</summary>
         internal static void Cancel()
         {
+            // NOTHING RUNNING IS NOTHING TO CANCEL, and the barrier is why this is a guard rather than a
+            // formality: `Release()` below would disarm a scenario that armed the barrier BEFORE its run
+            // begins, and W13 would then measure a bake that was never parked.
+            if (!Run.Latest.Busy) return;
             Run.Cancel();
             CancellationTokenSource c = cts;
             if (c != null) try { c.Cancel(); } catch (ObjectDisposedException) { }
@@ -278,6 +294,33 @@ namespace Morgott.ContentTool.Bake
 
         /// <summary>The freshness observation, WORKER-SAFE by construction: every path it touches was
         /// resolved on main and handed in.</summary>
+        /// <summary>Publishes a terminal AND retires the run's token source with it. One source per run
+        /// (SlimJob.cs:407), so the run that just ended is the only thing allowed to drop it - and a
+        /// source that outlived its run is a Cancel for the NEXT stage aimed at the last one's token.
+        /// `Cancel` already swallows ObjectDisposedException, which is the race this cannot avoid.</summary>
+        private static void Finish(long id, string result, BakeDisposition how)
+        {
+            if (!Run.Complete(id, result, how)) return;
+            CancellationTokenSource c = Interlocked.Exchange(ref cts, null);
+            if (c != null) try { c.Dispose(); } catch (Exception) { }
+        }
+
+        /// <summary>
+        /// MAIN. The freshness of THIS capture, measured now.
+        ///
+        /// <see cref="Seen"/> is whatever project BAKED last, and admission may not read that: after a bake
+        /// of A, selecting B would carry A's `Fresh` into B's Verify admission, and every source edit made
+        /// after a bake would go unseen. So the dashboard asks HERE, per selected root, before it admits
+        /// anything. A capture that could not be read - or none at all - observes nothing, which
+        /// <c>LifecycleState.Fresh</c> reads as `never`, never as the previous project's answer.
+        /// </summary>
+        internal static FreshnessObservation Look(Captured on)
+        {
+            seen = null;
+            if (on != null && on.Declared != null) Observe(on);
+            return seen;
+        }
+
         private static void Observe(Captured on)
         {
             try { seen = Route7.Observe(on.PatchedDir, on.Root, on.Declared, on.Shipped); }
@@ -294,7 +337,7 @@ namespace Morgott.ContentTool.Bake
                 catch (Exception ex)
                 {
                     LifecycleRun.Snapshot now = Run.Latest;
-                    if (now.Busy) Run.Complete(now.RunId, "lifecycle: " + ex.Message, BakeDisposition.Failed);
+                    if (now.Busy) Finish(now.RunId, "lifecycle: " + ex.Message, BakeDisposition.Failed);
                 }
             });
         }
@@ -337,8 +380,6 @@ namespace Morgott.ContentTool.Bake
             /// <summary>A worker is sitting in <see cref="Wait"/> right now, and this is its run.</summary>
             internal static volatile bool Parked;
             internal static long ParkedRunId;
-
-            internal static bool Armed { get { return gate != null; } }
 
             internal static void Arm()
             {

@@ -209,7 +209,11 @@ namespace Morgott.ContentTool.Bake
         internal string S1 { get; set; }
         internal string S2 { get; set; }
         internal long RunId, BarrierRunId;
-        internal bool Busy, CancelRequested, CancelAcknowledged, BarrierArmed, ParkedForPaint;
+        /// <summary>A worker is sitting AT the barrier right now - what `Barrier.Parked` publishes, and
+        /// never "a scenario armed one": arming alone would let W13's first poll pass before the run
+        /// exists (LifecycleJob.Barrier's own rule).</summary>
+        internal bool BarrierParked;
+        internal bool Busy, CancelRequested, CancelAcknowledged, ParkedForPaint;
         internal readonly Row[] Rows;
 
         internal LifecycleView()
@@ -231,19 +235,23 @@ namespace Morgott.ContentTool.Bake
         {
             if (name == null) name = "";
             if (name == "") return Header();
-            if (name == "log") return Bounded(Log, delegate(string text, bool cut)
+            if (name == "log") return Bounded(Len(Log), delegate(int room, bool cut)
             {
                 Import.JsonWriter w = Open("log");
-                return w.Key("log").Val(text).Key("bytes").Val(Len(Log)).Key("truncated").Val(cut)
-                        .EndObj().ToString();
+                return w.Key("log").Val(Clip(Log, room) ?? "").Key("bytes").Val(Len(Log))
+                        .Key("truncated").Val(cut).EndObj().ToString();
             });
-            if (name == "s1s2")
+            // TWO variable fields, ONE budget, and they shrink TOGETHER: Apply's S1 and S2 are producer
+            // lines with no length bound of their own, and this section used to hardcode `truncated:false`
+            // over them - the exact silent 2000-char clip the sectioning exists to prevent.
+            if (name == "s1s2") return Bounded(Math.Max(Len(S1), Len(S2)), delegate(int room, bool cut)
             {
                 Import.JsonWriter w = Open("s1s2");
-                w.Key("s1"); Text(w, S1);
-                w.Key("s2"); Text(w, S2);
-                return w.Key("bytes").Val(Len(S1) + Len(S2)).Key("truncated").Val(false).EndObj().ToString();
-            }
+                w.Key("s1"); Text(w, Clip(S1, room));
+                w.Key("s2"); Text(w, Clip(S2, room));
+                return w.Key("bytes").Val(Len(S1) + Len(S2)).Key("truncated").Val(cut)
+                        .EndObj().ToString();
+            });
             Row row = Of(name);
             if (row == null)
             {
@@ -251,16 +259,20 @@ namespace Morgott.ContentTool.Bake
                     .Key("error").Val("unknown section '" + Clip(name, 60) + "' - ask for \"\", a stage " +
                                       "name, \"log\" or \"s1s2\"").EndObj().ToString();
             }
-            return Bounded(row.Verdict, delegate(string text, bool cut)
+            // `installation` shrinks with the verdict: it is Apply's own line, as unbounded as the verdict
+            // beside it, and leaving it outside the loop let a long one overrun a payload that measured as
+            // fitting.
+            return Bounded(Math.Max(Len(row.Verdict), Len(row.Installation)), delegate(int room, bool cut)
             {
                 Import.JsonWriter w = Open(name);
                 w.Key("stage").Val(row.Stage)
                  .Key("freshness").Val(Word(row.Freshness))
                  .Key("outcome").Val(Word(row.Outcome))
                  .Key("starts").Val(row.Starts);
-                w.Key("installation"); Text(w, row.Installation);
-                w.Key("verdict"); if (row.Verdict == null) w.Null(); else w.Val(text);
-                return w.Key("bytes").Val(Len(row.Verdict)).Key("truncated").Val(cut).EndObj().ToString();
+                w.Key("installation"); Text(w, Clip(row.Installation, room));
+                w.Key("verdict"); if (row.Verdict == null) w.Null(); else w.Val(Clip(row.Verdict, room));
+                return w.Key("bytes").Val(Len(row.Verdict) + Len(row.Installation))
+                        .Key("truncated").Val(cut).EndObj().ToString();
             });
         }
 
@@ -281,7 +293,7 @@ namespace Morgott.ContentTool.Bake
              .Key("parkedForPaint").Val(ParkedForPaint);
             w.Key("failedMember"); Text(w, Clip(FailedMember, FieldRoom));
             w.Key("claimHeld"); Text(w, Clip(ClaimHeld, FieldRoom));
-            w.Key("barrierArmed").Val(BarrierArmed).Key("barrierRunId").Num(BarrierRunId);
+            w.Key("barrierParked").Val(BarrierParked).Key("barrierRunId").Num(BarrierRunId);
 
             w.Key("rows").Arr();
             foreach (Row r in Rows)
@@ -325,21 +337,23 @@ namespace Morgott.ContentTool.Bake
                  : o == GateOutcome.Void ? "void" : "none";
         }
 
-        /// <summary>Composes a payload and shrinks its ONE variable-length field until the whole thing fits.
+        /// <summary>Composes a payload and shrinks EVERY variable-length field in it - the composer clips
+        /// each of them to the same `room` - until the whole thing fits. <paramref name="widest"/> is the
+        /// longest of them, so the first attempt is the verbatim payload.
         /// ponytail: a geometric clip rather than budget arithmetic, because the escaping is what decides the
         /// final width (a newline is two chars, a control char six) and computing that exactly costs more
         /// code than the dozen iterations this takes; make it exact if a section is ever measured as hot.</summary>
-        private static string Bounded(string text, Func<string, bool, string> compose)
+        private static string Bounded(int widest, Func<int, bool, string> compose)
         {
-            string full = compose(text ?? "", false);
-            if (full.Length <= MaxPayload || text == null) return full;
-            for (int room = text.Length; room > 0; )
+            string full = compose(widest, false);
+            if (full.Length <= MaxPayload || widest <= 0) return full;
+            for (int room = widest; room > 0; )
             {
                 room = room * 3 / 4;
-                string json = compose(Clip(text, room), true);
+                string json = compose(room, true);
                 if (json.Length <= MaxPayload) return json;
             }
-            return compose("", true);
+            return compose(0, true);
         }
 
         /// <summary>Cuts to a character budget, never through a surrogate pair - half of one is not a
