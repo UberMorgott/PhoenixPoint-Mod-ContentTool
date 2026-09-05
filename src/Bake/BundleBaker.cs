@@ -928,6 +928,12 @@ namespace Morgott.ContentTool.Bake
                         AssetTypeValueField mesh = m.GetBaseField(afile, i);
                         if (mesh["m_Name"].AsString != meshName) continue;
                         buffers = MeshFields.Buffers(mesh);
+                        // A tree with NO vertex data, NO index buffer and NO stream path is not a Mesh
+                        // this build can read - and Summary/SkinSummary index exactly those absent
+                        // fields, where a dummy THROWS. Buffers already answers null (= VOID) for it;
+                        // the summary has to say so too rather than take the gate down with an NRE.
+                        if (buffers == null)
+                            return "unreadable Mesh " + meshName + " in " + bundlePath;
                         return skin ? SkinFields.SkinSummary(mesh) : MeshFields.Summary(mesh);
                     }
                     return "no Mesh named " + meshName + " in " + bundlePath;

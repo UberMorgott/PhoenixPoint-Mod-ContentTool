@@ -299,15 +299,17 @@ namespace Morgott.ContentTool.Bake
         /// The raw vertex + index BYTES as one hash - the question <see cref="Summary"/> deliberately
         /// does not ask. Summary compares counts, index format and ROUNDED bounds, so a patch that wrote
         /// nothing at all reads back identical to the mesh the game shipped; the buffers cannot.
-        /// A mesh that streams its vertices out of the .resS reports that path instead of a hash -
-        /// nothing this tool writes streams (<see cref="Fill"/> clears m_StreamData), so a streamed
-        /// answer can never equal a written one.
+        /// A mesh that streams its vertices out of the .resS reports that path, its slice (offset and
+        /// size) and the hash of its still-inline index buffer instead of one hash of both - nothing
+        /// this tool writes streams (<see cref="Fill"/> clears m_StreamData), so a streamed answer can
+        /// never equal a written one.
         /// </summary>
         internal static string Buffers(AssetTypeValueField mesh)
         {
             byte[] verts = Bytes(Child(mesh, "m_VertexData"), "m_DataSize");
             byte[] indices = Bytes(Child(mesh, "m_IndexBuffer"), "Array");
-            AssetTypeValueField p = Child(Child(mesh, "m_StreamData"), "path");
+            AssetTypeValueField sd = Child(mesh, "m_StreamData");
+            AssetTypeValueField p = Child(sd, "path");
             string path = p == null ? "" : (p.AsString ?? "");
             // NEITHER buffer readable and no stream path: whatever this field is, it is not a Mesh's
             // buffers. Defaulting those to new byte[0] hashed sha256("") on BOTH sides, so a patch that
@@ -316,7 +318,19 @@ namespace Morgott.ContentTool.Bake
             if (verts == null && indices == null && path.Length == 0) return null;
             verts = verts ?? new byte[0];
             indices = indices ?? new byte[0];
-            if (verts.Length == 0 && path.Length != 0) return "streamed from '" + path + "'";
+            if (verts.Length == 0 && path.Length != 0)
+            {
+                // WHERE in the archive entry, not just WHICH entry. A shipped bundle streams every one
+                // of its meshes out of the SAME .resS, so the path alone is identical for all of them:
+                // two different streamed meshes hashed EQUAL here, which P4-bytes reads as "the patch
+                // wrote nothing" and reds a correct bake. The offset and size are what tell them apart.
+                // The index buffer stays INLINE even when the vertices do not, so it is hashed too.
+                AssetTypeValueField off = Child(sd, "offset"), size = Child(sd, "size");
+                return "streamed from '" + path + "'" +
+                       " offset=" + (off == null ? "?" : off.AsULong.ToString()) +
+                       " size=" + (size == null ? "?" : size.AsUInt.ToString()) +
+                       " indexSha=" + AliasMap.Sha256(indices) + " indexBytes=" + indices.Length;
+            }
             var all = new byte[verts.Length + indices.Length];
             Buffer.BlockCopy(verts, 0, all, 0, verts.Length);
             Buffer.BlockCopy(indices, 0, all, verts.Length, indices.Length);

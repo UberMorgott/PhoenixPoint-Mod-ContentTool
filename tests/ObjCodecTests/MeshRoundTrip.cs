@@ -65,6 +65,13 @@ internal static class MeshRoundTrip
                "CONTROL the byte-copied '" + Control + "' hashes the SAME on both sides: " + bufControlAfter);
         Assert(unknown, "CONTROL a field that holds NEITHER buffer NOR a stream path answers null, not a " +
                         "hash of nothing - two of those compare EQUAL and would red a correct bake");
+        // STREAMED, which no mesh in this bundle is - the two answers are built from the real shipped
+        // field with its vertices moved out to a .resS, because "same archive entry, different slice"
+        // is exactly the pair the path-only answer used to hash EQUAL.
+        string[] streamed = Streamed(classData, shipped);
+        Assert(streamed[0] != streamed[1],
+               "two meshes streaming out of the SAME .resS at different offsets answer DIFFERENTLY: " +
+               streamed[0] + " vs " + streamed[1]);
 
         // The SKIN half: the target is rigged, so the copy must carry the shipped skeleton unchanged
         // AND our skin stream over it. The expected skeleton is read off the shipped file in this
@@ -359,6 +366,35 @@ internal static class MeshRoundTrip
         AssetsFileInstance af = m.LoadAssetsFileFromBundle(bun, 0, false);
         m.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
         try { return MeshFields.Buffers(m.GetBaseField(af, Find(m, af, Target))["m_LocalAABB"]) == null; }
+        finally { m.UnloadAll(); }
+    }
+
+    /// <summary>
+    /// The STREAMED answer, twice, off the real shipped Mesh with its vertices taken out to a .resS:
+    /// one slice at offset 0, one at offset 4096 of the SAME archive entry. Reporting the path alone
+    /// made those two identical, so P4-bytes read a correct bake as "the patch wrote nothing".
+    /// </summary>
+    private static string[] Streamed(string classData, string bundlePath)
+    {
+        AssetsManager m = new AssetsManager();
+        m.LoadClassPackage(classData);
+        BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
+        AssetsFileInstance af = m.LoadAssetsFileFromBundle(bun, 0, false);
+        m.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
+        try
+        {
+            AssetTypeValueField mesh = m.GetBaseField(af, Find(m, af, Target));
+            AssetTypeValueField data = mesh["m_VertexData"]["m_DataSize"];
+            data.Value = new AssetTypeValue(new byte[0], false);
+            data.TemplateField.ValueType = AssetValueType.ByteArray;
+            AssetTypeValueField sd = mesh["m_StreamData"];
+            sd["path"].AsString = "archive:/CAB-x/CAB-x.resS";
+            sd["size"].AsUInt = 4096;
+            sd["offset"].AsULong = 0;
+            string first = MeshFields.Buffers(mesh);
+            sd["offset"].AsULong = 4096;
+            return new[] { first, MeshFields.Buffers(mesh) };
+        }
         finally { m.UnloadAll(); }
     }
 

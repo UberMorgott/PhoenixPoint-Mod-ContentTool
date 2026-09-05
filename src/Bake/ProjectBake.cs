@@ -1720,7 +1720,9 @@ namespace Morgott.ContentTool.Bake
                     // says VOID. Two readable sides that agree is still a true FAIL, streamed included.
                     if (bytesCopy == null || bytesShipped == null)
                         log.AppendLine("P4-bytes VOID mesh '" + mesh.Key + "' has no readable vertex/index " +
-                                       "buffers in " + (bytesCopy == null ? copy : shipped));
+                                       "buffers in " + (bytesCopy == null && bytesShipped == null
+                                                        ? copy + " and " + shipped
+                                                        : bytesCopy == null ? copy : shipped));
                     else
                         failures += Check(log, "P4-bytes", bytesCopy != bytesShipped,
                             "mesh '" + mesh.Key + "' in the copy carries DIFFERENT vertex/index bytes than the " +
