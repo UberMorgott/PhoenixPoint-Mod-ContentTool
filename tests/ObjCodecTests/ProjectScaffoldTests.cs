@@ -708,10 +708,10 @@ internal static class ProjectScaffoldTests
                                         ".glb carries ONE alias map, so nothing was written; ship this .glb " +
                                         "under another file name for that target",
                             "R24 guards the sidecar a shared .glb was shipped WITHOUT: " + bareSaid);
-            checks += Check(!File.Exists(bare.SidecarPath) &&
+            checks += Check(!File.Exists(bare.SidecarPath) && !File.Exists(bare.MeshPath) &&
                             ManifestFile.Load(Path.Combine(bare.Root, "ppcontent.json"))
                                         .Manifest.Replace.Count == 1,
-                            "and it wrote no sidecar and added no second row");
+                            "and it wrote no sidecar, NO COPY and added no second row");
 
             // ---- R24 ON A SIDECAR THAT NO LONGER LOADS. LoadSidecar returning null is not "no map": the
             // other row still names this stem, and writing ours over it is the same silent rebind. The
@@ -760,6 +760,11 @@ internal static class ProjectScaffoldTests
                                                 StringComparison.Ordinal) &&
                             Same(File.ReadAllBytes(gone.SidecarPath), goneWas),
                             "a MISSING copy is no reason to skip R24: " + goneSaid);
+            // "nothing was written" is the sentence's own promise, and CopyOrVerify CREATES the .glb
+            // when it is absent - so a refusal that came after the copy left one behind on exactly the
+            // arms R24 exists for. Asked on both arms that START without a copy.
+            checks += Check(!File.Exists(gone.MeshPath),
+                            "and the refusal put NO .glb back: " + gone.MeshPath);
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates, row append " +

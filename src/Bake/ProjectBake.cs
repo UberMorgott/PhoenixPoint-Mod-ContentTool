@@ -1687,7 +1687,11 @@ namespace Morgott.ContentTool.Bake
                 foreach (KeyValuePair<string, ImportedMesh> mesh in meshes)
                 {
                     string want_ = mesh.Value.Baked.Describe();
-                    string got = BundleBaker.ReadMeshSummary(copy, mesh.Key);
+                    // ONE read per file: the buffers the P4-bytes arm below needs come off the same
+                    // Mesh field this summary does, so the bundle is decompressed once and not three
+                    // times per row.
+                    string bytesCopy, bytesShipped;
+                    string got = BundleBaker.ReadMeshSummary(copy, mesh.Key, false, out bytesCopy);
                     failures += Check(log, "P4", got.StartsWith(want_, StringComparison.Ordinal),
                         "mesh '" + mesh.Key + "' in the copy IS " + mesh.Value.Name + " -> " + got);
                     // DIAGNOSTIC, NEVER COUNTED. Describe() compares vertex/index counts, index format and
@@ -1697,7 +1701,7 @@ namespace Morgott.ContentTool.Bake
                     // sends route vii straight to BakeFailed (Route7.cs:342). P4 above is the arm that says the
                     // copy carries the replacement, and the shipped file's own bytes are never opened for
                     // writing at all - so a summary match here is worth PRINTING and worth nothing else.
-                    string ctl = BundleBaker.ReadMeshSummary(shipped, mesh.Key);
+                    string ctl = BundleBaker.ReadMeshSummary(shipped, mesh.Key, false, out bytesShipped);
                     log.AppendLine(ctl.StartsWith(want_, StringComparison.Ordinal)
                         ? "P4-ctl-shipped WARN the shipped " + bundleFile + "'s '" + mesh.Key + "' SUMMARISES " +
                           "the same as the replacement (counts, index format and rounded bounds only, not the " +
@@ -1709,11 +1713,18 @@ namespace Morgott.ContentTool.Bake
                     // wrote NOTHING: equal buffers mean the copy still carries the game's own mesh. P4
                     // above cannot see it (same Describe() prefix) and P5 is VOID unless the target is
                     // rigged, so on an UNSKINNED mesh this is the only proof the replacement landed.
-                    string bytesCopy = BundleBaker.ReadMeshBuffers(copy, mesh.Key);
-                    failures += Check(log, "P4-bytes",
-                        bytesCopy != BundleBaker.ReadMeshBuffers(shipped, mesh.Key),
-                        "mesh '" + mesh.Key + "' in the copy carries DIFFERENT vertex/index bytes than the " +
-                        "shipped " + bundleFile + " -> " + bytesCopy);
+                    // A side with no readable buffers cannot answer this: MeshFields.Buffers says null
+                    // rather than hashing an empty array, because sha256("") vertexBytes=0 is what BOTH
+                    // sides would then report - equal, and read as "the patch wrote nothing" on a bake
+                    // that is perfectly correct. Same law as P1 above (:1661): a gate that cannot answer
+                    // says VOID. Two readable sides that agree is still a true FAIL, streamed included.
+                    if (bytesCopy == null || bytesShipped == null)
+                        log.AppendLine("P4-bytes VOID mesh '" + mesh.Key + "' has no readable vertex/index " +
+                                       "buffers in " + (bytesCopy == null ? copy : shipped));
+                    else
+                        failures += Check(log, "P4-bytes", bytesCopy != bytesShipped,
+                            "mesh '" + mesh.Key + "' in the copy carries DIFFERENT vertex/index bytes than the " +
+                            "shipped " + bundleFile + " -> copy " + bytesCopy + " | shipped " + bytesShipped);
 
                     // P5: the replacement is SKINNED to the target's own skeleton. The expected
                     // skeleton is not a constant - it is read off the SHIPPED file in this same run,

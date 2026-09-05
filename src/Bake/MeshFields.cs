@@ -305,15 +305,37 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static string Buffers(AssetTypeValueField mesh)
         {
-            byte[] verts = mesh["m_VertexData"]["m_DataSize"].AsByteArray ?? new byte[0];
-            byte[] indices = mesh["m_IndexBuffer"]["Array"].AsByteArray ?? new byte[0];
-            AssetTypeValueField sd = mesh["m_StreamData"];
-            string path = sd == null || sd.IsDummy ? "" : (sd["path"].AsString ?? "");
+            byte[] verts = Bytes(Child(mesh, "m_VertexData"), "m_DataSize");
+            byte[] indices = Bytes(Child(mesh, "m_IndexBuffer"), "Array");
+            AssetTypeValueField p = Child(Child(mesh, "m_StreamData"), "path");
+            string path = p == null ? "" : (p.AsString ?? "");
+            // NEITHER buffer readable and no stream path: whatever this field is, it is not a Mesh's
+            // buffers. Defaulting those to new byte[0] hashed sha256("") on BOTH sides, so a patch that
+            // wrote nothing read back identical to the shipped mesh and P4-bytes red a correct bake.
+            // The only honest answer is "cannot say" - null - which the gate reports as VOID.
+            if (verts == null && indices == null && path.Length == 0) return null;
+            verts = verts ?? new byte[0];
+            indices = indices ?? new byte[0];
             if (verts.Length == 0 && path.Length != 0) return "streamed from '" + path + "'";
             var all = new byte[verts.Length + indices.Length];
             Buffer.BlockCopy(verts, 0, all, 0, verts.Length);
             Buffer.BlockCopy(indices, 0, all, verts.Length, indices.Length);
             return AliasMap.Sha256(all) + " vertexBytes=" + verts.Length + " indexBytes=" + indices.Length;
+        }
+
+        /// <summary>A named child, or null when the parent or the child is absent (a dummy field).
+        /// Indexing a dummy THROWS, so every lookup <see cref="Buffers"/> makes goes through here.</summary>
+        private static AssetTypeValueField Child(AssetTypeValueField f, string name)
+        {
+            if (f == null || f.IsDummy) return null;
+            AssetTypeValueField c = f[name];
+            return c == null || c.IsDummy ? null : c;
+        }
+
+        private static byte[] Bytes(AssetTypeValueField f, string name)
+        {
+            AssetTypeValueField c = Child(f, name);
+            return c == null ? null : c.AsByteArray;
         }
 
         private static void SetBytes(AssetTypeValueField field, byte[] bytes)

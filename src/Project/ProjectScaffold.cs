@@ -272,15 +272,13 @@ namespace Morgott.ContentTool.Project
                                                "Doctor session has no bone map, so the bake would silently use " +
                                                "mappings you never saw - delete it, or set the map");
 
-            Directory.CreateDirectory(Path.GetDirectoryName(result.MeshPath));
-            result.MeshAlreadyPresent = CopyOrVerify(result.MeshPath, bytes, sha, stem);
             // Keyed on the COPY and on the COPY's sha, because that is the file the bake hashes
             // (AliasMap.LoadSidecar:196) - the source the author picked is gone from the story by now.
+            // Read BEFORE the copy, like R5 and R6 above: the sidecar is not touched by CopyOrVerify,
+            // and R24 below has to be able to say "nothing was written" and be telling the truth.
+            string have = File.Exists(result.SidecarPath) ? File.ReadAllText(result.SidecarPath) : null;
             if (vetted != null)
             {
-                string want = AliasMap.SidecarText(sha, bytes.LongLength, vetted.Pairs);
-                string have = File.Exists(result.SidecarPath) ? File.ReadAllText(result.SidecarPath) : null;
-
                 // R24. ONE .glb CARRIES ONE ALIAS MAP. Shipping the same file again for ANOTHER target with a
                 // different map used to overwrite the sidecar the first replacement is bound by: both rows name
                 // the same "mesh", ContentProject.ImportMesh reads that one sidecar for every row that names it,
@@ -308,11 +306,16 @@ namespace Morgott.ContentTool.Project
                                                    "carries ONE alias map, so nothing was written; ship this " +
                                                    ".glb under another file name for that target");
                 }
+            }
 
+            Directory.CreateDirectory(Path.GetDirectoryName(result.MeshPath));
+            result.MeshAlreadyPresent = CopyOrVerify(result.MeshPath, bytes, sha, stem);
+            if (vetted != null)
+            {
                 // BYTES, not maps: an identical rewrite is invisible in the file's content and LOUD in its
                 // mtime, which is what PatchCache.Key stamps (:43/:49) - so a second press of the same Ship
                 // used to invalidate the cache and re-bake the whole project synchronously.
-                if (have != want)
+                if (have != AliasMap.SidecarText(sha, bytes.LongLength, vetted.Pairs))
                     AliasMap.SaveSidecar(result.MeshPath, sha, bytes.LongLength, vetted.Pairs);
             }
 

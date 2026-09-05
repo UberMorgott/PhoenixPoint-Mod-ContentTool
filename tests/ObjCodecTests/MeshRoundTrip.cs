@@ -37,9 +37,14 @@ internal static class MeshRoundTrip
         string copy = Path.Combine(Path.GetTempPath(), "ct-meshroundtrip-" + Bundle);
         string before = Summary(classData, shipped, Target), controlBefore = Summary(classData, shipped, Control);
         string skinBefore = Summary(classData, shipped, Target, true);
+        string bufBefore = Buffers(classData, shipped, Target);
+        string bufControlBefore = Buffers(classData, shipped, Control);
         Patch(classData, shipped, copy, baked);
         string after = Summary(classData, copy, Target), controlAfter = Summary(classData, copy, Control);
         string skinAfter = Summary(classData, copy, Target, true);
+        string bufAfter = Buffers(classData, copy, Target);
+        string bufControlAfter = Buffers(classData, copy, Control);
+        bool unknown = Unknown(classData, shipped);
         File.Delete(copy);
 
         string want = baked.Describe();
@@ -49,6 +54,17 @@ internal static class MeshRoundTrip
                "the shipped '" + Target + "' never had it: " + before);
         Assert(controlBefore == controlAfter,
                "CONTROL '" + Control + "' is byte-identical in both: " + controlAfter);
+
+        // THE BUFFERS, which the summary deliberately cannot see - the in-game P4-bytes arm compares
+        // exactly these two strings, and on an unskinned target it is the ONLY proof a replacement
+        // landed. All three answers the arm can get are asserted here, in one run.
+        Assert(bufBefore != null && bufAfter != null && bufBefore != bufAfter,
+               "the copy's '" + Target + "' carries DIFFERENT vertex/index bytes than the shipped one: " +
+               bufAfter + " (shipped " + bufBefore + ")");
+        Assert(bufControlBefore != null && bufControlBefore == bufControlAfter,
+               "CONTROL the byte-copied '" + Control + "' hashes the SAME on both sides: " + bufControlAfter);
+        Assert(unknown, "CONTROL a field that holds NEITHER buffer NOR a stream path answers null, not a " +
+                        "hash of nothing - two of those compare EQUAL and would red a correct bake");
 
         // The SKIN half: the target is rigged, so the copy must carry the shipped skeleton unchanged
         // AND our skin stream over it. The expected skeleton is read off the shipped file in this
@@ -313,6 +329,36 @@ internal static class MeshRoundTrip
             AssetTypeValueField mesh = m.GetBaseField(af, Find(m, af, meshName));
             return skin ? SkinFields.SkinSummary(mesh) : MeshFields.Summary(mesh);
         }
+        finally { m.UnloadAll(); }
+    }
+
+    /// <summary>The raw vertex + index bytes of a Mesh in a FILE, as one hash - the P4-bytes oracle.</summary>
+    private static string Buffers(string classData, string bundlePath, string meshName)
+    {
+        AssetsManager m = new AssetsManager();
+        m.LoadClassPackage(classData);
+        BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
+        AssetsFileInstance af = m.LoadAssetsFileFromBundle(bun, 0, false);
+        m.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
+        try { return MeshFields.Buffers(m.GetBaseField(af, Find(m, af, meshName))); }
+        finally { m.UnloadAll(); }
+    }
+
+    /// <summary>
+    /// The UNKNOWN answer, off a real field of a real shipped Mesh that is not itself a mesh: every
+    /// lookup Buffers makes comes back a dummy, which is what an absent or unreadable buffer looks
+    /// like. Defaulting those to an empty array hashed sha256("") vertexBytes=0 indexBytes=0, and the
+    /// copy and the shipped file then reported the SAME string - the P4-bytes gate reads that as "the
+    /// patch wrote nothing" and reds a correct bake, so the answer has to be "cannot say".
+    /// </summary>
+    private static bool Unknown(string classData, string bundlePath)
+    {
+        AssetsManager m = new AssetsManager();
+        m.LoadClassPackage(classData);
+        BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
+        AssetsFileInstance af = m.LoadAssetsFileFromBundle(bun, 0, false);
+        m.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
+        try { return MeshFields.Buffers(m.GetBaseField(af, Find(m, af, Target))["m_LocalAABB"]) == null; }
         finally { m.UnloadAll(); }
     }
 

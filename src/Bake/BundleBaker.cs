@@ -895,6 +895,25 @@ namespace Morgott.ContentTool.Bake
         /// </param>
         internal static string ReadMeshSummary(string bundlePath, string meshName, bool skin = false)
         {
+            string buffers;
+            return ReadMeshSummary(bundlePath, meshName, skin, out buffers);
+        }
+
+        /// <summary>
+        /// The same walk, and ONE decompress: <paramref name="buffers"/> comes back as
+        /// <see cref="MeshFields.Buffers"/> of the SAME Mesh field the summary was read off - the raw
+        /// vertex + index bytes as a hash, which the SUMMARY deliberately cannot be (a patch that wrote
+        /// nothing summarises exactly like the mesh the game shipped, and on an unskinned target no
+        /// other arm notices). Null when the mesh is not there, or when its buffers are not readable at
+        /// all - the caller then has no answer to compare and must say VOID.
+        ///
+        /// Folded into this reader because every caller wants both: asking separately reopened and
+        /// re-inflated the whole bundle a second time per mesh row.
+        /// </summary>
+        internal static string ReadMeshSummary(string bundlePath, string meshName, bool skin,
+                                               out string buffers)
+        {
+            buffers = null;
             AssetsManager m = new AssetsManager();
             using (Stream cldb = ContentToolMain.ClassData())
             {
@@ -908,30 +927,13 @@ namespace Morgott.ContentTool.Bake
                     {
                         AssetTypeValueField mesh = m.GetBaseField(afile, i);
                         if (mesh["m_Name"].AsString != meshName) continue;
+                        buffers = MeshFields.Buffers(mesh);
                         return skin ? SkinFields.SkinSummary(mesh) : MeshFields.Summary(mesh);
                     }
                     return "no Mesh named " + meshName + " in " + bundlePath;
                 }
                 finally { m.UnloadAll(); }
             }
-        }
-
-        /// <summary>
-        /// One Mesh's raw vertex + index bytes as a hash (<see cref="MeshFields.Buffers"/>) - the
-        /// P4-ctl-shipped oracle the SUMMARY cannot be: a patch that wrote nothing summarises exactly
-        /// like the mesh the game shipped, and on an unskinned target no other arm notices.
-        /// </summary>
-        internal static string ReadMeshBuffers(string bundlePath, string meshName)
-        {
-            return Read(bundlePath, (m, afile) =>
-            {
-                foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Mesh))
-                {
-                    AssetTypeValueField mesh = m.GetBaseField(afile, i);
-                    if (mesh["m_Name"].AsString == meshName) return MeshFields.Buffers(mesh);
-                }
-                return "no Mesh named " + meshName + " in " + bundlePath;
-            });
         }
 
         /// <summary>
