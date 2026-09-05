@@ -1658,14 +1658,7 @@ namespace Morgott.ContentTool.Bake
                 // "did the patch land" cannot exist to disagree with this one. The lines, their order and
                 // the count are what they were inline - a VOID is still UNCOUNTED here - and the structured
                 // entries are what let a caller tell an all-VOID read-back from a pass.
-                failures += ReadBack.Run(log, bundleFile, shipped, copy, want, mats, meshes).Failed;
-                foreach (KeyValuePair<string, ShippedReplacement> c in clips)
-                {
-                    uint attribute; float k;
-                    ParseClipEdit(c.Value.clip, out attribute, out k);
-                    failures += Curves(log, c.Key, c.Value.clip, attribute, k, shipped, copy);
-                    failures += SampleClip(log, c.Key, attribute, k, shipped, copy);
-                }
+                failures += ReadBack.Run(log, bundleFile, shipped, copy, want, mats, meshes, clips).Failed;
                 copies.Add(new KeyValuePair<string, string>(bundleFile, copy.Replace('\\', '/')));
             }
 
@@ -1712,7 +1705,7 @@ namespace Morgott.ContentTool.Bake
         /// multiplying one denormalises it into something Unity renders as a sheared rig - a
         /// refusal by name beats a result nobody can read.
         /// </summary>
-        private static string ParseClipEdit(string edit, out uint attribute, out float factor)
+        internal static string ParseClipEdit(string edit, out uint attribute, out float factor)
         {
             attribute = 0;
             factor = 0f;
@@ -1742,7 +1735,7 @@ namespace Morgott.ContentTool.Bake
         /// The control asserts the POSITIVE identity of the untouched channel (its own shipped
         /// values), not the absence of anything.
         /// </summary>
-        private static int Curves(StringBuilder log, string clipName, string edit, uint attribute,
+        internal static int Curves(StringBuilder log, string clipName, string edit, uint attribute,
                                   float factor, string shipped, string copy)
         {
             List<float> was = BundleBaker.ReadClipCurves(shipped, clipName, attribute);
@@ -1797,7 +1790,7 @@ namespace Morgott.ContentTool.Bake
         ///
         /// The two bundles carry the same CAB, so they are mounted one at a time, never together.
         /// </summary>
-        private static int SampleClip(StringBuilder log, string clipName, uint attribute, float factor,
+        internal static int SampleClip(StringBuilder log, string clipName, uint attribute, float factor,
                                       string shipped, string copy)
         {
             string why;

@@ -31,7 +31,8 @@ namespace Morgott.ContentTool.Bake
         internal static ReadBackResult Run(StringBuilder log, string bundleFile, string shipped, string copy,
                                            List<ImportedTexture> want,
                                            List<KeyValuePair<string, string>> mats,
-                                           List<KeyValuePair<string, ImportedMesh>> meshes)
+                                           List<KeyValuePair<string, ImportedMesh>> meshes,
+                                           List<KeyValuePair<string, ShippedReplacement>> clips)
         {
             List<GateEntry> entries = new List<GateEntry>();
 
@@ -151,7 +152,39 @@ namespace Morgott.ContentTool.Bake
                 ByName(log, entries, mesh.Key, mesh.Value, shipped, copy);
             }
 
+            foreach (KeyValuePair<string, ShippedReplacement> c in clips)
+            {
+                uint attribute; float k;
+                ProjectBake.ParseClipEdit(c.Value.clip, out attribute, out k);
+                int at = log.Length;
+                ProjectBake.Curves(log, c.Key, c.Value.clip, attribute, k, shipped, copy);
+                ProjectBake.SampleClip(log, c.Key, attribute, k, shipped, copy);
+                Clips(log, entries, c.Key, at);
+            }
+
             return ReadBackResult.Of(entries.ToArray());
+        }
+
+        /// <summary>The clip arms stay where they are - `Curves` would have to be RENAMED to move (there is
+        /// an unrelated `ProjectBake.Curves` at :1063) and they compose their lines through the same
+        /// <see cref="ProjectBake.Check"/> - so their outcomes are read back off the lines they just
+        /// appended. The producer's own second token IS the classification; nothing here re-decides a
+        /// verdict, and the counted failures are the " FAIL " lines those same Check calls returned 1 for.
+        ///
+        /// ponytail: one line per arm, which is what Check and every P7 VOID arm write today. An arm that
+        /// ever printed a detail containing a newline would need this to slice by Check's return instead.
+        /// </summary>
+        private static void Clips(StringBuilder log, List<GateEntry> entries, string target, int at)
+        {
+            foreach (string line in log.ToString(at, log.Length - at)
+                                       .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] token = line.Split(' ');
+                if (token.Length < 2) continue;
+                if (token[1] == "PASS") entries.Add(GateEntry.Pass(token[0], target, line));
+                else if (token[1] == "FAIL") entries.Add(GateEntry.Fail(token[0], target, line));
+                else if (token[1] == "VOID") entries.Add(GateEntry.Void(token[0], target, line));
+            }
         }
 
         /// <summary>
