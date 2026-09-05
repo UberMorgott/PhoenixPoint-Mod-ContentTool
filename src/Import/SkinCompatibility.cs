@@ -67,18 +67,32 @@ namespace Morgott.ContentTool.Import
         internal string TransformPath = "";
         internal string MeshName = "";
 
-        internal bool SameAs(RigTarget other)
+        /// <summary>Everything about the target that is NOT the mesh: which renderer, where it sits in the
+        /// hierarchy, and what its bones are called. A live Doctor preview puts a mesh WE built onto the
+        /// renderer (ModelDoctor.cs:451) while Target still describes the game's own (PickTarget:120/:142),
+        /// so with a preview up the MESH half of SameAs is guaranteed to differ and says nothing about
+        /// whether the rig moved. A caller holding the preview by reference proves that half itself.</summary>
+        internal bool SameRigAs(RigTarget other)
         {
             if (other == null) return false;
-            if (RendererInstanceId != other.RendererInstanceId || MeshInstanceId != other.MeshInstanceId ||
-                BindPoseCount != other.BindPoseCount || Rigged != other.Rigged ||
-                !string.Equals(TransformPath, other.TransformPath, StringComparison.Ordinal) ||
-                !string.Equals(MeshName, other.MeshName, StringComparison.Ordinal)) return false;
+            if (RendererInstanceId != other.RendererInstanceId ||
+                !string.Equals(TransformPath, other.TransformPath, StringComparison.Ordinal)) return false;
             if (BoneNames == null || other.BoneNames == null) return BoneNames == other.BoneNames;
             if (BoneNames.Length != other.BoneNames.Length) return false;
             for (int i = 0; i < BoneNames.Length; i++)
                 if (!string.Equals(BoneNames[i], other.BoneNames[i], StringComparison.Ordinal)) return false;
             return true;
+        }
+
+        /// <summary>The rig AND the mesh on it. Delegating rather than repeating is the point: two
+        /// hand-written comparisons drift, and the one they would drift over is the one the preview path
+        /// depends on. The null check lives in SameRigAs, so the &amp;&amp; below is short-circuited before
+        /// any member of `other` is read.</summary>
+        internal bool SameAs(RigTarget other)
+        {
+            return SameRigAs(other) && MeshInstanceId == other.MeshInstanceId &&
+                   BindPoseCount == other.BindPoseCount && Rigged == other.Rigged &&
+                   string.Equals(MeshName, other.MeshName, StringComparison.Ordinal);
         }
     }
 

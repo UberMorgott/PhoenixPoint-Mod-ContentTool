@@ -557,6 +557,38 @@ internal static class ProjectScaffoldTests
                             Same(withMap.MeshBytes, File.ReadAllBytes(withMap.MeshPath)),
                             "and Result.MeshBytes IS the copy's bytes - what the ship gate re-judges (§4.5)");
 
+            // ---- Fingerprint_APreviewIsNotAChangedRig. The R8 seam, on plain data: what a live Doctor
+            // preview does to a snapshot is change the MESH half and nothing else.
+            var was = new RigTarget
+            {
+                RendererInstanceId = 7, TransformPath = "Root/Body", MeshName = "Body",
+                MeshInstanceId = 11, BindPoseCount = 3, Rigged = true, BoneNames = new[] { "a", "b" }
+            };
+            // ALL FOUR mesh-derived fields differ: with BindPoseCount and Rigged left equal, the arm would
+            // pass even if SameRigAs still compared them, and the split it claims to prove would be two
+            // fields short.
+            var previewing = new RigTarget
+            {
+                RendererInstanceId = 7, TransformPath = "Root/Body", MeshName = "ours.glb",
+                MeshInstanceId = 12, BindPoseCount = 0, Rigged = false, BoneNames = new[] { "a", "b" }
+            };
+            checks += Check(!previewing.SameAs(was) && previewing.SameRigAs(was),
+                            "all four mesh fields change SameAs and NOT SameRigAs - the whole R8 split");
+            var elsewhere = new RigTarget
+            {
+                RendererInstanceId = 8, TransformPath = "Root/Body", MeshName = "Body",
+                MeshInstanceId = 11, BindPoseCount = 3, Rigged = true, BoneNames = new[] { "a", "b" }
+            };
+            checks += Check(!elsewhere.SameRigAs(was), "a DIFFERENT renderer is still a changed rig");
+            var renamed = new RigTarget
+            {
+                RendererInstanceId = 7, TransformPath = "Root/Body", MeshName = "Body",
+                MeshInstanceId = 11, BindPoseCount = 3, Rigged = true, BoneNames = new[] { "a", "c" }
+            };
+            checks += Check(!renamed.SameRigAs(was), "and so is a renamed bone");
+            checks += Check(was.SameAs(was) && !was.SameAs(null),
+                            "SameAs still answers itself, and still refuses null");
+
             // ---- Scaffold_RefusesASameStemMeshUnderAnotherExtension. ContentProject.Sources resolves a
             // replacement BY STEM, so body.obj and body.glb sharing one Content\Meshes\ make it SKIP BOTH
             // (ContentProject.cs:577-584) - the press would cost the author the mesh already shipped as well
