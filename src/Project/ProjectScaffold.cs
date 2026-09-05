@@ -78,8 +78,19 @@ namespace Morgott.ContentTool.Project
         internal static string RootOf(string modDir, string name)
         {
             if (NameRefusal(name) != null || string.IsNullOrEmpty(modDir)) return null;
-            DirectoryInfo mods = Directory.GetParent(modDir);
+            DirectoryInfo mods = Directory.GetParent(Normalized(modDir));
             return mods == null ? null : Path.Combine(mods.FullName, name);
+        }
+
+        /// <summary>ModDir made absolute with its trailing separator off. Directory.GetParent("...\Mods\
+        /// ContentTool\") answers "...\Mods\ContentTool", so one trailing separator would put the project
+        /// UNDER ContentTool - exactly where the manager never discovers it (ModGate.Decide:38 -> Unknown) -
+        /// and the post-condition below would accept it, because ContentMods.ProjectDir walks the same wrong
+        /// parent. Normalized once, at the door, so every derivation downstream shares one spelling.</summary>
+        private static string Normalized(string modDir)
+        {
+            return Path.GetFullPath(modDir)
+                       .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
         /// <summary>
@@ -100,6 +111,7 @@ namespace Morgott.ContentTool.Project
                 throw new InvalidDataException("no shipped target was derived for this slot, so there is no " +
                                                "row to write - pick the slot again");
 
+            if (!string.IsNullOrEmpty(modDir)) modDir = Normalized(modDir);
             DirectoryInfo mods = string.IsNullOrEmpty(modDir) ? null : Directory.GetParent(modDir);
             if (mods == null)
                 throw new InvalidDataException("ContentTool's own mod folder is not known, so there is nowhere " +
@@ -151,7 +163,18 @@ namespace Morgott.ContentTool.Project
                 // whether a player would end up with a working mod, so the wizard and the packager cannot
                 // disagree. stagedFiles is null on purpose - nothing is staged yet, and that null is what
                 // switches off MetaRefusal's AssemblyName arm (Package.cs:324).
-                string said = Package.MetaRefusal(File.ReadAllText(result.MetaPath), null);
+                // MetaRefusal is REGEX-based, so an unclosed object that happens to hold a matching "ID" and
+                // "Dependencies" sails through it while the game's own reader refuses the file. The strict
+                // reader this codebase already has runs first; no second parser is grown for it.
+                string text = File.ReadAllText(result.MetaPath);
+                string said;
+                try
+                {
+                    said = Json.Parse(text, 64) is Dictionary<string, object>
+                               ? Package.MetaRefusal(text, null)
+                               : "meta.json is not a JSON object.";
+                }
+                catch (FormatException bad) { said = "meta.json did not read as JSON: " + bad.Message; }
                 if (said != null)
                     throw new InvalidDataException("'" + result.MetaPath + "' already exists but is not a " +
                                                    "mod this project can ship: " + said + " - fix that file, " +

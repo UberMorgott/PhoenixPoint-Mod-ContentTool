@@ -50,6 +50,15 @@ internal static class ProjectScaffoldTests
             checks += Check(longName.Length == 64 && ProjectScaffold.NameRefusal(longName) == null,
                             "and a long asset name is cut to a name the table accepts: " + longName.Length);
 
+            // ---- Scaffold_NormalizesModDir. Directory.GetParent("...\Mods\ContentTool\") answers
+            // "...\Mods\ContentTool", so a trailing separator on ModDir would bury the project UNDER
+            // ContentTool - where the manager never discovers it (ModGate.Decide:38 -> Unknown) - and the
+            // post-condition would accept it, because ContentMods.ProjectDir walks the same wrong parent.
+            checks += Check(ProjectScaffold.RootOf(modDir + Path.DirectorySeparatorChar, "Replace_Rifle") ==
+                            ProjectScaffold.RootOf(modDir, "Replace_Rifle"),
+                            "RootOf ignores a trailing separator on ModDir: " +
+                            ProjectScaffold.RootOf(modDir + Path.DirectorySeparatorChar, "Replace_Rifle"));
+
             // ---- Scaffold_CreatesProjectTemplates
             string glb = Path.Combine(dir, "body.glb");
             File.WriteAllBytes(glb, new byte[] { 1, 2, 3 });
@@ -68,6 +77,12 @@ internal static class ProjectScaffoldTests
                             "meta.json is the design §4.2 template, byte for byte");
             checks += Check(ContentMods.ProjectDir(modDir, "Replace_Rifle") == made.Root,
                             "and ContentMods.ProjectDir now resolves that name to it - ct_project <name> finds it");
+
+            ProjectScaffold.Result trailing = ProjectScaffold.AddMeshReplacement(
+                modDir + Path.DirectorySeparatorChar, "Trail_Sep", glb, sha, "a.bundle", "Foo", empty);
+            checks += Check(trailing.Root == Path.Combine(mods, "Trail_Sep"),
+                            "a press made through the trailing-separator spelling lands BESIDE ContentTool, " +
+                            "not under it: " + trailing.Root);
 
             // ---- Scaffold_KeepsAnAuthoredId. ID == folder name is true of a project THIS tool made and of
             // nothing else: an authored ppcontent.json keeps whatever "id" its author chose, and the
@@ -110,6 +125,48 @@ internal static class ProjectScaffoldTests
             checks += Check(Same(File.ReadAllBytes(Path.Combine(idless, "meta.json")), metaWas),
                             "and a refused meta.json is never rewritten");
 
+            // Package.MetaRefusal is REGEX-based, so an unclosed object that happens to hold a matching "ID"
+            // and "Dependencies" sails straight through it while the game's own reader refuses the file.
+            // The strict reader runs FIRST, so R13 means "a player would get a working mod", not "the text
+            // contains the right two substrings".
+            string torn = Project(mods, "TornMeta",
+                                  "{\"ID\":\"x\",\"Dependencies\":[\"com.morgott.ContentTool\"");
+            byte[] tornWas = File.ReadAllBytes(Path.Combine(torn, "meta.json"));
+            string tornSaid = null;
+            try { ProjectScaffold.AddMeshReplacement(modDir, "TornMeta", glb, sha, "a.bundle", "Foo", empty); }
+            catch (InvalidDataException refused) { tornSaid = refused.Message; }
+            checks += Check(tornSaid != null &&
+                            tornSaid.StartsWith("'" + Path.Combine(torn, "meta.json") + "' already exists but " +
+                                                "is not a mod this project can ship: ", StringComparison.Ordinal) &&
+                            Same(File.ReadAllBytes(Path.Combine(torn, "meta.json")), tornWas),
+                            "a meta.json that does not PARSE is R13, and is not rewritten: " + tornSaid);
+            string listy = Project(mods, "ListMeta", "[1,2]");
+            byte[] listyWas = File.ReadAllBytes(Path.Combine(listy, "meta.json"));
+            string listySaid = null;
+            try { ProjectScaffold.AddMeshReplacement(modDir, "ListMeta", glb, sha, "a.bundle", "Foo", empty); }
+            catch (InvalidDataException refused) { listySaid = refused.Message; }
+            checks += Check(listySaid != null &&
+                            listySaid.IndexOf("is not a mod this project can ship: ",
+                                              StringComparison.Ordinal) > 0 &&
+                            Same(File.ReadAllBytes(Path.Combine(listy, "meta.json")), listyWas),
+                            "a meta.json that is not an OBJECT is R13 too: " + listySaid);
+
+            // ---- Scaffold_QuotesAnAuthoredId. An authored id comes back DECODED from ManifestFile.Load, so
+            // it can carry a quote that would end meta.json's JSON in the wrong place.
+            string quotedAt = Path.Combine(mods, "Quoted");
+            Directory.CreateDirectory(quotedAt);
+            File.WriteAllText(Path.Combine(quotedAt, "ppcontent.json"),
+                              "{\n  \"id\": \"com.test\\\"quote\",\n  \"bundle\": \"q.bundle\"\n}\n");
+            ProjectScaffold.Result quoted = ProjectScaffold.AddMeshReplacement(
+                modDir, "Quoted", glb, sha, "a.bundle", "Foo", empty);
+            string quotedMeta = File.ReadAllText(quoted.MetaPath);
+            checks += Check(quotedMeta == Template("com.test\"quote") &&
+                            (string)((Dictionary<string, object>)Json.Parse(quotedMeta, 64))["ID"] ==
+                                "com.test\"quote",
+                            "an authored id carrying a quote is ESCAPED into meta.json and re-reads intact");
+            checks += Check(Package.MetaRefusal(quotedMeta, null) == null,
+                            "and the packager still accepts that meta.json");
+
             // ---- Scaffold_RefusesAnUnrelatedFolder (R2)
             string squatter = Path.Combine(mods, "Squatter");
             Directory.CreateDirectory(squatter);
@@ -145,9 +202,12 @@ internal static class ProjectScaffoldTests
     /// the folder name only for a project this tool created.</summary>
     private static string Template(string id)
     {
-        return "{\n  \"ID\": \"" + id + "\",\n" +
+        // Escaped the way JSON escapes, spelled here rather than borrowed from JsonWriter - an id that came
+        // out of an AUTHORED manifest may carry a quote or a backslash.
+        string q = "\"" + id.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        return "{\n  \"ID\": " + q + ",\n" +
                "  \"Version\": \"1.0.0\",\n" +
-               "  \"Name\": [ { \"Key\": \"English\", \"Value\": \"" + id + "\" } ],\n" +
+               "  \"Name\": [ { \"Key\": \"English\", \"Value\": " + q + " } ],\n" +
                "  \"Dependencies\": [ \"com.morgott.ContentTool\" ]\n}\n";
     }
 
