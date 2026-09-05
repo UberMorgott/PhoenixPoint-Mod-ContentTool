@@ -264,15 +264,19 @@ namespace Morgott.ContentTool.Bake
         /// receipt whose key does not match, or over an output only PARTLY on disk, is `stale`; everything
         /// present and answering to the key is `fresh`.
         ///
-        /// The `Declared.Length != 0` term is not decoration: a project with no declared target (all rows
-        /// are video) has an empty census, so `Missing.Length == Declared.Length` is trivially true and a
-        /// key mismatch would have reported `never`.</summary>
+        /// NOTHING DECLARED IS NOTHING TO VERIFY, and it is answered FIRST. A video-only project's rows are
+        /// served live by ct_video, so `Route7.cs:157`/`:163` leave `wantReplace` false and never call
+        /// `ApplyProject`: no key is ever written, no patched directory ever appears, and this answered
+        /// `never` forever - `Admit("Verify")` returned R28 over evidence that will never exist, on every
+        /// launch. An empty census has nothing to be stale about either, so `fresh` is the honest answer and
+        /// Verify says so with <c>StageText.S8</c>.</summary>
         internal static Freshness Fresh(FreshnessObservation o)
         {
-            if (o == null || !o.CacheDirExists) return Freshness.Never;
+            if (o == null) return Freshness.Never;
+            if (o.Declared.Length == 0) return Freshness.Fresh;
+            if (!o.CacheDirExists) return Freshness.Never;
             if (o.HaveAll) return Freshness.Fresh;
-            return o.Declared.Length != 0 && o.MissingCopies.Length == o.Declared.Length
-                ? Freshness.Never : Freshness.Stale;
+            return o.MissingCopies.Length == o.Declared.Length ? Freshness.Never : Freshness.Stale;
         }
     }
 }

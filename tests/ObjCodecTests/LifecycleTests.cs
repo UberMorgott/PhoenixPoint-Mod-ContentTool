@@ -92,6 +92,17 @@ internal static class LifecycleTests
         checks += Check(selfCheck.Count == 1 && selfCheck[0].Outcome == GateOutcome.Fail &&
                         disagreed.ToString().StartsWith("P7 FAIL the clip read-back disagrees with itself:"),
                         "a P7 self-disagreement is one counted FAIL entry and no exception; agreement says nothing");
+        // THE REVERSE DIRECTION IS NOT A SECOND FAILURE. sliced > counted means the slicer already made a
+        // FAIL entry off that line (ReadBack.cs:208), so a counted P7 on top of it reported 2 FAILURE(S)
+        // for one defect. It is a VOID note - said, never counted twice.
+        List<GateEntry> reverse = new List<GateEntry>();
+        StringBuilder reverseLog = new StringBuilder();
+        GateEntry.SelfCheck(reverseLog, reverse, "clip_c", 0, 1);
+        checks += Check(reverse.Count == 1 && reverse[0].Outcome == GateOutcome.Void &&
+                        ReadBackResult.Of(null, reverse.ToArray()).Failed == 0 &&
+                        reverseLog.ToString().StartsWith("P7 VOID the clip read-back disagrees with itself:"),
+                        "counted < sliced is an UNCOUNTED P7 note - the sliced FAIL is the one failure, and " +
+                        "the total stays the larger of the two, never their sum");
         ReadBackResult failed = ReadBackResult.Of(null, GateEntry.Fail("P4", "mesh_a", "P4 FAILED mesh 'mesh_a'"));
         checks += Check(failed.Failed == 1 && failed.Entries[0].Outcome == GateOutcome.Fail &&
                         failed.Entries[0].Gate == "P4" && failed.Entries[0].Target == "mesh_a" &&
@@ -132,12 +143,22 @@ internal static class LifecycleTests
         // them through StageText (`:128`-`:133`, `:402`), so a literal re-typed here would compare this file
         // with itself. W18 proves that wording against the real producer, in game.
         // Their PREFIX is another matter - it is the one string in StageText that is PARSED:
-        // BundleResidency.cs:75/:99 classifies a bake by `first.Contains("ALL PASS")`, so a reword of these
-        // three passing sentences would silently turn the B1 re-bake gate VOID (or read a pass as a failure).
-        checks += Check(StageText.S4("D:\\x\\Dist\\a.bundle").StartsWith("ct_project: ALL PASS") &&
-                        StageText.BakeNoOwnBundle().StartsWith("ct_project: ALL PASS") &&
-                        StageText.BakeNothingPatched(2).StartsWith("ct_project: ALL PASS"),
-                        "the three passing bake sentences keep the prefix BundleResidency parses");
+        // StageResult.BakePassed classifies a bake by it, so a reword of these three passing sentences
+        // would silently turn the B1 re-bake gate VOID (or read a pass as a failure).
+        checks += Check(StageResult.BakePassed(StageText.S4("D:\\x\\Dist\\a.bundle")) &&
+                        StageResult.BakePassed(StageText.BakeNoOwnBundle()) &&
+                        StageResult.BakePassed(StageText.BakeNothingPatched(2)),
+                        "the three passing bake sentences keep the prefix BundleResidency classifies by - " +
+                        "and the arm calls the SAME helper the gate does, never a second copy of the rule");
+        // ON THE TERMINAL LINE ONLY. `report.Contains("ALL PASS")` read this very report as a pass:
+        // ClipFields.cs:505's skipped-clip refusal carries those two words mid-log (ProjectBake.cs:935),
+        // so a FAILED bake admitted B1 and B1-rebake.
+        checks += Check(!StageResult.BakePassed(
+                            "P8 VOID clip 'c' skipped, rather than reporting ALL PASS over an animation " +
+                            "nothing measured" + nl + StageText.S5(1)) &&
+                        StageResult.BakePassed("some noise" + nl + StageText.S4("D:\\x\\Dist\\a.bundle") + nl),
+                        "'ALL PASS' in the BODY of a report that ends in FAILURE(S) is not a pass - the " +
+                        "terminal line is the verdict, and a trailing newline does not hide it");
         checks += Check(StageText.S6("Replace_Rifle", 2, 2) ==
                         "Verify: PASS - load-back gates passed; 2 of 2 declared target(s) served from this " +
                         "project's copies for 'Replace_Rifle'.",
@@ -149,6 +170,10 @@ internal static class LifecycleTests
                         "a half-served census is VOID - design:384, 'any target missing -> VOID', never PASS");
         checks += Check(StageText.S7(4, 1234L, "D:\\out") == "PACKAGED 4 file(s), 1234 B into D:\\out",
                         "S7 - design:385, composed for Package.cs:178");
+        checks += Check(StageText.S8("IntroVideo") ==
+                        "Verify: PASS - nothing to verify for 'IntroVideo'; this project declares no " +
+                        "patched target - its row(s) are served live by ct_video.",
+                        "S8 is NEW - design:390, the empty-census Verify");
         checks += Check(StageText.PackageRefused("D:\\out") ==
                         "REFUSED: D:\\out already holds files. Name a folder that does not exist yet - a " +
                         "package is built from nothing, so no leftover of a previous run can be shipped by " +
@@ -365,7 +390,10 @@ internal static class LifecycleTests
         // ---- The ONE freshness observation. Route7.cs:308-:310 computes `fresh && Directory.Exists(patched)`
         // and then clears it for every declared copy that is absent; `HaveAll` IS that expression and
         // ApplyProject now asks it here, so the panel and the checkbox cannot drift by a single term.
-        FreshnessObservation gone = new FreshnessObservation("k", false, false, new string[0], new string[0]);
+        // `gone` DECLARES a bundle on purpose: with an empty census there would be nothing to verify and
+        // the answer would be `fresh` (the video-only arm below), which is not what this arm is about.
+        FreshnessObservation gone = new FreshnessObservation("k", false, false, new[] { "a.bundle" },
+                                                            new[] { "a.bundle" });
         FreshnessObservation wrongKey = new FreshnessObservation("k", false, true, new[] { "a.bundle" }, new string[0]);
         FreshnessObservation missing = new FreshnessObservation("k", true, true, new[] { "a.bundle" }, new[] { "a.bundle" });
         FreshnessObservation partly = new FreshnessObservation("k", true, true, new[] { "a.bundle", "b.bundle" },
@@ -382,10 +410,20 @@ internal static class LifecycleTests
         checks += Check(LifecycleState.Fresh(partly) == Freshness.Stale && !partly.HaveAll,
                         "SOME copies absent is stale - the census is the other half of the answer, " +
                         "Fresh() compares key text only");
-        checks += Check(LifecycleState.Fresh(new FreshnessObservation("k", false, true, new string[0],
-                                                                     new string[0])) == Freshness.Stale,
-                        "a bundle-less project's empty census must not read as 'never' over a key that " +
-                        "does not match - Declared.Length != 0 guards it");
+        // A VIDEO-ONLY PROJECT HAS NOTHING TO VERIFY, and it is never 'never'. Route7.cs:157/:163 leave
+        // `wantReplace` false, so ApplyProject is never called, no key is ever written and no patched dir
+        // ever appears: `never` here meant Verify was R28'd on every launch, permanently, over evidence
+        // that cannot exist. Both shapes - no cache dir at all, and a stale key beside an empty census.
+        FreshnessObservation videoOnly = new FreshnessObservation(null, false, false, new string[0], new string[0]);
+        checks += Check(LifecycleState.Fresh(videoOnly) == Freshness.Fresh &&
+                        LifecycleState.Fresh(new FreshnessObservation("k", false, true, new string[0],
+                                                                     new string[0])) == Freshness.Fresh,
+                        "a project that declares no patched target is FRESH - there is nothing to verify, " +
+                        "so it can be neither never nor stale (design:390, S8)");
+        checks += Check(LifecycleState.Admit("Verify", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.introvideo",
+                          Copies = LifecycleState.Fresh(videoOnly) }) == null,
+                        "and Verify is ADMITTED for it - it reports S8 instead of refusing forever");
         checks += Check(LifecycleState.Fresh(good) == Freshness.Fresh && good.HaveAll,
                         "receipt matches and every declared copy is there - this is Route7's `haveAll`");
         return checks;

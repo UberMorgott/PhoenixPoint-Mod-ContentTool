@@ -72,7 +72,7 @@ namespace Morgott.ContentTool.Bake
 
             string first = ProjectBake.Run(projectRoot);
             log.AppendLine("bake 1: " + Tail(first));
-            if (!first.Contains("ALL PASS"))
+            if (!StageResult.BakePassed(first))
                 return log.Append("B1 VOID the FIRST bake did not pass, so nothing about re-baking " +
                                   "was measured - fix that bake first").ToString();
 
@@ -96,7 +96,7 @@ namespace Morgott.ContentTool.Bake
 
             string second = ProjectBake.Run(projectRoot);
             log.AppendLine("bake 2: " + Tail(second));
-            fail += Check(log, "B1-rebake", second.Contains("ALL PASS"),
+            fail += Check(log, "B1-rebake", StageResult.BakePassed(second),
                 "the second bake verified its own output while the mod was holding the old copy");
 
             // Ours to clean up: the arm is the holder, so the arm lets go.

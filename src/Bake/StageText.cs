@@ -15,7 +15,8 @@ namespace Morgott.ContentTool.Bake
     /// last pair of strings that existed twice. Package appends its own LEFT BEHIND tail to S7.
     ///
     /// ONE thing here IS parsed: the `ct_project: ALL PASS` PREFIX of S4, BakeNoOwnBundle and
-    /// BakeNothingPatched, which BundleResidency.cs:75/:99 classifies a bake by. That prefix is pinned by an
+    /// BakeNothingPatched, which `StageResult.BakePassed` classifies a bake by - on the TERMINAL line only,
+    /// because those words also appear mid-report in ClipFields.cs:505's refusal. That prefix is pinned by an
     /// offline arm (LifecycleTests). Nothing else is parsed - every other outcome comes from the
     /// carrier.</summary>
     internal static class StageText
@@ -64,6 +65,15 @@ namespace Morgott.ContentTool.Bake
                 : "Verify: VOID - only " + served + " of " + declared +
                   " declared target(s) are served from this project's copies for '" + name +
                   "'; the target(s) named above are unproven.";
+        }
+
+        /// <summary>Verify PASS with an EMPTY census. NEW - design:390. A project that declares no patched
+        /// target has nothing on disk to measure, and refusing it with R28 forever was the bug: no bake ever
+        /// writes a key for it (LifecycleState.Fresh).</summary>
+        internal static string S8(string name)
+        {
+            return "Verify: PASS - nothing to verify for '" + name + "'; this project declares no " +
+                   "patched target - its row(s) are served live by ct_video.";
         }
 
         /// <summary>Package PASS. Called from src\Project\Package.cs:178, which appends its own LEFT BEHIND

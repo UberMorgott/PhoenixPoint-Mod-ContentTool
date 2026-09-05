@@ -64,16 +64,24 @@ namespace Morgott.ContentTool.Bake
         ///
         /// It lives HERE, not beside its caller, because ReadBack carries UnityEngine types and cannot be
         /// linked offline - this file can, so the arm is proven without a game session. The " FAIL " wording
-        /// is ProjectBake.Check's and is spelled out once more for that reason.</summary>
+        /// is ProjectBake.Check's and is spelled out once more for that reason.
+        ///
+        /// ONE DEFECT IS ONE FAILURE, so the direction decides the outcome. When the SLICER saw more
+        /// (sliced &gt; counted) those FAIL lines are already entries of their own (ReadBack.cs:208) and a
+        /// counted P7 on top of them reported `2 FAILURE(S)` for a single defect - so that direction is a
+        /// VOID note, uncounted, and the total stays the larger of the two. Only counted &gt; sliced adds a
+        /// failure, because there the arms' own count reaches nobody else.</summary>
         internal static void SelfCheck(StringBuilder log, List<GateEntry> entries, string clip,
                                        int counted, int sliced)
         {
             if (sliced == counted) return;
-            string line = "P7 FAIL the clip read-back disagrees with itself: clip '" + clip +
+            bool counts = counted > sliced;
+            string line = "P7 " + (counts ? "FAIL" : "VOID") +
+                          " the clip read-back disagrees with itself: clip '" + clip +
                           "' - its arms returned " + counted + " failure(s) and the lines they wrote " +
                           "classify as " + sliced;
             log.AppendLine(line);
-            entries.Add(Fail("P7", clip, line));
+            entries.Add(counts ? Fail("P7", clip, line) : Void("P7", clip, line));
         }
     }
 
@@ -199,6 +207,18 @@ namespace Morgott.ContentTool.Bake
             for (int i = Math.Max(0, end - lines); i < end; i++)
                 if (all[i].Length != 0) kept.AppendLine(all[i]);
             return kept.ToString().TrimEnd();
+        }
+
+        /// <summary>A bake passed only by its TERMINAL line, and this is the ONE place that decides it.
+        ///
+        /// <c>report.Contains("ALL PASS")</c> scanned the whole log, and one of the lines in that log is
+        /// ClipFields.cs:505's skipped-clip refusal - "...rather than reporting ALL PASS over an animation..."
+        /// (printed by ProjectBake.cs:935) - so a bake ending `ct_project: 1 FAILURE(S)` classified as a pass
+        /// and BundleResidency's B1/B1-rebake proceeded over it. The terminal line is the producer's verdict
+        /// (ProjectBake.cs:225, :515 both Append it last); nothing above it is a verdict about the run.</summary>
+        internal static bool BakePassed(string report)
+        {
+            return Tail(report, 1).StartsWith("ct_project: ALL PASS", StringComparison.Ordinal);
         }
     }
 }
