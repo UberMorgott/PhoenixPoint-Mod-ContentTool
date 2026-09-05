@@ -2421,8 +2421,10 @@ namespace Morgott.ContentTool.Bake
             try { bones = BundleBaker.ReadBoneNames(BakeSelfCheck.ShippedBundlePath(bundleFile), meshName); }
             catch (Exception) { bones = null; }
             // Two bones whose slots the reversal actually MOVES, or the fixture cannot ask its question.
+            // A rig with an UNVERIFIED slot (null) cannot be reversed into a fixture either - the .glb
+            // would carry a nameless joint, which is a different question from the one this asks.
             int n = bones == null ? 0 : bones.Length;
-            if (n < 3 || n - 1 == 0) return ModelBuild.SampleGlb();
+            if (n < 3 || n - 1 == 0 || Array.IndexOf(bones, null) >= 0) return ModelBuild.SampleGlb();
 
             SkinnedModel m = new SkinnedModel { Name = "rigfix" };
             m.Nodes.Add(new SkinNode { Name = "rigfix_root", Parent = -1, Local = Identity() });

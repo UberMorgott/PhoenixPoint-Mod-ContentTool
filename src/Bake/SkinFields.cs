@@ -967,6 +967,19 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static string[] BoneNames(AssetsManager m, AssetsFileInstance af, long meshPathId)
         {
+            string refusal;
+            return BoneNames(m, af, meshPathId, out refusal);
+        }
+
+        /// <param name="refusal">
+        /// why the names were REFUSED rather than merely absent - a bone whose path contradicts the
+        /// mesh's own hash for its slot. null when nothing in the file names the mesh's bones at all,
+        /// which is a different answer and must not read as a refusal.
+        /// </param>
+        internal static string[] BoneNames(AssetsManager m, AssetsFileInstance af, long meshPathId,
+                                           out string refusal)
+        {
+            refusal = null;
             AssetTypeValueField mesh = PrefabFields.Get(m, af, meshPathId);
             if (mesh == null) return null;
             AssetTypeValueField hashArray = mesh["m_BoneNameHashes"]["Array"];
@@ -976,6 +989,7 @@ namespace Morgott.ContentTool.Bake
             for (int b = 0; b < poses; b++) hashes[b] = hashArray.Children[b].AsUInt;
             uint rootHash = mesh["m_RootBoneNameHash"].AsUInt;
 
+            var memo = new Dictionary<long, string>();
             string[] found = null;
             foreach (AssetFileInfo i in af.file.Metadata.GetAssetsOfType(AssetClassID.SkinnedMeshRenderer))
             {
@@ -983,29 +997,134 @@ namespace Morgott.ContentTool.Bake
                 if (r["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
 
                 AssetTypeValueField bones = r["m_Bones"]["Array"];
-                // A renderer that disagrees about the LENGTH is not that correspondence at all, so
-                // its names are refused whole rather than half-applied to the bind poses.
+                // A SIBLING VARIANT renderer carries no m_Bones of its own - default/Gold/Xmas all draw
+                // CHR_PX_HVY_TS_M_V01 (MeshFields.cs:203) - so it names nothing and is skipped. Only a
+                // NON-ZERO list of the wrong length is a disagreement, and its names are then refused
+                // whole rather than half-applied to the bind poses.
+                if (bones.Children.Count == 0) continue;
                 if (bones.Children.Count != poses) return null;
                 string[] names = new string[poses], paths = new string[poses];
                 for (int b = 0; b < poses; b++)
                 {
-                    paths[b] = TransformPath(m, af, bones.Children[b]["m_PathID"].AsLong);
+                    paths[b] = TransformPath(m, af, bones.Children[b]["m_PathID"].AsLong, memo);
                     if (paths[b] == null) return null;
                     int slash = paths[b].LastIndexOf('/');
                     names[b] = slash < 0 ? paths[b] : paths[b].Substring(slash + 1);
                 }
-                // The anchor the other hashes are checked against: the renderer's own m_RootBone, or
-                // the bone that carries the mesh's root hash when the renderer does not name one.
+                // The anchor the hashes are checked against: the renderer's own m_RootBone first, then
+                // the bone CARRYING the mesh's root hash. Both are tried, because m_RootBone may point
+                // at a transform this mesh was never hashed against, and one wrong anchor must not cost
+                // a whole rig its names.
                 long rootId = r["m_RootBone"]["m_PathID"].AsLong;
-                string rootPath = rootId == 0 ? null : TransformPath(m, af, rootId);
-                if (rootPath == null)
-                    for (int b = 0; b < poses; b++) if (hashes[b] == rootHash) { rootPath = paths[b]; break; }
-                if (!BonesAligned(paths, rootPath, rootHash, hashes)) return null;
+                string byRoot = rootId == 0 ? null : TransformPath(m, af, rootId, memo);
+                string byHash = null;
+                for (int b = 0; b < poses; b++) if (hashes[b] == rootHash) { byHash = paths[b]; break; }
 
-                if (found == null) { found = names; continue; }
-                for (int b = 0; b < poses; b++) if (found[b] != names[b]) return null;
+                string clash = null;
+                string[] verified = byRoot == null ? null : Verify(names, paths, byRoot, rootHash, hashes, ref clash);
+                if (verified == null && byHash != null && byHash != byRoot)
+                {
+                    clash = null;   // the first ANCHOR was wrong, which says nothing about the rig
+                    verified = Verify(names, paths, byHash, rootHash, hashes, ref clash);
+                }
+                if (verified == null) { refusal = clash; return null; }
+
+                if (found == null) { found = verified; continue; }
+                for (int b = 0; b < poses; b++) if (found[b] != verified[b]) return null;
             }
             return found;
+        }
+
+        /// <summary>
+        /// The names one ANCHOR verifies, index-for-index with m_BindPose: a slot whose path checks out
+        /// against the mesh's own hash keeps its name, a slot this file cannot check at all is left
+        /// null - the caller writes the bone's hash there instead, which is what "not checked" means.
+        /// Refusing all nine of px_security_turret's doors because two of them sit outside the root
+        /// bone is what sent a perfectly good rig to nearest-bone.
+        ///
+        /// null when the anchor verifies NOTHING (it is not the prefix these hashes are of), or - with
+        /// <paramref name="contradiction"/> set - when a slot's path is checkable and DISAGREES, which
+        /// means m_Bones is not this mesh's bone order and no part of it may be trusted.
+        /// </summary>
+        private static string[] Verify(string[] names, string[] paths, string anchor, uint rootHash,
+                                       uint[] hashes, ref string contradiction)
+        {
+            string[] verified = new string[names.Length];
+            int named = 0;
+            for (int b = 0; b < names.Length; b++)
+            {
+                bool? ok = BoneVerifies(paths[b], anchor, rootHash, hashes[b]);
+                if (ok == false)
+                {
+                    contradiction = "the SkinnedMeshRenderer puts '" + paths[b] + "' in bone slot " + b +
+                                    ", but the mesh's own m_BoneNameHashes[" + b + "] is " + hashes[b] +
+                                    ", which that path does not produce - so its m_Bones is not this " +
+                                    "mesh's bone order, and every name it offers would land on another bone";
+                    return null;
+                }
+                if (ok == true) { verified[b] = names[b]; named++; }
+            }
+            return named == 0 ? null : verified;
+        }
+
+        /// <summary>
+        /// Is ONE bone's path the path the mesh hashed for that slot? true when it verifies, false when
+        /// it CONTRADICTS, null when this file cannot tell either way.
+        ///
+        /// A descendant of the anchor is decided outright: its hash is the anchor's register state
+        /// continued along the path below it, so a mismatch is a real disagreement. A bone OUTSIDE the
+        /// anchor's subtree is reached the other way - CRC-32's step is a bijection, so feeding the
+        /// anchor's own tail back OUT recovers the register at the ancestor the two paths share, and
+        /// the bone is hashed forward from there. Measured: px_security_turret's PP_Security_Turret_Base
+        /// (m_RootBone is Door1_L, the other doors are its siblings) verifies 9/9 that way, and
+        /// PP_Security_Turret_Guns 6/6. A mismatch on THAT route is not a contradiction: it only says
+        /// the shared prefix is not the hashed one, which the file never claimed.
+        /// </summary>
+        private static bool? BoneVerifies(string path, string anchor, uint rootHash, uint hash)
+        {
+            if (path == null || anchor == null) return null;
+            if (path == anchor) return hash == rootHash;
+            if (path.StartsWith(anchor + "/", StringComparison.Ordinal))
+                return Continue(~rootHash, path.Substring(anchor.Length)) == hash;
+            int shared = SharedPrefix(anchor, path);
+            return Continue(Back(~rootHash, anchor.Substring(shared)), path.Substring(shared)) == hash
+                ? true : (bool?)null;
+        }
+
+        /// <summary>The length of the longest path prefix both share, cut on a '/' boundary.</summary>
+        private static int SharedPrefix(string a, string b)
+        {
+            int at = 0, best = 0;
+            while (at < a.Length && at < b.Length && a[at] == b[at])
+            {
+                if (a[at] == '/') best = at;
+                at++;
+            }
+            // One path IS an ancestor of the other: the whole of the shorter is then shared.
+            if (at == a.Length && (at == b.Length || b[at] == '/')) return at;
+            if (at == b.Length && a[at] == '/') return at;
+            return best;
+        }
+
+        /// <summary>
+        /// <see cref="Continue"/> run BACKWARDS: the register state before <paramref name="tail"/> was
+        /// fed in. Each CRC-32 round is invertible - the bit shifted out is the register's new top bit,
+        /// because the polynomial's own top bit is set - so a known suffix can be taken back off a hash
+        /// even though the hash itself does not invert.
+        /// </summary>
+        private static uint Back(uint state, string tail)
+        {
+            uint c = state;
+            for (int i = tail.Length - 1; i >= 0; i--)
+            {
+                for (int k = 0; k < 8; k++)
+                {
+                    uint lsb = c >> 31;
+                    c = ((c ^ (lsb != 0 ? 0xEDB88320u : 0u)) << 1) | lsb;
+                }
+                c ^= (byte)tail[i];
+            }
+            return c;
         }
 
         /// <summary>
@@ -1023,22 +1142,16 @@ namespace Morgott.ContentTool.Bake
         /// state continued along the path BELOW the root bone. Exact on both shipped meshes the mesh
         /// gate reads, and it pins order and hierarchy together: a swapped pair fails.
         ///
-        /// false whenever a bone cannot be checked at all - no anchor, or a bone that does not descend
-        /// from the root bone - because "not checked" and "verified" must not report the same.
+        /// ALL-OR-NOTHING, and that is the only thing it answers: false whenever a single bone cannot be
+        /// checked, because "not checked" and "verified" must not report the same. <see cref="BoneNames"/>
+        /// does NOT ask it - a rig is verified per bone there, so one uncheckable bone costs that slot
+        /// its name and nothing else.
         /// </summary>
         internal static bool BonesAligned(string[] paths, string rootPath, uint rootHash, uint[] hashes)
         {
             if (rootPath == null || paths.Length != hashes.Length) return false;
             for (int b = 0; b < paths.Length; b++)
-            {
-                if (paths[b] == rootPath)
-                {
-                    if (hashes[b] != rootHash) return false;
-                    continue;
-                }
-                if (!paths[b].StartsWith(rootPath + "/", StringComparison.Ordinal)) return false;
-                if (Continue(~rootHash, paths[b].Substring(rootPath.Length)) != hashes[b]) return false;
-            }
+                if (BoneVerifies(paths[b], rootPath, rootHash, hashes[b]) != true) return false;
             return true;
         }
 
@@ -1048,6 +1161,16 @@ namespace Morgott.ContentTool.Bake
         /// a name will not resolve, or the chain loops. The model root the bone hashes are relative to
         /// sits somewhere on this path; <see cref="BonesAligned"/> is what finds where.
         /// </summary>
+        private static string TransformPath(AssetsManager m, AssetsFileInstance af, long transformPathId,
+                                            Dictionary<long, string> memo)
+        {
+            string hit;
+            if (memo.TryGetValue(transformPathId, out hit)) return hit;
+            hit = TransformPath(m, af, transformPathId);
+            memo[transformPathId] = hit;
+            return hit;
+        }
+
         private static string TransformPath(AssetsManager m, AssetsFileInstance af, long transformPathId)
         {
             string path = null;

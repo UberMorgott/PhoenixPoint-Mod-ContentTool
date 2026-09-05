@@ -25,6 +25,15 @@ internal static class MeshExtractTests
     private const string Rigged = "ALN_Siren_Arm_Slasher_Right";
     /// <summary>A second, larger mesh in the same file - the control that the first was not a fluke.</summary>
     private const string Control = "Geo_Head02_V01";
+    /// <summary>
+    /// The OUT-OF-SUBTREE case, on real shipped data: PP_Security_Turret_Base's m_RootBone is Door1_L,
+    /// and the other three doors are that bone's SIBLINGS, so their hashes continue a prefix that
+    /// reaches ABOVE the anchor. Refusing all nine names because seven of them are not under the root
+    /// bone is what sent a perfectly good rig to nearest-bone.
+    /// </summary>
+    private const string Turrets = "px_security_turret_assets_all.bundle";
+    private const string Siblings = "PP_Security_Turret_Base";
+    private const string MoreSiblings = "PP_Security_Turret_Guns";
 
     private static int checks;
 
@@ -44,7 +53,57 @@ internal static class MeshExtractTests
             first = OneMesh(m, afile, resS, Rigged);
             second = OneMesh(m, afile, resS, Control);
         });
-        return "MESH extract PASS on " + Bundle + ", " + checks + " check(s)\n  " + first + "\n  " + second;
+        string turret = Turret(classData, Path.GetDirectoryName(shipped));
+        return "MESH extract PASS on " + Bundle + ", " + checks + " check(s)\n  " + first + "\n  " +
+               second + "\n  " + turret;
+    }
+
+    /// <summary>
+    /// The regression arm, on REAL shipped data: a rig whose bones sit OUTSIDE the root bone's own
+    /// subtree must still come out NAMED. Every one of these bones is checkable - the hashes continue
+    /// a prefix reached by taking the anchor's own tail back off its hash - so a single hashed joint
+    /// here means the whole renderer was refused again and every replacement onto these meshes is back
+    /// on nearest-bone.
+    /// </summary>
+    private static string Turret(string classData, string streamingAssets)
+    {
+        string bundle = Path.Combine(streamingAssets, Turrets);
+        if (!File.Exists(bundle)) return Turrets + ": VOID - not on this machine";
+        string line = null;
+        Open(classData, bundle, (m, afile, resS) =>
+        {
+            line = "";
+            foreach (string name in new[] { Siblings, MoreSiblings })
+            {
+                AssetFileInfo info = AssetIndex.FindUnique(m, afile, AssetClassID.Mesh, name, Turrets);
+                AssetTypeValueField mesh = m.GetBaseField(afile, info);
+                int poses = Int(SkinFields.SkinSummary(mesh), "bindposes=");
+
+                string refusal;
+                string[] rig = SkinFields.BoneNames(m, afile, info.PathId, out refusal);
+                Check(refusal == null, name + ": nothing in its rig CONTRADICTS the mesh's own hashes" +
+                      (refusal == null ? "" : " - " + refusal));
+                Check(rig != null && rig.Length == poses,
+                      name + ": its bones are named even though its root bone's siblings are in the list (" +
+                      poses + " expected, got " + (rig == null ? "null" : rig.Length.ToString()) + ")");
+                int verified = 0;
+                foreach (string bone in rig) if (bone != null) verified++;
+                Check(verified == poses,
+                      name + ": all " + poses + " of them VERIFY against the mesh's own bone path hashes, " +
+                      "the siblings through the ancestor they share with the root bone (" + verified + " did) - " +
+                      SkinFields.SkinSummary(mesh));
+
+                // Read back off the WRITTEN nodes, so this cannot claim a name the .glb does not carry.
+                SkinnedModel model = MeshRead.Read(mesh, resS, rig);
+                int joints = model.JointNodes == null ? 0 : model.JointNodes.Length;
+                Check(MeshRead.NamedJoints(model) == joints,
+                      name + ": every joint the extract writes is a NAME, none on a hash (" +
+                      MeshRead.NamedJoints(model) + " of " + joints + ")");
+                line += (line.Length == 0 ? "" : " | ") + name + ": " + verified + "/" + poses +
+                        " bones verified, " + joints + " joint(s) written";
+            }
+        });
+        return line;
     }
 
     private static string OneMesh(AssetsManager m, AssetsFileInstance afile, Func<string, byte[]> resS,
@@ -188,6 +247,19 @@ internal static class MeshExtractTests
               "a permuted m_Bones is refused, not silently renumbered onto the bind poses");
         Check(!SkinFields.BonesAligned(new[] { "Elsewhere/Head", root, paths[2] }, root, rootHash, hashes),
               "a bone that does not descend from the root bone cannot be checked, so it is refused");
+
+        // OUTSIDE the root bone's subtree, the route px_security_turret needs: CRC-32's round is a
+        // bijection, so feeding the anchor's own tail back OUT recovers the register at the ancestor
+        // the two paths share, and the sibling is hashed forward from there - all without ever
+        // learning the prefix. A sibling whose hash does NOT come out of that ancestor is simply not
+        // verified; only a bone that IS checkable and disagrees refuses the rig.
+        const string sibling = "Root/Elsewhere";
+        uint[] withSibling = { hashes[0], rootHash, SkinFields.BoneHash(gone + sibling) };
+        Check(SkinFields.BonesAligned(new[] { paths[0], root, sibling }, root, rootHash, withSibling),
+              "a bone outside the root bone's subtree verifies through the ancestor the two share");
+        uint[] wrongSibling = { hashes[0], rootHash, SkinFields.BoneHash(gone + "Root/Somewhere") };
+        Check(!SkinFields.BonesAligned(new[] { paths[0], root, sibling }, root, rootHash, wrongSibling),
+              "... and one whose hash does not come out of that ancestor is not counted as verified");
     }
 
     // ---------------------------------------------------------------- helpers

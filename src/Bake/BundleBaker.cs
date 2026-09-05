@@ -1000,13 +1000,25 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static string[] ReadBoneNames(string bundlePath, string meshName)
         {
+            string refusal;
+            return ReadBoneNames(bundlePath, meshName, out refusal);
+        }
+
+        /// <param name="refusal">
+        /// why the names were REFUSED rather than merely absent - see
+        /// <see cref="SkinFields.BoneNames(AssetsManager,AssetsFileInstance,long,out string)"/>.
+        /// </param>
+        internal static string[] ReadBoneNames(string bundlePath, string meshName, out string refusal)
+        {
             string[] found = null;
+            string why = null;
             Read(bundlePath, (m, afile) =>
             {
                 found = SkinFields.BoneNames(m, afile,
-                    AssetIndex.FindUnique(m, afile, AssetClassID.Mesh, meshName, bundlePath).PathId);
+                    AssetIndex.FindUnique(m, afile, AssetClassID.Mesh, meshName, bundlePath).PathId, out why);
                 return "";
             });
+            refusal = why;
             return found;
         }
 

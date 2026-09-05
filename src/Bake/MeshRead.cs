@@ -345,7 +345,11 @@ namespace Morgott.ContentTool.Bake
                     ? "bone_" + hashes.Children[i].AsUInt
                     : "bone_" + i + "_unnamed";
                 model.BonePaths.Add(hash);
-                string bone = boneNames == null ? hash : boneNames[i];
+                // A null SLOT is a bone SkinFields.BoneNames could not verify against the mesh's own
+                // hashes (it sits outside the anchor's subtree and shares no checkable prefix), so it
+                // keeps the hash - the one fact the file does state about it - while its verified
+                // neighbours keep their real names.
+                string bone = boneNames == null || boneNames[i] == null ? hash : boneNames[i];
                 model.Nodes.Add(new SkinNode { Name = bone, Parent = 0, Local = Invert(bindPose, bone) });
                 model.JointNodes[i] = i + 1;
             }

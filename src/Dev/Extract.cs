@@ -99,18 +99,29 @@ namespace Morgott.ContentTool.Dev
             string path = BakeSelfCheck.ShippedBundlePath(bundleFileName);
             if (!File.Exists(path)) return "ct_list VOID - no bundle at " + path;
 
-            string[] names = BundleBaker.ReadBoneNames(path, meshName);
+            string refusal;
+            string[] names = BundleBaker.ReadBoneNames(path, meshName, out refusal);
+            // REFUSED and VOID are not the same answer: a bone whose path CONTRADICTS the mesh's own
+            // hash for its slot says the renderer's m_Bones is another mesh's order, which is a fact
+            // about the file. Nobody naming the bones at all is an absence.
+            if (names == null && refusal != null)
+                return "ct_list REFUSED - the bones of Mesh '" + meshName + "' in " + bundleFileName +
+                       " cannot be named: " + refusal;
             if (names == null)
                 return "ct_list VOID - nothing in " + bundleFileName + " names the bones of Mesh '" +
                        meshName + "': either no SkinnedMeshRenderer there uses it, or two do and " +
-                       "disagree about the skeleton, or the one that does lists its bones in an order " +
-                       "that does not match the mesh's own bone path hashes - refused, never guessed";
+                       "disagree about the skeleton - refused, never guessed";
 
             List<string> hits = new List<string>();
             for (int i = 0; i < names.Length; i++)
+            {
+                // A slot the mesh's own hashes could not check keeps no name: saying so beats printing
+                // a name an author would then spell into a rig that will not rebind.
+                string name = names[i] ?? "(unverified - outside the root bone's subtree)";
                 if (string.IsNullOrEmpty(nameFilter) ||
-                    names[i].IndexOf(nameFilter, StringComparison.OrdinalIgnoreCase) >= 0)
-                    hits.Add(i + ": " + names[i]);
+                    name.IndexOf(nameFilter, StringComparison.OrdinalIgnoreCase) >= 0)
+                    hits.Add(i + ": " + name);
+            }
 
             StringBuilder b = new StringBuilder();
             b.Append(hits.Count).Append(" of ").Append(names.Length).Append(" bone(s) of Mesh '")
@@ -342,10 +353,11 @@ namespace Morgott.ContentTool.Dev
             int named = MeshRead.NamedJoints(model);
             return Describe(model) + (joints == 0 ? "" : named == joints
                 ? " joints: " + joints + " named, 0 hashed"
-                : " joints: " + named + " named, " + (joints - named) +
-                  " hashed (no SkinnedMeshRenderer in " + Path.GetFileName(bundlePath) +
-                  " references this mesh, or two do and disagree about its bones, or the one that does " +
-                  "lists them in an order that does not match the mesh's own bone path hashes)");
+                : " joints: " + named + " named, " + (joints - named) + " hashed (" + (named == 0
+                    ? "no SkinnedMeshRenderer in " + Path.GetFileName(bundlePath) +
+                      " references this mesh, or two do and disagree about its bones, or the one that " +
+                      "does lists them in an order that does not match the mesh's own bone path hashes"
+                    : (joints - named) + " outside the root-bone subtree, unverifiable") + ")");
         }
 
         /// <summary>What a model actually holds, in one line - the oracle both gates read.</summary>
