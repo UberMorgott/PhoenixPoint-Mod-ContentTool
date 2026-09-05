@@ -344,7 +344,17 @@ namespace Morgott.ContentTool.Project
                 p.Replace.AddRange(ParseReplace(File.ReadAllText(metaPath), p.SourceRefusals));
                 p.ReplaceRefusals = p.SourceRefusals.Count - beforeReplace;
             }
-            catch (InvalidDataException bad) { p.SourceRefusals.Add(bad.Message); }
+            catch (InvalidDataException bad)
+            {
+                p.SourceRefusals.Add(bad.Message);
+                // ...but a DECLARED "replace" of the wrong shape IS a patch failure. Manifest:98 returns
+                // early when the key is absent, so NotAnArray is the one throw here that proves "replace"
+                // was declared and read by nobody: no row reaches Patch, patchFailed stayed 0
+                // (ProjectBake:111) and Route7:345 stamped the cache current over replacements nobody
+                // performed. Broken JSON and a non-object root say nothing about "replace" - still
+                // non-blocking.
+                if (bad.Message == Manifest.NotAnArray) p.ReplaceRefusals = 1;
+            }
             p.Publish.AddRange(ParsePublish(File.ReadAllText(metaPath), p.SourceRefusals));
 
             string refused = RefuseUnsupported(Path.Combine(Path.Combine(root, "Content"), "Audio"));

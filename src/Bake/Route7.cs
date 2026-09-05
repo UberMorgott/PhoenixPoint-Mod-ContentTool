@@ -98,7 +98,12 @@ namespace Morgott.ContentTool.Bake
             if (string.IsNullOrEmpty(modDir) ||
                 !File.Exists(Path.Combine(modDir, Project.ContentMods.Manifest))) return null;
             Project.ContentProject.Declared project = Project.ContentProject.LoadDeclared(modDir);
-            bool wantReplace = project.Replace.Count > 0, wantPublish = project.Publish.Count > 0;
+            // VIDEO rows are not the replace route's work - :288 skips them when it builds `declared`,
+            // so counting them here sent a video-only mod through a full blocking ProjectBake.Run that
+            // wrote a patch-cache key for an empty `declared` and ended at :360 "REFUSED: nothing to
+            // install". Ask for the rows the route actually patches.
+            bool wantReplace = project.Replace.Exists(r => string.IsNullOrEmpty(r.video)),
+                 wantPublish = project.Publish.Count > 0;
             if (!wantReplace && !wantPublish) return null;
 
             StringBuilder log = new StringBuilder();

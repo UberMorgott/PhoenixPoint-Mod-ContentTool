@@ -95,6 +95,13 @@ internal static class RefusalCount
             only[1] == "ppcontent.json declares \"replace\" but no complete entry was read from it",
             "an array of nothing BUT a primitive refuses the element and then says the array declared " +
             "nothing readable: " + string.Join(" | ", only.ToArray()));
+        // A wrong-shaped "replace" throws THROUGH a live refusal list: Manifest.Parse runs before
+        // ParseReplace has a row to collect, so the channel never sees it and adds nothing. That is why
+        // Load has to catch it, and why the catch - not the list - is what counts it as a patch failure
+        // (ContentProject.Load:347).
+        checks += Check(Threw("ParseReplace", "{\"replace\":5}", refusals) && refusals.Count == 4,
+            "a wrong-shaped \"replace\" THROWS past a non-null refusal list, adding nothing to it: " +
+            refusals.Count);
         checks += Check((Said("ParseReplace", "{\"replace\":5}") ?? "")
                             .IndexOf("ARRAY OF ROWS", StringComparison.Ordinal) >= 0,
             "V3 stands: a \"replace\" VALUE of another shape is still the array-shape refusal, and with no " +
@@ -131,9 +138,9 @@ internal static class RefusalCount
         return ((ICollection)Call(method, json, refusals)).Count;
     }
 
-    private static bool Threw(string method, string json)
+    private static bool Threw(string method, string json, List<string> refusals = null)
     {
-        try { Call(method, json, null); return false; }
+        try { Call(method, json, refusals); return false; }
         catch (InvalidDataException) { return true; }
     }
 

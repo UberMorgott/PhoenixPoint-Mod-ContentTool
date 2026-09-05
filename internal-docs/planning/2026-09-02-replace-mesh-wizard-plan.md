@@ -2051,7 +2051,7 @@ sub-projects deleted first), `E:\DEV\PhoenixPoint\ContentTool`, PowerShell.
 Section lines this slice is answerable for, verbatim from the `ObjCodecTests` run:
 
 ```
-REFUSAL-COUNT PASS, 16 check(s) - 5 refusals, 5 failures
+REFUSAL-COUNT PASS, 17 check(s) - 5 refusals, 5 failures
 ALIAS PASS, 32 check(s) - simultaneous rename, untouched index tables, sidecar policy
 PACKAGE-GATE PASS, 7 check(s)
 MANIFEST PASS, 53 check(s) - atomic write, nested rows, byte-preserving splice, E3/E4/E5/E6/E8 refusals
