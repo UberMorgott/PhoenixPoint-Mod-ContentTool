@@ -49,6 +49,7 @@
     <Compile Include="..\..\src\Bake\StageText.cs" Link="StageText.cs" />
     <Compile Include="..\..\src\Bake\OutputClaim.cs" Link="OutputClaim.cs" />
     <Compile Include="..\..\src\Bake\LifecycleState.cs" Link="LifecycleState.cs" />
+    <Compile Include="..\..\src\Bake\Publication.cs" Link="Publication.cs" />
     <Compile Include="LifecycleTests.cs" />
     <Compile Include="PreflightTests.cs" />
     <!-- The PROTOTYPE CATALOG carries no UnityEngine type on purpose, so which rigs are one binding

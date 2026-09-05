@@ -229,12 +229,13 @@ internal static class LifecycleTests
         string wide = new string('x', 5000);
         checks += Check(StageResult.Tail(wide, 1) == wide, "one very long line comes back whole");
 
-        checks += Publication();
+        checks += OneSwap();
+        checks += Ordering();
         checks += Ownership();
         checks += Admission();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
-               "one file swap, one output owner, the admission table";
+               "one file swap, the publication ordering, one output owner, the admission table";
     }
 
     /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per
@@ -387,14 +388,170 @@ internal static class LifecycleTests
         return checks;
     }
 
-    /// <summary>G4 - the ONE swap. AtomicFile.Write makes its own temp (AtomicFile.cs:19) and so cannot
-    /// publish one a bake already streamed; Publish takes that temp and performs the same two-armed swap.
-    /// Real files, System.IO only - the thing under test IS the filesystem call.
+    /// <summary>G7 - the B5 PUBLICATION ORDERING, driven through the production file.
+    ///
+    /// WHY THIS GATE EXISTS AT ALL (plan review, blocker 2). B5 as first planned lived only inside
+    /// `ProjectBake` and `LifecycleJob`, both of which carry UnityEngine and AssetsTools and can never be
+    /// linked here - so a G7 that re-implemented invalidate/swap/key would stay green while the real bake
+    /// stamped the key first. `AtomicFile.Publish` only covers ONE file and says nothing about the order.
+    /// The ordering therefore lives in `src\Bake\Publication.cs`, which IS what these arms call.
+    ///
+    /// THE FAULTS ARE REAL, NOT INJECTED. A key file held open with FileShare.None makes File.Delete throw;
+    /// a destination held the same way makes File.Replace throw; a key path under a directory that does not
+    /// exist makes the key write throw. No fault delegate, so nothing here can pass over a production path
+    /// the test replaced with its own.
+    ///
+    /// Every arm asserts ACTUAL BYTES, not a return code: the whole point of the ordering is what is on disk
+    /// when it stops halfway.</summary>
+    private static int Ordering()
+    {
+        int checks = 0;
+        string dir = Path.Combine(Path.GetTempPath(), "ct_order_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            byte[] fresh = { 7, 7, 7 }, old = { 1, 1 };
+            string a = Path.Combine(dir, "a.bundle"), b = Path.Combine(dir, "b.bundle");
+            string key = Path.Combine(dir, "ct-cache.key");
+            string message;
+
+            // ---- the happy path: old key gone, both copies published, new key LAST.
+            File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
+            File.WriteAllText(key, "OLDKEY");
+            checks += Check(Publication.Run(Pair(dir, fresh, a, b), key, "NEWKEY", null, null, out message) ==
+                            PublishOutcome.Published && message == null &&
+                            Same(File.ReadAllBytes(a), fresh) && Same(File.ReadAllBytes(b), fresh) &&
+                            File.ReadAllText(key) == "NEWKEY" && Temps(dir) == 0,
+                            "a clean publication replaces every copy, writes the new key and leaves no temp");
+
+            // ---- INVALIDATION FIRST, and a failed one publishes NOTHING. The old key is held open, so
+            // File.Delete throws before a single swap.
+            File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
+            File.WriteAllText(key, "OLDKEY");
+            PublishOutcome how;
+            using (new FileStream(key, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                how = Publication.Run(Pair(dir, fresh, a, b), key, "NEWKEY", null, null, out message);
+            checks += Check(how == PublishOutcome.Failed && message != null &&
+                            Same(File.ReadAllBytes(a), old) && Same(File.ReadAllBytes(b), old) &&
+                            File.ReadAllText(key) == "OLDKEY" && Temps(dir) == 0,
+                            "key invalidation fails -> nothing is published, the previous outputs are intact");
+
+            // ---- A FAILURE BETWEEN TWO REPLACEMENTS. The completed file is complete, the other one is
+            // untouched, and the key is ABSENT - which is what forbids Apply until a repair bake.
+            File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
+            File.WriteAllText(key, "OLDKEY");
+            using (new FileStream(b, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                how = Publication.Run(Pair(dir, fresh, a, b), key, "NEWKEY", null, null, out message);
+            checks += Check(how == PublishOutcome.Failed && message != null &&
+                            Same(File.ReadAllBytes(a), fresh) && Same(File.ReadAllBytes(b), old) &&
+                            !File.Exists(key) && Temps(dir) == 0,
+                            "a failure between two replacements leaves the finished copy complete, the key " +
+                            "absent and no orphaned temp");
+
+            // ---- THE KEY IS WRITTEN LAST, so a key write that throws still leaves both copies published.
+            File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
+            how = Publication.Run(Pair(dir, fresh, a, b),
+                                  Path.Combine(Path.Combine(dir, "no-such-dir"), "ct-cache.key"),
+                                  "NEWKEY", null, null, out message);
+            checks += Check(how == PublishOutcome.Failed && message != null &&
+                            Same(File.ReadAllBytes(a), fresh) && Same(File.ReadAllBytes(b), fresh) &&
+                            Temps(dir) == 0,
+                            "the key write fails LAST - the copies are published and the receipt is absent");
+
+            // ---- CANCEL AT B4, the last cancellable instant: temps deleted, previous outputs BYTE-IDENTICAL.
+            File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
+            File.WriteAllText(key, "OLDKEY");
+            checks += Check(Publication.Run(Pair(dir, fresh, a, b), key, "NEWKEY", null,
+                                            delegate { return true; }, out message) ==
+                            PublishOutcome.Cancelled &&
+                            Same(File.ReadAllBytes(a), old) && Same(File.ReadAllBytes(b), old) &&
+                            File.ReadAllText(key) == "OLDKEY" && Temps(dir) == 0,
+                            "a cancel at B4 publishes nothing, deletes the temps and leaves the previous " +
+                            "outputs byte-identical");
+
+            // ---- CANCEL INSIDE B5 IS IGNORED. The flag flips while the run is already past its one check;
+            // publication finishes and reports completion, because a half-published set is unclassifiable.
+            File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
+            bool late = false;
+            checks += Check(Publication.Run(Pair(dir, fresh, a, b), key, "NEWKEY",
+                                            delegate(string dest) { late = true; return null; },
+                                            delegate { return late; }, out message) ==
+                            PublishOutcome.Published &&
+                            Same(File.ReadAllBytes(a), fresh) && Same(File.ReadAllBytes(b), fresh) &&
+                            File.ReadAllText(key) == "NEWKEY",
+                            "a cancel raised INSIDE B5 does not interrupt it - publication completes");
+
+            // ---- R38 AT THE BOUNDARY. A copy a live reader is serving is refused before anything moves.
+            File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
+            File.WriteAllText(key, "OLDKEY");
+            string r38 = StageText.R38(b);
+            checks += Check(Publication.Run(Pair(dir, fresh, a, b), key, "NEWKEY",
+                                            delegate(string dest) { return dest == b ? r38 : null; },
+                                            null, out message) == PublishOutcome.Refused &&
+                            message == r38 &&
+                            Same(File.ReadAllBytes(a), old) && Same(File.ReadAllBytes(b), old) &&
+                            File.ReadAllText(key) == "OLDKEY" && Temps(dir) == 0,
+                            "a claimed or resident destination refuses the WHOLE publication with R38, " +
+                            "before the first swap - the live reader keeps reading what it had");
+
+            // ---- NO KEY AT ALL (the project's own Dist, and a bake nobody vouched for): the copies are
+            // published and the stale receipt is invalidated anyway, so nothing can read them as current.
+            File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
+            File.WriteAllText(key, "OLDKEY");
+            checks += Check(Publication.Run(Pair(dir, fresh, a, b), key, null, null, null, out message) ==
+                            PublishOutcome.Published && Same(File.ReadAllBytes(a), fresh) &&
+                            !File.Exists(key),
+                            "a publication with no key to write still INVALIDATES the old one - a failed " +
+                            "bake's copies can never be read as the receipt's");
+
+            // ---- THE HOLDER'S BYTES ARE UNTOUCHED BY A COMPETING ADMISSION, and the claim survives it.
+            string[] owned = { dir };
+            string refusal;
+            OutputClaim.Take(owned, out refusal);
+            try
+            {
+                string other;
+                checks += Check(!OutputClaim.Take(owned, out other) && other == StageText.R37(
+                                    OutputClaim.Canonical(dir)) &&
+                                Same(File.ReadAllBytes(a), fresh),
+                                "a competing producer is refused immediately and writes nothing - the " +
+                                "holder's bytes are untouched");
+            }
+            finally { OutputClaim.Release(owned); }
+            checks += Check(!OutputClaim.Held(dir),
+                            "the claim is released in a finally - an exception inside the run cannot leak it");
+        }
+        finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
+        return checks;
+    }
+
+    /// <summary>Two freshly streamed sibling temps for <paramref name="dests"/>, in that order - what B2
+    /// hands B5. Written here rather than in the arms so every arm starts from the same shape.</summary>
+    private static IList<KeyValuePair<string, string>> Pair(string dir, byte[] bytes, params string[] dests)
+    {
+        var work = new List<KeyValuePair<string, string>>();
+        foreach (string d in dests)
+        {
+            string tmp = d + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllBytes(tmp, bytes);
+            work.Add(new KeyValuePair<string, string>(tmp, d));
+        }
+        return work;
+    }
+
+    private static int Temps(string dir) { return Directory.GetFiles(dir, "*.tmp").Length; }
+
+    /// <summary>G7's swap half - the ONE swap. AtomicFile.Write makes its own temp (AtomicFile.cs:19) and so
+    /// cannot publish one a bake already streamed; Publish takes that temp and performs the same two-armed
+    /// swap. Real files, System.IO only - the thing under test IS the filesystem call.
     ///
     /// The last two arms are the regression this split could introduce: Write's own cleanup guard covers a
     /// failed open, write or flush, NONE of which ever reach Publish, so moving that guard wholesale would
-    /// strand Write's temp on exactly the paths that have one today.</summary>
-    private static int Publication()
+    /// strand Write's temp on exactly the paths that have one today.
+    ///
+    /// Named OneSwap, not Publication: <see cref="Morgott.ContentTool.Bake.Publication"/> is a TYPE this
+    /// class now calls, and a same-named method in the same scope hides it.</summary>
+    private static int OneSwap()
     {
         int checks = 0;
         string dir = Path.Combine(Path.GetTempPath(), "ct_publish_" + Guid.NewGuid().ToString("N"));
