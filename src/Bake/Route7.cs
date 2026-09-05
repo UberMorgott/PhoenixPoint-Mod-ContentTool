@@ -195,6 +195,13 @@ namespace Morgott.ContentTool.Bake
             return log.ToString();
         }
 
+        /// <summary>What became of ONE bundle in an apply. A wizard cannot read this out of the log: zero
+        /// claims taken is not the same fact as residency - a catalog Locate failure (BundleLive.cs:215-218)
+        /// and an ownership conflict (BundleClaims.Claim:250) also take no claim, and reporting either of
+        /// those as "restart and enable" is the tool telling the author something untrue with a straight
+        /// face.</summary>
+        internal enum ApplyDisposition { Redirected, Resident, Refused, BakeFailed }
+
         /// <summary>
         /// Installs a project's already-baked copies LIVE. Reads ContentToolMain.PatchedDir() and
         /// bakes when it is empty: this is what installing a DOWNLOADED mod looks like, where the
@@ -202,8 +209,17 @@ namespace Morgott.ContentTool.Bake
         /// be shipped (it would put Phoenix Point's own assets inside a Workshop item) and is produced
         /// here, on the player's machine, from the player's own game files.
         /// </summary>
-        private static string ApplyProject(string projectName)
+        internal static string ApplyProject(string projectName)
         {
+            ApplyDisposition ignored;
+            return ApplyProject(projectName, null, out ignored);
+        }
+
+        /// <param name="forBundle">the ONE shipped bundle the caller cares about, or null for the console
+        /// verb, which prints the log and asks nothing.</param>
+        internal static string ApplyProject(string projectName, string forBundle, out ApplyDisposition how)
+        {
+            how = ApplyDisposition.Refused;
             StringBuilder pre = new StringBuilder();
             string projectRoot = ContentToolMain.ProjectDir(projectName);
             Morgott.ContentTool.Project.ContentProject project =
@@ -246,14 +262,20 @@ namespace Morgott.ContentTool.Bake
                 // The COUNT, never the text: reading it out of the log made this branch depend on the
                 // wording of a sentence, and a reworded sentence would have failed the one way this
                 // project keeps being bitten - silently, with a stale copy looking current.
+                //
+                // ONE BUTTON MUST NOT INSTALL AN UNVOUCHED BAKE. Leaving the freshness key unwritten was
+                // enough while a human read the log and decided; the Doctor's Ship row presses this for
+                // them, and "the copies below are whatever the last good bake produced" is not something
+                // a wizard gets to do quietly.
                 int failed;
                 pre.AppendLine(ProjectBake.Run(projectRoot, out failed));
-                if (failed == 0)
-                    Project.PatchCache.Write(patched, key);
-                else
-                    pre.AppendLine("the bake above reported " + failed + " failure(s), so " + patched + " is NOT marked " +
-                                   "current - fix the source it names and enable the mod again, or the " +
-                                   "copies below are whatever the last good bake produced");
+                if (failed != 0)
+                {
+                    how = ApplyDisposition.BakeFailed;
+                    return pre.AppendLine("NOT APPLIED: the bake reported " + failed + " failure(s); fix the " +
+                                          "lines above and press Ship again").ToString();
+                }
+                Project.PatchCache.Write(patched, key);
             }
             List<KeyValuePair<string, string>> copies = new List<KeyValuePair<string, string>>();
             if (Directory.Exists(patched))
@@ -277,8 +299,25 @@ namespace Morgott.ContentTool.Bake
             // does everything the catalog edit did and writes nothing into the player's install.
             // "installing", not "installed": the count below is what was DECLARED, and BundleLive's
             // own tally on the last line is what actually happened, refusals named.
-            return pre.Append("installing " + copies.Count + " patched copy(ies) as '" + modId + "'\n")
-                      .Append(BundleLive.Install(modId, copies)).ToString();
+            //
+            // RESIDENCY IS READ BEFORE THE INSTALL, because that is the order Register:80-92 decides in:
+            // it refuses a resident bundle BEFORE it looks at claims. A press made after an earlier
+            // redirect has already loaded would otherwise find this mod's own standing claim
+            // (BundleClaims.Claim:258-267 keeps it), report Redirected, and print S2 ("redirected LIVE")
+            // over a log that says "restart required" - the wizard lying with a straight face, which is
+            // the whole reason this is a value and not a grep of the log.
+            bool wasResident = !string.IsNullOrEmpty(forBundle) && BundleLive.ResidentNow(forBundle);
+            pre.Append("installing " + copies.Count + " patched copy(ies) as '" + modId + "'\n")
+               .Append(BundleLive.Install(modId, copies));
+            if (!string.IsNullOrEmpty(forBundle))
+            {
+                BundleClaim mine = BundleClaims.Find(forBundle);
+                how = wasResident ? ApplyDisposition.Resident
+                    : mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal)
+                      ? ApplyDisposition.Redirected
+                      : ApplyDisposition.Refused;
+            }
+            return pre.ToString();
         }
 
         // ------------------------------------------------------------------ route iii (ct_catalog)

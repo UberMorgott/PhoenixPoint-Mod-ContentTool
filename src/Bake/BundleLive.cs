@@ -144,6 +144,20 @@ namespace Morgott.ContentTool.Bake
 
         internal static bool Holds(string modId) { return BundleClaims.Holds(modId); }
 
+        /// <summary>Is the shipped bundle open RIGHT NOW? The same two steps Register:80-92 takes - the
+        /// live location first, because only its AssetBundleRequestOptions knows the BUILD name Unity
+        /// loaded it under (a 32-hex hash in this game, :230-238). Asked here rather than re-derived in
+        /// Route7: this project has already shipped that comparison wrong once, and one copy of it is one
+        /// too many.</summary>
+        internal static bool ResidentNow(string bundleFile)
+        {
+            string why;
+            IResourceLocation loc = Locate(bundleFile, out why);
+            AssetBundleRequestOptions opts = loc == null ? null : loc.Data as AssetBundleRequestOptions;
+            string who;
+            return opts != null && Resident(opts.BundleName, out who);
+        }
+
         internal static string Status()
         {
             StringBuilder log = new StringBuilder("live bundle redirections: " + BundleClaims.All.Count +
