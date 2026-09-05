@@ -328,6 +328,110 @@ internal static class ProjectScaffoldTests
             catch (InvalidDataException refused) { metaLess = refused.Message; }
             checks += Check(metaLess != null && !File.Exists(Path.Combine(metaless, "meta.json")),
                             "an R6 refusal into a project that had no meta.json leaves none: " + metaLess);
+
+            // ---- Scaffold_MeshCollisionPolicy. The .glb under Content\Meshes\ is the bake's INPUT
+            // (ProjectBake.FindMesh:1581), so overwriting one silently re-points a row an author already
+            // shipped. This tool never overwrites it.
+            string meshPath = Path.Combine(made.Root, "Content", "Meshes", "body.glb");
+            checks += Check(File.Exists(meshPath) && Same(File.ReadAllBytes(meshPath), new byte[] { 1, 2, 3 }),
+                            "the first press copied the .glb under Content\\Meshes\\ verbatim");
+            ProjectScaffold.Result again = ProjectScaffold.AddMeshReplacement(
+                modDir, "Replace_Rifle", glb, sha, "px_equipment_assets_all.bundle", "WPN_PX_Stock", empty);
+            checks += Check(again.MeshAlreadyPresent && again.MeshPath == meshPath &&
+                            Same(File.ReadAllBytes(meshPath), new byte[] { 1, 2, 3 }),
+                            "the SAME bytes under the same name are a no-op, not a rewrite");
+
+            string clashDir = Path.Combine(dir, "clash");
+            Directory.CreateDirectory(clashDir);
+            string clashGlb = Path.Combine(clashDir, "body.glb");
+            File.WriteAllBytes(clashGlb, new byte[] { 9, 9, 9, 9 });
+            string clashSha = AliasMap.Sha256(File.ReadAllBytes(clashGlb));
+            string clashSaid = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Replace_Rifle", clashGlb, clashSha,
+                                                   "px_equipment_assets_all.bundle", "WPN_PX_Barrel", empty);
+            }
+            catch (IOException refused) { clashSaid = refused.Message; }
+            checks += Check(clashSaid == "Content\\Meshes\\body.glb already holds DIFFERENT bytes (sha " + sha +
+                                         " vs " + clashSha + "), so it was NOT overwritten - rename the file you " +
+                                         "are shipping, or ship into another project",
+                            "R4 verbatim: " + clashSaid);
+            checks += Check(Same(File.ReadAllBytes(meshPath), new byte[] { 1, 2, 3 }),
+                            "and the bytes already there are still the bytes there");
+
+            // ---- R3: the source moved between the verdict and the press.
+            string stale = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Replace_Rifle", glb, clashSha,
+                                                   "a.bundle", "StaleFoo", empty);
+            }
+            catch (IOException refused) { stale = refused.Message; }
+            checks += Check(stale == "'" + glb + "' changed on disk after its green verdict, so nothing was " +
+                                     "written - pick it again, read the report, then press Ship again",
+                            "R3 verbatim: " + stale);
+            checks += Check(File.ReadAllText(made.ManifestPath)
+                                .IndexOf("StaleFoo", StringComparison.Ordinal) < 0,
+                            "and R3 left no row behind - the manifest is saved only after the copy lands");
+
+            // ---- Scaffold_RefusesAStaleSourceBeforeWriting. "nothing was written" has to be true of a
+            // FIRST press too: the source is read and hashed before the folder exists, so a stale file
+            // cannot leave an empty project the author now has to delete.
+            string never = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "NeverMade", glb, clashSha,
+                                                   "a.bundle", "StaleFoo", empty);
+            }
+            catch (IOException refused) { never = refused.Message; }
+            checks += Check(never != null && !Directory.Exists(Path.Combine(mods, "NeverMade")),
+                            "R3 on a NEW name creates no folder at all: " + never);
+
+            // ---- R5: a sidecar beside the copy that this session never saw.
+            string lone = Path.Combine(dir, "lone.glb");
+            File.WriteAllBytes(lone, new byte[] { 3, 3, 3 });
+            string loneSha = AliasMap.Sha256(File.ReadAllBytes(lone));
+            string loneCopy = Path.Combine(made.Root, "Content", "Meshes", "lone.glb");
+            Directory.CreateDirectory(Path.GetDirectoryName(loneCopy));
+            File.WriteAllText(AliasMap.SidecarPathOf(loneCopy), "{}");
+            string stray = null;
+            try
+            {
+                ProjectScaffold.AddMeshReplacement(modDir, "Replace_Rifle", lone, loneSha,
+                                                   "a.bundle", "Lone", empty);
+            }
+            catch (InvalidDataException refused) { stray = refused.Message; }
+            checks += Check(stray == "lone.glb.aliases.json already sits beside the copy but this Doctor " +
+                                     "session has no bone map, so the bake would silently use mappings you " +
+                                     "never saw - delete it, or set the map",
+                            "R5 verbatim: " + stray);
+            File.Delete(AliasMap.SidecarPathOf(loneCopy));
+
+            // ---- Scaffold_SidecarRoundTrips: the sidecar is keyed on the COPY, which is the file the bake
+            // will hash (AliasMap.LoadSidecar:196), not on the source the author picked.
+            var map = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                { "Bip01_Head", "head" }, { "Bip01_Neck", "neck" }
+            };
+            ProjectScaffold.Result withMap = ProjectScaffold.AddMeshReplacement(
+                modDir, "Replace_Rifle", lone, loneSha, "a.bundle", "Lone", map);
+            string whyNot;
+            AliasMap back = AliasMap.LoadSidecar(withMap.MeshPath,
+                                                 AliasMap.Sha256(File.ReadAllBytes(withMap.MeshPath)),
+                                                 out whyNot);
+            checks += Check(back != null && whyNot == null,
+                            "the sidecar loads against the COPY's own sha: " + whyNot);
+            int mapped = 0;
+            string wanted;
+            foreach (KeyValuePair<string, string> pair in back.Pairs)
+                if (map.TryGetValue(pair.Key, out wanted) && wanted == pair.Value) mapped++;
+            checks += Check(mapped == 2, "and both rows round-trip: " + mapped);
+            checks += Check(withMap.SidecarPath == AliasMap.SidecarPathOf(withMap.MeshPath),
+                            "the Result names the sidecar it wrote");
+            checks += Check(withMap.MeshBytes != null &&
+                            Same(withMap.MeshBytes, File.ReadAllBytes(withMap.MeshPath)),
+                            "and Result.MeshBytes IS the copy's bytes - what the ship gate re-judges (§4.5)");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
         return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates";

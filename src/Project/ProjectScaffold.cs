@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Morgott.ContentTool.Import;
-using Morgott.ContentTool.IO;
 
 namespace Morgott.ContentTool.Project
 {
@@ -13,8 +12,10 @@ namespace Morgott.ContentTool.Project
     /// added to whatever the author already had.
     ///
     /// It AUTHORS nothing itself. Every byte goes out through ManifestFile.Save (atomic splice, .bak, the E5
-    /// fingerprint), AtomicFile and AliasMap.SaveSidecar, which is why an existing project's own formatting,
-    /// key order and unknown keys survive a press by construction.
+    /// fingerprint) and AliasMap.SaveSidecar, which is why an existing project's own formatting, key order
+    /// and unknown keys survive a press by construction. The three files that must NOT already exist - the
+    /// two templates and the mesh copy - go out through FileMode.CreateNew instead, never through
+    /// AtomicFile's upsert writer.
     ///
     /// PLACEMENT IS THE WHOLE POINT: the SIBLING Mods\&lt;name&gt;, never ContentMods.ProjectDir's
     /// Mods\ContentTool\&lt;name&gt; fallback (ContentMods.cs:147). A folder under ContentTool is not a mod the
@@ -34,7 +35,7 @@ namespace Morgott.ContentTool.Project
             internal bool Created, MeshAlreadyPresent, RowAlreadyPresent;
             /// <summary>The bytes that were VERIFIED against the verdict's sha and are now the copy's, so
             /// the caller re-judges what it wrote instead of re-reading the file and re-opening the
-            /// question of whether the two are the same bytes. Null until Task 3.</summary>
+            /// question of whether the two are the same bytes.</summary>
             internal byte[] MeshBytes;
         }
 
@@ -142,6 +143,17 @@ namespace Morgott.ContentTool.Project
                                                "holds no ppcontent.json, so it is not a ContentTool project " +
                                                "- pick another project name");
 
+            // R3, AND IT COMES FIRST. The refusal says "nothing was written", so it has to be true: read and
+            // hash the source before a directory, a template or a meta exists, and a press that fails here
+            // leaves an author with no folder to delete. The Doctor's verdict was about THESE bytes; a
+            // re-export between the green report and this press would ship a file nobody has read.
+            byte[] bytes = File.ReadAllBytes(sourceGlb);
+            string sha = AliasMap.Sha256(bytes);
+            if (!string.Equals(sha, expectedSha, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("'" + sourceGlb + "' changed on disk after its green verdict, so nothing " +
+                                      "was written - pick it again, read the report, then press Ship again");
+            result.MeshBytes = bytes;
+
             Directory.CreateDirectory(result.Root);
             if (result.Created)
             {
@@ -151,8 +163,7 @@ namespace Morgott.ContentTool.Project
                 {
                     { "id", name }, { "bundle", name + ".bundle" }
                 };
-                AtomicFile.WriteText(result.ManifestPath,
-                                     new JsonWriter().Val(tree).ToString() + "\n", new UTF8Encoding(false));
+                CreateNew(result.ManifestPath, new JsonWriter().Val(tree).ToString() + "\n");
             }
 
             // THE MANIFEST FIRST, and its ID rather than the folder name. "id == name" is true of a project
@@ -203,18 +214,40 @@ namespace Morgott.ContentTool.Project
             // add its row never leaves a .glb behind that nothing references.
             result.RowAlreadyPresent = Reuses(file.Manifest, shippedBundle, shippedAsset, stem);
             if (!result.RowAlreadyPresent)
+            {
                 file.Manifest.AddMeshReplacement(shippedBundle, shippedAsset, stem);
-            // The splice, the .bak and the E5 fingerprint are ManifestFile's; nothing outside the "replace"
-            // value span moves - and with nothing pending, Save validates and writes NOTHING (Manifest.cs:321).
-            // Save VALIDATES before it splices (Manifest.cs:320), so R6 lands here, before the copy, and no
-            // separate Validate call is needed to put it there.
+                // Save validates too (Manifest.cs:320), but Save now happens AFTER the copy - and a press
+                // that cannot add its row must not leave a .glb behind that nothing references. So R6 is
+                // asked for here, explicitly, before the first byte of content moves.
+                file.Manifest.Validate();
+            }
+
+            // R5. A sidecar already beside the copy, with an empty map in hand, would be applied by the bake
+            // and by nothing the author ever looked at. SaveSidecar rewrites the whole "bones" object, so the
+            // only safe answers are "write mine" or "refuse".
+            if ((aliases == null || aliases.Count == 0) && File.Exists(result.SidecarPath))
+                throw new InvalidDataException(stem + ".glb.aliases.json already sits beside the copy but this " +
+                                               "Doctor session has no bone map, so the bake would silently use " +
+                                               "mappings you never saw - delete it, or set the map");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(result.MeshPath));
+            result.MeshAlreadyPresent = CopyOrVerify(result.MeshPath, bytes, sha, stem);
+            // Keyed on the COPY and on the COPY's sha, because that is the file the bake hashes
+            // (AliasMap.LoadSidecar:196) - the source the author picked is gone from the story by now.
+            if (aliases != null && aliases.Count != 0)
+                AliasMap.SaveSidecar(result.MeshPath, sha, bytes.LongLength, aliases);
+
+            // THE SPLICE LAST, deliberately: a manifest row pointing at a mesh file that is not there yet is
+            // the one half-written state a retry cannot fix by pressing again (design §7, stages 6-8). The
+            // splice, the .bak and the E5 fingerprint are ManifestFile's; nothing outside the "replace" value
+            // span moves - and with nothing pending, Save validates and writes NOTHING (Manifest.cs:321).
             file.Save();
 
             // THE META LAST, because it is the file that turns a folder into a MOD the manager lists. An R6
             // refusal or a failed Save above leaves the press with nothing added, and a meta.json written
             // before that decision would hand the author a mod id for a project that gained no row.
             if (!File.Exists(result.MetaPath))
-                AtomicFile.WriteText(result.MetaPath, Meta(id), new UTF8Encoding(false));
+                CreateNew(result.MetaPath, Meta(id));
 
             // THE POST-CONDITION, asserted rather than assumed: this is what makes `ct_project <name>` and
             // `ct_route7 apply <name>` find the folder that was just written (ContentMods.Sibling:128).
@@ -242,6 +275,48 @@ namespace Morgott.ContentTool.Project
                    "  \"Version\": \"1.0.0\",\n" +
                    "  \"Name\": [ { \"Key\": \"English\", \"Value\": " + quoted + " } ],\n" +
                    "  \"Dependencies\": [ \"" + Package.EngineId + "\" ]\n}\n";
+        }
+
+        /// <summary>True when the destination already held these exact bytes. R4 otherwise: the .glb under
+        /// Content\Meshes\ is an authored input, and PatchCache.Key stamps it by path/size/mtime (:43/:49),
+        /// so a same-size overwrite would be INVISIBLE to the freshness check and the player would keep being
+        /// served last bake's copy.
+        ///
+        /// "Absent" is decided by the CREATE ITSELF, never by a File.Exists that another writer can falsify
+        /// between the question and the write: AtomicFile.Write ends in File.Replace, which would happily
+        /// overwrite a file created in that window - the one thing this method exists to forbid.
+        /// FileMode.CreateNew is the stdlib's own create-only-or-fail, one line and atomic; the loser of a
+        /// race re-reads the winner and judges it by the same SHA, so two presses agree.</summary>
+        private static bool CopyOrVerify(string meshPath, byte[] bytes, string sha, string stem)
+        {
+            try
+            {
+                using (var made = new FileStream(meshPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    made.Write(bytes, 0, bytes.Length);
+                return false;
+            }
+            catch (IOException) when (File.Exists(meshPath)) { }
+            string have = AliasMap.Sha256(File.ReadAllBytes(meshPath));
+            if (string.Equals(have, sha, StringComparison.OrdinalIgnoreCase)) return true;
+            throw new IOException("Content\\Meshes\\" + stem + ".glb already holds DIFFERENT bytes (sha " +
+                                  have + " vs " + sha + "), so it was NOT overwritten - rename the file you " +
+                                  "are shipping, or ship into another project");
+        }
+
+        /// <summary>The absent-only twin of AtomicFile.WriteText, for the two TEMPLATES. Same reason as
+        /// CopyOrVerify: the upsert writer must never be the one deciding "it was not there a moment ago".
+        /// A file that appeared in the meantime is left exactly as its writer left it, and the caller reads
+        /// it back - ManifestFile.Load for the manifest, Json.Parse + Package.MetaRefusal for the meta - so
+        /// the winner is validated rather than trusted.</summary>
+        private static void CreateNew(string path, string text)
+        {
+            byte[] bytes = new UTF8Encoding(false).GetBytes(text);
+            try
+            {
+                using (var made = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    made.Write(bytes, 0, bytes.Length);
+            }
+            catch (IOException) when (File.Exists(path)) { }
         }
 
         /// <summary>Does the project ALREADY declare exactly this replacement? Each field folded the way the
