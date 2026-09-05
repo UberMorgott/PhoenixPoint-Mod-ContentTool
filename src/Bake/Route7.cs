@@ -352,7 +352,6 @@ namespace Morgott.ContentTool.Bake
             // and its case-blindness moved with it, comments and all.
             FreshnessObservation seen = Observe(project, projectRoot);
             List<string> declared = new List<string>(seen.Declared);
-            string key = seen.Key;
             if (!seen.HaveAll)
             {
                 pre.AppendLine(seen.CacheDirExists && !seen.KeyMatches
@@ -401,7 +400,12 @@ namespace Morgott.ContentTool.Bake
                     // failures are NAMED above; a caller that has a next step adds its own.
                     return pre.AppendLine(StageText.R35(patchFailed)).ToString();
                 }
-                Project.PatchCache.Write(patched, key);
+                // NO PatchCache.Write HERE ANY MORE. The receipt is written by the bake itself, LAST inside
+                // its own B5 publication and under the same claim (ProjectBake.Patch), for two reasons: it
+                // is the only place the copies and the receipt can be ordered against each other, and a
+                // STANDALONE bake used to leave the observation reading `never`, so the dashboard's Verify
+                // was refused (R28) over copies that had just been produced - it would have taken an Apply,
+                // a change to game state, to make Verify admissible at all.
             }
             List<KeyValuePair<string, string>> copies = new List<KeyValuePair<string, string>>();
             if (Directory.Exists(patched))

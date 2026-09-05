@@ -96,6 +96,16 @@ namespace Morgott.ContentTool.Bake
                    "copy(ies) above are the whole output";
         }
 
+        /// <summary>The bake stopped at a cooperative boundary because the author asked it to. NEW with the
+        /// segmented job - there was no cancel button before it, and <c>BakeDisposition.Cancelled</c> had no
+        /// producer. It says what is on disk, because "cancelled" alone leaves the author guessing whether
+        /// their copies were half-replaced: nothing was published, so they were not.</summary>
+        internal static string BakeCancelled(string id)
+        {
+            return "ct_project: CANCELLED - '" + id + "' stopped before it published anything; the " +
+                   "patched copies and this project's own bundle are exactly as they were.";
+        }
+
         internal static string BakeNothingPatched(int replacements)
         {
             return "ct_project: ALL PASS - nothing needed patching: none of this project's " +

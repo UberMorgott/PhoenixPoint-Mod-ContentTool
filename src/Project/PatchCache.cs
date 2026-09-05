@@ -88,13 +88,14 @@ namespace Morgott.ContentTool.Project
             return File.Exists(file) && File.ReadAllText(file).Trim() == key;
         }
 
-        /// <summary>Records the key a successful bake was produced from. Only ever called after that
-        /// bake, or a failed one would be remembered as current.</summary>
-        internal static void Write(string patchedDir, string key)
+        /// <summary>Where the receipt for these copies lives. There is no <c>Write</c> here any more: the
+        /// receipt is written by <see cref="Morgott.ContentTool.Bake.Publication"/>, LAST, in the same
+        /// ordered step that invalidates the old one and publishes the copies - and a second writer beside
+        /// it would be a second way for a receipt to precede the bytes it vouches for. The path is all this
+        /// class still owns, because <see cref="Fresh"/> is what reads it back.</summary>
+        internal static string KeyPath(string patchedDir)
         {
-            if (string.IsNullOrEmpty(patchedDir) || string.IsNullOrEmpty(key)) return;
-            Directory.CreateDirectory(patchedDir);
-            File.WriteAllText(Path.Combine(patchedDir, KeyFile), key);
+            return string.IsNullOrEmpty(patchedDir) ? null : Path.Combine(patchedDir, KeyFile);
         }
 
         /// <summary>

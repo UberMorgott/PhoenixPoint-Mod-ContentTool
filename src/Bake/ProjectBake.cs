@@ -4,8 +4,10 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using AssetsTools.NET.Extra;
 using Morgott.ContentTool.Import;
+using Morgott.ContentTool.IO;
 using Morgott.ContentTool.Project;
 using Morgott.ContentTool.Tactical;
 using Morgott.ContentTool.Wwise;
@@ -93,7 +95,11 @@ namespace Morgott.ContentTool.Bake
         /// <param name="claimHeld">the caller already owns these directories and holds them past this bake -
         /// <see cref="Route7.ApplyProject"/> keeps the claim through Install, so re-taking it here would
         /// make Apply's own bake refuse against itself. Passed down, never re-taken.</param>
-        internal static BakeResult Bake(string projectRoot, bool claimHeld)
+        /// <param name="cancel">the dashboard's token, or none for the console verb and the checkbox, which
+        /// have no cancel button. Checked at cooperative boundaries ONLY - at the top, between bundles, and
+        /// once more at B4 - never inside a Unity call, which no token can interrupt.</param>
+        internal static BakeResult Bake(string projectRoot, bool claimHeld,
+                                        CancellationToken cancel = default(CancellationToken))
         {
             ContentProject p = ContentProject.Load(projectRoot);
             // AFTER Load, because p.Id is what names the patched directory - and Load writes nothing, so
@@ -106,15 +112,19 @@ namespace Morgott.ContentTool.Bake
             // EVERY path, exception included: an unhandled throw out of the bake is reported by ct_project
             // as "ct_project THREW" and the run ends - with the claim left standing, every later press in
             // that session would be refused for a run that is long over.
-            try { return Baked(p); }
+            try { return Baked(p, cancel); }
             finally { if (!claimHeld) OutputClaim.Release(dirs); }
         }
 
         /// <summary>The bake itself, under someone's claim. Private because <see cref="Bake"/> is what owns
         /// the directories this writes into, and a caller that reached here directly would own none.</summary>
-        private static BakeResult Baked(ContentProject p)
+        private static BakeResult Baked(ContentProject p, CancellationToken cancel)
         {
             StringBuilder log = new StringBuilder();
+            // The FIRST cooperative boundary, before a byte is written: a run cancelled while it was still
+            // queued must not start at all. Load has already run - it writes nothing.
+            if (cancel.IsCancellationRequested)
+                return new BakeResult(0, 0, StageText.BakeCancelled(p.Id), BakeDisposition.Cancelled);
             // NO `int failed = 0` up front. That is what let the LoadFromFile-returned-null exit report a
             // failed bake as a success: a default at the top satisfies the compiler for every exit at once.
             // The count is stated AT each exit instead, which proves - rather than asks a reviewer to check
@@ -160,8 +170,16 @@ namespace Morgott.ContentTool.Bake
                 // rewritten under its reader, so the bake stops before it writes anything at all - zero
                 // failures, disposition Refused, and Apply reads the disposition rather than the counts.
                 string live;
-                int refused = Patch(p, log, out live);
+                PublishOutcome published;
+                int refused = Patch(p, log, cancel, out live, out published);
                 if (live != null) return new BakeResult(0, 0, log.Append(live).ToString(), BakeDisposition.Refused);
+                // R38 AT B5 IS THE SAME ANSWER AS R38 AT ENTRY - a claim can arrive while the bake runs, and
+                // the boundary asks again with the temps already written. Nothing was published either way.
+                if (published == PublishOutcome.Refused)
+                    return new BakeResult(0, 0, log.ToString(), BakeDisposition.Refused);
+                if (published == PublishOutcome.Cancelled)
+                    return new BakeResult(0, 0, log.Append(StageText.BakeCancelled(p.Id)).ToString(),
+                                          BakeDisposition.Cancelled);
                 patchFailed += refused; failures += refused;
             }
             // WHAT WAS PATCHED, not how many rows were declared. A "video" row is a replacement that
@@ -191,7 +209,15 @@ namespace Morgott.ContentTool.Bake
 
             string outPath = Path.Combine(Path.Combine(p.Root, "Dist"), p.BundleName);
             Directory.CreateDirectory(Path.GetDirectoryName(outPath));
-            if (File.Exists(outPath)) { File.Delete(outPath); log.AppendLine("deleted stale " + outPath); }
+            // B2 FOR THIS PROJECT'S OWN OUTPUT. The pre-delete that stood here made Dist EMPTY for the whole
+            // serialization: a bake that threw, or was cancelled, in between left the author with no bundle
+            // at all and a "deleted stale" line as the only trace. Streamed into a sibling temp and
+            // published in one swap instead, so the previous bundle stands until this one is whole.
+            // ponytail: no finally around the serialization to sweep this temp - a throw out of BundleBaker
+            // is already "ct_project THREW" and one orphaned .tmp beside Dist is a file, not a blocker
+            // (AtomicFile.cs:10). Wrap it if a crashing importer ever litters somebody's Dist.
+            string outTmp = outPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            string outIdentity = null;
 
             List<string> texKeys = new List<string>();
             List<string> modelKeys = new List<string>();
@@ -376,9 +402,14 @@ namespace Morgott.ContentTool.Bake
 
                 // The bundle is renamed to the project id, so an already-loaded bundle cannot
                 // masquerade as this one.
-                baker.Write(outPath, p.Id.ToLowerInvariant().Replace('.', '_'));
-                log.AppendLine("WROTE " + outPath + " " + new FileInfo(outPath).Length + " B as " + baker.WrittenIdentity);
+                baker.Write(outTmp, p.Id.ToLowerInvariant().Replace('.', '_'));
+                outIdentity = baker.WrittenIdentity;
             }
+            // B5 for Dist: one swap, published as soon as the writer is closed - the same instant the file
+            // used to appear at its final path, so the gates below still read this run's bundle and the log
+            // reads exactly as it did.
+            AtomicFile.Publish(outTmp, outPath);
+            log.AppendLine("WROTE " + outPath + " " + new FileInfo(outPath).Length + " B as " + outIdentity);
 
             // Read off the written FILE before the engine opens it - Unity holds a bundle open after
             // LoadFromFile, and a second reader on the same path is asking for trouble (BakeSelfCheck
@@ -1558,17 +1589,34 @@ namespace Morgott.ContentTool.Bake
         /// <param name="liveRefusal">R38, or null. Set when one of the copies this would replace is being
         /// SERVED to the game right now, in which case nothing at all was written and the whole bake is
         /// Refused - not failed, and not counted.</param>
-        private static int Patch(ContentProject p, StringBuilder log, out string liveRefusal)
+        /// <param name="published">how the B5 boundary ended. <c>Refused</c> and <c>Cancelled</c> published
+        /// nothing and carry no count; <c>Failed</c> published part of the set and is counted like any other
+        /// patch failure, which is what withholds the receipt and forbids an install until a repair bake.</param>
+        private static int Patch(ContentProject p, StringBuilder log, CancellationToken cancel,
+                                 out string liveRefusal, out PublishOutcome published)
         {
             int failures = 0;
+            published = PublishOutcome.Published;
             string outDir = ContentToolMain.PatchedDir(p.Id);
             liveRefusal = LiveReader(p, outDir);
             if (liveRefusal != null) return 0;
             Directory.CreateDirectory(outDir);
             List<KeyValuePair<string, string>> copies = new List<KeyValuePair<string, string>>();
+            // ---- B1: the receipt this run's output will answer to, captured BEFORE a byte is written.
+            // Captured, not recomputed at B5: a source edited while the bake ran would otherwise be stamped
+            // as though this output carried it, and the copies are a mix. Stamping the OLD key over a
+            // changed source reads STALE next time and costs one re-bake - the safe direction of the same
+            // uncertainty. Route7.Observe is the one observation, so the key here and the key the checkbox
+            // compares against are the same expression (Route7.cs:119).
+            string key = Route7.Observe(p, p.Root).Key;
+            // ---- B2's ledger: the sibling temp each copy was streamed into, and the copy it replaces.
+            List<KeyValuePair<string, string>> pending = new List<KeyValuePair<string, string>>();
 
             foreach (string bundleFile in Bundles(p))
             {
+                // A cooperative boundary between bundles. Not inside one: a BundleBaker pass is a single
+                // AssetsTools call and no token interrupts it.
+                if (cancel.IsCancellationRequested) break;
                 string shipped = BakeSelfCheck.ShippedBundlePath(bundleFile);
                 // THE BUNDLE NAME ITSELF IS A ROW'S FIELD, so a typo in it is a bad row and not a
                 // broken tool: BundleBaker's constructor throws FileNotFoundException on a path that
@@ -1583,6 +1631,10 @@ namespace Morgott.ContentTool.Bake
                     failures++; continue;
                 }
                 string copy = Path.Combine(outDir, bundleFile);
+                // B2. The copy is streamed into a UNIQUE SIBLING temp and published at B5, never written
+                // over the file the game may be about to load: a bake that fails, throws or is cancelled
+                // after this point leaves the previous copy whole instead of half-replaced.
+                string copyTmp = copy + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 List<ImportedTexture> want = new List<ImportedTexture>();
                 List<KeyValuePair<string, string>> mats = new List<KeyValuePair<string, string>>();
                 List<KeyValuePair<string, ImportedMesh>> meshes = new List<KeyValuePair<string, ImportedMesh>>();
@@ -1698,8 +1750,10 @@ namespace Morgott.ContentTool.Bake
                         log.AppendLine("patch " + bundleFile + ": '" + r.asset + "' <- " + t.Name +
                                        " " + t.Width + "x" + t.Height);
                     }
-                    baker.Write(copy, null);   // identity kept: the copy stands in for the shipped file
-                    log.AppendLine("WROTE " + copy + " " + new FileInfo(copy).Length + " B as " +
+                    baker.Write(copyTmp, null);   // identity kept: the copy stands in for the shipped file
+                    // The FINAL path is what the line names - that is where these bytes are going, and the
+                    // temp's name is a GUID nobody can act on.
+                    log.AppendLine("WROTE " + copy + " " + new FileInfo(copyTmp).Length + " B as " +
                                    baker.WrittenIdentity + " (shipped source is " + new FileInfo(shipped).Length + " B)");
                     refusedHere = failures - refusedHere;
                     if (refusedHere > 0)
@@ -1715,9 +1769,39 @@ namespace Morgott.ContentTool.Bake
                 // "did the patch land" cannot exist to disagree with this one. The lines, their order and
                 // the count are what they were inline - a VOID is still UNCOUNTED here - and the structured
                 // entries are what let a caller tell an all-VOID read-back from a pass.
-                failures += ReadBack.Run(log, bundleFile, shipped, copy, want, mats, meshes, clips).Failed;
+                //
+                // B3: THE GATES READ THE TEMP, not the copy - the file that is about to be published is the
+                // one worth measuring, and nothing has been replaced yet. The one visible consequence is the
+                // P4-bytes VOID diagnostic (ReadBack.cs:121), which names the file it could not read
+                // buffers in: on that arm alone it now prints the temp's path instead of the copy's.
+                failures += ReadBack.Run(log, bundleFile, shipped, copyTmp, want, mats, meshes, clips).Failed;
+                pending.Add(new KeyValuePair<string, string>(copyTmp, copy));
                 copies.Add(new KeyValuePair<string, string>(bundleFile, copy.Replace('\\', '/')));
             }
+
+            // ---- B4 and B5. Cancellation is answered here and nowhere later; past this point the
+            // publication finishes and reports completion, because a half-published set is exactly the
+            // output nobody can classify. THE RECEIPT IS WRITTEN HERE, at the shared bake completion and
+            // under the same claim - not by Apply (Route7.cs:404, removed): a standalone Bake that left the
+            // observation reading `never` made Verify's admission demand an Apply, i.e. a change to game
+            // state, before it would measure anything at all.
+            //
+            // `vouched` IS Route7's own gate, term for term: its `patchFailed` is this run's own failures
+            // PLUS the rows ContentProject dropped before Patch ever saw them, and a receipt over either is
+            // a stale copy read as current.
+            bool vouched = failures == 0 && p.ReplaceRefusals == 0;
+            string publishMessage;
+            published = Publication.Run(pending, Project.PatchCache.KeyPath(outDir),
+                                        vouched ? key : null,
+                                        dest => Live(p, Path.GetFileName(dest), dest),
+                                        () => cancel.IsCancellationRequested, out publishMessage);
+            if (publishMessage != null) log.AppendLine(publishMessage);
+            // A publication that stopped part-way is a patch failure like any other: it is what withholds
+            // the receipt, and Route7 must not install over it. Refused and Cancelled published NOTHING and
+            // are dispositions, never counts - the caller returns on them before this count is read.
+            if (published == PublishOutcome.Failed) failures++;
+            // Nothing at all was written on these two, so none of the advice below applies.
+            if (published == PublishOutcome.Refused || published == PublishOutcome.Cancelled) return failures;
 
             // Baking produces artifacts and NOTHING else. Installing is an explicit, separate act -
             // a build command must not mutate the player's game installation, and a downloaded mod
@@ -1732,7 +1816,10 @@ namespace Morgott.ContentTool.Bake
             // A source-blind modder read that line against the site's "there is no apply" and could
             // not tell which was current (blind test round 2, A2). `ct_route7 apply` still exists as
             // a DEV entry point, so it is named as one instead of being prescribed.
-            if (copies.Count > 0)
+            // ...and only when they ARE ready: a publication that stopped part-way left some copies from
+            // this run and some from the last, which is the one state that must never be advertised as
+            // installable.
+            if (copies.Count > 0 && published == PublishOutcome.Published)
                 log.AppendLine("copies ready in " + outDir + " - nothing to install: ticking '" + name +
                                "' on in the mod manager redirects them (dev-only shortcut: ct_route7 apply " +
                                name + ")");
@@ -1979,19 +2066,30 @@ namespace Morgott.ContentTool.Bake
         /// Applies to a stale, fresh, repair or forced same-key bake alike - a forced re-bake is a
         /// replacement of the claimed file like any other.
         /// </summary>
-        private static string LiveReader(ContentProject p, string outDir)
+        internal static string LiveReader(ContentProject p, string outDir)
         {
             foreach (string bundleFile in Bundles(p))
             {
-                BundleClaim c = BundleClaims.Find(bundleFile);
-                if (c == null || !string.Equals(c.Mod, p.Id, StringComparison.Ordinal)) continue;
-                string copy = Path.Combine(outDir, bundleFile);
-                // BundleLive stores the served path with forward slashes (Route7.cs:363); one spelling on
-                // both sides, case-blind like every other path comparison on this route.
-                if (string.Equals(Slashed(c.Path), Slashed(copy), StringComparison.OrdinalIgnoreCase))
-                    return StageText.R38(copy);
+                string refusal = Live(p, bundleFile, Path.Combine(outDir, bundleFile));
+                if (refusal != null) return refusal;
             }
             return null;
+        }
+
+        /// <summary>The same question about ONE copy - what B5 asks per destination immediately before the
+        /// first swap, and what the loop above asks per target before the bake starts. One expression, two
+        /// moments, so the boundary cannot be laxer than the entry check.
+        ///
+        /// MAIN THREAD ONLY: <see cref="BundleClaims.Find"/> walks a static list main mutates. A worker hands
+        /// in a verdict captured on main instead of calling this.</summary>
+        internal static string Live(ContentProject p, string bundleFile, string copy)
+        {
+            BundleClaim c = BundleClaims.Find(bundleFile);
+            if (c == null || !string.Equals(c.Mod, p.Id, StringComparison.Ordinal)) return null;
+            // BundleLive stores the served path with forward slashes (Route7.cs:363); one spelling on
+            // both sides, case-blind like every other path comparison on this route.
+            return string.Equals(Slashed(c.Path), Slashed(copy), StringComparison.OrdinalIgnoreCase)
+                ? StageText.R38(copy) : null;
         }
 
         private static string Slashed(string path)

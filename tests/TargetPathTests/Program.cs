@@ -1610,7 +1610,10 @@ internal static class Program
                 "a patched folder written by the ContentTool that had no key is STALE - the copies " +
                 "are all there and that is not evidence of anything");
 
-            PatchCache.Write(patched, baseline);
+            // What a bake's B5 leaves behind. PatchCache.Write is gone - the receipt is written LAST inside
+            // Publication.Run, so the ONLY writer is the one that also ordered the copies before it; this
+            // fixture stamps the file directly rather than reaching through a second writer.
+            File.WriteAllText(PatchCache.KeyPath(patched), baseline);
             Check("S15-hit", PatchCache.Fresh(patched, baseline)
                              && PatchCache.Key(project, sources) == baseline,
                 "after a bake stamps it, the same project against the same game reads FRESH -> " + baseline);
@@ -1729,7 +1732,7 @@ internal static class Program
     private static string Stamped(string dir, string key)
     {
         File.WriteAllBytes(Path.Combine(dir, "shipped_assets_all.bundle"), new byte[32]);
-        PatchCache.Write(dir, key);
+        File.WriteAllText(PatchCache.KeyPath(dir), key);
         return dir;
     }
 
@@ -1922,7 +1925,10 @@ internal static class Program
     {
         return Regex.IsMatch(text, "patchedBundles\\s*>\\s*0\\s*\\?\\s*(\"ct_project: ALL PASS - this " +
                                    "project has no bundle|StageText\\.BakeNoOwnBundle)")
-               && Regex.IsMatch(text, "if\\s*\\(copies\\.Count\\s*>\\s*0\\)\\s*log\\.AppendLine\\(\"copies ready in ");
+               // `copies.Count > 0` and NOTHING WEAKER. Further conditions are allowed - B5 added
+               // `&& published == PublishOutcome.Published`, so a half-finished publication is not
+               // advertised as installable either - but the census term itself has to be there.
+               && Regex.IsMatch(text, "if\\s*\\(copies\\.Count\\s*>\\s*0[^)]*\\)\\s*log\\.AppendLine\\(\"copies ready in ");
     }
 
     /// <summary>
