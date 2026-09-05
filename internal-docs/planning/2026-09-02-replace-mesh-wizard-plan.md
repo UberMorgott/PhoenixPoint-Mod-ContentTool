@@ -1887,9 +1887,12 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
   `ObjCodecTests` (`ObjCodecTests.csproj` links `Package.cs:83`, `Json.cs:145`, `SkinCompatibility.cs:192` and no
   Dev file), and `Tail` is `private static` inside it — an offline arm would mean linking a Unity-dependent file
   into the gate to test five lines. So the assertion is made where the string is actually produced: **Task 8 step
-  2.10 (W5)** compares the panel's `shipResult` byte for byte with
-  `NOT APPLIED: the bake reported <n> failure(s); fix the lines above and press Ship again` — a blank or
-  truncated result there fails W5.
+  2.10 (W5)** compares the panel's `shipResult` byte for byte with the string the SHIPPED code produces —
+  `Tail(log, 1)` (`ModelDoctor.cs:702`, `:745`) glued to `" Fix the lines above and press Ship again."`, whose
+  first half is `Route7`'s own NOT APPLIED line (`Route7.cs:341-343`):
+  `NOT APPLIED: patching the shipped bundle(s) reported <n> failure(s), named in the P0/REFUSED line(s) above; nothing was installed and no copy was marked current. Fix the lines above and press Ship again.`
+  — a blank or truncated result there fails W5. (Restated from disk at HEAD `578843a` on 2026-09-05; the earlier
+  draft of this paragraph quoted a string no longer in the code.)
 
 - [ ] **Step 4: The panel row.** In `src\Dev\ModelDoctor.cs`, in `Draw`, immediately after
   `GUILayout.EndHorizontal();` that closes the Preview/Revert/Save/Skel-plan row (`:1264`) and before the closing
@@ -1982,16 +1985,17 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
 
 ### Task 7: the offline gates, and the acceptance table's offline half
 
-- [ ] **Step 1: Name the arm honestly.** In `ProjectScaffoldTests.Run()`, change the return to:
+- [x] **Step 1: Name the arm honestly.** In `ProjectScaffoldTests.Run()`, change the return to:
   ```csharp
           return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates, row append " +
                  "and reuse, mesh collision policy, sidecar, rig fingerprint";
   ```
   - Run: `dotnet run --project tests\ObjCodecTests -c Release`
-  - Expected: `PROJECT-SCAFFOLD PASS, 64 check(s) - name table, project templates, row append and reuse, mesh
+  - Expected: `PROJECT-SCAFFOLD PASS, 79 check(s) - name table, project templates, row append and reuse, mesh
     collision policy, sidecar, rig fingerprint`, last line `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0.
+    (Drafted as 64; the review-fix commits of Tasks 2–6 added arms. 79 is what the run printed.)
 
-- [ ] **Step 2: Every build and every gate, from clean.**
+- [x] **Step 2: Every build and every gate, from clean.**
   - `dotnet build -c Release` → `Ошибок: 0`, `Предупреждений: 1` (`GlbCodec.cs(59,23) CS0649`).
   - `dotnet run --project tests\ObjCodecTests -c Release` → every section line PASS, no line reads FAIL, last line
     `DEMO BANKS: ALL PASS, 6 check(s)`, exit 0.
@@ -2009,7 +2013,7 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
     own and did not widen. A SECOND error in either is a regression this slice owns; repairing the first one is a
     separately scoped prerequisite, not this task.
 
-- [ ] **Step 3: Record the offline half of design §10, in this file.** Append the table below under a new
+- [x] **Step 3: Record the offline half of design §10, in this file.** Append the table below under a new
   `## Task 7 acceptance run` heading, filled with what the run actually printed — command, last line, exit code —
   and mark **W4**, **W5**, **W6** and **W7** `pending`, not passed: they are Task 8.
   - **W1** offline gates green: the FOUR commands of step 2 (build, `ObjCodecTests`, `TargetPathTests`,
@@ -2027,12 +2031,81 @@ proof: Task 8 steps 3-6 and **W6**/**W7**.
   - **W3b** a retry is a retry: `Scaffold_ReusesAnIdenticalRow` in a FRESH project — the identical replacement run
     twice leaves EXACTLY ONE row, no R6, and byte-identical manifest state after run two (Codex finding 13).
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
   - `git -C E:\DEV\PhoenixPoint\ContentTool add tests\ObjCodecTests\ProjectScaffoldTests.cs internal-docs\planning\2026-09-02-replace-mesh-wizard-plan.md && git -C E:\DEV\PhoenixPoint\ContentTool commit -m "test(project): name what the scaffold gate proves, and close the offline half of the acceptance table"`
 
 ---
 
+## Task 7 acceptance run
+
+Run 2026-09-05 at HEAD `578843a`, from clean (`obj\`/`bin\` of the main project and of all three
+sub-projects deleted first), `E:\DEV\PhoenixPoint\ContentTool`, PowerShell.
+
+| Command | Last / verdict line, verbatim | Exit |
+|---|---|---|
+| `dotnet build -c Release` | `Предупреждений: 1` / `Ошибок: 0` — the only warning is `src\Import\GlbCodec.cs(59,23): warning CS0649` on `SampledClip.Looping` | 0 |
+| `dotnet run --project tests\ObjCodecTests -c Release` | `DEMO BANKS: ALL PASS, 6 check(s)`; no line reads FAIL as a verdict | 0 |
+| `dotnet run --project tests\TargetPathTests -c Release` | `R0: ALL PASS` | 0 |
+| `dotnet build tools\Package\Package.csproj -c Release` | `Предупреждений: 0` / `Ошибок: 0` | 0 |
+
+Section lines this slice is answerable for, verbatim from the `ObjCodecTests` run:
+
+```
+REFUSAL-COUNT PASS, 16 check(s) - 5 refusals, 5 failures
+ALIAS PASS, 32 check(s) - simultaneous rename, untouched index tables, sidecar policy
+PACKAGE-GATE PASS, 7 check(s)
+MANIFEST PASS, 53 check(s) - atomic write, nested rows, byte-preserving splice, E3/E4/E5/E6/E8 refusals
+PROJECT-SCAFFOLD PASS, 79 check(s) - name table, project templates, row append and reuse, mesh collision policy, sidecar, rig fingerprint
+```
+
+**Baseline known failures — outside W1, regression check only.** Both standalone tools still fail with
+EXACTLY ONE error each, the same pre-existing one this slice neither owns nor widened:
+
+```
+dotnet build tools\ClipEvents\ClipEvents.csproj -c Release       -> Ошибок: 1
+dotnet build tools\SpiderAxisCheck\SpiderAxisCheck.csproj -c Release -> Ошибок: 1
+src\Import\GlbReader.cs(6,27): error CS0234: ... "Bake" ... в пространстве имен "Morgott.ContentTool"
+```
+
+### The acceptance table, offline half
+
+| id | Check | Evidence |
+|---|---|---|
+| W1 | Offline gates green | The four commands in the table above, all exit 0: build `Ошибок: 0` / `Предупреждений: 1` (CS0649 only), `ObjCodecTests` last line `DEMO BANKS: ALL PASS, 6 check(s)` with `PROJECT-SCAFFOLD PASS, 79 check(s)` present, `TargetPathTests` last line `R0: ALL PASS` (incl. the `S14-owntemp` / `S14-owntemp-not` arms at `tests\TargetPathTests\Program.cs:1213`, `:1216`, which pin `Package.IsOwnTemp`'s GUID-N `.tmp` exemption), `Package.csproj` `Ошибок: 0`. The two standalone tools are recorded above as **baseline known failures**, outside this row. |
+| W2 | Scaffold is exact | `PROJECT-SCAFFOLD PASS, 79 check(s)`. Arms: `Scaffold_CreatesProjectTemplates` `tests\ObjCodecTests\ProjectScaffoldTests.cs:69` (meta.json compared against the template spelled independently at `:649`), `Scaffold_QuotesAnAuthoredId` `:219` (the `com.test"quote` id), `Scaffold_KeepsAnAuthoredId` `:146`, `Scaffold_AppendsSecondRow` `:261` — the append into a hand-written manifest carrying a BOM, an unknown member and a nested value, `replace` span located independently before and after, prefix and suffix byte-compared, the original row one unbroken run inside the new span. |
+| W3 | No overwrite is possible | Same gate line. Arms: `Scaffold_MeshCollisionPolicy` `:397` (same SHA → `MeshAlreadyPresent`; different SHA → R4, destination bytes unchanged), `Scaffold_RefusesConflictingTarget` `:355` (R6 == `Manifest.Validate` E4, manifest bytes identical, no .glb copied), `Scaffold_RefusesAnUnrelatedFolder` `:235` (R2), `Scaffold_RefusesAnUnshippableMeta` `:162` (R13, the file not rewritten), `Scaffold_RefusesAStaleSourceBeforeWriting` `:481` (R3 creates no folder), plus `Scaffold_RefusesASameStemMeshUnderAnotherExtension` `:592` and `Scaffold_WritesNoMetaUntilTheRowLands` `:379`. |
+| W3b | A retry is a retry — OFFLINE HALF ONLY | `Scaffold_ReusesAnIdenticalRow` `:325`, in a FRESH project: the identical replacement run twice leaves EXACTLY ONE row, no R6, byte-identical manifest state after run two; `Scaffold_ValidatesTheManifestOnTheReUSED row too` `:618`. **The in-game half (the second press of Ship) is PENDING Task 8 step 8.** |
+| — | R8 seam, offline | `Fingerprint_APreviewIsNotAChangedRig` `:560`: all four mesh-derived fields differ → `SameAs` false AND `SameRigAs` true; a different renderer `:577` and a renamed bone `:583` are still a changed rig. This is what lets Task 8 ship with the preview live. |
+| W4 | Target derivation disk-proved | **PENDING Task 8** — `ShippedTarget` needs `UnityEngine` + `Base.Assets` + `BundleBaker` and is not test-linked; the build gate above is its only offline evidence. |
+| W5 | A failed bake installs nothing | **PENDING Task 8** (step 2.10, separate never-applied project). |
+| W6 | Honest end state, with the preview up | **PENDING Task 8** (steps 3 + 6 + 9). |
+| W7 | Owner visual check | **PENDING Task 8** (after the step-9 restart). |
+
+---
+
 ### Task 8: in-game acceptance on `D:\PP-Instance2` via PPCLI (**W3b + W4 + W5 + W6 + W7**)
+
+> **Expectations restated from disk at HEAD `578843a` (2026-09-05), by Task 7.** Where this section and the
+> shipped code once disagreed, the code wins and the text below has been corrected:
+> - **R11 / the NOT APPLIED line.** `Route7.cs:341-343` prints
+>   `NOT APPLIED: patching the shipped bundle(s) reported <n> failure(s), named in the P0/REFUSED line(s) above; nothing was installed and no copy was marked current.`
+>   and the wizard's R11 is `Tail(log, 1)` + `" Fix the lines above and press Ship again."` (`ModelDoctor.cs:702`).
+>   Step 2.10 below quotes the composed string; the earlier draft quoted a string no longer in the code.
+> - **A refused target is `Unproven`, not a silent skip.** `ShippedTarget.Resolve` refuses an ambiguous or
+>   unreadable candidate rather than naming another bundle: `TARGET REFUSED: '<file>' could not answer whether it
+>   holds a Mesh named '<asset>' (<why>) - ...` (`ShippedTarget.cs:173-176`), and the negative marker is
+>   `bakers[path] = null`. In step 2 the chosen slot's `TargetRefusal` must be null; a slot carrying any
+>   `TARGET REFUSED:` text is a different slot, not a failure of W4.
+> - **`Route7.Failed` is a per-SESSION set** (`Route7.cs:94`, added at `:337`, cleared at `:397`) consulted ONLY by
+>   `Toggle` (`:120`), not by `ApplyProject`. So step 8's second press of Ship still bakes normally, but after
+>   step 2.10's deliberate failure the mod-manager checkbox for THAT project prints
+>   `'<id>' failed to bake earlier in this session - not baking it again. Fix the lines it printed, then <RetryHint>`
+>   — expected, not a defect.
+> - **The ship arm is cancelled by `Tick` after two unpainted ticks** (`SHIP: cancelled - the SHIP section was not
+>   on screen ...`). Keep the Doctor's SHIP section visible between `Enqueue("ship")` and the poll, or the arm
+>   cancels itself and the result line says so.
+> - **`Package.IsOwnTemp`** exempts the tool's own GUID-N `.tmp` in `Occupied` and `CopyDir`, so a leftover of that
+>   shape under the project folder is not "someone else's work" and does not refuse.
 
 The only proof for three of the four seams: `ShippedTarget` reads the LIVE Addressables catalog and the LIVE addon
 graph, the SHIP row is IMGUI, and `ApplyProject` ends in `BundleLive`. **Do not mark the slice done before this
@@ -2085,8 +2158,11 @@ this plan deliberately spells none, because a stale command line in a plan is wo
      with its own name and its own id (`Replace_BadRow`, never applied, never enabled), then hand-edit its
      `ppcontent.json` to name a bundle this install does not ship (or a mesh stem with no file) and press Ship
      again. Assert, all three about THAT project and its own patched directory: the panel's `shipResult` is byte
-     for byte `NOT APPLIED: the bake reported <n> failure(s); fix the lines above and press Ship again` (the exact
-     R11 string — a blank result is the `Tail` bug of finding 6 and fails this row), `BundleLive.Holds(<its id>)`
+     for byte
+     `NOT APPLIED: patching the shipped bundle(s) reported <n> failure(s), named in the P0/REFUSED line(s) above; nothing was installed and no copy was marked current. Fix the lines above and press Ship again.`
+     (the exact R11 string as the SHIPPED code composes it: `Route7.cs:341-343`'s NOT APPLIED line, taken by
+     `Tail(log, 1)` and suffixed at `ModelDoctor.cs:702` — a blank result is the `Tail` bug of finding 6 and fails
+     this row), `BundleLive.Holds(<its id>)`
      is FALSE, and no `ct-cache.key` exists under its patched directory. Remove that project afterwards and record
      it under "Left behind / removed".
 

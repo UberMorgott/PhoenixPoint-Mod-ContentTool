@@ -643,7 +643,8 @@ internal static class ProjectScaffoldTests
                             "and the refusal came BEFORE the copy and before the sidecar was overwritten");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
-        return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates";
+        return "PROJECT-SCAFFOLD PASS, " + checks + " check(s) - name table, project templates, row append " +
+               "and reuse, mesh collision policy, sidecar, rig fingerprint";
     }
 
     /// <summary>The meta.json the scaffold must produce, spelled here independently of the code that writes
