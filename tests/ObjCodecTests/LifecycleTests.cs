@@ -138,8 +138,9 @@ internal static class LifecycleTests
                         "applied and redirected LIVE - px_equipment_assets_all.bundle now loads from the " +
                         "patched copy on the next load",
                         "S2 - design:380, composed for ModelDoctor.cs:712");
-        checks += Check(StageText.S3("Replace_Rifle") == "Validate: PASS - 'Replace_Rifle'.",
-                        "S3 is NEW - design:381");
+        checks += Check(StageText.S3("Replace_Rifle", "a1b2") == "Validate: PASS - 'Replace_Rifle' - key a1b2.",
+                        "S3 is NEW - design:381 - and it CARRIES §4.1's key, which is what makes the one " +
+                        "call whose result used to be discarded observable");
         // S4/S5 and the three bake special cases have no WORDING arm here on purpose: ProjectBake composes
         // them through StageText (`:128`-`:133`, `:402`), so a literal re-typed here would compare this file
         // with itself. W18 proves that wording against the real producer, in game.
@@ -527,6 +528,27 @@ internal static class LifecycleTests
                         run.Latest.Result == "Verify: PASS" && run.Latest.How == BakeDisposition.Success,
                         "one terminal result per run - a second completion cannot rewrite the first");
 
+        // ---- ELIGIBILITY RIDES WITH THE VERDICT, all the way to the snapshot the panel rebuilds from.
+        // It had nowhere to sit: `Finish` published only the verdict and the disposition, and both sites
+        // that rebuild a StageReport from `Latest` therefore reported every ModGate reason as null - a
+        // switched-off project's Validate row said nothing about the switch.
+        LifecycleRun gated = new LifecycleRun();
+        long fifth = gated.Begin("Validate");
+        gated.Complete(fifth, StageText.S3("demo", "a1b2"), BakeDisposition.Success,
+                       ModGate.Why(ModVerdict.Disabled));
+        LifecycleRun.Snapshot published = gated.Latest;
+        checks += Check(published.Eligibility == ModGate.Why(ModVerdict.Disabled) &&
+                        published.Result == StageText.S3("demo", "a1b2"),
+                        "the producer's eligibility reaches the snapshot BESIDE the verdict, never inside it");
+        checks += Check(new LifecycleState.StageReport(GateOutcome.Pass, published.Result, published.How,
+                                                       false, true, published.Eligibility).Eligibility ==
+                        ModGate.Why(ModVerdict.Disabled),
+                        "so a report rebuilt from the snapshot - what the pump and Dispatch both do - " +
+                        "carries the reason instead of dropping it");
+        checks += Check(gated.Begin("Bake") != 0 && gated.Latest.Eligibility == null,
+                        "and the NEXT run starts with none - eligibility is not inherited any more than a " +
+                        "cancel request is");
+
         // ---- A CANCEL WITH NOTHING RUNNING IS SILENCE, not a flag the next run inherits.
         run.Cancel();
         long fourth = run.Begin("Package");
@@ -718,12 +740,24 @@ internal static class LifecycleTests
             off[ModGate.Key(root)] = false;
 
             LifecycleState.StageReport ok = StageValidate.Run(root, manifest, shipped, off);
-            checks += Check(ok.Outcome == GateOutcome.Pass && ok.Verdict == StageText.S3(name) &&
+            checks += Check(ok.Outcome == GateOutcome.Pass &&
+                            ok.Verdict == StageText.S3(name, PatchCache.Key(root, shipped)) &&
                             ok.How == BakeDisposition.Success && ok.Applicable && !ok.RestartRequired,
                             "S3 verbatim, and Validate PASS is the producer's own line");
             checks += Check(ok.Eligibility == ModGate.Why(ModVerdict.Disabled),
                             "a DISABLED project still validates - eligibility is a field, never the verdict " +
                             "(design:103)");
+
+            // AN ENABLED FOLDER IS AN ELIGIBILITY ANSWER TOO, and the one that says the content will
+            // actually be applied - the arm that stops "eligibility survived" from meaning "it is always
+            // the refusal word".
+            Dictionary<string, bool> on = new Dictionary<string, bool>(StringComparer.Ordinal);
+            on[ModGate.Key(root)] = true;
+            LifecycleState.StageReport live = StageValidate.Run(root, manifest, shipped, on);
+            checks += Check(live.Outcome == GateOutcome.Pass &&
+                            live.Eligibility == ModGate.Why(ModVerdict.Apply),
+                            "an ENABLED roster entry validates PASS and reports Apply - " +
+                            ModGate.Why(ModVerdict.Apply));
 
             LifecycleState.StageReport none = StageValidate.Run(root, manifest, shipped, null);
             checks += Check(none.Outcome == GateOutcome.Pass &&
@@ -742,6 +776,9 @@ internal static class LifecycleTests
                             dup.Verdict.IndexOf("already replaces", StringComparison.Ordinal) > 0,
                             "E4 comes back as ValidateFailed carrying the manifest's own reason, and the " +
                             "throw never escapes the producer");
+            checks += Check(dup.Eligibility == null,
+                            "a FAILED Validate states NO eligibility - it never got as far as asking the " +
+                            "mod manager, and inventing 'applied' there would read as consent");
 
             LifecycleState.StageReport gone =
                 StageValidate.Run(root, Path.Combine(root, "absent.json"), shipped, off);
@@ -751,10 +788,15 @@ internal static class LifecycleTests
                             "a missing ppcontent.json is an IOException answered by the same one-line " +
                             "fallback, not an exception out of the panel");
 
-            // The key must be COMPUTABLE here - the producer calls it and stores nothing, so this is the
-            // arm that fails if the four §4.1 calls stop being reachable offline.
-            checks += Check(!string.IsNullOrEmpty(PatchCache.Key(root, shipped)),
-                            "the pre-import key is computable from the validated declaration");
+            // §4.1's key, DRIVEN THROUGH THE PRODUCER. Computing one here proved only that this file can
+            // call PatchCache; the claim is that StageValidate computes it, so the verdict carries it and
+            // it is the same key B1 would take.
+            string expected = PatchCache.Key(root, shipped);
+            checks += Check(!string.IsNullOrEmpty(expected) &&
+                            ok.Verdict.IndexOf(expected, StringComparison.Ordinal) > 0 &&
+                            StageValidate.Run(root, manifest, new string[0], off).Verdict != ok.Verdict,
+                            "the pre-import key is computed BY the producer, stated in its verdict, and is " +
+                            "the key of THIS census - dropping the shipped bundle moves it");
         }
         finally { try { Directory.Delete(root, true); } catch (Exception) { } }
         return checks;
@@ -826,6 +868,24 @@ internal static class LifecycleTests
             checks += Check(taken >= 0 && imported > taken,
                             "and B1 is taken BEFORE the import in ProjectBake.Bake - the capture order " +
                             "this arm is named for, read off the source -> " + file);
+
+            // ---- A HALF-TYPED "publish" MUST NOT EMPTY THE CENSUS. `LoadDeclared` parses "publish" BEFORE
+            // "replace", so with no refusal sink on that call one incomplete publish row threw before a
+            // single replacement was read: CacheKey:179 caught it and keyed an EMPTY census, while
+            // `ContentProject.Load` - which DOES give ParsePublish a sink (:429) - kept the replacements and
+            // patched the shipped bundles. Route7.Observe then keyed the same project WITH those bundles,
+            // so the two keys could never match and every ApplyProject re-baked, forever and silently.
+            // The two halves are measured apart: the keys differ (here, on real files), and LoadDeclared
+            // forwards the sink (off the source - it goes through JsonUtility and cannot be linked).
+            string declaredCensus = src == null ? null : Path.Combine(src, "Project", "ContentProject.cs");
+            string declaredText = declaredCensus != null && File.Exists(declaredCensus)
+                                  ? File.ReadAllText(declaredCensus) : null;
+            checks += Check(PatchCache.Key(root, new[] { dest }) != PatchCache.Key(root, new string[0]) &&
+                            declaredText != null &&
+                            declaredText.IndexOf("ParsePublish(text, refusals)", StringComparison.Ordinal) > 0,
+                            "an empty census is a DIFFERENT key, and LoadDeclared hands ParsePublish the " +
+                            "same refusal sink Load gives it - so a half-typed \"publish\" beside a valid " +
+                            "\"replace\" keys what Load actually bakes -> " + declaredCensus);
         }
         finally { try { Directory.Delete(root, true); } catch (Exception) { } }
         return checks;
@@ -1015,7 +1075,8 @@ internal static class LifecycleTests
         string after = Drive(s1, ran, delegate(string s)
         {
             return s == "Apply"
-                ? new LifecycleState.StageReport(GateOutcome.Pass, "applied", BakeDisposition.Success, true, true)
+                ? new LifecycleState.StageReport(GateOutcome.Pass, "applied", BakeDisposition.Success,
+                                                 true, true, null)
                 : Pass("ok");
         });
         checks += Check(after == StageText.R30("morgott.demo") && ran.Count == 3 && !ran.Contains("Verify"),
@@ -1050,7 +1111,7 @@ internal static class LifecycleTests
                         {
                             return s == "Bake"
                                 ? new LifecycleState.StageReport(GateOutcome.Void, "stopped",
-                                                                 BakeDisposition.Cancelled, false, true)
+                                                                 BakeDisposition.Cancelled, false, true, null)
                                 : Pass("ok");
                         }) == StageText.R31("Bake") && ran.Count == 2,
                         "an acknowledged cancellation stops the chain at that stage, with R31");
@@ -1215,13 +1276,14 @@ internal static class LifecycleTests
     }
 
     private static LifecycleState.StageReport Pass(string line)
-    { return new LifecycleState.StageReport(GateOutcome.Pass, line, BakeDisposition.Success, false, true); }
+    { return new LifecycleState.StageReport(GateOutcome.Pass, line, BakeDisposition.Success, false, true, null); }
 
     private static LifecycleState.StageReport Fail(string line)
-    { return new LifecycleState.StageReport(GateOutcome.Fail, line, BakeDisposition.Failed, false, true); }
+    { return new LifecycleState.StageReport(GateOutcome.Fail, line, BakeDisposition.Failed, false, true, null); }
 
     private static LifecycleState.StageReport Void(string line, bool applicable)
-    { return new LifecycleState.StageReport(GateOutcome.Void, line, BakeDisposition.Success, false, applicable); }
+    { return new LifecycleState.StageReport(GateOutcome.Void, line, BakeDisposition.Success, false, applicable,
+                                            null); }
 
     /// <summary>Drives one whole chain and records what was dispatched. Returns the terminal line when the
     /// chain stopped, or null when all five completed.</summary>

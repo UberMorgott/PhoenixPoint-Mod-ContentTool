@@ -41,20 +41,26 @@ namespace Morgott.ContentTool.Bake
             /// <summary>The producer's OWN terminal line, verbatim. Null until it returns one.</summary>
             internal readonly string Result;
             internal readonly BakeDisposition How;
+            /// <summary>What the mod manager said about the folder - <c>ModGate.Why</c>, or null for a stage
+            /// that does not ask. BESIDE the verdict, never inside it (design:103): the panel rebuilds a
+            /// <see cref="StageReport"/> from this snapshot, and without a field of its own every ModGate
+            /// reason died at <c>LifecycleJob.Finish</c>.</summary>
+            internal readonly string Eligibility;
 
             internal Snapshot(long runId, string stage, bool busy, bool cancelRequested,
                               bool cancelAcknowledged, SlimProgress progress, string result,
-                              BakeDisposition how)
+                              BakeDisposition how, string eligibility)
             {
                 RunId = runId; Stage = stage; Busy = busy; CancelRequested = cancelRequested;
                 CancelAcknowledged = cancelAcknowledged; Progress = progress; Result = result; How = how;
+                Eligibility = eligibility;
             }
         }
 
         private readonly object gate = new object();
         private long ids;
         private volatile Snapshot state =
-            new Snapshot(0, null, false, false, false, null, null, BakeDisposition.Success);
+            new Snapshot(0, null, false, false, false, null, null, BakeDisposition.Success, null);
 
         internal Snapshot Latest { get { return state; } }
 
@@ -68,7 +74,7 @@ namespace Morgott.ContentTool.Bake
             {
                 if (state.Busy) return 0;
                 long id = ++ids;
-                state = new Snapshot(id, stage, true, false, false, null, null, BakeDisposition.Success);
+                state = new Snapshot(id, stage, true, false, false, null, null, BakeDisposition.Success, null);
                 return id;
             }
         }
@@ -81,7 +87,7 @@ namespace Morgott.ContentTool.Bake
             {
                 if (!state.Busy || state.CancelRequested) return;
                 state = new Snapshot(state.RunId, state.Stage, true, true, state.CancelAcknowledged,
-                                     state.Progress, state.Result, state.How);
+                                     state.Progress, state.Result, state.How, state.Eligibility);
             }
         }
 
@@ -91,21 +97,25 @@ namespace Morgott.ContentTool.Bake
             {
                 if (!state.Busy || state.RunId != runId) return;
                 state = new Snapshot(state.RunId, state.Stage, true, state.CancelRequested,
-                                     state.CancelAcknowledged, progress, state.Result, state.How);
+                                     state.CancelAcknowledged, progress, state.Result, state.How,
+                                     state.Eligibility);
             }
         }
 
         /// <summary>The producer's terminal line and disposition. False when this run is no longer the one
         /// in flight, or already reported - the caller has nothing to do about it, and the point is that
         /// the state did not move.</summary>
-        internal bool Complete(long runId, string result, BakeDisposition how)
+        /// <param name="eligibility">The producer's <c>StageReport.Eligibility</c>, for the stage that has
+        /// one. It rides ALONGSIDE the verdict because the panel rebuilds the report from this snapshot.</param>
+        internal bool Complete(long runId, string result, BakeDisposition how, string eligibility = null)
         {
             lock (gate)
             {
                 if (!state.Busy || state.RunId != runId) return false;
                 state = new Snapshot(state.RunId, state.Stage, false, state.CancelRequested,
                                      // RULE 3: only the producer's own Cancelled acknowledges it.
-                                     how == BakeDisposition.Cancelled, state.Progress, result, how);
+                                     how == BakeDisposition.Cancelled, state.Progress, result, how,
+                                     eligibility);
                 return true;
             }
         }
@@ -455,8 +465,10 @@ namespace Morgott.ContentTool.Bake
             /// into the verdict would word a switched-off project as malformed (design:103).</summary>
             internal readonly string Eligibility;
 
+            /// <param name="eligibility">REQUIRED, and null is a statement: it was optional, and both sites
+            /// that rebuild this from a run snapshot silently dropped every ModGate reason.</param>
             internal StageReport(GateOutcome outcome, string verdict, BakeDisposition how,
-                                 bool restartRequired, bool applicable, string eligibility = null)
+                                 bool restartRequired, bool applicable, string eligibility)
             {
                 Outcome = outcome; Verdict = verdict; How = how;
                 RestartRequired = restartRequired; Applicable = applicable; Eligibility = eligibility;

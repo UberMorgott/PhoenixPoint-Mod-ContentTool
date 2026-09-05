@@ -250,13 +250,22 @@ namespace Morgott.ContentTool.Bake
         {
             long id = Run.Begin("Validate");
             if (id == 0) return StageText.R26(Run.Latest.Stage);
+            // THE EMPTY CAPTURE SHELL IS A REFUSAL, the same one StartBake:142 answers. A declaration that
+            // could not be read leaves Declared, Shipped and Roster null (Capture:95), and running anyway
+            // reported "the mod manager could not be read" - ModGate's NoRoster - over a project whose
+            // ppcontent.json is what is actually broken, then handed Observe a null census.
+            if (on.Declared == null)
+            {
+                Finish(id, on.LiveRefusal, BakeDisposition.Refused);
+                return null;
+            }
             Worker(delegate
             {
                 LifecycleState.StageReport r = StageValidate.Run(on.Root,
                                                                  Path.Combine(on.Root, ContentMods.Manifest),
                                                                  on.Shipped, on.Roster);
                 Observe(on);
-                Finish(id, r.Verdict, r.How);
+                Finish(id, r.Verdict, r.How, r.Eligibility);
             });
             return null;
         }
@@ -368,9 +377,9 @@ namespace Morgott.ContentTool.Bake
         /// (SlimJob.cs:407), so the run that just ended is the only thing allowed to drop it - and a
         /// source that outlived its run is a Cancel for the NEXT stage aimed at the last one's token.
         /// `Cancel` already swallows ObjectDisposedException, which is the race this cannot avoid.</summary>
-        private static void Finish(long id, string result, BakeDisposition how)
+        private static void Finish(long id, string result, BakeDisposition how, string eligibility = null)
         {
-            if (!Run.Complete(id, result, how)) return;
+            if (!Run.Complete(id, result, how, eligibility)) return;
             CancellationTokenSource c = Interlocked.Exchange(ref cts, null);
             if (c != null) try { c.Dispose(); } catch (Exception) { }
         }

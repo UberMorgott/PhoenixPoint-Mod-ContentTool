@@ -22,23 +22,29 @@ namespace Morgott.ContentTool.Bake
                                                        IDictionary<string, bool> roster)
         {
             string name = Path.GetFileName(projectRoot.TrimEnd('\\', '/'));
+            string key;
             try
             {
                 ManifestFile mf = ManifestFile.Load(manifestPath);   // Manifest.cs:290 - E1/E2/E8
                 mf.Manifest.Validate();                              // :200 - E3 row, E4 duplicate target
-                PatchCache.Key(projectRoot, shippedPaths);           // :43 - it must be COMPUTABLE, not stored
+                // :43 - it must be COMPUTABLE, and the verdict SAYS it: a call whose result was thrown away
+                // proved nothing anyone could read, and a key that stopped matching B1's read as a run
+                // nobody could compare.
+                key = PatchCache.Key(projectRoot, shippedPaths);
             }
-            // BY TYPE, the three §4.1 can produce - the same rule LifecycleJob.Capture:88 already applies.
+            // BY TYPE, the four §4.1 can produce - the same rule LifecycleJob.Capture:88 already applies.
+            // UnauthorizedAccessException is one of them: File.ReadAllBytes on a directory or an ACL-denied
+            // path is the author's file being unreadable, not a bug in here.
             // Anything else is a bug in here and belongs in LifecycleJob.Worker's handler, which says a
             // stage threw and keeps the exception, rather than wearing "fix ppcontent.json".
             catch (Exception ex) when (ex is IOException || ex is InvalidDataException ||
-                                       ex is ArgumentException)
+                                       ex is ArgumentException || ex is UnauthorizedAccessException)
             {
                 return new LifecycleState.StageReport(GateOutcome.Fail, StageText.ValidateFailed(ex.Message),
                                                       BakeDisposition.Failed, false, true, null);
             }
             // DISABLED IS NOT MALFORMED (design:103): its own field, never folded into the verdict.
-            return new LifecycleState.StageReport(GateOutcome.Pass, StageText.S3(name),
+            return new LifecycleState.StageReport(GateOutcome.Pass, StageText.S3(name, key),
                                                   BakeDisposition.Success, false, true,
                                                   ModGate.Why(ModGate.Decide(projectRoot, roster)));
         }

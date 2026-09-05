@@ -222,7 +222,7 @@ namespace Morgott.ContentTool.Dev
 
             if (chain == null) return;
             chain.Report(ctx, new LifecycleState.StageReport(Outcome(now.How), now.Result, now.How,
-                                                             false, true));
+                                                             false, true, now.Eligibility));
             string next = chain.Next(Refresh(true));
             // A CHAIN THAT STOPPED HAS TO SAY SO SOMEWHERE. `Next` returns null both when the five stages
             // are done and when an ADMISSION refused one, and the refusal is only in `chain.Terminal` -
@@ -333,8 +333,9 @@ namespace Morgott.ContentTool.Dev
                 // that was refused never entered.
                 if (row != null) { row.Verdict = refusal; row.Outcome = GateOutcome.Void; }
                 log = refusal;
+                // null eligibility, explicitly: a stage that was REFUSED never asked the mod manager.
                 if (chain != null) chain.Report(ctx, new LifecycleState.StageReport(
-                    GateOutcome.Void, refusal, BakeDisposition.Refused, false, true));
+                    GateOutcome.Void, refusal, BakeDisposition.Refused, false, true, null));
                 return Started(false, 0, refusal);
             }
             dispatched = LifecycleJob.Run.Latest.RunId;

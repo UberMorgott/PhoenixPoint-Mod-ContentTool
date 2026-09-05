@@ -347,7 +347,12 @@ namespace Morgott.ContentTool.Project
             if (m == null || string.IsNullOrEmpty(m.id) || string.IsNullOrEmpty(m.bundle))
                 throw new InvalidDataException("ppcontent.json needs both \"id\" and \"bundle\"");
             Declared d = new Declared { Id = m.id, BundleName = m.bundle };
-            d.Publish.AddRange(ParsePublish(text));
+            // THE SINK REACHES BOTH ARRAYS, or the census B1 takes is not the one Load keeps: "publish" is
+            // parsed FIRST, so one half-typed row threw before a single "replace" row was read and
+            // ProjectBake.CacheKey:179 fell back to an EMPTY census - while Load, which hands ParsePublish
+            // its own sink (:429), kept every replacement and patched the shipped bundles. The key then
+            // named no shipped bundle, Route7.Observe's named them all, and every ApplyProject re-baked.
+            d.Publish.AddRange(ParsePublish(text, refusals));
             d.Replace.AddRange(ParseReplace(text, refusals));
             d.Videos.AddRange(ImportVideos(root));
             return d;

@@ -41,8 +41,12 @@ namespace Morgott.ContentTool.Bake
                    "on the next load";
         }
 
-        /// <summary>Validate PASS. NEW - Validate had no success string of its own.</summary>
-        internal static string S3(string name) { return "Validate: PASS - '" + name + "'."; }
+        /// <summary>Validate PASS. NEW - Validate had no success string of its own. It carries §4.1's
+        /// pre-import KEY, which is the only thing that makes "the key is computable" observable at all.</summary>
+        internal static string S3(string name, string key)
+        {
+            return "Validate: PASS - '" + name + "' - key " + key + ".";
+        }
 
         /// <summary>Bake PASS. Quotes ProjectBake.cs:402.</summary>
         internal static string S4(string outPath) { return "ct_project: ALL PASS - " + outPath; }
