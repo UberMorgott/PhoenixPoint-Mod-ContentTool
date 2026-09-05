@@ -57,7 +57,11 @@ internal static class MeshExtractTests
         int fileVerts = Int(summary, "verts="), fileIndices = Int(summary, "indices=");
         int filePoses = Int(SkinFields.SkinSummary(mesh), "bindposes=");
 
-        SkinnedModel model = MeshRead.Read(mesh, resS);
+        // What BundleBaker.ReadMesh hands the reader: the rig's REAL names off the renderer that uses
+        // this mesh, since the Mesh alone carries only uninvertible CRC-32s.
+        string[] rig = SkinFields.BoneNames(m, afile, info.PathId);
+
+        SkinnedModel model = MeshRead.Read(mesh, resS, rig);
         int triangles = 0;
         foreach (int[] s in model.Submeshes) triangles += s.Length / 3;
 
@@ -107,9 +111,27 @@ internal static class MeshExtractTests
             Check(Same(model.Joints, back.Joints), name + ": every bone index survives the round trip");
             Check(back.Weights != null && Furthest(model.Weights, back.Weights) < 1e-4f,
                   name + ": every skin weight survives the round trip");
-            // The bone name IS the CRC-32 the mesh records, because a CRC does not invert.
-            Check(back.JointNames[0].StartsWith("bone_", StringComparison.Ordinal),
-                  name + ": a joint is named after the hash the mesh carries: " + back.JointNames[0]);
+            // The bone NAMES, not the CRC-32s the Mesh alone carries: they live on the
+            // SkinnedMeshRenderer that uses this mesh, and an extract that writes hashes can never
+            // reach Outcome.ByName when the author edits it and ships it back.
+            Check(rig != null && rig.Length == filePoses,
+                  name + ": a SkinnedMeshRenderer in the bundle names all " + filePoses + " of its bones");
+            bool hashed = false, sameAsRig = true;
+            for (int j = 0; j < back.JointNames.Count; j++)
+            {
+                if (back.JointNames[j].StartsWith("bone_", StringComparison.Ordinal)) hashed = true;
+                if (rig == null || j >= rig.Length || back.JointNames[j] != rig[j]) sameAsRig = false;
+            }
+            Check(!hashed, name + ": no joint in the GLB is named after a hash (" +
+                  string.Join(", ", back.JointNames.ToArray()) + ")");
+            Check(sameAsRig, name + ": the GLB's joints ARE the renderer's bones, in its order");
+            // The whole point of the names: the extract, read back, binds onto its own rig BY NAME.
+            IList<BindingIssue> issues = SkinCompatibility.Analyze(back, rig);
+            Check(issues.Count == 0, name + ": the extracted GLB binds to its own rig with no issue" +
+                  (issues.Count == 0 ? "" : " - " + issues[0].Code + ": " + issues[0].Message));
+            Check(ReplacementDecision.Decide(back.JointNames.Count > 0, filePoses > 0, rig != null,
+                                             issues.Count == 0 ? null : issues[0]) == Outcome.ByName,
+                  name + ": the replacement verdict on it is ByName");
         }
         // The STATIC path, without hunting for an unrigged shipped mesh: the same geometry with the
         // skin stripped must still be a whole valid export - Validate refuses a half-rig either way.
@@ -122,7 +144,8 @@ internal static class MeshExtractTests
 
         return name + ": " + summary.Substring(0, summary.IndexOf(" centre=", StringComparison.Ordinal)) +
                " -> glb " + glb.Length + "B verts=" + back.Positions.Length + " tris=" + backTriangles +
-               " joints=" + back.JointNames.Count;
+               " joints=" + back.JointNames.Count +
+               (back.JointNames.Count == 0 ? "" : " bone0='" + back.JointNames[0] + "'");
     }
 
     // ---------------------------------------------------------------- helpers

@@ -2201,6 +2201,21 @@ this plan deliberately spells none, because a stale command line in a plan is wo
   the `px_heavy_assets_all.bundle` pairs the hand-written `Wizard.ApocDesignation\ppcontent.json` names are out of
   the wizard's reach today. Not a defect of this slice; a scope note for whatever adds armour-set choice.
 
+  **OPEN GAP 1 — hashed extract joints — FIXED, `9eb14f7`.** The sentence above ("an extract cannot be fed
+  back by name at all") no longer holds: `MeshRead.Skin` now names the joints off the SkinnedMeshRenderer that uses
+  the mesh (`SkinFields.BoneNames`, whose `m_Bones` is index-for-index with `m_BindPose` — the bake writes both off
+  one loop counter, `SkinFields.cs:400/451/462`), plumbed through `BundleBaker.ReadMesh(…, out boneNames)`;
+  `bone_<hash>` survives only when no renderer in the bundle uniquely names them, and `Extract.MeshToGlb` then says
+  so (`joints: 0 named, N hashed (no SkinnedMeshRenderer references this mesh in <file>, or two do and disagree
+  about its bones)`). Offline arm in `tests\ObjCodecTests\MeshExtractTests.cs`: `MESH extract PASS on
+  mutoid_assets_all.bundle, 40 check(s)`, `ALN_Siren_Arm_Slasher_Right … joints=3 bone0='LowerArm_Slasher_R'` —
+  and the extract read back through `SkinCompatibility.Analyze` against its own rig gives zero issues, so
+  `ReplacementDecision.Decide` answers `ByName`. RED before the fix: `MESH extract FAIL:
+  ALN_Siren_Arm_Slasher_Right: no joint in the GLB is named after a hash (bone_3835176939, bone_98537536,
+  bone_628985679)`. Plain names are right on the file side: the game's `#<bone>_Addon` decoration is on the LIVE
+  side and `BoneOverlay.MatchesByName` (`BoneOverlay.cs:75-83`) undecorates both — `rig-census-2026-09-02.json`
+  carries no decorated name at all.
+
   | id | Check | Evidence |
   |---|---|---|
   | W4 | Target derivation disk-proved: the stored pair equals the row the bake matched, and `WhyNot` answered `null` for **exactly one** bundle — evidence is the `Player.log` derivation block `[ContentTool] ShippedTarget: '<asset>' candidates (n): …` with one `WhyNot` outcome line per deduplicated candidate and a single `HOLDS IT (WhyNot == null)`, closed by `resolved '<asset>' -> <bundle> (1 of <present> present candidate(s) …)` | **PASS.** Slot `Human_LeftLeg_SlotDef` read through `FitBench.SlotTargets()`: `ShippedBundle = an_assault_assets_all.bundle`, `ShippedAsset = CHR_AN_Assault_M_Leftleg`, `TargetRefusal = null`. `ct-task8.log`, in this order: `[ContentTool] ShippedTarget: 'CHR_AN_Assault_M_Leftleg' candidates (7): an_assault_assets_all.bundle, defaultlocalgroup_unitybuiltinshaders.bundle, _common_assets_all.bundle, _shaders_assets_all.bundle, nj_equipment_assets_all.bundle, kaos_content_assets_all.bundle, px_equipment_assets_all.bundle` → `ShippedTarget:   an_assault_assets_all.bundle: HOLDS IT (WhyNot == null)` → six `no Mesh named 'CHR_AN_Assault_M_Leftleg' in unity=2019.4.31f1 assets=… cldbTypes=320` lines, one per remaining candidate → `ShippedTarget: resolved 'CHR_AN_Assault_M_Leftleg' -> an_assault_assets_all.bundle (1 of 7 present candidate(s) answered WhyNot == null)`. The bake then matched the same pair: `patch an_assault_assets_all.bundle: mesh 'CHR_AN_Assault_M_Leftleg' <- heavyleftleg verts=12599 indices=34665 …`, and `ppcontent.json`'s row is `{"bundle":"an_assault_assets_all.bundle","asset":"CHR_AN_Assault_M_Leftleg","mesh":"HeavyLeftLeg"}`. (The same block for `CHR_AN_Assault_M_Torso` is in the log too, from the first slot tried — 7 candidates, one `HOLDS IT`.) |

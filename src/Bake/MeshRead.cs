@@ -40,8 +40,13 @@ namespace Morgott.ContentTool.Bake
         /// <summary>
         /// <paramref name="resS"/> is asked for an archive entry by name when the vertices are not
         /// inline; it may return null, which is reported as a refusal rather than as empty geometry.
+        ///
+        /// <paramref name="boneNames"/> is the rig's REAL names, index-for-index with m_BindPose -
+        /// <see cref="SkinFields.BoneNames"/> off the SkinnedMeshRenderer that uses this mesh. Null
+        /// falls the joints back on the bone name HASHES, which is all a Mesh carries by itself.
         /// </summary>
-        internal static SkinnedModel Read(AssetTypeValueField mesh, Func<string, byte[]> resS)
+        internal static SkinnedModel Read(AssetTypeValueField mesh, Func<string, byte[]> resS,
+                                          string[] boneNames = null)
         {
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
             string name = mesh["m_Name"].AsString ?? "mesh";
@@ -72,7 +77,7 @@ namespace Morgott.ContentTool.Bake
                 model.Tangents = Floats(vertexData, channels[SlotTangent], layout, count, 4);
 
             Submeshes(mesh, model, name);
-            Skin(mesh, model, vertexData, channels, layout, count, name);
+            Skin(mesh, model, vertexData, channels, layout, count, name, boneNames);
             return model;
         }
 
@@ -279,13 +284,20 @@ namespace Morgott.ContentTool.Bake
 
         /// <summary>
         /// The rig, as much of it as a Mesh actually holds: bind poses and bone name HASHES. The bone
-        /// hierarchy is not in here - it lives on the SkinnedMeshRenderer's transforms - and a CRC-32
-        /// does not invert, so the export is a FLAT rig under one synthetic root: bone i's rest
-        /// transform is the inverse of its bind pose, which under an identity root is exactly its
-        /// model-space rest pose. The deformation is therefore exact; only the parenting is lost.
+        /// hierarchy is not in here - it lives on the SkinnedMeshRenderer's transforms - so the export
+        /// is a FLAT rig under one synthetic root: bone i's rest transform is the inverse of its bind
+        /// pose, which under an identity root is exactly its model-space rest pose. The deformation is
+        /// therefore exact; only the parenting is lost.
+        ///
+        /// The NAMES come from that same renderer when <paramref name="boneNames"/> is supplied, and
+        /// they have to: a CRC-32 does not invert, so a joint called "bone_2424243207" matches nothing
+        /// on the rig it came off and an edited extract could never reach <c>Outcome.ByName</c>. Plain
+        /// GameObject names is exactly right - the game's '#&lt;bone&gt;_Addon' decoration is on the LIVE
+        /// side and <c>BoneOverlay.MatchesByName</c> (BoneOverlay.cs:75-83) undecorates both.
         /// </summary>
         private static void Skin(AssetTypeValueField mesh, SkinnedModel model, byte[] data,
-                                 Channel[] channels, Layout layout, int count, string name)
+                                 Channel[] channels, Layout layout, int count, string name,
+                                 string[] boneNames)
         {
             AssetTypeValueField poses = mesh["m_BindPose"]["Array"];
             Channel w = channels[SlotBlendWeight], b = channels[SlotBlendIndices];
@@ -312,6 +324,10 @@ namespace Morgott.ContentTool.Bake
                 }
 
             AssetTypeValueField hashes = mesh["m_BoneNameHashes"]["Array"];
+            // m_Bones is index-for-index with m_BindPose and m_BoneNameHashes - the bake writes all
+            // three off one loop counter (SkinFields.cs:400/451/462). A renderer that disagrees about
+            // the length is not that correspondence, so it is refused whole rather than half-applied.
+            if (boneNames != null && boneNames.Length != poses.Children.Count) boneNames = null;
             model.RootBonePath = mesh["m_RootBoneNameHash"].AsUInt.ToString();
             model.Nodes.Add(new SkinNode { Name = name + "_rig", Parent = -1, Local = Identity() });
             model.InverseBindMatrices = new float[poses.Children.Count][];
@@ -320,12 +336,13 @@ namespace Morgott.ContentTool.Bake
             {
                 float[] bindPose = Matrix(poses.Children[i]);
                 model.InverseBindMatrices[i] = bindPose;
-                // A CRC-32 does not invert, so the hash IS the name - it is what the mesh records and
-                // what a re-import has to match, and inventing "Bone_03" would lose it.
-                string bone = i < hashes.Children.Count
+                // BonePaths stays the HASH: it records what the Mesh itself carries, and a CRC-32
+                // does not invert, so inventing a path for it would lose the one fact it has.
+                string hash = i < hashes.Children.Count
                     ? "bone_" + hashes.Children[i].AsUInt
                     : "bone_" + i + "_unnamed";
-                model.BonePaths.Add(bone);
+                model.BonePaths.Add(hash);
+                string bone = boneNames == null ? hash : boneNames[i];
                 model.Nodes.Add(new SkinNode { Name = bone, Parent = 0, Local = Invert(bindPose, bone) });
                 model.JointNodes[i] = i + 1;
             }

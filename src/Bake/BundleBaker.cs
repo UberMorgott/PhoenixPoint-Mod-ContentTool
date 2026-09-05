@@ -583,6 +583,18 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static SkinnedModel ReadMesh(string bundlePath, string assetName)
         {
+            string[] boneNames;
+            return ReadMesh(bundlePath, assetName, out boneNames);
+        }
+
+        /// <summary>
+        /// The same read, saying whether the joints came out NAMED: <paramref name="boneNames"/> is
+        /// what <see cref="SkinFields.BoneNames"/> found on the renderer that uses the mesh, and null
+        /// when nothing in the bundle uniquely names its bones - the one case where the extract falls
+        /// back on the uninvertible hashes, which the caller has to be able to say out loud.
+        /// </summary>
+        internal static SkinnedModel ReadMesh(string bundlePath, string assetName, out string[] boneNames)
+        {
             AssetsManager m = new AssetsManager();
             using (Stream cldb = ContentToolMain.ClassData())
             {
@@ -593,8 +605,10 @@ namespace Morgott.ContentTool.Bake
                 try
                 {
                     AssetFileInfo info = AssetIndex.FindUnique(m, afile, AssetClassID.Mesh, assetName, bundlePath);
+                    boneNames = SkinFields.BoneNames(m, afile, info.PathId);
                     return MeshRead.Read(m.GetBaseField(afile, info),
-                                         entry => BundleHelper.LoadAssetDataFromBundle(bun.file, entry));
+                                         entry => BundleHelper.LoadAssetDataFromBundle(bun.file, entry),
+                                         boneNames);
                 }
                 finally { m.UnloadAll(); }
             }

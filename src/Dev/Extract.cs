@@ -330,11 +330,18 @@ namespace Morgott.ContentTool.Dev
         /// <summary>Returns what was read, for the log; anything wrong throws with the cause.</summary>
         internal static string MeshToGlb(string bundlePath, string assetName, string outPath)
         {
-            SkinnedModel model = BundleBaker.ReadMesh(bundlePath, assetName);
+            string[] boneNames;
+            SkinnedModel model = BundleBaker.ReadMesh(bundlePath, assetName, out boneNames);
             byte[] glb = GlbCodec.Write(model);
             Directory.CreateDirectory(Path.GetDirectoryName(outPath));
             File.WriteAllBytes(outPath, glb);
-            return Describe(model);
+            // Named joints are what a re-import matches on; hashed ones can never reach ByName, so the
+            // fallback is never silent - it says which file could not name them.
+            int joints = model.JointNodes == null ? 0 : model.JointNodes.Length;
+            return Describe(model) + (joints == 0 ? "" : boneNames != null
+                ? " joints: " + joints + " named, 0 hashed"
+                : " joints: 0 named, " + joints + " hashed (no SkinnedMeshRenderer references this mesh in " +
+                  Path.GetFileName(bundlePath) + ", or two do and disagree about its bones)");
         }
 
         /// <summary>What a model actually holds, in one line - the oracle both gates read.</summary>
