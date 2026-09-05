@@ -147,6 +147,16 @@ namespace Morgott.ContentTool.Bake
                    ".";
         }
 
+        /// <summary>THE `Run all` COLUMN of design:194-:204, and its only wording. Inside a chain a later
+        /// stage is refused when the earlier one it reads did not pass; a STANDALONE run never sees this,
+        /// which is why every arm that composes it is guarded by <c>Admission.InRunAll</c>. R28's own
+        /// sentence cannot serve here - it words an EVIDENCE AGE ("is never"/"is stale"), and a Bake that
+        /// failed two seconds ago has no freshness to report.</summary>
+        internal static string R28All(string stage, string prerequisite)
+        {
+            return "Lifecycle: " + stage + " blocked in Run all; " + prerequisite + " did not pass.";
+        }
+
         /// <summary>Route7.cs:129-132, and called from there. The retry hint is passed IN, because only
         /// Route7.RetryHint (:158) knows which argument actually resolves back to that folder.</summary>
         internal static string R29(string id, string retryHint)

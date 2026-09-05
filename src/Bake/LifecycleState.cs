@@ -211,6 +211,119 @@ namespace Morgott.ContentTool.Bake
             /// <summary>How old the PATCHED COPIES are - <see cref="Fresh"/> of the caller's observation.
             /// Read by Verify alone; Apply re-bakes them itself and Bake does not read them.</summary>
             internal Freshness Copies { get; set; }
+
+            // ---- THE `Run all` COLUMN (design:194-:204), as FIELDS. Its conditions - Bake after Validate
+            // PASS, Apply after a Bake that did not FAIL, Verify after Apply, and S1 -> R30 - live here and
+            // as arms of Admit below. The sequencer READS them and re-implements none of them; a second copy
+            // of the graph in the coordinator is the exact drift 4.6 exists to prevent.
+
+            /// <summary>True only while <see cref="Sequence"/> is driving. Every chain arm is guarded by it,
+            /// so a STANDALONE stage is asked exactly what it was asked before Task 5.</summary>
+            internal bool InRunAll { get; set; }
+            /// <summary>What each earlier stage of THIS chain reported. <c>None</c> means "not reached yet",
+            /// which is what refuses Verify before Apply.</summary>
+            internal GateOutcome ValidateOutcome { get; set; }
+            internal GateOutcome BakeOutcome { get; set; }
+            internal GateOutcome ApplyOutcome { get; set; }
+            /// <summary>Apply reported S1: it installed, but the game is still serving what it loaded, so
+            /// nothing on disk answers for what is visible. R30, and it holds for a STANDALONE Verify too -
+            /// it is a fact about this session, not about this chain. A restart clears it by ending the
+            /// process; nothing else may.</summary>
+            internal bool RestartRequired { get; set; }
+        }
+
+        /// <summary>
+        /// What one stage's producer reported, as VALUES - the only thing <see cref="Sequence"/> is allowed
+        /// to read. No text is parsed to classify anything (design:361).
+        /// </summary>
+        internal sealed class StageReport
+        {
+            internal readonly GateOutcome Outcome;
+            /// <summary>The producer's own terminal line, verbatim.</summary>
+            internal readonly string Verdict;
+            internal readonly BakeDisposition How;
+            /// <summary>Apply's S1. Feeds <see cref="Admission.RestartRequired"/>.</summary>
+            internal readonly bool RestartRequired;
+            /// <summary>False for a row with NO applicable gate at all - a video-only project's Apply, a
+            /// Verify with nothing declared. Design:281: those are "VOID with a reason" and do NOT stop the
+            /// chain, while a VOID that means "the proof is missing" does (design:279-:280).</summary>
+            internal readonly bool Applicable;
+
+            internal StageReport(GateOutcome outcome, string verdict, BakeDisposition how,
+                                 bool restartRequired, bool applicable)
+            {
+                Outcome = outcome; Verdict = verdict; How = how;
+                RestartRequired = restartRequired; Applicable = applicable;
+            }
+        }
+
+        /// <summary>
+        /// THE `Run all` COORDINATOR. Serial, in displayed order, stopping immediately on FAIL, refusal,
+        /// acknowledged cancellation or a blocking VOID (design:278-:283).
+        ///
+        /// IT IS A STATE MACHINE, NOT A LOOP, and that is not a style choice: every producer is
+        /// main -> worker -> main and answers frames later, so a synchronous `foreach` over the five stages
+        /// could only exist by blocking the main thread on a worker - the one thing LifecycleJob's whole
+        /// shape forbids. The pump calls <see cref="Next"/> for the stage to dispatch and <see cref="Report"/>
+        /// when that stage completes; the offline gate calls exactly the same two methods in a tight loop.
+        /// One object, two callers, one graph.
+        ///
+        /// It knows NOTHING about dependencies. <see cref="Admit"/> answers those, asked per stage AS IT IS
+        /// REACHED (design:187), so an earlier stage's output can admit a later one.
+        /// </summary>
+        internal sealed class Sequence
+        {
+            /// <summary>Displayed order, and the panel draws them in this order too (design:293-:303).</summary>
+            internal static readonly string[] Stages = { "Validate", "Bake", "Apply", "Verify", "Package" };
+
+            private int at = -1;
+
+            /// <summary>The stage last handed out, so <see cref="Report"/> knows whose report it is.</summary>
+            internal string Current { get; private set; }
+            /// <summary>The last thing a producer or an admission said. Null while nothing has run.</summary>
+            internal string Terminal { get; private set; }
+            /// <summary>The chain ended early. <see cref="Terminal"/> says why, in the producer's own words
+            /// or in the refusal's.</summary>
+            internal bool Stopped { get; private set; }
+            internal bool Done { get { return Stopped || at >= Stages.Length; } }
+
+            /// <summary>The next stage to dispatch, or null when the chain is over - stopped, or all five
+            /// done. A refusal stops it and is remembered as the terminal line.</summary>
+            internal string Next(Admission ctx)
+            {
+                if (Stopped) return null;
+                if (++at >= Stages.Length) { Current = null; return null; }
+
+                string stage = Stages[at];
+                Current = stage;
+                string refusal = Admit(stage, ctx);
+                if (refusal == null) return stage;
+                Stopped = true;
+                Terminal = refusal;
+                return null;
+            }
+
+            /// <summary>The report of the stage <see cref="Next"/> just handed out. Records what the later
+            /// stages' admission reads, then applies the four stop rules.</summary>
+            internal void Report(Admission ctx, StageReport r)
+            {
+                if (Stopped || Current == null || r == null) return;
+
+                if (Current == "Validate") ctx.ValidateOutcome = r.Outcome;
+                else if (Current == "Bake") ctx.BakeOutcome = r.Outcome;
+                else if (Current == "Apply")
+                {
+                    ctx.ApplyOutcome = r.Outcome;
+                    // Never cleared here: an Apply that once needed a restart still does until the process
+                    // ends, and a later green row must not talk the author out of restarting.
+                    if (r.RestartRequired) ctx.RestartRequired = true;
+                }
+
+                Terminal = r.Verdict;
+                if (r.How == BakeDisposition.Cancelled) { Stopped = true; Terminal = StageText.R31(Current); }
+                else if (r.How == BakeDisposition.Refused || r.Outcome == GateOutcome.Fail) Stopped = true;
+                else if (r.Outcome == GateOutcome.Void && r.Applicable) Stopped = true;
+            }
         }
 
         /// <summary>The refusal this stage would print, or null when it may run. Design section 4.6, row by
@@ -225,6 +338,13 @@ namespace Morgott.ContentTool.Bake
 
             switch (stage)
             {
+                case "Bake":
+                    // Standalone: Bake loads and validates the manifest itself, so a `never` Validate is not
+                    // a prerequisite. Inside a chain it IS one, because the chain declared the order.
+                    if (ctx.InRunAll && ctx.ValidateOutcome != GateOutcome.Pass)
+                        return StageText.R28All("Bake", "Validate");
+                    return null;
+
                 case "Apply":
                     // NEVER R28 for a stale or absent bake: ApplyProject bakes on a stale or missing key
                     // ITSELF (Route7.cs:311-:351) and that bake reports through the same producer, filling
@@ -233,9 +353,19 @@ namespace Morgott.ContentTool.Bake
                     if (ctx.LegacyDiskActive) return StageText.R36();
                     if (ctx.WriteOutsideRoots) return StageText.R34();
                     if (!string.IsNullOrEmpty(ctx.RetryHint)) return StageText.R29(ctx.ProjectId, ctx.RetryHint);
+                    // "after a Bake that did not FAIL" - a VOID Bake (nothing to bake, no own bundle) is not
+                    // a failure and does not block the install of what IS on disk.
+                    if (ctx.InRunAll && ctx.BakeOutcome == GateOutcome.Fail)
+                        return StageText.R28All("Apply", "Bake");
                     return null;
 
                 case "Verify":
+                    // S1 -> R30, and it is asked FIRST because it outranks every disk answer: the copies can
+                    // be fresh, complete and correct while the game is still serving what it loaded, and a
+                    // Verify run over them would prove a revision nobody can see.
+                    if (ctx.RestartRequired) return StageText.R30(ctx.ProjectId);
+                    if (ctx.InRunAll && ctx.ApplyOutcome == GateOutcome.None)
+                        return StageText.R28All("Verify", "Apply");
                     // The one stage that READS evidence it cannot regenerate: it measures the copies on
                     // disk. Absent or stale, there is nothing to measure and a verdict would be invented.
                     return ctx.Copies == Freshness.Fresh
@@ -243,10 +373,10 @@ namespace Morgott.ContentTool.Bake
                         : StageText.R28("Verify", "patched copies", ctx.Copies);
 
                 default:
-                    // Validate re-derives its own receipts; Bake loads and validates the manifest itself, so
-                    // a `never` Validate is not a prerequisite; Package's payload and empty-destination
-                    // refusals belong to Package.Run alone (Package.cs:78) and are not restated here. "All"
-                    // is admitted and re-asked per stage as the sequencer reaches it.
+                    // Validate re-derives its own receipts; Package's payload and empty-destination refusals
+                    // belong to Package.Run alone (Package.cs:78) and are not restated here. "All" is
+                    // admitted and re-asked per stage as the sequencer reaches it. Package needs no chain
+                    // arm either: it is only ever reached when nothing stopped the chain before it.
                     return null;
             }
         }

@@ -262,10 +262,11 @@ internal static class LifecycleTests
         checks += Ownership();
         checks += Admission();
         checks += Cancelling();
+        checks += Sequencing();
 
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
                "one file swap, the pre-import receipt, the publication ordering, one output owner, " +
-               "the admission table, the cancel contract";
+               "the admission table, the cancel contract, the Run all chain";
     }
 
     /// <summary>G6, the claim half - design:377 (R37) and §5's "fail fast, in the producer". One owner per
@@ -854,6 +855,163 @@ internal static class LifecycleTests
         if (a == null || b == null || a.Length != b.Length) return false;
         for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
         return true;
+    }
+
+    /// <summary>G5 - THE `Run all` CHAIN, and the one thing it is forbidden to be: a second copy of the
+    /// dependency graph. Design:202-:204 - the Run all column's conditions are FIELDS of `Admission` and ARMS
+    /// of `Admit`, and the sequencer only reads them by calling `Admit` as it reaches each stage.
+    ///
+    /// The arms below drive `Sequence` with a recording dispatcher, so "invocation order and count" and
+    /// "first stop position" are measured rather than asserted about text. The rule set (design:278-:283):
+    /// stop on FAIL, on a refusal, on an acknowledged cancellation and on a BLOCKING VOID; a non-applicable
+    /// row is VOID and does NOT stop the chain; Package is never entered after a stop.</summary>
+    private static int Sequencing()
+    {
+        int checks = 0;
+        List<string> ran = new List<string>();
+
+        // Everything passes: five stages, in the displayed order, each dispatched exactly once.
+        LifecycleState.Admission ctx = Fresh();
+        checks += Check(Drive(ctx, ran, delegate { return Pass("ok"); }) == null &&
+                        string.Join(",", ran.ToArray()) == "Validate,Bake,Apply,Verify,Package",
+                        "a clean chain runs the five stages in displayed order, once each");
+
+        // Each stage fails in turn: the chain stops AT it, the later ones are never dispatched, and the
+        // run's terminal line is the producer's own - never a sentence the sequencer composed.
+        string[] stages = { "Validate", "Bake", "Apply", "Verify", "Package" };
+        for (int i = 0; i < stages.Length; i++)
+        {
+            string failAt = stages[i];
+            ran.Clear();
+            string terminal = Drive(Fresh(), ran, delegate(string s)
+            { return s == failAt ? Fail(s + " broke") : Pass("ok"); });
+            checks += Check(ran.Count == i + 1 && ran[ran.Count - 1] == failAt && terminal == failAt + " broke",
+                            "a FAIL at " + failAt + " stops the chain there, with the producer's own line");
+        }
+
+        // The one the design names explicitly (design:280): a Verify that cannot prove itself stops the
+        // chain, and PACKAGE IS NOT ENTERED. A green Package under an unproven Verify is the whole point.
+        ran.Clear();
+        Drive(Fresh(), ran, delegate(string s)
+        { return s == "Verify" ? Void("Verify: VOID - nothing proved it", true) : Pass("ok"); });
+        checks += Check(ran.Count == 4 && !ran.Contains("Package"),
+                        "an absent mandatory proof stays VOID and blocks completion - Package is not entered");
+
+        // ...but a VOID with no applicable gate at all is a reason, not a failure (design:281).
+        ran.Clear();
+        checks += Check(Drive(Fresh(), ran, delegate(string s)
+                        { return s == "Apply" ? Void("Apply: VOID - no non-video target", false) : Pass("ok"); }) == null &&
+                        ran.Count == 5,
+                        "a non-applicable row is VOID with a reason and does NOT stop the chain");
+
+        // THE S1 BARRIER. Apply PASSES and reports restart-required; Verify is then refused by Admit's own
+        // R30 arm - the sequencer never learns what S1 means, it only re-asks Admit.
+        ran.Clear();
+        LifecycleState.Admission s1 = Fresh();
+        string after = Drive(s1, ran, delegate(string s)
+        {
+            return s == "Apply"
+                ? new LifecycleState.StageReport(GateOutcome.Pass, "applied", BakeDisposition.Success, true, true)
+                : Pass("ok");
+        });
+        checks += Check(after == StageText.R30("morgott.demo") && ran.Count == 3 && !ran.Contains("Verify"),
+                        "S1 -> R30: an Apply that needs a restart refuses Verify and stops before Package");
+
+        // A PREREQUISITE REFUSAL, straight off Admit - the arm the sequencer reads and nothing re-implements.
+        LifecycleState.Admission chained = Fresh();
+        chained.InRunAll = true;
+        checks += Check(LifecycleState.Admit("Bake", chained) == StageText.R28All("Bake", "Validate"),
+                        "inside Run all, Bake is refused until Validate passed - a FIELD of Admission");
+        chained.ValidateOutcome = GateOutcome.Pass;
+        chained.BakeOutcome = GateOutcome.Fail;
+        checks += Check(LifecycleState.Admit("Bake", chained) == null &&
+                        LifecycleState.Admit("Apply", chained) == StageText.R28All("Apply", "Bake"),
+                        "and Apply is refused after a Bake that FAILED - never after one that merely VOIDed");
+        chained.BakeOutcome = GateOutcome.Void;
+        chained.ApplyOutcome = GateOutcome.None;
+        checks += Check(LifecycleState.Admit("Apply", chained) == null &&
+                        LifecycleState.Admit("Verify", chained) == StageText.R28All("Verify", "Apply"),
+                        "Verify comes after Apply inside the chain; standalone it asks the copies instead");
+        // STANDALONE IS UNTOUCHED by all three - that is why they are guarded by InRunAll.
+        LifecycleState.Admission alone = Fresh();
+        checks += Check(LifecycleState.Admit("Bake", alone) == null &&
+                        LifecycleState.Admit("Apply", alone) == null &&
+                        LifecycleState.Admit("Verify", alone) == null,
+                        "outside Run all none of the chain arms fire - a standalone stage asks only its own row");
+
+        // CANCELLATION. The producer's Cancelled disposition is what stops it, and the terminal line says
+        // later stages were not run - it never claims a rollback.
+        ran.Clear();
+        checks += Check(Drive(Fresh(), ran, delegate(string s)
+                        {
+                            return s == "Bake"
+                                ? new LifecycleState.StageReport(GateOutcome.Void, "stopped",
+                                                                 BakeDisposition.Cancelled, false, true)
+                                : Pass("ok");
+                        }) == StageText.R31("Bake") && ran.Count == 2,
+                        "an acknowledged cancellation stops the chain at that stage, with R31");
+
+        // ADMIT IS ASKED AS THE STAGE IS REACHED, NEVER UP FRONT (design:187): a context whose Verify would
+        // be refused at the start still runs Validate, Bake and Apply first.
+        ran.Clear();
+        LifecycleState.Admission stale = Fresh();
+        stale.Copies = Freshness.Never;
+        Drive(stale, ran, delegate(string s)
+        {
+            if (s == "Apply") stale.Copies = Freshness.Fresh;    // the earlier stage's output admits the later
+            return Pass("ok");
+        });
+        checks += Check(ran.Count == 5,
+                        "Admit runs per stage as it is reached, so an earlier stage's output admits a later one");
+
+        // EARLIER RECEIPTS ARE NEVER ERASED, and the session block is never cleared by a green stage:
+        // Route7.cs:405 stays the only clearing path, so RetryHint survives a passing Validate and Bake.
+        ran.Clear();
+        LifecycleState.Admission blocked = Fresh();
+        blocked.RetryHint = "'ct_route7 apply Demo'.";
+        string stop = Drive(blocked, ran, delegate { return Pass("ok"); });
+        checks += Check(stop == StageText.R29("morgott.demo", "'ct_route7 apply Demo'.") &&
+                        ran.Count == 2 && blocked.RetryHint == "'ct_route7 apply Demo'." &&
+                        blocked.ValidateOutcome == GateOutcome.Pass && blocked.BakeOutcome == GateOutcome.Pass,
+                        "a session block refuses Apply mid-chain; the earlier receipts stand and nothing " +
+                        "clears the block");
+        return checks;
+    }
+
+    private static LifecycleState.Admission Fresh()
+    {
+        return new LifecycleState.Admission
+        {
+            Selection = LifecycleState.Selection.Ok,
+            ProjectId = "morgott.demo",
+            Copies = Freshness.Fresh
+        };
+    }
+
+    private static LifecycleState.StageReport Pass(string line)
+    { return new LifecycleState.StageReport(GateOutcome.Pass, line, BakeDisposition.Success, false, true); }
+
+    private static LifecycleState.StageReport Fail(string line)
+    { return new LifecycleState.StageReport(GateOutcome.Fail, line, BakeDisposition.Failed, false, true); }
+
+    private static LifecycleState.StageReport Void(string line, bool applicable)
+    { return new LifecycleState.StageReport(GateOutcome.Void, line, BakeDisposition.Success, false, applicable); }
+
+    /// <summary>Drives one whole chain and records what was dispatched. Returns the terminal line when the
+    /// chain stopped, or null when all five completed.</summary>
+    private static string Drive(LifecycleState.Admission ctx, List<string> ran,
+                                Func<string, LifecycleState.StageReport> producer)
+    {
+        LifecycleState.Sequence seq = new LifecycleState.Sequence();
+        ctx.InRunAll = true;
+        for (int guard = 0; guard < 16; guard++)
+        {
+            string stage = seq.Next(ctx);
+            if (stage == null) break;
+            ran.Add(stage);
+            seq.Report(ctx, producer(stage));
+        }
+        return seq.Stopped ? seq.Terminal : null;
     }
 
     private static int Check(bool condition, string what)
