@@ -723,6 +723,21 @@ internal static class LifecycleTests
                             "so the NEXT observation reads STALE and costs one re-bake - the safe " +
                             "direction; a key taken after the import would have stamped the new file's " +
                             "hash over the old file's pixels and read FRESH forever");
+
+            // ---- THE ORDER ITSELF. Everything above measures what the key DOES; where `Bake` takes it
+            // was prose, and prose is what let the capture drift below the import once. `Bake` cannot be
+            // linked here (Load goes through JsonUtility, an ECall into the player - RefusalCount.cs:20),
+            // so the arm reads the SOURCE, the arrangement TargetPathTests uses for the same reason.
+            string src = SrcRoot();
+            string file = src == null ? null : Path.Combine(src, "Bake", "ProjectBake.cs");
+            string text = file != null && File.Exists(file) ? File.ReadAllText(file) : null;
+            int taken = text == null ? -1 : text.IndexOf("string cacheKey = CacheKey(projectRoot);",
+                                                         StringComparison.Ordinal);
+            int imported = text == null ? -1 : text.IndexOf("ContentProject.Load(projectRoot, pump)",
+                                                            StringComparison.Ordinal);
+            checks += Check(taken >= 0 && imported > taken,
+                            "and B1 is taken BEFORE the import in ProjectBake.Bake - the capture order " +
+                            "this arm is named for, read off the source -> " + file);
         }
         finally { try { Directory.Delete(root, true); } catch (Exception) { } }
         return checks;
@@ -1114,6 +1129,20 @@ internal static class LifecycleTests
             seq.Report(ctx, producer(stage));
         }
         return seq.Stopped ? seq.Terminal : null;
+    }
+
+    /// <summary>The repo's src\, walked up from the test binary - null when the suite runs from a
+    /// package, which the one arm that uses it reports rather than passing blind.</summary>
+    private static string SrcRoot()
+    {
+        DirectoryInfo d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d != null)
+        {
+            string s = Path.Combine(d.FullName, "src");
+            if (File.Exists(Path.Combine(s, "Bake", "ProjectBake.cs"))) return s;
+            d = d.Parent;
+        }
+        return null;
     }
 
     private static int Check(bool condition, string what)

@@ -335,7 +335,10 @@ namespace Morgott.ContentTool.Project
         /// A VIDEO install is the same case and takes the same route: it copies a file and writes a
         /// catalog row, so decoding the project's sounds to reach that is work nobody asked for.
         /// </summary>
-        internal static Declared LoadDeclared(string root)
+        /// <param name="refusals">Where an incomplete row, a junk element and a "replace" that reads as
+        /// nothing go instead of ending the caller's run - exactly the channel <c>Load</c> gives
+        /// <c>ParseReplace</c> (:410). Null keeps the throw for the callers that want it.</param>
+        internal static Declared LoadDeclared(string root, List<string> refusals = null)
         {
             string metaPath = Path.Combine(root, "ppcontent.json");
             if (!File.Exists(metaPath)) throw new FileNotFoundException("no ppcontent.json in " + root, metaPath);
@@ -345,7 +348,7 @@ namespace Morgott.ContentTool.Project
                 throw new InvalidDataException("ppcontent.json needs both \"id\" and \"bundle\"");
             Declared d = new Declared { Id = m.id, BundleName = m.bundle };
             d.Publish.AddRange(ParsePublish(text));
-            d.Replace.AddRange(ParseReplace(text));
+            d.Replace.AddRange(ParseReplace(text, refusals));
             d.Videos.AddRange(ImportVideos(root));
             return d;
         }

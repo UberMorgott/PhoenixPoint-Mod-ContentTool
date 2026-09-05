@@ -78,8 +78,16 @@ namespace Morgott.ContentTool.Bake
             // malformed row), and this runs on MAIN under the dashboard's Bake press - the throw would have
             // escaped past every counter into the caller's frame, with no run begun and nothing said. Same
             // shape as the R38 verdict below: carried as a string, reported by StartBake as Refused.
+            //
+            // BY TYPE, not "anything at all". The three above and only those: IOException covers missing
+            // and locked (FileNotFoundException is one), InvalidDataException the manifest that parsed but
+            // says nothing, ArgumentException JsonUtility's verdict on text that is not JSON. Anything else
+            // is NOT the author's manifest - a bug in here, an IO error out of some other sweep - and
+            // wearing "fix ppcontent.json" it sent them editing a file that was never wrong. The rest
+            // reaches StartBake's Failed path, which says a stage threw and keeps the exception.
             try { d = ContentProject.LoadDeclared(projectRoot); }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException || ex is InvalidDataException ||
+                                       ex is ArgumentException)
             {
                 return new Captured
                 {

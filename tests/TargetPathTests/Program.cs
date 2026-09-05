@@ -54,6 +54,7 @@ internal static class Program
         DeclaredTypeArm();
         StopEventArm();
         CancelPrecedenceArm();
+        OneCensusArm();
         WeaponTintArm();
         FitBelowRootArm();
         FitAlgebraArm();
@@ -1979,6 +1980,45 @@ internal static class Program
                                 "\\w+\\.How\\s*==\\s*BakeDisposition\\.Cancelled\\)\\s*\\r?\\n\\s*return"),
             "a Refused or Cancelled bake returns before `patchFailed` is read, so a cancelled run reaches " +
             "neither Failed.Add nor the install -> " + file);
+    }
+
+    /// <summary>
+    /// Gate S41: ONE census, spelled the same in all three places that take it.
+    ///
+    /// `ProjectBake.CacheKey` (B1), `Route7.Observe` and `LifecycleJob.Capture` each walk the declared
+    /// "replace" rows to name the bundles a bake touches, and B1's key is compared against Observe's. A
+    /// term that drifts in one of them - a video row counted, an Ordinal dedup - produces a key the other
+    /// side's observation can never match, and the patched copies then read STALE forever, silently.
+    ///
+    /// None of the three is linkable here (LoadDeclared goes through JsonUtility, an ECall into the
+    /// player; Observe reads persistentDataPath), so the arm is over the SOURCE, the arrangement S13-wired,
+    /// S17, S18, S20 and S40 use. It also pins B1's refusal SINK: without it CacheKey threw on the rows
+    /// `ContentProject.Load` merely counts, and the bake died at B1 with nothing loaded.
+    /// </summary>
+    private static void OneCensusArm()
+    {
+        string src = SrcRoot();
+        string[] files = { "ProjectBake.cs", "Route7.cs", "LifecycleJob.cs" };
+        bool all = src != null;
+        foreach (string f in files)
+        {
+            string path = src == null ? null : Path.Combine(src, "Bake", f);
+            string text = path != null && File.Exists(path) ? File.ReadAllText(path) : null;
+            all = all && text != null && Regex.IsMatch(Strip(text),
+                @"foreach\s*\(\s*[\w\.]*ShippedReplacement\s+r\s+in\s+[^\r\n]*\)\s*\r?\n\s*\{\s*" +
+                @"if\s*\(\s*!\s*string\.IsNullOrEmpty\(r\.video\)\s*\)\s*continue;\s*" +
+                @"if\s*\(\s*!?\s*declared\.Contains\(r\.bundle,\s*StringComparer\.OrdinalIgnoreCase\)\s*\)");
+        }
+
+        string bake = src == null ? null : Path.Combine(src, "Bake", "ProjectBake.cs");
+        string bakeText = bake != null && File.Exists(bake) ? File.ReadAllText(bake) : null;
+
+        Check("S41-one-census",
+            all && bakeText != null &&
+            Regex.IsMatch(Strip(bakeText), @"LoadDeclared\(projectRoot,\s*new List<string>\(\)\)"),
+            "B1, Observe and Capture take the SAME census - video rows skipped, bundles deduped " +
+            "case-blind - and B1 hands LoadDeclared a refusal sink, so the rows Load counts do not " +
+            "kill the key -> " + bake);
     }
 
     private static void StopEventArm()

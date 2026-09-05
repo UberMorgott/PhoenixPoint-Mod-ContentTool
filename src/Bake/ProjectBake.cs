@@ -167,7 +167,17 @@ namespace Morgott.ContentTool.Bake
         private static string CacheKey(string projectRoot)
         {
             List<string> shipped = new List<string>(), declared = new List<string>();
-            foreach (ShippedReplacement r in ContentProject.LoadDeclared(projectRoot).Replace)
+            // THE CENSUS SURVIVES EXACTLY THE ROWS Load's DOES. This runs BEFORE the try that Load sits
+            // in, so a throw here kills the whole bake with nothing loaded - and ct_project reports
+            // "ct_project THREW" over one half-typed row that Load counts as a refusal and bakes past
+            // (:408-425). The sink takes the three ParseReplace refuses by name (:500, :519, :531); the
+            // catch takes the shapes Load catches instead of raising, and leaves behind the same EMPTY
+            // census Load leaves - no row reached p.Replace there either, so the key still matches
+            // Route7.Observe's.
+            ContentProject.Declared d;
+            try { d = ContentProject.LoadDeclared(projectRoot, new List<string>()); }
+            catch (InvalidDataException) { return Project.PatchCache.Key(projectRoot, shipped); }
+            foreach (ShippedReplacement r in d.Replace)
             {
                 if (!string.IsNullOrEmpty(r.video)) continue;
                 if (declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) continue;
@@ -1833,7 +1843,11 @@ namespace Morgott.ContentTool.Bake
                             log.AppendLine("patch " + bundleFile + ": '" + r.asset + "' <- " + t.Name +
                                            " " + t.Width + "x" + t.Height);
                         }
-                        baker.Write(copyTmp, null);   // identity kept: the copy stands in for the shipped file
+                        // Swept on a throw the same way outTmp is (:473): Write CREATES the file and can
+                        // still throw after it, and a temp that failed before the Add below is one no
+                        // catch can find - a full-size clone left in PatchedDir under a GUID nothing prunes.
+                        try { baker.Write(copyTmp, null); }   // identity kept: the copy stands in for the shipped file
+                        catch (Exception) { Sweep(copyTmp); throw; }
                         // LEDGERED THE INSTANT IT EXISTS, not after the read-back gates. Those gates throw
                         // (AssetsTools does, on a file it cannot parse), and a temp written but not yet
                         // listed is one the catch below cannot sweep - a full-size clone left in
