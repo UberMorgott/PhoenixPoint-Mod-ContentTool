@@ -42,8 +42,11 @@ string Run() }` that throws on failure and is called from `Program.Main`. `ObjCo
    create `Directory.GetParent(modDir)\<name>` itself and assert the post-condition afterwards; a folder under
    `Mods\ContentTool\` is never discovered by the manager (`ModGate.Decide:38` → `Unknown`, `Why:62`).
 4. **`Route7.ApplyProject` (`:205`) is `private` and CONTINUES after a failed bake.** Today `:249-256` writes no
-   freshness key but still installs whatever `PatchedDir` holds. Task 4 makes it `internal` and returns early — a
-   behaviour change that the console verb `ct_route7 apply` sees too, and that W5 in Task 8 is the proof for.
+   freshness key but still installs whatever `PatchedDir` holds. Task 4 makes it `internal` and returns early on the
+   PATCH-ROUTE failures alone (`ProjectBake.Run`'s new `patchFailed`, the count from `Patch(p, log)`) — gating on the
+   run's total `failed` would let one unrelated `p.ImportFailures` (a bad .wav/.png/model) block the project's good
+   patched bundles forever on the player's enable path, since the unwritten key re-bakes and re-fails every launch —
+   a behaviour change that the console verb `ct_route7 apply` sees too, and that W5 in Task 8 is the proof for.
 5. **A live preview makes `RigTarget.SameAs` false, always.** `Snapshot` (`ModelDoctor.cs:242-261`) records
    `MeshInstanceId` and `MeshName`; `SameAs` (`SkinCompatibility.cs:70-82`) compares both; `Target` is taken when the
    slot is picked (`:120`/`:142`) and `DoPreview:451` then assigns `Renderer.sharedMesh = candidate`. So R8 as first

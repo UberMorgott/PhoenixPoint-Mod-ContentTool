@@ -82,6 +82,16 @@ namespace Morgott.ContentTool.Bake
         /// enable), so that toggle blocks for as long as the bake takes. There is no async seam here
         /// to hang it on; give it one if a first enable is ever measured as painful.
         /// </summary>
+        /// <summary>
+        /// Mods whose bake FAILED in this session, so the checkbox does not bake them again on every pass.
+        /// A failed bake installs nothing, so <see cref="BundleLive.Holds"/> stays false and
+        /// <see cref="BundleClaims.RouteMoves"/> says "move" again for the POSTFIX pass - ModRoster runs
+        /// BeforeSetEnabled-&gt;Reconciled AND AfterSetEnabled per press, so one checkbox cost TWO full
+        /// blocking <see cref="ProjectBake.Run"/>s, both doomed the same way. Cleared by the bake that
+        /// finally succeeds ('ct_route7 apply', or the next session).
+        /// </summary>
+        private static readonly HashSet<string> Failed = new HashSet<string>(StringComparer.Ordinal);
+
         internal static string Toggle(string modDir, bool on)
         {
             if (string.IsNullOrEmpty(modDir) ||
@@ -106,7 +116,10 @@ namespace Morgott.ContentTool.Bake
                 string legacy = LegacyDisk(project.Id);
                 if (legacy != null) log.AppendLine(legacy);
                 else if (BundleClaims.RouteMoves(true, BundleLive.Holds(project.Id), on))
-                    log.AppendLine(on ? ApplyProject(name) : BundleLive.Uninstall(project.Id));
+                    log.AppendLine(on && Failed.Contains(project.Id)
+                        ? "'" + project.Id + "' failed to bake earlier in this session - not baking it " +
+                          "again. Fix the lines it printed, then 'ct_route7 apply " + project.Id + "'."
+                        : on ? ApplyProject(name) : BundleLive.Uninstall(project.Id));
             }
             if (wantPublish)
             {
@@ -267,14 +280,27 @@ namespace Morgott.ContentTool.Bake
                 // enough while a human read the log and decided; the Doctor's Ship row presses this for
                 // them, and "the copies below are whatever the last good bake produced" is not something
                 // a wizard gets to do quietly.
-                int failed;
-                pre.AppendLine(ProjectBake.Run(projectRoot, out failed));
-                if (failed != 0)
+                //
+                // THE PATCH ROUTE'S OWN COUNT, not the run's. ProjectBake.Run's `failed` also folds in
+                // p.ImportFailures and every arm over the mod's own bundle, so ONE unrelated .wav, .png or
+                // .glb the importer refused blocked this project's perfectly good patched copies here -
+                // permanently, on the PLAYER'S enable path: the key stayed unwritten, so every launch
+                // re-baked, failed on the same unrelated file and installed nothing at all. Those failures
+                // are still counted and printed by the bake above; they just do not decide route vii.
+                int failed, patchFailed;
+                pre.AppendLine(ProjectBake.Run(projectRoot, out failed, out patchFailed));
+                if (patchFailed != 0)
                 {
                     how = ApplyDisposition.BakeFailed;
-                    return pre.AppendLine("NOT APPLIED: the bake reported " + failed + " failure(s); fix the " +
-                                          "lines above and press Ship again").ToString();
+                    Failed.Add(modId);
+                    // No "press Ship again": this same text is printed by the console verb (Run:49) and by
+                    // the mod-manager checkbox (Toggle:109), where there is no Ship button to press. The
+                    // failures are NAMED above; a caller that has a next step adds its own.
+                    return pre.AppendLine("NOT APPLIED: patching the shipped bundle(s) reported " + patchFailed +
+                                          " failure(s), named in the P0/REFUSED line(s) above; nothing was " +
+                                          "installed and no copy was marked current.").ToString();
                 }
+                Failed.Remove(modId);
                 Project.PatchCache.Write(patched, key);
             }
             List<KeyValuePair<string, string>> copies = new List<KeyValuePair<string, string>>();
@@ -306,12 +332,26 @@ namespace Morgott.ContentTool.Bake
             // (BundleClaims.Claim:258-267 keeps it), report Redirected, and print S2 ("redirected LIVE")
             // over a log that says "restart required" - the wizard lying with a straight face, which is
             // the whole reason this is a value and not a grep of the log.
-            bool wasResident = !string.IsNullOrEmpty(forBundle) && BundleLive.ResidentNow(forBundle);
+            //
+            // THE BUNDLE ASKED ABOUT HAS TO BE ONE THIS APPLY IS ABOUT, and both halves of that were
+            // missing. A forBundle the project does not declare answered Refused with NO line naming it,
+            // so the wizard reported a refusal nobody could act on. And a declared bundle that this apply
+            // did NOT install - refused by Register, or simply absent from the patched folder - still
+            // found this mod's own standing claim from an EARLIER apply (BundleClaims.Claim:258-267 keeps
+            // it) and answered Redirected: the press credited with work it did not do.
+            bool asked = !string.IsNullOrEmpty(forBundle);
+            bool ours = asked && declared.Exists(b => string.Equals(b, forBundle, StringComparison.OrdinalIgnoreCase));
+            if (asked && !ours)
+                pre.AppendLine("REFUSED: " + forBundle + " is not declared by this project - its " +
+                               Project.ContentMods.Manifest + " names " + declared.Count + " \"replace\" " +
+                               "target(s)" + (declared.Count == 0 ? "" : ": " + string.Join(", ", declared.ToArray())));
+            bool wasResident = ours && BundleLive.ResidentNow(forBundle);
             pre.Append("installing " + copies.Count + " patched copy(ies) as '" + modId + "'\n")
                .Append(BundleLive.Install(modId, copies));
-            if (!string.IsNullOrEmpty(forBundle))
+            if (ours)
             {
-                BundleClaim mine = BundleClaims.Find(forBundle);
+                BundleClaim mine = copies.Exists(c => string.Equals(c.Key, forBundle, StringComparison.OrdinalIgnoreCase))
+                    ? BundleClaims.Find(forBundle) : null;
                 how = wasResident ? ApplyDisposition.Resident
                     : mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal)
                       ? ApplyDisposition.Redirected

@@ -50,8 +50,8 @@ namespace Morgott.ContentTool.Bake
 
         internal static string Run(string projectRoot)
         {
-            int ignored;
-            return Run(projectRoot, out ignored);
+            int ignored, alsoIgnored;
+            return Run(projectRoot, out ignored, out alsoIgnored);
         }
 
         /// <summary>
@@ -60,7 +60,13 @@ namespace Morgott.ContentTool.Bake
         /// sentence, and the failure mode of a reworded sentence is exactly the one this project keeps
         /// being bitten by - a wrong result presented as fresh, silently.
         /// </summary>
-        internal static string Run(string projectRoot, out int failed)
+        /// <param name="patchFailed">ROUTE VII'S OWN count - only what <see cref="Patch"/>, the step that
+        /// writes PatchedDir, refused. Route7 gates NOT APPLIED on THIS and not on <paramref name="failed"/>:
+        /// that one also folds in <c>p.ImportFailures</c> and every arm over the mod's own bundle, so one
+        /// unreadable .wav or .png blocked the project's perfectly good patched copies on the PLAYER'S
+        /// enable path - the freshness key was never written, so every launch re-baked and installed
+        /// nothing. An unrelated import failure is still counted, printed and reported as before.</param>
+        internal static string Run(string projectRoot, out int failed, out int patchFailed)
         {
             StringBuilder log = new StringBuilder();
             // NOT initialised here on purpose. `failed = 0` up front is what let the
@@ -93,7 +99,11 @@ namespace Morgott.ContentTool.Bake
             // patched copy at all; route vii then refused with "holds no .bundle". Measured on
             // demos\MaterialTweak, 2026-08-28. Patch() writes into PatchedDir() and needs nothing
             // from the mod's own bundle, so it is simply in the wrong order, not conditional on it.
-            if (p.Replace.Count > 0) failures += Patch(p, log);
+            // Counted TWICE on purpose: into the run's own total, and out through patchFailed, which is
+            // the only count route vii may gate on (see the param note). Assigned here rather than at the
+            // top because no exit precedes this line.
+            patchFailed = 0;
+            if (p.Replace.Count > 0) { patchFailed = Patch(p, log); failures += patchFailed; }
             // WHAT WAS PATCHED, not how many rows were declared. A "video" row is a replacement that
             // needs no patched bundle at all - Bundles(p) skips it, because the clip is a loose file
             // served live by ct_video - so keying the success line on p.Replace.Count made a

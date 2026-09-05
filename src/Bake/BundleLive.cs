@@ -148,7 +148,9 @@ namespace Morgott.ContentTool.Bake
         /// live location first, because only its AssetBundleRequestOptions knows the BUILD name Unity
         /// loaded it under (a 32-hex hash in this game, :230-238). Asked here rather than re-derived in
         /// Route7: this project has already shipped that comparison wrong once, and one copy of it is one
-        /// too many.</summary>
+        /// too many.
+        /// ponytail: second catalog walk per apply (Register:80 walks it again for the same bundle); pass
+        /// the IResourceLocation out if it ever shows in a profile.</summary>
         internal static bool ResidentNow(string bundleFile)
         {
             string why;
