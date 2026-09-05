@@ -549,6 +549,32 @@ internal static class LifecycleTests
                         "and the NEXT run starts with none - eligibility is not inherited any more than a " +
                         "cancel request is");
 
+        // ---- S1 AND `Applicable` RIDE THE SAME CARRIER, for the reason eligibility does. `Finish`
+        // published neither, so both sites that rebuild a StageReport from `Latest` hard-coded
+        // `restartRequired:false, applicable:true`: Admit's R30 arm was unreachable after an Apply that
+        // said `Resident`, and an Apply with no gate at all read as a blocking refusal.
+        LifecycleRun applied = new LifecycleRun();
+        long sixth = applied.Begin("Apply");
+        applied.Complete(sixth, StageText.S1("demo", "a.bundle", true), BakeDisposition.Success, null,
+                         true, true);
+        checks += Check(applied.Latest.RestartRequired && applied.Latest.Applicable &&
+                        LifecycleState.Admit("Verify", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, ProjectId = "demo",
+                          Copies = Freshness.Fresh,
+                          RestartRequired = applied.Latest.RestartRequired }) == StageText.R30("demo"),
+                        "Apply's Resident disposition reaches the snapshot as RestartRequired, which is " +
+                        "what makes Admit's R30 arm reachable at all");
+        long seventh = applied.Begin("Apply");
+        applied.Complete(seventh, "REFUSED: nothing to install", BakeDisposition.Refused, null, false, false);
+        checks += Check(!applied.Latest.RestartRequired && !applied.Latest.Applicable,
+                        "a project declaring no non-video target publishes Applicable false - and neither " +
+                        "field is inherited from the run before it");
+        long eighth = applied.Begin("Bake");
+        applied.Complete(eighth, "ct_project: ALL PASS", BakeDisposition.Success);
+        checks += Check(!applied.Latest.RestartRequired && applied.Latest.Applicable,
+                        "every other producer keeps the defaults - a bake needs no restart and always had " +
+                        "a gate to answer");
+
         // ---- A CANCEL WITH NOTHING RUNNING IS SILENCE, not a flag the next run inherits.
         run.Cancel();
         long fourth = run.Begin("Package");
@@ -1067,6 +1093,30 @@ internal static class LifecycleTests
                         { return s == "Apply" ? Void("Apply: VOID - no non-video target", false) : Pass("ok"); }) == null &&
                         ran.Count == 5,
                         "a non-applicable row is VOID with a reason and does NOT stop the chain");
+
+        // ...and neither does a REFUSAL with no applicable gate. Apply on an own-bundle-only project answers
+        // "nothing to install" (Route7.cs:497) with `how == Refused`, which stopped `Run all` dead on every
+        // demos/AddUiSounds-shaped project. The same disposition WITH a gate - R37/R38, a contended output,
+        // an admission's own refusal - still stops it.
+        ran.Clear();
+        checks += Check(Drive(Fresh(), ran, delegate(string s)
+                        {
+                            return s == "Apply"
+                                ? new LifecycleState.StageReport(GateOutcome.Void,
+                                                                 "REFUSED: nothing to install",
+                                                                 BakeDisposition.Refused, false, false, null)
+                                : Pass("ok");
+                        }) == null && ran.Count == 5,
+                        "a REFUSED row with no applicable gate does not stop the chain either - design:281");
+        ran.Clear();
+        checks += Check(Drive(Fresh(), ran, delegate(string s)
+                        {
+                            return s == "Apply"
+                                ? new LifecycleState.StageReport(GateOutcome.Void, "REFUSED: R38",
+                                                                 BakeDisposition.Refused, false, true, null)
+                                : Pass("ok");
+                        }) == "REFUSED: R38" && ran.Count == 3,
+                        "while a genuine refusal - one with a gate to refuse - stops it at Apply");
 
         // THE S1 BARRIER. Apply PASSES and reports restart-required; Verify is then refused by Admit's own
         // R30 arm - the sequencer never learns what S1 means, it only re-asks Admit.

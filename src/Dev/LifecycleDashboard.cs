@@ -220,9 +220,15 @@ namespace Morgott.ContentTool.Dev
             }
             log = now.Result;
 
+            // S1 IS A FACT ABOUT THE SESSION, NOT ABOUT A CHAIN (LifecycleState.cs:443). A STANDALONE Apply
+            // never reaches `Sequence.Report`, so setting it only there left the button path's Verify
+            // admitted after an apply the game is not yet serving. Never cleared here: only `Bind` does.
+            if (now.RestartRequired) ctx.RestartRequired = true;
+
             if (chain == null) return;
             chain.Report(ctx, new LifecycleState.StageReport(Outcome(now.How), now.Result, now.How,
-                                                             false, true, now.Eligibility));
+                                                             now.RestartRequired, now.Applicable,
+                                                             now.Eligibility));
             string next = chain.Next(Refresh(true));
             // A CHAIN THAT STOPPED HAS TO SAY SO SOMEWHERE. `Next` returns null both when the five stages
             // are done and when an ADMISSION refused one, and the refusal is only in `chain.Terminal` -

@@ -46,14 +46,24 @@ namespace Morgott.ContentTool.Bake
             /// <see cref="StageReport"/> from this snapshot, and without a field of its own every ModGate
             /// reason died at <c>LifecycleJob.Finish</c>.</summary>
             internal readonly string Eligibility;
+            /// <summary>Apply's S1 - it installed, but the game is still serving what it loaded. It rides
+            /// here for exactly the reason <see cref="Eligibility"/> does: the pump rebuilds a
+            /// <see cref="StageReport"/> from this snapshot, and a hard-coded `false` there made
+            /// <see cref="Admit"/>'s R30 arm unreachable - `Run all` walked on into Verify.</summary>
+            internal readonly bool RestartRequired;
+            /// <summary>False when the stage had NO applicable gate at all - Apply on a project that
+            /// declares no non-video replacement target. Such a row is VOID WITH A REASON and must not stop
+            /// the chain (design:281). True by default, so every other producer is unchanged.</summary>
+            internal readonly bool Applicable;
 
             internal Snapshot(long runId, string stage, bool busy, bool cancelRequested,
                               bool cancelAcknowledged, SlimProgress progress, string result,
-                              BakeDisposition how, string eligibility)
+                              BakeDisposition how, string eligibility,
+                              bool restartRequired = false, bool applicable = true)
             {
                 RunId = runId; Stage = stage; Busy = busy; CancelRequested = cancelRequested;
                 CancelAcknowledged = cancelAcknowledged; Progress = progress; Result = result; How = how;
-                Eligibility = eligibility;
+                Eligibility = eligibility; RestartRequired = restartRequired; Applicable = applicable;
             }
         }
 
@@ -87,7 +97,8 @@ namespace Morgott.ContentTool.Bake
             {
                 if (!state.Busy || state.CancelRequested) return;
                 state = new Snapshot(state.RunId, state.Stage, true, true, state.CancelAcknowledged,
-                                     state.Progress, state.Result, state.How, state.Eligibility);
+                                     state.Progress, state.Result, state.How, state.Eligibility,
+                                     state.RestartRequired, state.Applicable);
             }
         }
 
@@ -98,7 +109,7 @@ namespace Morgott.ContentTool.Bake
                 if (!state.Busy || state.RunId != runId) return;
                 state = new Snapshot(state.RunId, state.Stage, true, state.CancelRequested,
                                      state.CancelAcknowledged, progress, state.Result, state.How,
-                                     state.Eligibility);
+                                     state.Eligibility, state.RestartRequired, state.Applicable);
             }
         }
 
@@ -107,7 +118,8 @@ namespace Morgott.ContentTool.Bake
         /// the state did not move.</summary>
         /// <param name="eligibility">The producer's <c>StageReport.Eligibility</c>, for the stage that has
         /// one. It rides ALONGSIDE the verdict because the panel rebuilds the report from this snapshot.</param>
-        internal bool Complete(long runId, string result, BakeDisposition how, string eligibility = null)
+        internal bool Complete(long runId, string result, BakeDisposition how, string eligibility = null,
+                               bool restartRequired = false, bool applicable = true)
         {
             lock (gate)
             {
@@ -115,7 +127,7 @@ namespace Morgott.ContentTool.Bake
                 state = new Snapshot(state.RunId, state.Stage, false, state.CancelRequested,
                                      // RULE 3: only the producer's own Cancelled acknowledges it.
                                      how == BakeDisposition.Cancelled, state.Progress, result, how,
-                                     eligibility);
+                                     eligibility, restartRequired, applicable);
                 return true;
             }
         }
@@ -539,7 +551,13 @@ namespace Morgott.ContentTool.Bake
 
                 Terminal = r.Verdict;
                 if (r.How == BakeDisposition.Cancelled) { Stopped = true; Terminal = StageText.R31(Current); }
-                else if (r.How == BakeDisposition.Refused || r.Outcome == GateOutcome.Fail) Stopped = true;
+                // `&& r.Applicable`, for the same design:281 reason the VOID arm below carries it: an Apply
+                // on a project that declares no non-video target REFUSES ("nothing to install",
+                // Route7.cs:497) and that is not a blocking refusal - it is a row with no gate at all, and
+                // it stopped `Run all` on every own-bundle-only project (demos/AddUiSounds). Every genuine
+                // refusal - an admission's, R37/R38, a contended output - reports Applicable true.
+                else if ((r.How == BakeDisposition.Refused && r.Applicable) ||
+                         r.Outcome == GateOutcome.Fail) Stopped = true;
                 else if (r.Outcome == GateOutcome.Void && r.Applicable) Stopped = true;
             }
         }

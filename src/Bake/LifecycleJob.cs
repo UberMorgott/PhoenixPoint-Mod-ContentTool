@@ -214,11 +214,33 @@ namespace Morgott.ContentTool.Bake
         {
             long id = Run.Begin("Apply");
             if (id == 0) return StageText.R26(Run.Latest.Stage);
+            // The empty capture shell, exactly as StartValidate:257 answers it: a ppcontent.json that could
+            // not be read leaves Declared null, and ApplyRoot would Load() the same file and throw.
+            if (on.Declared == null)
+            {
+                Finish(id, on.LiveRefusal, BakeDisposition.Refused);
+                return null;
+            }
             Worker(delegate
             {
+                // FIRST, like StartBake:155 - an armed barrier must park THIS run, not leak into the next.
+                Barrier.Wait(id);
                 Observe(on);                                   // A1 revalidate, on a worker
                 Park(delegate
                 {
+                    // THE LAST CANCELLABLE INSTANT. Everything below bakes and installs live redirects and
+                    // yields nowhere, so a cancel raised during the Observe above - or while this segment sat
+                    // parked waiting for a painted panel - has to be answered HERE or not at all.
+                    // ponytail: the Apply segment stays UNCANCELLABLE past this line. Threading a token into
+                    // ApplyRoot -> Applied -> ProjectBake.Bake means widening four public overloads and
+                    // every caller of them (console verb, mod-manager toggle, wizard) - far past this
+                    // commit's budget. The pre-check is what makes the button honest meanwhile.
+                    LifecycleRun.Snapshot at = Run.Latest;
+                    if (at.CancelRequested)
+                    {
+                        Finish(id, StageText.R31(at.Stage), BakeDisposition.Cancelled);
+                        return;
+                    }
                     string line;
                     // Task 6 draws a row per target; the seam carries one verdict, so the list is asked for
                     // here rather than parsed back out of the log later (TargetInstall's whole point).
@@ -233,9 +255,18 @@ namespace Morgott.ContentTool.Bake
                     BakeDisposition d = how == Route7.ApplyDisposition.BakeFailed ? BakeDisposition.Failed
                                       : how == Route7.ApplyDisposition.Refused ? BakeDisposition.Refused
                                       : BakeDisposition.Success;
+                    // S1, AS A VALUE (plan:869). `Resident` is a PASS the author has to act on, and the
+                    // disposition is the only thing that knows it: read back out of `line` it would be a
+                    // grep of a sentence, and hard-coded false at the pump it left Admit's R30 unreachable.
+                    bool restart = how == Route7.ApplyDisposition.Resident;
+                    // ...and plan:870's `Applicable`, taken from the DECLARATION rather than from
+                    // `targets.Count`: a project with no non-video "replace" row has no Apply gate at all and
+                    // is VOID with a reason, while an R37/R38 or contended-output refusal ALSO comes back
+                    // with zero targets and is a real refusal that must stop the chain.
+                    bool applicable = on.Declared.Length > 0;
                     // Trailing observation FIRST, like the bake (:177): the completion is published with the
                     // freshness this very run produced, never with the one it started from.
-                    Worker(delegate { Observe(on); Finish(id, line, d); });
+                    Worker(delegate { Observe(on); Finish(id, line, d, null, restart, applicable); });
                 }, true);
             });
             return null;
@@ -377,9 +408,10 @@ namespace Morgott.ContentTool.Bake
         /// (SlimJob.cs:407), so the run that just ended is the only thing allowed to drop it - and a
         /// source that outlived its run is a Cancel for the NEXT stage aimed at the last one's token.
         /// `Cancel` already swallows ObjectDisposedException, which is the race this cannot avoid.</summary>
-        private static void Finish(long id, string result, BakeDisposition how, string eligibility = null)
+        private static void Finish(long id, string result, BakeDisposition how, string eligibility = null,
+                                   bool restartRequired = false, bool applicable = true)
         {
-            if (!Run.Complete(id, result, how, eligibility)) return;
+            if (!Run.Complete(id, result, how, eligibility, restartRequired, applicable)) return;
             CancellationTokenSource c = Interlocked.Exchange(ref cts, null);
             if (c != null) try { c.Dispose(); } catch (Exception) { }
         }
