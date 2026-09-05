@@ -1432,26 +1432,89 @@ namespace Morgott.ContentTool.Dev
             // says so rather than inviting one.
             // Extend has no renderer to put a mesh on at all - the same "nothing to bind onto" the
             // bone-less target already says, and the same refusal to invent one.
+            // EVERY CONTROL THAT CAN MOVE THE TARGET IS DEAD WHILE A PRESS IS ARMED: the gate spans one
+            // frame the author can act in, and retargeting mid-press is what DoShip's generation check
+            // would then have to throw the press away for.
             bool blind = Target == null || Target.BoneNames == null;
-            GUI.enabled = (Ready.Outcome == Outcome.ByName || Ready.Outcome == Outcome.NearestBone) &&
+            GUI.enabled = !shipPending &&
+                          (Ready.Outcome == Outcome.ByName || Ready.Outcome == Outcome.NearestBone) &&
                           Ready.Report.Count(Severity.Blocking) == 0 && !blind;
             if (GUILayout.Button(blind ? "Preview - no live bones to bind onto" : "Preview",
                                  GUILayout.Width(blind ? 230f : 80f))) Enqueue("preview");
-            GUI.enabled = HasPreview;
+            GUI.enabled = !shipPending && HasPreview;
             if (GUILayout.Button("Revert preview", GUILayout.Width(110f))) Enqueue("revert");
             // Changed AND valid, decided in Rethink: an unchanged map rewrites the sidecar for nothing,
             // and a map AliasMap.Of refuses would be refused again by the loader about to read it.
-            GUI.enabled = canSave;
+            GUI.enabled = !shipPending && canSave;
             if (GUILayout.Button("Save aliases", GUILayout.Width(110f))) Enqueue("save");
             // The same map, baked INTO the file instead of parked beside it. Offered whenever the map
             // has anything in it - including a map already saved to a sidecar, which is exactly the
             // state an author is in when they decide to bake it.
-            GUI.enabled = aliases.Count > 0;
+            GUI.enabled = !shipPending && aliases.Count > 0;
             if (GUILayout.Button("Write skel plan", GUILayout.Width(120f))) Enqueue("skelplan");
-            GUI.enabled = true;
+            GUI.enabled = !shipPending;
             if (GUILayout.Button("Copy report", GUILayout.Width(100f)))
                 GUIUtility.systemCopyBuffer = PlainTextOf(Ready, Path, Target);
+            GUI.enabled = true;
             GUILayout.EndHorizontal();
+
+            Ship();
+        }
+
+        /// <summary>
+        /// SHIP: from a green verdict to a mod folder the player can switch on, in one press. Read-and-enqueue
+        /// like every other control here - the only thing it writes is its own text field and the repaint flag
+        /// the two-frame gate waits for.
+        /// </summary>
+        private void Ship()
+        {
+            GUILayout.Space(6f);
+            GUILayout.Label("SHIP - write a mod folder beside ContentTool, bake it, apply it");
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("project", GUILayout.Width(56f));
+            // Seeded on LAYOUT only: a value that changed between Layout and Repaint is how an IMGUI pass ends
+            // up unbalanced.
+            if (Event.current.type == EventType.Layout && projectName.Length == 0 &&
+                Prototype != null && Prototype.ShippedAsset != null)
+                projectName = ProjectScaffold.DefaultName(Prototype.ShippedAsset);
+            projectName = GUILayout.TextField(projectName ?? "", GUILayout.Width(220f));
+            GUILayout.Label(Prototype != null && Prototype.ShippedBundle != null
+                            ? "target " + Prototype.ShippedBundle + " / " + Prototype.ShippedAsset
+                            : (Prototype != null && Prototype.TargetRefusal != null
+                               ? Prototype.TargetRefusal
+                               : "no shipped target derived for this slot"));
+            GUILayout.EndHorizontal();
+
+            // ponytail: File.Exists on every OnGUI pass - two stats a frame on a local file. Cache it in
+            // Refresh() (Layout only) if a profile ever shows it.
+            string refusal = ProjectScaffold.NameRefusal(projectName);
+            bool ready = Ready != null && Ready.Outcome == Outcome.ByName &&
+                         Ready.Report.Count(Severity.Blocking) == 0 &&
+                         Prototype != null && Prototype.Mode == VerifyMode.Replace && Prototype.Live != null &&
+                         Prototype.TargetRefusal == null && Prototype.ShippedBundle != null &&
+                         Renderer != null && Path != null && File.Exists(Path) &&
+                         Path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) &&
+                         refusal == null && !Busy && !shipPending;
+
+            GUILayout.BeginHorizontal();
+            GUI.enabled = ready;
+            if (GUILayout.Button("CREATE, BAKE & APPLY", GUILayout.Width(200f))) Enqueue("ship");
+            GUI.enabled = true;
+            GUILayout.Label(shipPending ? shipPhase : (refusal ?? ""));
+            GUILayout.EndHorizontal();
+
+            // ALWAYS DRAWN, placeholder or not (design §4.4 "Rows, always drawn"). A row that appears only
+            // once it has content makes the section jump under the author's cursor at the exact moment they
+            // are reading a result, and an IMGUI layout that changes shape between one press and the next is
+            // also how a Layout/Repaint pair ends up unbalanced.
+            GUILayout.Label(shipPath.Length > 0 ? "project " + shipPath : "project -");
+            GUILayout.Label(shipResult.Length > 0 ? shipResult : "-");
+            GUILayout.Label(shipTail.Length > 0 ? shipTail : "-");
+
+            // THE SECOND HALF OF THE GATE, and Repaint only: a Layout pass paints nothing, so arming on it
+            // would let the freeze start under a panel that still says nothing.
+            if (Event.current.type == EventType.Repaint && shipPending) shipLabelPainted = true;
         }
 
         /// <summary>
