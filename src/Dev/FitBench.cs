@@ -1693,13 +1693,17 @@ namespace Morgott.ContentTool.Dev
             // `ArgumentException`, and OnGUI's catch (:2359) answers that by closing the bench. `Update`'s
             // SHIP landing (:2189) moves the tab the same way: outside a GUI event.
             GUI.enabled = !doctor.ShipPending && !LifecycleDashboard.Busy;
+            // ONLY A TOGGLE FOR A TAB WE ARE NOT ON RECORDS A CHANGE. The one for the ACTIVE tab is drawn
+            // CHECKED, so it returns true every frame - and being drawn LAST it would overwrite a press on
+            // an earlier toggle, which made every leftward move (DOCTOR -> FIT, LIFECYCLE -> anything)
+            // impossible without closing the bench.
             int wanted = tab;
-            if (GUILayout.Toggle(tab == TabFit, " FIT", GUILayout.Width(70f))) wanted = TabFit;
-            if (GUILayout.Toggle(tab == TabDoctor, " MODEL DOCTOR", GUILayout.Width(130f))) wanted = TabDoctor;
+            if (GUILayout.Toggle(tab == TabFit, " FIT", GUILayout.Width(70f)) && tab != TabFit) wanted = TabFit;
+            if (GUILayout.Toggle(tab == TabDoctor, " MODEL DOCTOR", GUILayout.Width(130f)) && tab != TabDoctor) wanted = TabDoctor;
             // The Doctor's armed press still gates it: that press fires on a PAINT of its own SHIP label,
             // and it is the leaving of the Doctor's tab - not the lifecycle job - that this half forbids.
             GUI.enabled = !doctor.ShipPending;
-            if (GUILayout.Toggle(tab == TabLifecycle, " LIFECYCLE", GUILayout.Width(100f))) wanted = TabLifecycle;
+            if (GUILayout.Toggle(tab == TabLifecycle, " LIFECYCLE", GUILayout.Width(100f)) && tab != TabLifecycle) wanted = TabLifecycle;
             GUI.enabled = true;
             GUILayout.EndHorizontal();
             if (tab == TabLifecycle)
