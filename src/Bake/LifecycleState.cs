@@ -649,8 +649,12 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>
-        /// R39's field, MEASURED - the one producer of it, so what the panel refuses and what the pump
-        /// drains parked work with (`panelReady &amp;&amp; Painted`, LifecycleDashboard.cs) cannot drift apart.
+        /// R39's field, MEASURED - the one producer of it, so a press is refused by a rule rather than by
+        /// each call site's own reading. <paramref name="painted"/> is the ADMISSION predicate
+        /// (`LifecycleDashboard.Paintable`), which counts the arrival frame; the pump drains parked work
+        /// with the stricter `panelReady &amp;&amp; Repainted` (LifecycleDashboard.cs:511), because a press
+        /// admitted one frame early merely WAITS, while a parked segment released one frame early runs its
+        /// blocking work before the panel has drawn the status or the Cancel button.
         ///
         /// Only a PRESS asks: a chain already running keeps the closed-window policy, which PARKS the
         /// blocking segment and resumes it when the tab comes back (LifecycleJob.Tick). Refusing mid-chain
@@ -672,7 +676,7 @@ namespace Morgott.ContentTool.Bake
             if (!string.IsNullOrEmpty(ctx.RunningStage)) return StageText.R26(ctx.RunningStage);
             // A RUN NOBODY CAN PAINT PARKS FOREVER, and it looks exactly like a hang. Bake, Apply and
             // Verify each park a BLOCKING main segment that waits for the open, painted Lifecycle tab
-            // (LifecycleJob.cs:182/:264/:362, drained by Tick(panelReady && Painted)), so a `Run("All")`
+            // (LifecycleJob.cs:182/:264/:362, drained by Tick(panelReady && Repainted)), so a `Run("All")`
             // pressed over the wire from the main menu reached `parkedForPaint:true` with no word at all
             // (2026-09-06, trap T2). Asked before every per-stage arm, because none of them can be
             // reached without a panel either. It is NOT the parked path's replacement: a chain already

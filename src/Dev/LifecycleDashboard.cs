@@ -495,7 +495,7 @@ namespace Morgott.ContentTool.Dev
         /// sequencer for the next stage.
         ///
         /// <paramref name="panelReady"/> is the bench's half of "the panel is open and has painted" - the
-        /// Lifecycle tab is the selected one. <see cref="Painted"/> is the other half, and it is ANDed HERE
+        /// Lifecycle tab is the selected one. <see cref="Repainted"/> is the other half, and it is ANDed HERE
         /// rather than at the call site so the paint gate cannot be forgotten by a second caller.
         /// </summary>
         internal static void Pump(bool panelReady)
@@ -508,7 +508,10 @@ namespace Morgott.ContentTool.Dev
             wasReady = panelReady;
             Drain();
             LifecycleJob.PumpRegistered = true;
-            LifecycleJob.Tick(panelReady && Painted);
+            // THE REAL REPAINT, never the arrival tolerance: a parked segment released on the frame the tab
+            // was merely SELECTED runs its synchronous Bake/Apply/Verify before the panel has drawn the
+            // "running" status or the Cancel button at all - the freeze this gate exists to prevent.
+            LifecycleJob.Tick(panelReady && Repainted);
 
             LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
             if (now.Busy || now.RunId == 0 || now.RunId == harvested || now.RunId != dispatched) return;
@@ -598,19 +601,25 @@ namespace Morgott.ContentTool.Dev
         /// tab was refused R39 over a panel that was about to paint later in the same frame.</summary>
         private static int readyFrame = -2;
 
-        /// <summary>The panel has PAINTED within a frame of now - what a blocking main segment waits for
-        /// (design:323-:333), and the same two-frame shape as SHIP's arming gate (ModelDoctor.cs:443).
-        ///
-        /// ARRIVING ON THE TAB COUNTS AS PAINTABLE. `Pump` runs from Update and the panel draws later in
-        /// the same frame, so on the arrival frame `paintedFrame` still predates the switch while the
-        /// panel is, in fact, about to paint - the same one-frame window, measured from the other end.</summary>
-        private static bool Painted
+        /// <summary>The panel has ACTUALLY REPAINTED within a frame of now - what a blocking main segment
+        /// waits for (design:323-:333), and the same two-frame shape as SHIP's arming gate
+        /// (ModelDoctor.cs:443). The arrival tolerance of <see cref="Paintable"/> is deliberately NOT part
+        /// of it: releasing parked work on a frame nothing has drawn yet is exactly the freeze the gate is
+        /// for.</summary>
+        private static bool Repainted
         {
-            get
-            {
-                int now = UnityEngine.Time.frameCount;
-                return now - paintedFrame <= 1 || now - readyFrame <= 1;
-            }
+            get { return UnityEngine.Time.frameCount - paintedFrame <= 1; }
+        }
+
+        /// <summary>ADMISSION ONLY (R39). ARRIVING ON THE TAB COUNTS AS PAINTABLE: `Pump` runs from Update
+        /// and the panel draws later in the same frame, so on the arrival frame `paintedFrame` still
+        /// predates the switch while the panel is, in fact, about to paint - the same one-frame window,
+        /// measured from the other end. Without it the very first press after switching to the Lifecycle
+        /// tab was refused R39 over a panel that was about to paint. It never releases PARKED work - that
+        /// is <see cref="Repainted"/>, which waits for the draw to have happened.</summary>
+        private static bool Paintable
+        {
+            get { return Repainted || UnityEngine.Time.frameCount - readyFrame <= 1; }
         }
 
         /// <summary>
@@ -932,11 +941,12 @@ namespace Morgott.ContentTool.Dev
             ctx.LegacyDiskActive = Route7.LegacyDiskActive(id);
             ctx.WriteOutsideRoots = OutsideRoots();
             ctx.InRunAll = inChain;
-            // THE SAME EXPRESSION THE PUMP DRAINS PARKED WORK WITH (`panelReady && Painted`, :511), so a
-            // press this admits is one the pump can serve. `wasReady` is last frame's `panelReady`: the
-            // press is drained from Update and the panel paints later in the frame, which is exactly the
-            // one-frame window `Painted` allows.
-            ctx.PaintUnavailable = LifecycleState.PaintMissing(atPress, wasReady, Painted);
+            // THE TOLERANT HALF, and only here. `wasReady` is last frame's `panelReady`: the press is
+            // drained from Update and the panel paints later in the frame, which is exactly the one-frame
+            // window `Paintable` allows, so the first press after arriving on the tab is not false-refused.
+            // The pump's parked-work gate is the STRICTER `Repainted` (:511) on purpose - a press this
+            // admits may still park for one frame, which is a wait, not a refusal.
+            ctx.PaintUnavailable = LifecycleState.PaintMissing(atPress, wasReady, Paintable);
             return ctx;
         }
 

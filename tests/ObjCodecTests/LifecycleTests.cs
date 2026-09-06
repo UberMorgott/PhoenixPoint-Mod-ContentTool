@@ -691,10 +691,12 @@ internal static class LifecycleTests
                         "R26 outranks R39 - a run already holding the seam is the older fact");
 
         // ---- AND THE FIELD ITSELF, MEASURED. Every arm above SETS PaintUnavailable by hand, so the rule
-        // that fills it in - Refresh's `PaintMissing(atPress, wasReady, Painted)` - was the one thing R39
+        // that fills it in - Refresh's `PaintMissing(atPress, wasReady, Paintable)` - was the one thing R39
         // had no arm for: it false-refused the first press after the Lifecycle tab was selected, where
         // `wasReady` is true from that frame's Pump and `paintedFrame` still predates the switch (the
-        // dashboard answers that by counting the ARRIVAL frame as paintable, which is `painted` here).
+        // dashboard answers that by counting the ARRIVAL frame paintable in `Paintable`, which is `painted`
+        // here). THE TOLERANCE IS THE CALLER'S, NOT THIS RULE'S: the pump gates parked work on the stricter
+        // `Repainted`, so an unpainted tab is still a refusal to whoever measures it that way.
         LifecycleState.Admission pressed = new LifecycleState.Admission
         {
             Selection = LifecycleState.Selection.Ok,
@@ -715,6 +717,10 @@ internal static class LifecycleTests
         checks += Check(!arrived.PaintUnavailable && LifecycleState.Admit("All", arrived) == null,
                         "and the open, painted tab is ADMITTED - the arrival frame counts as painted, " +
                         "which is the false refusal this pair exists to catch");
+        checks += Check(LifecycleState.PaintMissing(true, true, false),
+                        "a SELECTED tab that has not painted is still R39 - the arrival tolerance belongs " +
+                        "to the caller's predicate (Paintable), never to this rule, so the pump's stricter " +
+                        "Repainted gate cannot be softened by measuring it here");
         // MID-CHAIN THE ANSWER IS 'PARK', NOT 'REFUSE'. The pump passes atPress:false on purpose, so a
         // bench the author closed mid-chain parks the blocking segment and LifecycleJob.Tick resumes it
         // when the tab comes back. Restating R39 there would kill a run that is merely waiting.
