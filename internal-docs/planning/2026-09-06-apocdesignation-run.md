@@ -572,3 +572,127 @@ author's original still `.glb.broken`) and the same `ppcontent.json` (previous 3
 
 **Still owed:** a game run. Nothing here was baked, applied or rendered — the next in-game pass should
 see 5 rows, 0 failures, and a torso painted with the body material instead of the shoulder pad's.
+
+---
+
+# Run 5 — five rows, 0 failures, 0 warnings, 2026-09-06
+
+Same bench (`D:\PP-Instance2`, profile `76561197996210592`), ContentTool at HEAD `d919a54`, REBUILT:
+`dotnet build -c Release` → `Ошибок: 0`, and `deploy.ps1` put a byte-identical DLL at
+`D:\PP-Instance2\Mods\ContentTool\ContentTool.dll` — SHA-256
+`37F6BC7321078F7CF4D411848C2659FA28A3DED636494E603493F91EB2EACB7A` on both `bin\Release\ContentTool\
+ContentTool.dll` and the deployed file (compared, `match=True`). PPBridge NOT redeployed
+(`build=3068ae67` in every reply, never `stale`). Three hand launches, each gated on `connect state`
+answering first: `ct-apocd5.log` PID 25396, `ct-apocd5b.log` PID 32228, `ct-apocd5c.log` PID 34536.
+Sources = the data fix above: de-sharded torso, the two raw leg GLBs, `Content\Textures\
+RR_soldier_albedo.png`, 5-row `ppcontent.json`. **The project stayed ACTIVATED for the whole run.**
+
+## The startup bake — PASSES with 5 rows
+
+`ct-apocd5.log`, launch 1 (the manifest changed since run 4, so the copies were re-baked):
+
+> `ct_content: 'Wizard.ApocDesignation' is ON in the mod manager, so its live registrations were installed at startup.`
+> `the patched copies in …\Patched\d29f58a2\Wizard.ApocDesignation were built from a different project, game build or ContentTool format - re-baking them`
+> `project 'Wizard.ApocDesignation' at D:\PP-Instance2\Mods\Wizard.ApocDesignation: 1 texture(s), 3 mesh(es), 0 model(s), 0 video(s), 0 sound(s), 5 replacement(s)`
+> `WROTE …\px_heavy_assets_all.bundle 129463085 B as 4e130b87ae4219d20db6fde21aa06aaa.bundle (shipped source is 123054139 B)`
+> `P1 PASS every replaced Texture2D in px_heavy_assets_all.bundle reads back its new pixels`
+> `ct_project: ALL PASS - D:\PP-Instance2\Mods\Wizard.ApocDesignation\Dist\ApocDesignation.bundle`
+> `1/1 bundle(s) redirected LIVE for 'Wizard.ApocDesignation' - nothing was written to the game installation`
+
+All three meshes `skinned BY NAME onto the target's own 10 bones, carrying 4 of the file's own
+influences per vertex`; both textures `patch px_heavy_assets_all.bundle: 'CHR_PX_HVY_TS_M_V01_Albedo'
+<- rr_soldier_albedo 2048x2048` and the same for `'CHR_PX_HVY_Legs_M_V01_albedo'`. Read-back
+`P4 PASS` / `P5 PASS` (bindposes=10, rootHash=2424243207, boneMax 9/8/9, inRange=yes) / `P6 VOID` on
+each mesh. **F1's WARN is gone** — the torso line is now the INFO mapping statement
+`P4 materials chr_px_hvy_ts_m_v01: part 1 (15647 triangles) -> material 'CHR_PX_HVY_TS_M_GOLD_V02 or
+CHR_PX_HVY_TS_M_XMAS_V02 or CHR_PX_HVY_TS_M_V01 (varies by renderer variant)'` — and **F2 is gone**:
+no REFUSED anywhere, no `FAILURE(S)`, no `warning(s)`. T1 (run 1's session poison) cannot bite when
+the startup bake passes. Launches 2 and 3 re-baked nothing — copies current, just
+`installing 1 patched copy(ies)` + `1/1 bundle(s) redirected LIVE` at startup.
+
+## T3 — an ACTIVATED project makes the dashboard's Bake VOID, and `All` stops there
+
+Because the startup bake already wrote AND redirected the copy, the dashboard cannot rewrite it:
+
+> `ct_project: 'C:/Users/Morgott/AppData/LocalLow/Snapshot Games Inc/Phoenix Point\ContentTool\Patched\d29f58a2\Wizard.ApocDesignation\px_heavy_assets_all.bundle' is being served to the game right now, so it was not rewritten - restart the game and bake again.`
+
+`Run("All")` therefore ends at `Bake / fresh / void / 1` with `Apply`, `Verify`, `Package` at
+`starts: 0` — reproduced identically in launches 1 and 3. Design-correct (it refuses to rewrite a
+file Unity has open), but it means **the dashboard can never show a Bake PASS for an activated,
+already-served project**; the bake that matters happened at `OnModEnabled` and is in the game log.
+
+**T4 — press Verify BEFORE Apply.** `Apply` on an already-served project reports the S1 refusal and
+sets `restartRequired: true`; the very next `Run("Verify")` is then refused outright with
+`Verify: VOID - restart required for 'Wizard.ApocDesignation'.` (`runId 0`, nothing dispatched).
+Restarting and pressing `All` → `Verify` → `Apply` → `Package` gives every row a verdict.
+
+## Stage verdicts, verbatim (launch 3, `ct-apocd5c.log`, geoscape → `ct_bench open` → `FitBench.tab=2` → `Open`)
+
+| Stage | freshness / outcome / starts | Verdict |
+|---|---|---|
+| Validate | fresh / **pass** / 1 | `Validate: PASS - 'Wizard.ApocDesignation' - key 5cc12cda9b8bbb06749b90d103f7232eea3f840f.` |
+| Bake | fresh / **void** / 1 | the T3 line above (257 chars) |
+| Apply | fresh / **pass** / 1 | `installing 1 patched copy(ies) as 'Wizard.ApocDesignation'` / `REFUSED: restart required: px_heavy_assets_all.bundle is already loaded (as '4e130b87ae4219d20db6fde21aa06aaa.bundle'). Unity rejects a second bundle of the same identity…` / `0/1 bundle(s) redirected LIVE`; `installation: restart required` |
+| Verify | fresh / **pass** / 1 | `Verify: PASS - load-back gates passed; 1 of 1 declared target(s) served from this project's copies for 'Wizard.ApocDesignation'.` |
+| Package | fresh / **pass** / 1 | `PACKAGED 32 file(s), 45485648 B into C:\Users\Morgott\AppData\Local\ContentTool\Packages\Wizard.ApocDesignation\20260906-202735-5` |
+
+**Served: `px_heavy_assets_all.bundle`, 1 of 1 declared target(s)** — redirected at startup, so the
+five rows really are live in this session. **Package dir:**
+`C:\Users\Morgott\AppData\Local\ContentTool\Packages\Wizard.ApocDesignation\20260906-202735-5`
+(verified on disk: 32 files, 45 485 648 B). Apply's `restart required` is cosmetic here — the loaded
+bundle IS this project's copy; the gate only knows the identity is already open.
+
+## Visual — the material is right and the author's albedo is on the model
+
+`Human / PX_HeavyStarting` (record `CHR_Human_Rig_Ready`, variant 166 of 166) on the bench platform,
+camera pinned exactly as the run-2 baseline (`Yaw`/`YawTarget` 180, `Pitch`/`PitchTarget` 0,
+`Zoom`/`ZoomTarget` 0.85; back frame at yaw 0; close frame at zoom 0.4). 3D is in the `.scene.png`.
+
+| File | What it shows |
+|---|---|
+| `apoc5-front.scene.png` | PX Heavy with all five rows served, yaw 180 — same framing as `apoc-before-front.scene.png` |
+| `apoc5-back.scene.png` | same soldier, yaw 0 |
+| `apoc5-front-close.scene.png` | torso + shoulder pad close, zoom 0.4 |
+| `apoc5-lifecycle.png` | the LIFECYCLE panel, all five rows with their verdicts |
+| `apoc5-doctor.png` | MODEL DOCTOR on `Human_Torso_SlotDef` with the fixed GLB |
+
+- **Material is CORRECT now.** Run 4's torso was uniformly dark grey — the shoulder-pad material
+  (`CHR_PX_HVY_SHD_M_V01`) painted over the whole body because of the leading 1-triangle part. With
+  the shard dropped the body takes slot 0 and reads brown/olive, which is `RR_soldier_albedo`
+  (`px[0,0]=79,77,60,255`). Side-by-side `apoc4-front-close.scene.png` vs `apoc5-front-close.scene.png`
+  is the clearest pair.
+- **The author's albedo is visible on torso AND legs** — both replaced Texture2Ds (`CHR_PX_HVY_TS_M_V01_Albedo`,
+  `CHR_PX_HVY_Legs_M_V01_albedo`) carry it, and the legs in `apoc5-back.scene.png` show the same
+  olive/orange treatment as the torso.
+- **The shoulder pad is still the shipped one** — `CHR_PX_HVY_SHD_M_V01_Albedo` was deliberately not
+  replaced, and the pad renders tan/orange exactly as it ships, on the new body.
+- **Doctor, before the bake:** header `BY NAME - your weights will be used` with NO warning count, and
+  a single `NOTE` row (Info) `CHR_PX_HVY_TS_M_V01.glb: part 1 (15647 triangles) -> ma…`. The
+  `SubmeshMaterials` WARNING of run 4 is gone.
+
+## Observations
+
+- **T3/T4 are the two new traps** and both are consequences of running the dashboard against an
+  ACTIVATED project. Neither is a defect: Bake refuses to rewrite a file Unity holds open, and Verify
+  refuses to measure while a restart is pending. Worth a line in the dashboard plan's §Task 8
+  preconditions all the same.
+- `LifecycleDashboard.Snapshot` takes `""` for the header — `"header"` is refused with
+  `unknown section 'header' - ask for "", a stage name, "log" or "s1s2"`. Ten minutes were burned
+  polling a refusal that always answers `ok:false`; poll `Snapshot("")` and read `busy`.
+- Driving `FitBench.ShowPrototype` from PPCLI costs two `items` + two `connect multi` batches (36
+  record `Id`s, then 166 variant `Name`s) to turn two names into two handles. `connect multi` makes
+  that two round-trips instead of 202 — that is the way to do it.
+- **No PPCLI defect** — nothing appended to `PPCLI\ISSUES.md`.
+
+## Bench state at exit
+
+`ct_bench close` → `ct_bench closed - the screen you came from was never left, so it is still there.`
+Instance2 stopped path-filtered (`Where-Object { $_.Path -like 'D:\PP-Instance2\*' }`, never by name);
+**0 `PhoenixPointWin64` processes anywhere afterwards.** `D:\PP-Instance2\Mods\PPBridge\ppcli-enabled`
+deleted (verified absent). **The project is left ACTIVATED and SERVED** — `Options.jopt` still holds
+`Wizard.ApocDesignation`, the 5-row `ppcontent.json` is in place, and the patched
+`px_heavy_assets_all.bundle` is redirected at every launch, so the render above reproduces on the
+next start with no setup.
+
+**Nothing is owed on the project any more.** Both author-side defects (F1 shard, F2 texture row) are
+fixed in his own files, the bake is clean, and the result is on screen.
