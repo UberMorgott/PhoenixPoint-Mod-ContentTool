@@ -1747,6 +1747,12 @@ namespace Morgott.ContentTool.Bake
                         // was refused. It is NOT the previous bake's copy - this one overwrites it - which
                         // is what the line after Write says out loud rather than leaving to be discovered.
                         int refusedHere = failures;
+                        // A SUSPECT PART IS COUNTED BUT NOT REFUSED - its own line says "Baked anyway;
+                        // nothing was skipped" - so it must not be subtracted into the PARTIAL sentence
+                        // below, which tells the author which rows are MISSING from the copy. Measured
+                        // 2026-09-06: a copy carrying every row it declared reported "1 row(s) above were
+                        // REFUSED".
+                        int suspectHere = 0;
                         foreach (ShippedReplacement r in p.Replace)
                         {
                             if (!string.Equals(r.bundle, bundleFile, StringComparison.OrdinalIgnoreCase)) continue;
@@ -1825,7 +1831,7 @@ namespace Morgott.ContentTool.Bake
                                 // Reported and counted, never fatal - the file is legal, just probably not
                                 // what its author meant, so the bake stands and the run does not say ALL PASS.
                                 if (mapping != null) log.AppendLine((suspect ? "P4 WARN " : "P4 materials ") + mapping);
-                                if (suspect) failures++;
+                                if (suspect) { failures++; suspectHere++; }
                                 continue;
                             }
 
@@ -1858,7 +1864,7 @@ namespace Morgott.ContentTool.Bake
                         // temp's name is a GUID nobody can act on.
                         log.AppendLine("WROTE " + copy + " " + new FileInfo(copyTmp).Length + " B as " +
                                        baker.WrittenIdentity + " (shipped source is " + new FileInfo(shipped).Length + " B)");
-                        refusedHere = failures - refusedHere;
+                        refusedHere = failures - refusedHere - suspectHere;
                         if (refusedHere > 0)
                             log.AppendLine("PARTIAL " + bundleFile + ": " + refusedHere + " row(s) above were " +
                                            "REFUSED and the copy was rewritten anyway - what the game loads is " +
