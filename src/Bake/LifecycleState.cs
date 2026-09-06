@@ -407,6 +407,7 @@ namespace Morgott.ContentTool.Bake
         /// later rows, the progress track, `Run all`/`Cancel` and the log tail off the screen, which is
         /// design §4's constant control sequence broken by a result arriving.</summary>
         private const int RowRoom = 160;
+        private static readonly char[] Breaks = { '\r', '\n' };
 
         /// <summary>THE ROW'S ONE LINE: the verdict's first line, bounded, with a marker when there is more.
         /// The full text is untouched - the log tail holds it and `Section("&lt;stage&gt;")` still serves it
@@ -416,12 +417,20 @@ namespace Morgott.ContentTool.Bake
         internal static string OneLine(string s)
         {
             if (string.IsNullOrEmpty(s)) return s;
-            int cut = s.IndexOfAny(new[] { '\r', '\n' });
-            string head = cut < 0 ? s : s.Substring(0, cut);
-            bool more = head.Length > RowRoom || (cut >= 0 && s.Substring(cut).Trim().Length > 0);
+            int cut = s.IndexOfAny(Breaks);
+            int head = cut < 0 ? s.Length : cut;
+            // The remainder is scanned IN PLACE, by index. A Bake verdict is the whole bake log (1 225 445
+            // chars measured) and `LifecycleDashboard.Body` calls this on EVERY OnGUI pass - the old
+            // `s.Substring(cut).Trim()` copied that log TWICE per pass, for a boolean. Nothing but the
+            // drawn row is allocated now.
+            bool more = head > RowRoom;
+            for (int i = head + 1; !more && i < s.Length; i++) more = !char.IsWhiteSpace(s[i]);
+            if (!more) return cut < 0 ? s : s.Substring(0, head);
+            int room = head;
+            if (room > RowRoom) { room = RowRoom; if (char.IsHighSurrogate(s[room - 1])) room--; }
             // ASCII marker on purpose: these files carry no BOM, and `StageText.Idle` escapes its em dash
             // rather than trust a compiler's codepage guess - three dots need no such trust.
-            return more ? Clip(head, RowRoom) + " ..." : head;
+            return s.Substring(0, room) + " ...";
         }
 
         internal static string Word(GateOutcome o)
