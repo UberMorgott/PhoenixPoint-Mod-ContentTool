@@ -76,9 +76,14 @@ internal static class Program
         GlbDocument doc = GlbDocument.Load(a[1]);
         var accessors = (List<object>)doc.Json["accessors"];
         int dropped = 0;
-        foreach (object meshObj in (List<object>)doc.Json["meshes"])
+        var meshes = (List<object>)doc.Json["meshes"];
+        for (int m = 0; m < meshes.Count; m++)
         {
-            var mesh = (Dictionary<string, object>)meshObj;
+            var mesh = (Dictionary<string, object>)meshes[m];
+            // glTF mesh.name is optional and GlbReader tolerates its absence, so the log line must too.
+            object nameObj;
+            string label = mesh.TryGetValue("name", out nameObj) && nameObj != null
+                ? nameObj.ToString() : "mesh #" + m;
             var prims = (List<object>)mesh["primitives"];
             var tris = new int[prims.Count];
             int most = 0;
@@ -92,7 +97,7 @@ internal static class Program
             {
                 if (tris[i] > 8 || most <= 8) continue;
                 Console.WriteLine("dropping part " + (i + 1) + " of " + prims.Count + " (" + tris[i] +
-                                  " triangle(s)) from mesh '" + mesh["name"] + "'");
+                                  " triangle(s)) from mesh '" + label + "'");
                 prims.RemoveAt(i);
                 dropped++;
             }
@@ -168,8 +173,10 @@ internal static class Program
         foreach (Diagnostic d in r.Report.Rows)
             Console.WriteLine("  [" + d.Severity + "/" + d.Side + "] " + d.Code + ": " + d.Message);
         // A mapping row is INFO - the report states which part lands where even when nothing is wrong -
-        // so the gate is "no row that is more than information", not "no rows".
-        return r.Outcome == Outcome.ByName && r.Report.Count(Severity.Info) == r.Report.Rows.Count ? 0 : 1;
+        // so the gate is "no row that is more than information", not "no rows". NotRigged is a verdict
+        // about the TARGET (no bind poses), not a fault in the replacement: a static target is a pass.
+        return (r.Outcome == Outcome.ByName || r.Outcome == Outcome.NotRigged) &&
+               r.Report.Count(Severity.Info) == r.Report.Rows.Count ? 0 : 1;
     }
 
     /// <summary>
@@ -209,12 +216,12 @@ internal static class Program
                             foreach (AssetTypeValueField slot in r["m_Materials"]["Array"].Children)
                                 draws |= slot["m_PathID"].AsLong == mi.PathId;
                             if (!draws) continue;
-                            long meshId = r["m_Mesh"]["m_PathID"].AsLong;
+                            long meshId = 0;
                             if (kind == AssetClassID.MeshRenderer)
                             {
-                                // A static renderer names no mesh: its MeshFilter on the same GameObject does.
+                                // A static renderer HAS no m_Mesh field at all - reading it throws - so the
+                                // mesh comes only from the MeshFilter on the same GameObject.
                                 long go = r["m_GameObject"]["m_PathID"].AsLong;
-                                meshId = 0;
                                 foreach (AssetFileInfo fi in af.file.Metadata.GetAssetsOfType(AssetClassID.MeshFilter))
                                 {
                                     AssetTypeValueField f = man.GetBaseField(af, fi);
@@ -222,6 +229,7 @@ internal static class Program
                                         meshId = f["m_Mesh"]["m_PathID"].AsLong;
                                 }
                             }
+                            else meshId = r["m_Mesh"]["m_PathID"].AsLong;
                             Console.WriteLine("      drawn on mesh '" + PrefabFields.Name(man, af, meshId) + "'");
                         }
                 }
