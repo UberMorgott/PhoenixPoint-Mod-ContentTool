@@ -441,7 +441,16 @@ namespace Morgott.ContentTool.Dev
                 AutoOpenMap();
                 // §7: the REPORT says what happened in the author's words, and the exception behind it
                 // goes to the log - the one place a stack trace helps and the only place it belongs.
-                if (Ready.Failure != null)
+                //
+                // An ImportRefusedException is the EXPECTED answer for a file the reader cannot use (a
+                // malformed .glb, a non-indexed primitive): it is caught, it is already a row, and the
+                // panel shows the friendly sentence. Logging it at ERROR with a stack made a handled
+                // user-file refusal look like a crash in the tool. One warning line, no stack. Anything
+                // else really is unexpected and keeps both.
+                if (Ready.Failure is ImportRefusedException)
+                    Debug.LogWarning("[ContentTool] Model Doctor: '" + Path + "' refused - " +
+                                     Ready.Failure.Message);
+                else if (Ready.Failure != null)
                     Debug.LogError("[ContentTool] Model Doctor: '" + Path + "' - " +
                                    Ready.Failure.GetType().Name + ": " + Ready.Failure.Message + "\n" +
                                    Ready.Failure.StackTrace);
