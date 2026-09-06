@@ -70,10 +70,22 @@ namespace Morgott.ContentTool.Dev
         internal ReplacementPreflightResult Ready;
         internal string Message = "";
 
+        /// <summary>How much of a variant name the picked-slot header and the browser's variant button
+        /// show. ONE number for both: at 18 the header cut "Human / NJ_Technician1" (22 chars) down to
+        /// the string its neighbours cut to, and two different armour sets read identically.</summary>
+        private const int VariantChars = 24;
+
         // ---------------------------------------------------------------- SHIP
         /// <summary>The project name the author is editing. Seeded from the resolved target on the first
-        /// Layout pass that has one, then owned by the text field.</summary>
+        /// Layout pass that has one, RE-seeded when the picked target changes, then owned by the text
+        /// field.</summary>
         private string projectName = "";
+        /// <summary>The default last written into <see cref="projectName"/>. A name the author TYPED is
+        /// never overwritten, and this is how "typed" is told from "still the seed": the box is re-seeded
+        /// only while it still holds exactly this. Before gap 2 one target per manager made a stale seed
+        /// impossible; now switching Human / AN_Assault1 to Human / PX_HeavyStarting keeps the box on the
+        /// PREVIOUS target's default and ships the new mesh under the old project name.</summary>
+        private string seededName = "";
         /// <summary>The two-frame gate. The bake blocks the main thread for seconds, so the label has to be
         /// PAINTED before it starts: Tick N+1 arms, Draw paints during Repaint, Tick N+2 runs. SlimPanel's
         /// volatile-snapshot pattern does not apply here - no worker changes state between Layout and
@@ -1584,11 +1596,14 @@ namespace Morgott.ContentTool.Dev
             GUILayout.BeginHorizontal();
             GUILayout.Label("project", GUILayout.Width(56f));
             // Seeded on LAYOUT only: a value that changed between Layout and Repaint is how an IMGUI pass ends
-            // up unbalanced.
+            // up unbalanced. RE-seeded when the picked target changes, but only while the box is empty or
+            // still holds the default we put there - a typed name survives every retarget.
             var name = (projectName ?? "").Trim();
-            if (Event.current.type == EventType.Layout && name.Length == 0 &&
-                Prototype != null && Prototype.ShippedAsset != null)
-                projectName = name = ProjectScaffold.DefaultName(Prototype.ShippedAsset);
+            string wanted = Prototype == null || Prototype.ShippedAsset == null
+                                ? null : ProjectScaffold.DefaultName(Prototype.ShippedAsset);
+            if (Event.current.type == EventType.Layout && wanted != null && wanted != name &&
+                (name.Length == 0 || name == seededName))
+                projectName = name = seededName = wanted;
             projectName = GUILayout.TextField(projectName ?? "", GUILayout.Width(220f));
             GUILayout.Label(Prototype != null && Prototype.ShippedBundle != null
                             ? "target " + Prototype.ShippedBundle + " / " + Prototype.ShippedAsset
@@ -1666,7 +1681,8 @@ namespace Morgott.ContentTool.Dev
             GUI.enabled = true;
             GUILayout.Label("|", GUILayout.Width(8f));
             GUILayout.Label(BenchList.Elide(Prototype == null || Prototype.Variant == null
-                                            ? "-" : Prototype.Variant.Name, 18), GUILayout.Width(120f));
+                                            ? "-" : Prototype.Variant.Name, VariantChars),
+                            GUILayout.Width(160f));
             GUILayout.Label("|", GUILayout.Width(8f));
             GUILayout.Label(BenchList.Elide(Prototype == null ? "-" : Prototype.SlotDefName ?? "-", 22));
             if (Ready != null && Ready.Source != null && Ready.Source.AliasesApplied > 0)
@@ -1811,7 +1827,7 @@ namespace Morgott.ContentTool.Dev
             // Refused while a rebuild is in flight: two overlapping rebuilds leave the bay showing a
             // mix of two prototypes and neither slot list is worth reading.
             GUI.enabled = !protoBusy;
-            if (GUILayout.Button((here ? "      * " : "        ") + BenchList.Elide(v.Name, 24) +
+            if (GUILayout.Button((here ? "      * " : "        ") + BenchList.Elide(v.Name, VariantChars) +
                                  "   " + v.Slots.Count + " slot(s)", GUILayout.Width(340f)))
             {
                 PrototypeRecord rec = r; PrototypeVariant var = v;
@@ -2082,7 +2098,7 @@ namespace Morgott.ContentTool.Dev
             shipProto = null;
             shipTargetWas = null;
             shipRenderer = null;
-            projectName = "";
+            projectName = seededName = "";
             shipPhase = shipResult = shipPath = shipTail = "";
         }
     }
