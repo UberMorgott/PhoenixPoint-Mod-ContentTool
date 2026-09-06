@@ -303,9 +303,10 @@ namespace Morgott.ContentTool.Dev
         /// performs is what the poll then reads.</summary>
         private static string Ship()
         {
-            if (!FitBench.DoctorShowing)
-                return "refused: the bench's MODEL DOCTOR tab is not open and painting - a press arms for " +
-                       "two frames and cancels itself when its own section is not on screen.";
+            if (!FitBench.DoctorShowing || !FitBench.Doctor.ShipSectionShowing)
+                return "refused: the bench's MODEL DOCTOR tab is not open with its SHIP section on screen " +
+                       "(a file or prototype browser takes the whole area) - a press arms for two frames " +
+                       "and cancels itself when that section is not painted.";
             // The BUTTON's condition, asked of the Doctor rather than restated here - a second copy of it
             // would let this scenario press something the author cannot.
             string why = FitBench.Doctor.ShipRefusal;
@@ -343,21 +344,34 @@ namespace Morgott.ContentTool.Dev
                 Bind(Path.GetFullPath(producedRoot),
                      ContentProject.LoadDeclared(producedRoot).Id);
                 captured = LifecycleJob.Capture(root);
+                // A PROJECT THAT DID NOT EXIST A MOMENT AGO is not in the selector's list, and the label
+                // would read "(none)" over a panel whose buttons already act on it. The enumeration itself
+                // happens in `Drain`, outside drawing, like every other one.
+                rescan = true;
 
                 LifecycleView.Row row = view.Of("Apply");
                 row.Verdict = applyLine;
-                // The SAME two rules the pump applies to a dashboard Apply - the carrier's disposition
-                // mapping and the one outcome rule - so a row filled by SHIP and a row filled by the panel
-                // cannot disagree about what `Resident` means.
-                row.Outcome = LifecycleState.Outcome(GateOutcome.None, Route7.Disposition(how));
-                row.Installation = how == Route7.ApplyDisposition.Resident
+                // THE ROW IS ABOUT THE PROJECT, `how` is about the SLOT SHIP named. `ApplyRoot` narrows the
+                // disposition to `forBundle` when a bundle is asked for (Route7.cs:594-:601), so a project
+                // carrying a second target - which is exactly what appending a row to an existing project
+                // makes - would have published this slot's PASS over a sibling that was refused, and missed
+                // a restart the sibling needs. The row asks the same conservative aggregate the
+                // console-shaped call gets; the Doctor keeps `how` for its own S1/S2 sentence about the one
+                // slot it shipped.
+                Route7.ApplyDisposition project = Route7.Aggregate(targets);
+                // ...and then the SAME two rules the pump applies to a dashboard Apply - the carrier's
+                // disposition mapping and the one outcome rule - so a row filled by SHIP and a row filled
+                // by the panel cannot disagree about what `Resident` means.
+                row.Outcome = LifecycleState.Outcome(GateOutcome.None, Route7.Disposition(project));
+                row.Installation = project == Route7.ApplyDisposition.Resident
                                  ? StageText.RestartRequired : null;
                 // `Starts` stays 0 on purpose: it counts the times THIS panel entered a stage, and the
                 // panel entered none. The row is a receipt of an apply that happened elsewhere.
                 row.Freshness = LifecycleState.Fresh(LifecycleJob.Look(captured));
                 // S1 IS A FACT ABOUT THE SESSION, so it is set here for the same reason the pump sets it:
-                // a Verify after this press must be refused R30, whichever door the apply came through.
-                if (how == Route7.ApplyDisposition.Resident) ctx.RestartRequired = true;
+                // a Verify after this press must be refused R30, whichever door the apply came through -
+                // and for ANY target that needs it, not only the slot SHIP named.
+                if (project == Route7.ApplyDisposition.Resident) ctx.RestartRequired = true;
                 view.S1 = Lines(targets, Route7.ApplyDisposition.Resident);
                 view.S2 = Lines(targets, Route7.ApplyDisposition.Redirected);
                 log = applyLine;
@@ -468,6 +482,10 @@ namespace Morgott.ContentTool.Dev
                 // on, and it is a carrier value (`RestartRequired`), never a word read off the verdict. A
                 // stage that did not report it clears the column rather than inheriting the last one's.
                 row.Installation = now.RestartRequired ? StageText.RestartRequired : null;
+                // A NEW APPLY REPLACES THE OLD ONE'S INSTALLATION LINES, and this producer publishes none:
+                // the carrier has one verdict, not a list. Leaving a SHIP handoff's S1/S2 standing beside a
+                // later apply would leave the section describing an install that has since been redone.
+                if (now.Stage == "Apply") view.S1 = view.S2 = null;
             }
             // The producer's gate log when it published one - Verify's FAIL/VOID lines are what its
             // verdict points at - and the verdict itself for every stage whose verdict is the whole of
@@ -734,6 +752,10 @@ namespace Morgott.ContentTool.Dev
             LifecycleJob.Look(null);
             chain = null;
             log = null;
+            // ...AND THE INSTALLATION LINES WITH THEM. They are the previous project's per-target result,
+            // and a `Snapshot("s1s2")` that still answers with them after the selection moved is a section
+            // describing an install this panel is no longer about.
+            view.S1 = view.S2 = null;
             foreach (LifecycleView.Row r in view.Rows)
             {
                 r.Verdict = null; r.Installation = null; r.Starts = 0;

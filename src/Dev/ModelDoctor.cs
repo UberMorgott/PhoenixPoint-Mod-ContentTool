@@ -642,6 +642,13 @@ namespace Morgott.ContentTool.Dev
             }
         }
 
+        /// <summary>Whether <see cref="Draw"/> reaches the SHIP section at all this frame. `ShipRefusal`
+        /// answers the BUTTON's condition; this answers whether the button is on screen to be pressed -
+        /// the two browsers take the whole content area and return before it. The arming gate waits for a
+        /// PAINT of that section, so a press enqueued behind one of them cancels itself two frames later,
+        /// and the acceptance seam has to refuse rather than report an accepted press.</summary>
+        internal bool ShipSectionShowing { get { return !browser.Open && !browserOpen; } }
+
         /// <summary>The bench's half of the handoff, read ONCE: a successful SHIP already gave the panel
         /// its project and its Apply result, and this says the tab may now move. Taken in Update, after
         /// `DoShip` returned and `shipPending` had already gone false - the tab never changes inside a GUI

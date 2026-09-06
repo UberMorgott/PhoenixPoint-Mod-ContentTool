@@ -338,6 +338,27 @@ namespace Morgott.ContentTool.Bake
         /// Both consumers ask here - the lifecycle Apply producer and the Doctor's SHIP handoff - because
         /// two copies of "Resident is a Success" is exactly how one path publishes PASS for a state the
         /// other calls a refusal.</summary>
+        /// <summary>What the whole PROJECT's apply came to, from the per-target list - CONSERVATIVELY: any
+        /// refusal survives, then any restart-required target (that is the one the author has to act on),
+        /// and a blanket "redirected LIVE" only when every target was. An empty list is a refusal, because
+        /// nothing was installed.
+        ///
+        /// EXTRACTED because a second consumer arrived. `Applied` computes it for the console-shaped call
+        /// that names no bundle, and the dashboard needs the same answer for a SHIP that DID name one:
+        /// `how` then speaks for that ONE slot (<c>:594</c>-<c>:601</c>), and a five-row panel showing it as
+        /// the project's Apply would publish PASS over a sibling target that was refused, or miss a restart
+        /// another target needs.</summary>
+        internal static ApplyDisposition Aggregate(IList<TargetInstall> targets)
+        {
+            ApplyDisposition how = ApplyDisposition.Refused;
+            if (targets == null) return how;
+            foreach (TargetInstall t in targets)
+                if (t.Outcome == ApplyDisposition.Refused) { how = ApplyDisposition.Refused; break; }
+                else if (t.Outcome == ApplyDisposition.Resident) how = ApplyDisposition.Resident;
+                else if (how != ApplyDisposition.Resident) how = ApplyDisposition.Redirected;
+            return how;
+        }
+
         internal static BakeDisposition Disposition(ApplyDisposition how)
         {
             return how == ApplyDisposition.BakeFailed ? BakeDisposition.Failed
@@ -599,18 +620,10 @@ namespace Morgott.ContentTool.Bake
                     if (string.Equals(t.Bundle, forBundle, StringComparison.OrdinalIgnoreCase))
                     { how = t.Outcome; break; }
             }
-            else if (!asked)
-            {
-                // NO BUNDLE NAMED, so speak for the whole project - CONSERVATIVELY. `how` used to stay at
-                // its initial Refused here (it was only ever overwritten inside `if (ours)`), so the
-                // console-shaped call reported a refusal that did not happen. Any refusal survives; then any
-                // restart-required target, because that is the one the author has to act on; a blanket
-                // Redirected only when every target was.
-                foreach (TargetInstall t in targets)
-                    if (t.Outcome == ApplyDisposition.Refused) { how = ApplyDisposition.Refused; break; }
-                    else if (t.Outcome == ApplyDisposition.Resident) how = ApplyDisposition.Resident;
-                    else if (how != ApplyDisposition.Resident) how = ApplyDisposition.Redirected;
-            }
+            // NO BUNDLE NAMED, so speak for the whole project - the shared conservative rule. `how` used to
+            // stay at its initial Refused here (it was only ever overwritten inside `if (ours)`), so the
+            // console-shaped call reported a refusal that did not happen.
+            else if (!asked) how = Aggregate(targets);
             return pre.ToString();
         }
 
