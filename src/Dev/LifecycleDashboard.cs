@@ -94,7 +94,7 @@ namespace Morgott.ContentTool.Dev
         {
             try
             {
-                string refusal = LifecycleState.Admit(stage, Refresh(stage == "All"));
+                string refusal = LifecycleState.Admit(stage, Refresh(stage == "All", true));
                 // THE PANEL'S LINE, taken here because a button press ends in this return too: an admission
                 // refusal that only went back down the wire left the panel silent about the press.
                 if (refusal != null) { message = refusal; return Started(false, 0, refusal); }
@@ -899,7 +899,11 @@ namespace Morgott.ContentTool.Dev
         /// list went stale with it. The freshness observation is taken from THAT capture for the same
         /// reason, one project at a time.
         /// </summary>
-        private static LifecycleState.Admission Refresh(bool inChain)
+        /// <param name="atPress">this is a PRESS - a button or the RPC seam - so the paint gate (R39) is
+        /// asked. The pump passes false: a chain already running keeps the closed-window policy, which
+        /// parks the blocking segment and resumes it when the tab comes back (LifecycleJob.Tick), and
+        /// refusing mid-chain would break that on purpose.</param>
+        private static LifecycleState.Admission Refresh(bool inChain, bool atPress = false)
         {
             LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
             ctx.Selection = string.IsNullOrEmpty(root) ? LifecycleState.Selection.None
@@ -913,6 +917,11 @@ namespace Morgott.ContentTool.Dev
             ctx.LegacyDiskActive = Route7.LegacyDiskActive(id);
             ctx.WriteOutsideRoots = OutsideRoots();
             ctx.InRunAll = inChain;
+            // THE SAME EXPRESSION THE PUMP DRAINS PARKED WORK WITH (`panelReady && Painted`, :511), so a
+            // press this admits is one the pump can serve. `wasReady` is last frame's `panelReady`: the
+            // press is drained from Update and the panel paints later in the frame, which is exactly the
+            // one-frame window `Painted` allows.
+            ctx.PaintUnavailable = atPress && !(wasReady && Painted);
             return ctx;
         }
 

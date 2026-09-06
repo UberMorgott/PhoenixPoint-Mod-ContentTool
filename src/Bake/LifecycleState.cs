@@ -511,6 +511,12 @@ namespace Morgott.ContentTool.Bake
             /// <summary>The apply would write somewhere that is neither the mod-manager apply path nor the
             /// author's own output. R34. Inverted on purpose: the default is "allowed".</summary>
             internal bool WriteOutsideRoots { get; set; }
+            /// <summary>The Lifecycle tab is NOT open and painting, so a blocking main segment would park
+            /// with nothing to release it. R39. Inverted on purpose, like <see cref="WriteOutsideRoots"/>:
+            /// the default is "the panel is there", and only the seam's own press fills this in - a chain
+            /// already running keeps the closed-window policy (LifecycleJob.Tick), which parks and
+            /// resumes.</summary>
+            internal bool PaintUnavailable { get; set; }
             /// <summary>How old the PATCHED COPIES are - <see cref="Fresh"/> of the caller's observation.
             /// Read by Verify alone; Apply re-bakes them itself and Bake does not read them.</summary>
             internal Freshness Copies { get; set; }
@@ -651,6 +657,14 @@ namespace Morgott.ContentTool.Bake
             if (ctx == null || ctx.Selection == Selection.None) return StageText.R25();
             if (ctx.Selection == Selection.Unavailable) return StageText.R27();
             if (!string.IsNullOrEmpty(ctx.RunningStage)) return StageText.R26(ctx.RunningStage);
+            // A RUN NOBODY CAN PAINT PARKS FOREVER, and it looks exactly like a hang. Bake, Apply and
+            // Verify each park a BLOCKING main segment that waits for the open, painted Lifecycle tab
+            // (LifecycleJob.cs:182/:264/:362, drained by Tick(panelReady && Painted)), so a `Run("All")`
+            // pressed over the wire from the main menu reached `parkedForPaint:true` with no word at all
+            // (2026-09-06, trap T2). Asked before every per-stage arm, because none of them can be
+            // reached without a panel either. It is NOT the parked path's replacement: a chain already
+            // running keeps the closed-window policy, and only a press fills this field in.
+            if (ctx.PaintUnavailable && NeedsPaint(stage)) return StageText.R39(stage);
 
             switch (stage)
             {
@@ -705,6 +719,13 @@ namespace Morgott.ContentTool.Bake
                     // arm either: it is only ever reached when nothing stopped the chain before it.
                     return null;
             }
+        }
+
+        /// <summary>The stages whose producer parks a BLOCKING main segment - the three that call
+        /// <c>Park(..., needsPaint: true)</c>, plus `All`, which contains them.</summary>
+        private static bool NeedsPaint(string stage)
+        {
+            return stage == "Bake" || stage == "Apply" || stage == "Verify" || stage == "All";
         }
 
         /// <summary>The accepted tokens, exactly.</summary>

@@ -643,6 +643,31 @@ internal static class LifecycleTests
                         "neither field set admits Apply - R36 and R34 are facts the caller measured, " +
                         "never a default");
 
+        // ---- R39: A RUN NOBODY CAN PAINT. Bake, Apply and Verify each park a BLOCKING main segment that
+        // only an open, painted Lifecycle tab drains, so `Run("All")` pressed from the main menu was
+        // ADMITTED and then sat at `parkedForPaint:true` with no word at all (2026-09-06, trap T2).
+        LifecycleState.Admission blind = new LifecycleState.Admission
+        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo", Copies = Freshness.Fresh,
+          PaintUnavailable = true };
+        checks += Check(LifecycleState.Admit("All", blind) == StageText.R39("All") &&
+                        LifecycleState.Admit("Bake", blind) == StageText.R39("Bake") &&
+                        LifecycleState.Admit("Apply", blind) == StageText.R39("Apply") &&
+                        LifecycleState.Admit("Verify", blind) == StageText.R39("Verify"),
+                        "every stage that parks a blocking segment is REFUSED when nothing can paint it");
+        checks += Check(StageText.R39("All").IndexOf("LIFECYCLE tab", StringComparison.Ordinal) > 0,
+                        "and the refusal names the way in, which is the whole point of it: " +
+                        StageText.R39("All"));
+        checks += Check(LifecycleState.Admit("Validate", blind) == null &&
+                        LifecycleState.Admit("Package", blind) == null,
+                        "the two worker-only stages park nothing and are unaffected");
+        checks += Check(LifecycleState.Admit("Bake", ok) == null,
+                        "the default is 'the panel is there' - R39 is a fact the caller measured, never " +
+                        "a default (the same shape as R34/R36)");
+        checks += Check(LifecycleState.Admit("Bake", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, RunningStage = "Bake",
+                          PaintUnavailable = true }) == StageText.R26("Bake"),
+                        "R26 outranks R39 - a run already holding the seam is the older fact");
+
         // ---- The ONE freshness observation. Route7.cs:308-:310 computes `fresh && Directory.Exists(patched)`
         // and then clears it for every declared copy that is absent; `HaveAll` IS that expression and
         // ApplyProject now asks it here, so the panel and the checkbox cannot drift by a single term.

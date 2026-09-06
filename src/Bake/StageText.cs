@@ -227,6 +227,16 @@ namespace Morgott.ContentTool.Bake
 
         internal static string R36() { return "Lifecycle: Apply blocked while legacy disk patching is active."; }
 
+        /// <summary>NEW. The one thing <see cref="WaitingForPaint"/> could never say: that word is what a
+        /// run PARKED behind an open panel reports, and a caller with no panel at all never sees it.
+        /// It names the way in, because the tab is not reachable from where the press came from.</summary>
+        internal static string R39(string stage)
+        {
+            return "Lifecycle: " + stage + " blocked; its main-thread work has to run behind an OPEN, " +
+                   "painted panel. Open the bench (ct_bench open, from a loaded geoscape) and select the " +
+                   "LIFECYCLE tab, then run it again.";
+        }
+
         internal static string R37(string dir)
         {
             return "ct_project: '" + dir + "' is already being written by another run - nothing was " +
