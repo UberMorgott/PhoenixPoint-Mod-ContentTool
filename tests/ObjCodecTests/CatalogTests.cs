@@ -206,6 +206,20 @@ internal static class CatalogTests
         checks += Check(PrototypeCatalog.Representatives(null).Count == 0,
                         "a manager nothing points at has no representative");
 
+        // A def whose template read THREW carries the sentinel and NEVER merges - not with another
+        // failed def, and not with the genuinely part-less ones. Without it the harvest's catch handed
+        // every broken def the same empty signature and one bucket swallowed the lot.
+        var broken = new Dictionary<string, IList<string>>(StringComparer.Ordinal)
+        {
+            { "A_CharacterTemplateDef", new string[0] },
+            { "B_CharacterTemplateDef", new[] { PrototypeCatalog.FailedRead("B_CharacterTemplateDef") } },
+            { "C_CharacterTemplateDef", new[] { "AN_Assault_Torso_BodyPartDef",
+                                                PrototypeCatalog.FailedRead("C_CharacterTemplateDef") } },
+            { "D_CharacterTemplateDef", new[] { "AN_Assault_Torso_BodyPartDef" } }
+        };
+        checks += Check(PrototypeCatalog.Representatives(broken).Count == 4,
+                        "a failed bodypart read never merges - with another failure or with a part-less def");
+
         var gapRig = new RigScan { RigName = "GAP2_Rig_Ready" };
         gapRig.Bones.Add(new PrototypeBone { Name = "GAP2_Rig_Ready", Parent = null, Path = "GAP2_Rig_Ready" });
         gapRig.Bones.Add(new PrototypeBone { Name = "Hips", Parent = "GAP2_Rig_Ready",

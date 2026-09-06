@@ -100,6 +100,7 @@ namespace Morgott.ContentTool.Dev
             // below (slots, clips, body state) touch live Unity objects and run only for survivors.
             var candidates = new Dictionary<AddonsManagerDef, IDictionary<string, IList<string>>>();
             var defsByName = new Dictionary<string, TacCharacterDef>(StringComparer.Ordinal);
+            var partsByDef = new Dictionary<string, List<TacticalItemDef>>(StringComparer.Ordinal);
             foreach (TacCharacterDef d in repo.GetAllDefs<TacCharacterDef>())
             {
                 if (d == null || d.name == null) continue;
@@ -109,7 +110,10 @@ namespace Morgott.ContentTool.Dev
                 IDictionary<string, IList<string>> mine;
                 if (!candidates.TryGetValue(m, out mine))
                     candidates[m] = mine = new Dictionary<string, IList<string>>(StringComparer.Ordinal);
-                mine[d.name] = BodypartNames(d);
+                bool failed;
+                List<TacticalItemDef> parts = Bodyparts(d, out failed);
+                mine[d.name] = BodypartNames(parts, failed, d.name);
+                partsByDef[d.name] = parts;
                 defsByName[d.name] = d;
             }
 
@@ -142,6 +146,23 @@ namespace Morgott.ContentTool.Dev
                     rig.Managers.Add(m.name);
                 }
 
+                // ALSO once per MANAGER: the animator, its controller and the clips behind it belong to
+                // the manager's rig, not to a representative - and Unity REBUILDS the array every time
+                // `animationClips` is read. Per-representative, the 166-variant Human manager paid for
+                // that rebuild 166 times, even in the runs where the anim-actions arm wins.
+                RuntimeAnimatorController controller = null;
+                if (m.Rig != null)
+                    try
+                    {
+                        Animator animator = m.Rig.GetComponent<Animator>();
+                        controller = animator == null ? null : animator.runtimeAnimatorController;
+                    }
+                    catch (Exception) { }
+                var fromController = new List<AnimationClip>();
+                try { if (controller != null) fromController.AddRange(controller.animationClips); }
+                catch (Exception) { }
+                IList<string> controllerNames = Names(fromController);
+
                 IDictionary<string, IList<string>> wearers;
                 candidates.TryGetValue(m, out wearers);
                 IList<string> reps = PrototypeCatalog.Representatives(wearers);
@@ -167,8 +188,10 @@ namespace Morgott.ContentTool.Dev
                     if (rig == null) continue;   // Dropped / FallDown / ... - nothing to verify against
                     if (rep == null) continue;
 
-                    ReadSlots(rep, scan);
-                    ReadClips(rep, m, scan);
+                    List<TacticalItemDef> parts;
+                    partsByDef.TryGetValue(rep.name, out parts);
+                    ReadSlots(parts, scan);
+                    ReadClips(rep, m, scan, controller, fromController, controllerNames);
                     CharacterBodyStateDef body = null;
                     try { body = rep.ComponentSetDef.GetComponentDef<CharacterBodyStateDef>(); }
                     catch (Exception) { }
@@ -180,18 +203,33 @@ namespace Morgott.ContentTool.Dev
             Census = Line(managerCount, rigged, rigs, transforms, Records.Count);
         }
 
-        /// <summary>The template bodypart names of one character def - the whole of what makes two
-        /// defs on ONE manager different shipped targets. Never throws: GetTemplateBodyparts Concats
-        /// several def arrays (CreatureBuild.cs:366) and one broken def must not cost the catalogue.</summary>
-        private static IList<string> BodypartNames(TacCharacterDef d)
+        /// <summary>The template bodyparts of one character def, materialized ONCE - the variant key is
+        /// read off them and so are the slots. Never throws: GetTemplateBodyparts Concats several def
+        /// arrays (CreatureBuild.cs:366) and one broken def must not cost the catalogue. A read that
+        /// throws half way returns what it got and sets <paramref name="failed"/>.</summary>
+        private static List<TacticalItemDef> Bodyparts(TacCharacterDef d, out bool failed)
         {
-            var names = new List<string>();
+            var parts = new List<TacticalItemDef>();
+            failed = false;
             try
             {
                 foreach (TacticalItemDef part in d.GetTemplateBodyparts())
-                    if (part != null) names.Add(part.name);
+                    if (part != null) parts.Add(part);
             }
-            catch (Exception) { }
+            catch (Exception) { failed = true; }
+            return parts;
+        }
+
+        /// <summary>The template bodypart names of one character def - the whole of what makes two defs
+        /// on ONE manager different shipped targets. A FAILED read carries a per-def sentinel, so a
+        /// partial (or empty) list can never merge with another def's: without it every def whose read
+        /// threw collapsed into one bucket together with the genuinely part-less ones, and the armour
+        /// sets vanished silently - the very thing gap 2 was closed to stop.</summary>
+        private static IList<string> BodypartNames(List<TacticalItemDef> parts, bool failed, string defName)
+        {
+            var names = new List<string>(parts.Count + 1);
+            foreach (TacticalItemDef part in parts) names.Add(part.name);
+            if (failed) names.Add(PrototypeCatalog.FailedRead(defName));
             return names;
         }
 
@@ -227,13 +265,14 @@ namespace Morgott.ContentTool.Dev
         /// ponytail: an addon may declare several RequiredSlotBinds and the game takes the first
         /// AVAILABLE one (AddonDef.cs:68), so this can over-list. An over-listed slot simply reads
         /// "slot visual unavailable" - the honest answer - rather than inventing a target.</summary>
-        private static void ReadSlots(TacCharacterDef rep, ManagerScan scan)
+        private static void ReadSlots(List<TacticalItemDef> parts, ManagerScan scan)
         {
             var seen = new HashSet<string>(StringComparer.Ordinal);
             try
             {
-                foreach (TacticalItemDef part in rep.GetTemplateBodyparts())
+                for (int i = 0; parts != null && i < parts.Count; i++)
                 {
+                    TacticalItemDef part = parts[i];
                     if (part == null || part.RequiredSlotBinds == null) continue;
                     foreach (AddonDef.RequiredSlotBind bind in part.RequiredSlotBinds)
                         if (bind.RequiredSlot != null && seen.Add(bind.RequiredSlot.name))
@@ -249,20 +288,16 @@ namespace Morgott.ContentTool.Dev
         /// rule's business and are proven offline. The anim-actions arm is the def's own clips
         /// (<c>GetAllClips</c> is TacActorAnimActionBaseDef's abstract member,
         /// <c>TacActorAnimActionBaseDef.cs:12</c>); the controller arm is the very controller
-        /// CommonCharacterUtils.cs:41-42 copies onto the live rig.</summary>
-        private void ReadClips(TacCharacterDef rep, AddonsManagerDef m, ManagerScan scan)
+        /// CommonCharacterUtils.cs:41-42 copies onto the live rig - read ONCE per manager by the caller
+        /// and handed in, because a get on <c>animationClips</c> rebuilds the array.</summary>
+        private void ReadClips(TacCharacterDef rep, AddonsManagerDef m, ManagerScan scan,
+                               RuntimeAnimatorController controller, List<AnimationClip> fromController,
+                               IList<string> controllerNames)
         {
             TacActorAnimActionsDef anim = null;
             try { anim = rep.GetAnimActionDef(); } catch (Exception) { }
             scan.AnimActionsDef = anim == null ? null : anim.name;
 
-            RuntimeAnimatorController controller = null;
-            try
-            {
-                Animator animator = m.Rig.GetComponent<Animator>();
-                controller = animator == null ? null : animator.runtimeAnimatorController;
-            }
-            catch (Exception) { }
             scan.ControllerName = controller == null ? null : controller.name;
 
             var character = m as CharacterAddonsManagerDef;
@@ -283,12 +318,8 @@ namespace Morgott.ContentTool.Dev
                 }
             }
 
-            var fromController = new List<AnimationClip>();
-            try { if (controller != null) fromController.AddRange(controller.animationClips); }
-            catch (Exception) { }
-
             PrototypeCatalog.ClipSource source;
-            IList<string> names = PrototypeCatalog.ResolveClips(Names(fromActions), Names(fromController),
+            IList<string> names = PrototypeCatalog.ResolveClips(Names(fromActions), controllerNames,
                                                                out source);
             scan.ClipNames.AddRange(names);
             scan.ClipSource = source == PrototypeCatalog.ClipSource.Controller

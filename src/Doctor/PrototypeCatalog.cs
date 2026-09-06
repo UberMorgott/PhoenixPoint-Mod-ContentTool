@@ -183,6 +183,16 @@ namespace Morgott.ContentTool.Doctor
             return kept;
         }
 
+        /// <summary>The bodypart name a def whose template read THREW carries instead of the parts it
+        /// never got. Per-def and unspellable ('\0' cannot occur in a def name), so a failed read gives
+        /// a signature of its own: a partial or empty list must never merge with another def's, or every
+        /// broken def collapses into one bucket with the genuinely part-less ones and its armour set
+        /// disappears from the picker.</summary>
+        internal static string FailedRead(string defName)
+        {
+            return "\0" + defName;
+        }
+
         /// <summary>A bodypart SET, order-blind and duplicate-blind: what two templates wear, not the
         /// order their def happens to Concat it in.</summary>
         private static string PartSignature(IList<string> names)
