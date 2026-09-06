@@ -728,7 +728,7 @@ namespace Morgott.ContentTool.Dev
         {
             if (proto == null || shownVariant == null || harvest == null) return null;
             if (animActions != proto.Actions) return null;
-            try { return harvest.Clips(shownVariant.ManagerName); }
+            try { return harvest.Clips(shownVariant.RepresentativeCharacter); }
             catch (Exception) { return null; }
         }
 

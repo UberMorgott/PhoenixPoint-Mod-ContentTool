@@ -184,6 +184,47 @@ internal static class CatalogTests
         checks += Check(turrets.RigPrefabNames.Count == 1 && turrets.Variants.Count == 3,
                         "the three tech turrets are one prefab and three variants");
 
+        // ---- GAP 2. One AddonsManagerDef is shared by every human template, and the shipped bundle
+        // a slot resolves to comes from the parts that template WEARS - so keeping one
+        // representative per manager put every armour set but the ordinal-lowest, px_heavy included,
+        // out of the wizard's reach. The rule: one representative per DISTINCT template bodypart
+        // set, ordinal-lowest name winning inside a set, ordinal order out. AN_Assault2 below wears
+        // AN_Assault1's parts in a different ORDER, which is the same set and not a second variant.
+        var wearers = new Dictionary<string, IList<string>>(StringComparer.Ordinal)
+        {
+            { "PX_Heavy1_CharacterTemplateDef",
+              new[] { "PX_Heavy_Torso_BodyPartDef", "PX_Heavy_Legs_BodyPartDef" } },
+            { "AN_Assault1_CharacterTemplateDef",
+              new[] { "AN_Assault_Legs_BodyPartDef", "AN_Assault_Torso_BodyPartDef" } },
+            { "AN_Assault2_CharacterTemplateDef",
+              new[] { "AN_Assault_Torso_BodyPartDef", "AN_Assault_Legs_BodyPartDef" } }
+        };
+        IList<string> reps = PrototypeCatalog.Representatives(wearers);
+        checks += Check(reps.Count == 2 && reps[0] == "AN_Assault1_CharacterTemplateDef" &&
+                        reps[1] == "PX_Heavy1_CharacterTemplateDef",
+                        "one representative per distinct bodypart set, ordinal-lowest name, ordinal order");
+        checks += Check(PrototypeCatalog.Representatives(null).Count == 0,
+                        "a manager nothing points at has no representative");
+
+        var gapRig = new RigScan { RigName = "GAP2_Rig_Ready" };
+        gapRig.Bones.Add(new PrototypeBone { Name = "GAP2_Rig_Ready", Parent = null, Path = "GAP2_Rig_Ready" });
+        gapRig.Bones.Add(new PrototypeBone { Name = "Hips", Parent = "GAP2_Rig_Ready",
+                                             Path = "GAP2_Rig_Ready/Hips" });
+        var sets = new List<ManagerScan>();
+        foreach (string rep in reps)
+            sets.Add(new ManagerScan { ManagerName = "Human_AddonsManagerDef", RigName = gapRig.RigName,
+                                       HasRig = true, RepresentativeCharacter = rep });
+        PrototypeRecord shared = PrototypeCatalog.Build(new List<RigScan> { gapRig }, sets)[0];
+        checks += Check(shared.Variants.Count == 2,
+                        "two armour sets under one manager are two variants, not " + shared.Variants.Count);
+        checks += Check(shared.Variants[0].Name == "Human / AN_Assault1" &&
+                        shared.Variants[1].Name == "Human / PX_Heavy1",
+                        "variants of one manager are named apart by their representative");
+        checks += Check(shared.Variants[1].RepresentativeCharacter == "PX_Heavy1_CharacterTemplateDef",
+                        "each variant keeps the representative the bay has to stand up");
+        checks += Check(shared.DisplayName == "Human",
+                        "the RECORD keeps the manager's bare name - it holds every armour set, not one");
+
         // ---- Search: token-AND, case-insensitive, over the record's own vocabulary. Mutoid is a
         // human SLOT, so searching it must land on the human rig rather than invent a rig.
         IList<PrototypeRecord> mutoid = PrototypeCatalog.Search(all, "mutoid");

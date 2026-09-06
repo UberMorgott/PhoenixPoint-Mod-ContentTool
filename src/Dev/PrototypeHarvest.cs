@@ -47,11 +47,16 @@ namespace Morgott.ContentTool.Dev
         /// <c>UnitDisplayData</c> needs, which the name-only scan DTOs cannot carry.</summary>
         private readonly Dictionary<string, TacCharacterDef> representatives =
             new Dictionary<string, TacCharacterDef>(StringComparer.Ordinal);
-        /// <summary>The live clips behind <see cref="ManagerScan.ClipNames"/>, by manager name - what the
-        /// transport binds when a variant's own anim actions catalogue nothing. They live HERE and not on
-        /// <see cref="PrototypeVariant"/>, which stays UnityEngine-free, exactly as the representative
-        /// <c>TacCharacterDef</c>s already do.</summary>
-        private readonly Dictionary<string, AnimationClip[]> clipsByManager =
+        /// <summary>The live clips behind <see cref="ManagerScan.ClipNames"/>, by REPRESENTATIVE character
+        /// name - what the transport binds when a variant's own anim actions catalogue nothing. They live
+        /// HERE and not on <see cref="PrototypeVariant"/>, which stays UnityEngine-free, exactly as the
+        /// representative <c>TacCharacterDef</c>s already do.
+        ///
+        /// Keyed on the representative and NOT on the manager since gap 2: one manager now mints one
+        /// variant per armour set, the anim actions def is the CHARACTER's, and a manager key would let
+        /// the last variant scanned overwrite the clips of every other one. A TacCharacterDef points at
+        /// exactly one AddonsManagerDef, so a representative name is unique across the whole scan.</summary>
+        private readonly Dictionary<string, AnimationClip[]> clipsByCharacter =
             new Dictionary<string, AnimationClip[]>(StringComparer.Ordinal);
         /// <summary>The one line Task 7 diffs against the fixture. Always set, even on failure.</summary>
         internal string Census = "";
@@ -63,11 +68,12 @@ namespace Morgott.ContentTool.Dev
         }
 
         /// <summary>The resolved clip objects for one variant, in the order its ClipNames list carries
-        /// them. Null when the manager was never scanned - shaped exactly like Representative.</summary>
-        internal AnimationClip[] Clips(string managerName)
+        /// them, keyed on the variant's REPRESENTATIVE character. Null when it was never scanned -
+        /// shaped exactly like Representative.</summary>
+        internal AnimationClip[] Clips(string characterName)
         {
             AnimationClip[] clips;
-            return managerName != null && clipsByManager.TryGetValue(managerName, out clips) ? clips : null;
+            return characterName != null && clipsByCharacter.TryGetValue(characterName, out clips) ? clips : null;
         }
 
         /// <summary>Never throws: this is called from a GUI loop and its result is cached even when it
@@ -88,56 +94,81 @@ namespace Morgott.ContentTool.Dev
         {
             DefRepository repo = GameUtl.GameComponent<DefRepository>();
 
-            // Manager -> the character def that will stand in for it. Ordinal-lowest name wins, so a
-            // rescan picks the same one and a variant does not silently change identity between opens.
-            var reps = new Dictionary<AddonsManagerDef, TacCharacterDef>();
+            // Manager -> every character def pointing at it, with the template bodypart names
+            // PrototypeCatalog.Representatives keys the variant on. CHEAP on purpose:
+            // GetTemplateBodyparts reads the def's own arrays, while the per-representative reads
+            // below (slots, clips, body state) touch live Unity objects and run only for survivors.
+            var candidates = new Dictionary<AddonsManagerDef, IDictionary<string, IList<string>>>();
+            var defsByName = new Dictionary<string, TacCharacterDef>(StringComparer.Ordinal);
             foreach (TacCharacterDef d in repo.GetAllDefs<TacCharacterDef>())
             {
-                if (d == null) continue;
+                if (d == null || d.name == null) continue;
                 AddonsManagerDef m = null;
                 try { m = d.GetAddonsMangerDef(); } catch (Exception) { }
                 if (m == null) continue;
-                TacCharacterDef held;
-                if (!reps.TryGetValue(m, out held) || string.CompareOrdinal(d.name, held.name) < 0)
-                    reps[m] = d;
+                IDictionary<string, IList<string>> mine;
+                if (!candidates.TryGetValue(m, out mine))
+                    candidates[m] = mine = new Dictionary<string, IList<string>>(StringComparer.Ordinal);
+                mine[d.name] = BodypartNames(d);
+                defsByName[d.name] = d;
             }
 
             var rigs = new List<RigScan>();
             var byRigName = new Dictionary<string, RigScan>(StringComparer.Ordinal);
             var managers = new List<ManagerScan>();
-            int rigged = 0, transforms = 0;
+            int managerCount = 0, rigged = 0, transforms = 0;
 
             foreach (AddonsManagerDef m in repo.GetAllDefs<AddonsManagerDef>())
             {
                 if (m == null) continue;
-                TacCharacterDef rep;
-                reps.TryGetValue(m, out rep);
-                var scan = new ManagerScan
-                {
-                    ManagerName = m.name,
-                    RootMotionNode = m.RootMotionNodeName,
-                    ResourcePath = m.ResourcePath,
-                    RepresentativeCharacter = rep == null ? null : rep.name,
-                    HasRig = m.Rig != null
-                };
-                managers.Add(scan);
-                if (rep != null) representatives[rep.name] = rep;
-                if (!scan.HasRig) continue;      // Dropped / FallDown / ... - nothing to verify against
+                // THE CENSUS COUNTS MANAGERS, and one manager is now several scans. Counting the scan
+                // list instead would make the assertion against rig-census-2026-09-02.json read as a
+                // DIFFERS the moment gap 2 was closed.
+                managerCount++;
 
-                rigged++;
-                scan.RigName = m.Rig.name;
-                RigScan rig;
-                if (!byRigName.TryGetValue(scan.RigName, out rig))
+                // Once per MANAGER, never once per representative: the rig prefab, its transforms and
+                // the manager list on it are the manager's, and Build merges rigs by their bones.
+                RigScan rig = null;
+                if (m.Rig != null)
                 {
-                    rig = ScanRig(m.Rig);
-                    byRigName[scan.RigName] = rig;
-                    rigs.Add(rig);
-                    transforms += rig.Bones.Count;
+                    rigged++;
+                    if (!byRigName.TryGetValue(m.Rig.name, out rig))
+                    {
+                        rig = ScanRig(m.Rig);
+                        byRigName[m.Rig.name] = rig;
+                        rigs.Add(rig);
+                        transforms += rig.Bones.Count;
+                    }
+                    rig.Managers.Add(m.name);
                 }
-                rig.Managers.Add(scan.ManagerName);
-                if (rep != null) { ReadSlots(rep, scan); ReadClips(rep, m, scan); }
-                if (rep != null)
+
+                IDictionary<string, IList<string>> wearers;
+                candidates.TryGetValue(m, out wearers);
+                IList<string> reps = PrototypeCatalog.Representatives(wearers);
+                // A manager nothing points at is still exactly ONE scan with no representative -
+                // what it was before gap 2, and what keeps the rig-less four out of the picker.
+                if (reps.Count == 0) reps = new string[] { null };
+
+                foreach (string repName in reps)
                 {
+                    TacCharacterDef rep = null;
+                    if (repName != null) defsByName.TryGetValue(repName, out rep);
+                    var scan = new ManagerScan
+                    {
+                        ManagerName = m.name,
+                        RootMotionNode = m.RootMotionNodeName,
+                        ResourcePath = m.ResourcePath,
+                        RepresentativeCharacter = rep == null ? null : rep.name,
+                        HasRig = rig != null,
+                        RigName = rig == null ? null : rig.RigName
+                    };
+                    managers.Add(scan);
+                    if (rep != null) representatives[rep.name] = rep;
+                    if (rig == null) continue;   // Dropped / FallDown / ... - nothing to verify against
+                    if (rep == null) continue;
+
+                    ReadSlots(rep, scan);
+                    ReadClips(rep, m, scan);
                     CharacterBodyStateDef body = null;
                     try { body = rep.ComponentSetDef.GetComponentDef<CharacterBodyStateDef>(); }
                     catch (Exception) { }
@@ -146,7 +177,22 @@ namespace Morgott.ContentTool.Dev
             }
 
             Records = PrototypeCatalog.Build(rigs, managers);
-            Census = Line(managers.Count, rigged, rigs, transforms, Records.Count);
+            Census = Line(managerCount, rigged, rigs, transforms, Records.Count);
+        }
+
+        /// <summary>The template bodypart names of one character def - the whole of what makes two
+        /// defs on ONE manager different shipped targets. Never throws: GetTemplateBodyparts Concats
+        /// several def arrays (CreatureBuild.cs:366) and one broken def must not cost the catalogue.</summary>
+        private static IList<string> BodypartNames(TacCharacterDef d)
+        {
+            var names = new List<string>();
+            try
+            {
+                foreach (TacticalItemDef part in d.GetTemplateBodyparts())
+                    if (part != null) names.Add(part.name);
+            }
+            catch (Exception) { }
+            return names;
         }
 
         /// <summary>Every transform under the rig PREFAB, in the DFS preorder
@@ -250,7 +296,7 @@ namespace Morgott.ContentTool.Dev
                                   : source == PrototypeCatalog.ClipSource.AnimActions
                                         ? scan.AnimActionsDef + " (anim actions)"
                                         : null;
-            clipsByManager[scan.ManagerName] =
+            clipsByCharacter[rep.name] =
                 Objects(source == PrototypeCatalog.ClipSource.Controller ? fromController : fromActions, names);
         }
 

@@ -154,8 +154,48 @@ namespace Morgott.ContentTool.Doctor
             return string.Join("\n", Bindable(inner));
         }
 
-        /// <summary>Group rigs by Signature, attach every manager that uses one of the grouped
-        /// prefabs as a VARIANT, and drop managers with HasRig == false.</summary>
+        /// <summary>THE VARIANT KEY, gap 2: one representative character def per DISTINCT template
+        /// bodypart SET under one AddonsManagerDef, given every def that points at that manager and
+        /// the bodypart names it wears.
+        ///
+        /// Every human template shares Human_AddonsManagerDef, and the shipped mesh a slot resolves
+        /// to comes from the parts the standing template WEARS (ShippedTarget.Resolve keys on the
+        /// live renderer's own sharedMesh.name) - so keeping only the ordinal-lowest def put every
+        /// other armour set's bundle, px_heavy_assets_all.bundle included, out of the wizard's
+        /// reach. Two defs wearing the same parts build the same meshes and would resolve to the
+        /// same pairs, so they stay ONE variant: ordinal-lowest name wins inside a set. The
+        /// survivors come out ordinal-sorted, so a rescan picks the same reps in the same order and
+        /// a variant never silently changes identity between two opens of the browser.</summary>
+        internal static IList<string> Representatives(IDictionary<string, IList<string>> bodypartsByDef)
+        {
+            var best = new Dictionary<string, string>(StringComparer.Ordinal);   // set -> def name
+            if (bodypartsByDef != null)
+                foreach (KeyValuePair<string, IList<string>> pair in bodypartsByDef)
+                {
+                    if (pair.Key == null) continue;
+                    string set = PartSignature(pair.Value);
+                    string held;
+                    if (!best.TryGetValue(set, out held) || string.CompareOrdinal(pair.Key, held) < 0)
+                        best[set] = pair.Key;
+                }
+            var kept = new List<string>(best.Values);
+            kept.Sort(StringComparer.Ordinal);
+            return kept;
+        }
+
+        /// <summary>A bodypart SET, order-blind and duplicate-blind: what two templates wear, not the
+        /// order their def happens to Concat it in.</summary>
+        private static string PartSignature(IList<string> names)
+        {
+            var sorted = new List<string>(Distinct(names));
+            sorted.Sort(StringComparer.Ordinal);
+            return string.Join("\n", sorted);
+        }
+
+        /// <summary>Group rigs by Signature, attach every manager scan that uses one of the grouped
+        /// prefabs as a VARIANT, and drop managers with HasRig == false. ONE SCAN IS ONE VARIANT: a
+        /// manager shared by several representatives (gap 2) arrives as several scans, and they are
+        /// named apart by their representative so the picker can tell two armour sets apart.</summary>
         internal static IList<PrototypeRecord> Build(IList<RigScan> rigs, IList<ManagerScan> managers)
         {
             var records = new List<PrototypeRecord>();
@@ -188,15 +228,25 @@ namespace Morgott.ContentTool.Doctor
                 byRig[rig.RigName] = record;
             }
 
+            var scansPerManager = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = 0; managers != null && i < managers.Count; i++)
+            {
+                string name = managers[i] == null ? null : managers[i].ManagerName;
+                int n;
+                if (name != null) scansPerManager[name] = scansPerManager.TryGetValue(name, out n) ? n + 1 : 1;
+            }
+
             for (int i = 0; managers != null && i < managers.Count; i++)
             {
                 ManagerScan manager = managers[i];
                 PrototypeRecord record;
                 if (manager == null || !manager.HasRig || manager.RigName == null ||
                     !byRig.TryGetValue(manager.RigName, out record)) continue;
+                int scans;
+                scansPerManager.TryGetValue(manager.ManagerName ?? "", out scans);
                 var variant = new PrototypeVariant
                 {
-                    Name = VariantName(manager.ManagerName),
+                    Name = VariantName(manager.ManagerName, manager.RepresentativeCharacter, scans > 1),
                     ManagerName = manager.ManagerName,
                     RepresentativeCharacter = manager.RepresentativeCharacter,
                     BodyStateDef = manager.BodyStateDef,
@@ -214,7 +264,12 @@ namespace Morgott.ContentTool.Doctor
 
             foreach (PrototypeRecord record in records)
             {
-                record.DisplayName = record.Variants.Count > 0 ? record.Variants[0].Name : VariantName(record.Id);
+                // The MANAGER's bare name, never the variant's: since gap 2 a variant of a shared
+                // manager carries its representative in its label, and "Human / AN_Assault1" is a
+                // wrong name for the record that holds every human armour set.
+                record.DisplayName = record.Variants.Count > 0
+                                         ? VariantName(record.Variants[0].ManagerName)
+                                         : VariantName(record.Id);
                 if (record.Category == null) record.Category = CategoryOf(null, record.Id);
                 Term(record, record.DisplayName);
                 Term(record, record.Category);
@@ -306,11 +361,28 @@ namespace Morgott.ContentTool.Doctor
 
         private static string VariantName(string managerName)
         {
-            if (managerName == null) return null;
-            const string suffix = "_AddonsManagerDef";
-            return managerName.EndsWith(suffix, StringComparison.Ordinal)
-                ? managerName.Substring(0, managerName.Length - suffix.Length)
-                : managerName;
+            return Trim(managerName, "_AddonsManagerDef");
+        }
+
+        /// <summary>The manager's own name while it has ONE representative - the 45 managers that do
+        /// keep exactly the label they had before gap 2 - and "Human / PX_Heavy1" when it has
+        /// several, because two armour sets on one manager are two different targets and a picker
+        /// row that cannot tell them apart is useless. Short on purpose: the button elides at 24
+        /// characters (ModelDoctor.cs:1814).</summary>
+        private static string VariantName(string managerName, string representative, bool shared)
+        {
+            string name = VariantName(managerName);
+            return !shared || string.IsNullOrEmpty(representative)
+                ? name
+                : name + " / " + Trim(representative, "_CharacterTemplateDef");
+        }
+
+        private static string Trim(string name, string suffix)
+        {
+            if (name == null) return null;
+            return name.EndsWith(suffix, StringComparison.Ordinal)
+                ? name.Substring(0, name.Length - suffix.Length)
+                : name;
         }
 
         private static void Term(PrototypeRecord record, string value)
