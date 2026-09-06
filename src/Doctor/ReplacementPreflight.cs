@@ -98,6 +98,7 @@ namespace Morgott.ContentTool.Doctor
                 result.Model = source.Model;
                 result.Original = source.Original;
                 result.Baked = ModelBuild.From(source.Model, "preflight");
+                Submesh(result, path, live == null ? null : live.MaterialNames);
                 Sidecar(result, source, live != null ? live.BoneNames : BoneArray(proto));
                 // The OUTCOME is computed from the model the BAKE would see. When a sidecar did not
                 // apply, that is the unaliased one - which is exactly what the bake will read from the
@@ -128,6 +129,35 @@ namespace Morgott.ContentTool.Doctor
                 result.Report.Outcome = Outcome.Refused;
                 return result;
             }
+        }
+
+        /// <summary>
+        /// THE BAKE'S SUSPECT-PART RULE, asked HERE too, through the one function that owns it.
+        /// <c>ProjectBake.cs:1827</c>-<c>:1828</c> prints <see cref="Bake.MeshFields.SubmeshReport"/> and
+        /// COUNTS a suspect mapping as a bake failure - so a file this panel called clean took the run
+        /// down minutes later (2026-09-06: chr_px_hvy_ts_m_v01, part 1 of 2 = 1 triangle, "BY NAME - your
+        /// weights will be used" with zero rows). The Doctor is where that has to be read.
+        ///
+        /// Asked only when the target's MATERIALS are known: the game paints part N with material N, and
+        /// with no material list there is nothing to state a mapping against. A prototype Extend has no
+        /// renderer at all, so it says nothing here rather than inventing a slot list.
+        /// </summary>
+        private static void Submesh(ReplacementPreflightResult result, string path, string[] slots)
+        {
+            if (slots == null || slots.Length == 0 || result.Baked == null || result.Baked.Mesh == null) return;
+            int[] counts = result.Baked.Mesh.SubmeshIndexCounts;
+            if (counts == null || counts.Length == 0) return;
+            var triangles = new int[counts.Length];
+            for (int i = 0; i < counts.Length; i++) triangles[i] = counts[i] / 3;
+            bool suspect;
+            string mapping = Bake.MeshFields.SubmeshReport(
+                string.IsNullOrEmpty(path) ? "this file" : System.IO.Path.GetFileName(path),
+                triangles, slots, out suspect);
+            // The report's own sentence already carries the Blender fix for the suspect case, so there is
+            // no remedy to add: a second wording under the same code is how the two drift.
+            if (mapping != null)
+                result.Report.Add("SubmeshMaterials", suspect ? Severity.Warning : Severity.Info,
+                                  DiagnosticSide.File, mapping);
         }
 
         /// <summary>Everything the sidecar has to say, all of it a WARNING: ignoring a sidecar leaves a

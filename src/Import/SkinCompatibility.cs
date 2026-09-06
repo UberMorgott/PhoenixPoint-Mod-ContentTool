@@ -56,6 +56,11 @@ namespace Morgott.ContentTool.Import
         /// <summary>smr.bones[b].name, in the live rig's order. NULL when the renderer lists no bones
         /// (LiveMesh.cs:116-117) - which is the nearest-bone branch, not an error.</summary>
         internal string[] BoneNames;
+        /// <summary>smr.sharedMaterials[i].name, in slot order, or null when the caller did not look.
+        /// The game paints submesh i with material i, so this is the other half of the bake's
+        /// suspect-part rule (MeshFields.SubmeshReport) - NOT part of the fingerprint below: repainting
+        /// a renderer says nothing about whether the RIG moved under the preview.</summary>
+        internal string[] MaterialNames;
         /// <summary>From BIND POSES, the same fact SkinFields.Rigged keys on (SkinFields.cs:623-626).</summary>
         internal bool Rigged;
         internal int RendererInstanceId;

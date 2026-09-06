@@ -116,6 +116,46 @@ internal static class PreflightTests
             checks += Check(refused.Outcome == Outcome.Refused && Has(refused, "SkinlessOntoRigged"),
                             "a skinless source onto a rigged target is REFUSED: " + refused.Outcome + " " + Codes(refused));
 
+            // ---- THE BAKE'S SUSPECT-PART RULE, on the Doctor's side of the wall. ProjectBake.cs:1828
+            // counts a shard as a bake FAILURE, and this panel showed BY NAME with zero rows for the very
+            // file the bake then failed on (2026-09-06: part 1 of 2 held ONE triangle).
+            byte[] shardBytes = GlbCodec.Write(Parts(GlbReader.Read(bytes), 1));
+            string shardPath = Path.Combine(dir, "shard.glb");
+            File.WriteAllBytes(shardPath, shardBytes);
+            RigTarget painted = Rig(own);
+            painted.MaterialNames = new[] { "MAT_A", "MAT_B" };
+            ReplacementPreflightResult shard = ReplacementPreflight.Run(shardBytes, shardPath, painted);
+            checks += Check(shard.Outcome == Outcome.ByName && Has(shard, "SubmeshMaterials") &&
+                            Severity(shard, "SubmeshMaterials") == Morgott.ContentTool.Doctor.Severity.Warning &&
+                            Message(shard, "SubmeshMaterials").Contains("part 1 of 2 has only 1 triangle"),
+                            "a 1-triangle part is a WARNING row here, in the bake's own words: " + Codes(shard));
+            checks += Check(shard.Report.Header().Contains("warning(s) below"),
+                            "and the verdict is no longer BY NAME-clean: " + shard.Report.Header());
+            // The control: one part onto one material says nothing at all, and the verdict stays clean.
+            RigTarget oneSlot = Rig(own);
+            oneSlot.MaterialNames = new[] { "MAT_A" };
+            ReplacementPreflightResult quietParts = ReplacementPreflight.Run(bytes, glb, oneSlot);
+            checks += Check(!Has(quietParts, "SubmeshMaterials") &&
+                            quietParts.Report.Header() == "BY NAME - your weights will be used",
+                            "a single-part source onto a single slot is silent: " + quietParts.Report.Header());
+            // TWO SANE PARTS onto two materials: the mapping is still stated, as a NOTE, and the verdict
+            // stays clean - the arm that stops the row above from meaning "any multi-part file is warned".
+            byte[] evenBytes = GlbCodec.Write(Parts(GlbReader.Read(bytes), 12));
+            string evenPath = Path.Combine(dir, "even.glb");
+            File.WriteAllBytes(evenPath, evenBytes);
+            ReplacementPreflightResult even = ReplacementPreflight.Run(evenBytes, evenPath, painted);
+            checks += Check(Severity(even, "SubmeshMaterials") == Morgott.ContentTool.Doctor.Severity.Info &&
+                            even.Report.Header() == "BY NAME - your weights will be used",
+                            "two sane parts are a NOTE and leave the verdict clean: " + even.Report.Header());
+            // MORE PARTS THAN THE TARGET HAS MATERIALS is stated too - the part past the end is drawn by
+            // nothing, which is the author's own row and not a shard.
+            checks += Check(Message(ReplacementPreflight.Run(evenBytes, evenPath, oneSlot), "SubmeshMaterials")
+                                .Contains("NO material (not drawn)"),
+                            "a part with no material slot is named as undrawn");
+            // ...and with no material list at all there is nothing to map against, so nothing is claimed.
+            checks += Check(!Has(ReplacementPreflight.Run(shardBytes, shardPath, Rig(own)), "SubmeshMaterials"),
+                            "a target whose materials were never read states no mapping");
+
             // ---- garbage in. The worker must never throw; it must report.
             ReplacementPreflightResult junk = ReplacementPreflight.Run(new byte[] { 7, 7, 7, 7 }, glb, Rig(own));
             checks += Check(junk.Outcome == Outcome.Refused && Has(junk, "MalformedGlb"),
@@ -233,6 +273,32 @@ internal static class PreflightTests
         model.Joints = null;
         model.Weights = null;
         return model;
+    }
+
+    /// <summary>The same geometry as TWO parts, the first of <paramref name="firstTriangles"/> - one is
+    /// the shape an author's torso arrived in on 2026-09-06 and the bake counts as a failure, twelve is
+    /// an ordinary two-material model. The probe is a two-triangle fixture and the rule turns on SIZE
+    /// (8 triangles or fewer is a shard), so each part REPEATS the file's own triangles: the indices stay
+    /// in range and the result is still a real .glb the reader has to hand back.</summary>
+    private static SkinnedModel Parts(SkinnedModel model, int firstTriangles)
+    {
+        if (model.Submeshes.Count != 1) throw new Exception("PREFLIGHT FAILURE: the probe is not one part");
+        int[] all = model.Submeshes[0];
+        model.Submeshes.Clear();
+        model.Submeshes.Add(Grow(all, firstTriangles));
+        model.Submeshes.Add(Grow(all, 12));
+        model.Materials.Clear();
+        model.Materials.Add("first");
+        model.Materials.Add("body");
+        model.MaterialInfo.Clear();
+        return model;
+    }
+
+    private static int[] Grow(int[] triangleIndices, int triangles)
+    {
+        var list = new List<int>();
+        while (list.Count < triangles * 3) list.AddRange(triangleIndices);
+        return list.GetRange(0, triangles * 3).ToArray();
     }
 
     private static PrototypeTarget Extend(PrototypeRecord record)

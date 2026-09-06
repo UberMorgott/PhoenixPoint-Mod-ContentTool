@@ -288,6 +288,15 @@ namespace Morgott.ContentTool.Dev
             var t = new RigTarget { TransformPath = transformPath ?? "" };
             if (smr == null) return t;
             t.RendererInstanceId = smr.GetInstanceID();
+            // The material SLOTS, for the bake's suspect-part rule (ReplacementPreflight.Submesh).
+            // sharedMaterials, never materials: the latter INSTANTIATES every slot on read.
+            Material[] mats = smr.sharedMaterials;
+            if (mats != null)
+            {
+                t.MaterialNames = new string[mats.Length];
+                for (int m = 0; m < mats.Length; m++)
+                    t.MaterialNames[m] = mats[m] == null ? "slot " + m : mats[m].name;
+            }
             Transform[] bones = smr.bones;
             if (bones != null && bones.Length > 0)
             {
@@ -1540,7 +1549,9 @@ namespace Morgott.ContentTool.Dev
             rowScroll = GUILayout.BeginScrollView(rowScroll, GUILayout.Height(200f));
             Rows(Severity.Blocking, "REFUSED");
             Rows(Severity.Downgrade, "LOSES YOUR WEIGHTS");
-            Rows(Severity.Warning, "IGNORED");
+            // "WARNING", not "IGNORED": a sidecar row IS ignored, a suspect part mapping is not - it bakes
+            // and then fails the run (ProjectBake.cs:1828).
+            Rows(Severity.Warning, "WARNING");
             Rows(Severity.Info, "NOTE");
             GUILayout.EndScrollView();
 

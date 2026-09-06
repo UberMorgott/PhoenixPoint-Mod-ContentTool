@@ -66,7 +66,13 @@ namespace Morgott.ContentTool.Doctor
         {
             switch (Outcome)
             {
-                case Outcome.ByName: return "BY NAME - your weights will be used";
+                // THE WARNING COUNT RIDES ON THE VERDICT. A clean "BY NAME" over a row the BAKE counts as
+                // a failure (SubmeshMaterials) is the panel telling the author to stop reading - which is
+                // exactly what happened to the 1-triangle torso of 2026-09-06.
+                case Outcome.ByName:
+                    int warned = Count(Severity.Warning);
+                    return "BY NAME - your weights will be used" +
+                           (warned > 0 ? " (" + warned + " warning(s) below)" : "");
                 case Outcome.NearestBone:
                     return "NEAREST-BONE - the bake would import this but NOT use your weights (" +
                            Count(Severity.Downgrade) + " reason(s))";
