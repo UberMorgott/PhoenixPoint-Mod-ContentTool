@@ -2201,6 +2201,34 @@ this plan deliberately spells none, because a stale command line in a plan is wo
   the `px_heavy_assets_all.bundle` pairs the hand-written `Wizard.ApocDesignation\ppcontent.json` names are out of
   the wizard's reach today. Not a defect of this slice; a scope note for whatever adds armour-set choice.
 
+  **GAP 2 CLOSED, 2026-09-06.** Root cause was the rep collapse in `PrototypeHarvest.Read` (old `:93-103`): one
+  `TacCharacterDef` per `AddonsManagerDef`, ordinal-lowest name winning, so every armour set but AN Assault was
+  dropped before anything was scanned. `ShippedTarget.Resolve` needed no change - it keys only on the LIVE
+  `smr.sharedMesh.name` (`ShippedTarget.cs:66`) and the live addon's graph (`:193-199`), both of which come from
+  the representative the bay stood up.
+  - `PrototypeCatalog.Representatives(IDictionary<string, IList<string>>)` (`src\Doctor\PrototypeCatalog.cs:169`)
+    is the new rule and lives in the half a test can reach: ONE representative per DISTINCT template bodypart SET,
+    ordinal-lowest name inside a set, ordinal order out (order- and duplicate-blind via `PartSignature` `:188`).
+  - `PrototypeHarvest.Read` (`src\Dev\PrototypeHarvest.cs:93`) gathers every def pointing at a manager with its
+    `BodypartNames` (`:186`, cheap - def arrays only), asks that rule, and runs the EXPENSIVE per-rep reads
+    (`ReadSlots`/`ReadClips`/body state) only for the survivors. The rig scan, `rigged` and `rig.Managers` moved
+    up to once per MANAGER, and the census line now counts distinct managers (`managerCount`), so
+    `rig-census-2026-09-02.json` still reads `MATCHES` (46/42/37/2551/36 all unchanged).
+  - `PrototypeCatalog.Build` mints one variant per scan and names them apart only when a manager has several:
+    `VariantName(manager, representative, shared)` (`:372`) → `Human` stays `Human` for the 45 single-rep
+    managers, and a shared one reads `Human / PX_Heavy1`. The RECORD keeps the bare manager name (`:270`).
+  - Clip cache re-keyed from manager to representative (`clipsByCharacter`, `PrototypeHarvest.cs:59`,
+    `FitBench.cs:731`) - a manager key let the last variant scanned overwrite every other variant's clips.
+  - Offline arm: `tests\ObjCodecTests\CatalogTests.cs:187-227` (RED first: `CS0117 … does not contain a definition
+    for "Representatives"`), 6 checks - the dedup rule, the empty case, two variants under one manager, the two
+    names, the per-variant representative, the record's own name. `CATALOG PASS, 35 check(s)` (was 29).
+  - Gates at the fix: build `Ошибок: 0` / `Предупреждений: 1`, `LIFECYCLE PASS, 230`, `PACKAGE-GATE 8`,
+    `MANIFEST 53`, `PROJECT-SCAFFOLD 89`, `ALIAS 32`, `REFUSAL-COUNT 17`, `MESH extract PASS … 64`, `R0: ALL PASS`.
+  - STILL OWED IN GAME (`ShippedTarget` is not test-linked, W4 `:2079`): open the browser on
+    `CHR_Human_Rig_Ready`, confirm it now lists several `Human / …` variants, stand `Human / PX_Heavy1` up and
+    check a body slot resolves to `ShippedBundle = px_heavy_assets_all.bundle` with `TargetRefusal = null` and a
+    `BY NAME` verdict - and that the census line still says `MATCHES rig-census-2026-09-02.json`.
+
   **OPEN GAP 1 — hashed extract joints — FIXED, `a2aee68`.** The sentence above ("an extract cannot be fed
   back by name at all") no longer holds: `MeshRead.Skin` now names the joints off the SkinnedMeshRenderer that uses
   the mesh (`SkinFields.BoneNames`, whose `m_Bones` is index-for-index with `m_BindPose` — the bake writes both off
