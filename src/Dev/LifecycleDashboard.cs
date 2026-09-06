@@ -410,10 +410,19 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>The canonical project roots the selector offers, and the label each one shows.</summary>
         private static string[] roots = new string[0], labels = new string[0];
-        /// <summary>Index into <see cref="roots"/> of the bound project, or -1: NOT a second selection.
-        /// `root` is the binding; this is only where the arrows currently stand, and a `Refresh` that no
-        /// longer finds the bound root leaves it at -1 rather than sliding the selection onto a neighbour.</summary>
-        private static int chosen = -1;
+        /// <summary>Index into <see cref="roots"/> of the bound project, or -1. DERIVED, never stored:
+        /// `root` is the one binding, and a remembered index went stale the moment the RPC seam bound a
+        /// different project - `Open("B")` after a Scan left the label naming A while Run and Apply acted
+        /// on B. A list that no longer holds the bound root answers -1 rather than sliding the arrows onto
+        /// a neighbour.</summary>
+        private static int Chosen
+        {
+            get
+            {
+                for (int i = 0; i < roots.Length; i++) if (Under(root, roots[i])) return i;
+                return -1;
+            }
+        }
         private static bool rescan = true;
 
         /// <summary>The panel's transient line - a refusal, a queued stage, a cancel note. NEVER a verdict:
@@ -450,11 +459,12 @@ namespace Morgott.ContentTool.Dev
             GUILayout.BeginHorizontal();
             GUILayout.Label("Project", GUILayout.Width(60f));
             GUI.enabled = !owned && roots.Length > 0;
-            if (GUILayout.Button("<", GUILayout.Width(26f))) select = chosen - 1;
+            int at = Chosen;
+            if (GUILayout.Button("<", GUILayout.Width(26f))) select = at - 1;
             GUI.enabled = true;
-            GUILayout.Label(chosen >= 0 && chosen < labels.Length ? labels[chosen] : "(none)");
+            GUILayout.Label(at >= 0 && at < labels.Length ? labels[at] : "(none)");
             GUI.enabled = !owned && roots.Length > 0;
-            if (GUILayout.Button(">", GUILayout.Width(26f))) select = chosen + 1;
+            if (GUILayout.Button(">", GUILayout.Width(26f))) select = at + 1;
             GUI.enabled = !owned;
             if (GUILayout.Button("Refresh", GUILayout.Width(80f))) rescan = true;
             GUI.enabled = true;
@@ -467,12 +477,15 @@ namespace Morgott.ContentTool.Dev
             foreach (LifecycleView.Row r in view.Rows)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label(r.Stage, GUILayout.Width(70f));
-                GUILayout.Label(LifecycleView.Word(r.Freshness), GUILayout.Width(56f));
-                GUILayout.Label(LifecycleView.Word(r.Outcome), GUILayout.Width(48f));
-                GUILayout.Label(Dash(r.Installation), GUILayout.Width(150f));
+                // THE WIDTHS ARE BenchList'S, and asserted there: this row is five FIXED columns, so it
+                // does not shrink to the panel - it is drawn past the edge, silently, with the Run button
+                // off-screen. See BenchList.StageRowFits.
+                GUILayout.Label(r.Stage, GUILayout.Width(BenchList.StageW));
+                GUILayout.Label(LifecycleView.Word(r.Freshness), GUILayout.Width(BenchList.FreshW));
+                GUILayout.Label(LifecycleView.Word(r.Outcome), GUILayout.Width(BenchList.OutcomeW));
+                GUILayout.Label(Dash(r.Installation), GUILayout.Width(BenchList.InstallW));
                 GUI.enabled = !owned;
-                if (GUILayout.Button("Run", GUILayout.Width(60f))) intent = r.Stage;
+                if (GUILayout.Button("Run", GUILayout.Width(BenchList.StageRunW))) intent = r.Stage;
                 GUI.enabled = true;
                 GUILayout.EndHorizontal();
                 // The row's OWN verdict, never the tail's last line: the two answer different questions and
@@ -563,8 +576,6 @@ namespace Morgott.ContentTool.Dev
                 // the picker has to say WHICH root it bound, which is the ambiguity `Open` refuses outright.
                 labels[i] = duplicate ? name + "  [" + roots[i] + "]" : name;
             }
-            chosen = -1;
-            for (int i = 0; i < roots.Length; i++) if (Under(root, roots[i])) { chosen = i; break; }
         }
 
         private static void Offer(List<string> found, string dir)
@@ -591,7 +602,6 @@ namespace Morgott.ContentTool.Dev
             try
             {
                 string modId = ContentProject.LoadDeclared(roots[i]).Id;
-                chosen = i;
                 Bind(roots[i], modId);
                 message = null;
             }

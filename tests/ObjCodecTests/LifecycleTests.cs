@@ -266,6 +266,14 @@ internal static class LifecycleTests
         checks += Check(StageText.Idle == "\u2014" && StageText.Ready == "Ready.",
                         "the idle row placeholder and the global ready line - design:394");
 
+        // The stage row is five FIXED columns, so it cannot shrink to the panel: IMGUI draws an over-wide
+        // horizontal group past the edge of the area, and the Run button on the right is unreachable with
+        // nothing on screen to say why. The panel carries UnityEngine types and cannot be linked here; its
+        // arithmetic can, which is why the widths live in BenchList.
+        checks += Check(Morgott.ContentTool.Dev.BenchList.StageRowFits(
+                            Morgott.ContentTool.Dev.BenchList.PanelWidth),
+                        "the Lifecycle stage row fits the panel's content width, scrollbar included");
+
         // ---- G3 Tail, frozen exactly as ModelDoctor.cs:745 wrote it.
         checks += Check(StageResult.Tail(null, 1) == "" && StageResult.Tail("", 3) == "",
                         "no log is no tail, never a null the panel would print");

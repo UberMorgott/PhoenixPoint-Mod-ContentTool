@@ -1672,12 +1672,19 @@ namespace Morgott.ContentTool.Dev
             // DEAD WHILE THE DOCTOR HAS A PRESS ARMED. Its two-frame gate closes on a PAINT of its own
             // SHIP label, and leaving the tab stops Draw being called at all while Tick keeps running
             // below - so the press would sit armed and fire whenever the author came back.
-            // DEAD WHILE A LIFECYCLE RUN OWNS THE JOB, for the second half of the same reason: a blocking
-            // main segment waits for THIS tab to be open and painted, so walking away from it mid-run parks
-            // the segment behind a panel that is no longer being drawn.
+            // LEAVING is what a lifecycle run forbids, never ARRIVING - a blocking main segment waits for
+            // THIS tab to be open and painted, so walking away from it mid-run parks the segment behind a
+            // panel that is no longer being drawn. Disabling the Lifecycle toggle TOO closed the only door
+            // back in: `Close` puts the tab back to FIT (:1137) without cancelling anything, and a run
+            // started through the static RPC seam begins on whatever tab the author is standing on. Either
+            // way `Pump(open && tab == TabLifecycle)` never unparked the segment again and Cancel - which
+            // lives on that panel - was unreachable, so the job stayed busy for the rest of the session.
             GUI.enabled = !doctor.ShipPending && !LifecycleDashboard.Busy;
             if (GUILayout.Toggle(tab == TabFit, " FIT", GUILayout.Width(70f))) tab = TabFit;
             if (GUILayout.Toggle(tab == TabDoctor, " MODEL DOCTOR", GUILayout.Width(130f))) tab = TabDoctor;
+            // The Doctor's armed press still gates it: that press fires on a PAINT of its own SHIP label,
+            // and it is the leaving of the Doctor's tab - not the lifecycle job - that this half forbids.
+            GUI.enabled = !doctor.ShipPending;
             if (GUILayout.Toggle(tab == TabLifecycle, " LIFECYCLE", GUILayout.Width(100f))) tab = TabLifecycle;
             GUI.enabled = true;
             GUILayout.EndHorizontal();

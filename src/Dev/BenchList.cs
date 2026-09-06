@@ -468,6 +468,31 @@ namespace Morgott.ContentTool.Dev
 
         internal static float ContentWidth(float panelW) { return panelW - 2f * PanelInset; }
 
+        /// <summary>The Lifecycle stage row's five columns, in draw order. They live HERE for the same
+        /// reason <see cref="PanelWidth"/> does - the panel that draws them carries UnityEngine types and
+        /// cannot be compiled offline, while the row's arithmetic can. As written they summed to 384 px
+        /// inside a 364 px content width and the Run buttons were drawn past the edge.</summary>
+        internal const float StageW = 62f, FreshW = 44f, OutcomeW = 38f, InstallW = 122f, StageRunW = 56f;
+
+        /// <summary>The gap IMGUI leaves between two controls in a horizontal group - the larger of the two
+        /// adjoining margins, 4 px for the built-in label and button styles. <see cref="RowFits"/>'s 2 px is
+        /// deliberately left alone: it is a frozen assertion about a different row.</summary>
+        internal const float RowGap = 4f;
+
+        /// <summary>The vertical scrollbar the Lifecycle tab's outer scroll view always takes, because its
+        /// column (five rows, the progress bar and a 120 px log tail) is taller than the viewport. 15 px of
+        /// bar plus its margin - counted BEFORE the fit, since a row that only fits without it does not fit.</summary>
+        internal const float ScrollbarWidth = 17f;
+
+        /// <summary>Does the Lifecycle stage row fit the panel? Same defect as <see cref="RowFits"/>'s and
+        /// the same silence: IMGUI draws an over-wide horizontal group past the edge of the area, and the
+        /// Run button on the right is simply unreachable with nothing on screen to say why.</summary>
+        internal static bool StageRowFits(float panelW)
+        {
+            return StageW + FreshW + OutcomeW + InstallW + StageRunW + 4f * RowGap
+                   <= ContentWidth(panelW) - ScrollbarWidth;
+        }
+
         /// <summary>
         /// Does a row of <paramref name="buttons"/> equal-width buttons fit the panel? IMGUI does NOT
         /// clip an over-wide horizontal group - it draws it past the edge of the area and the last
