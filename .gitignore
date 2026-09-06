@@ -53,3 +53,6 @@ local/
 # Secrets
 .env
 tiffany_cox_idle_animation.glb
+
+# Claude Code session config (stop-hook etc.) - local only, as in Multiplayer2
+.claude/
