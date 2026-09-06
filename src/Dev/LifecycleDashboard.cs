@@ -633,9 +633,10 @@ namespace Morgott.ContentTool.Dev
             // operation that finally succeeded) and not one frame earlier. There is no bypass here: the
             // dashboard follows the checkbox's suppression, and the console verb's override is not ours.
             bool blocked = Route7.IsFailed(id);
-            // A BLOCKING MAIN SEGMENT IS PARKED until this panel paints (design:330-:333). It is published
-            // to the wire and was never read here, so Cancel stayed lit over a segment nothing can
-            // interrupt and the wait itself was invisible - a run that merely looked stuck.
+            // A BLOCKING MAIN SEGMENT IS PARKED until this panel paints (design:330-:333). It has NOT begun:
+            // `Tick` drops the unrun segment on a cancel (LifecycleJob.cs:458-:469) and the segment's own
+            // `Stopped(id)` pre-check answers one when it does run, so a parked run is CANCELLABLE (W13).
+            // This is read for the status line only - the wait was invisible and the run merely looked stuck.
             bool parked = LifecycleJob.ParkedForPaint;
 
             GUILayout.BeginHorizontal(); openGroups++;
@@ -718,13 +719,13 @@ namespace Morgott.ContentTool.Dev
             // A CANCEL IS A REQUEST, and only until one is outstanding. `owned && !busy` is the producer's
             // publication - it has stated its verdict and the pump has not served it yet - which is exactly
             // the window in which there is nothing left to interrupt.
-            // ...AND A PARKED MAIN SEGMENT IS THE OTHER END OF THAT WINDOW: design:319-:320's
-            // "non-interruptible main-thread segment", which has begun and cannot be interrupted.
-            GUI.enabled = now.Busy && !now.CancelRequested && !parked;
+            // A PARKED SEGMENT IS NOT THAT WINDOW: it has not begun, `Tick` cancels it unrun, and W13
+            // measured a parked bake cancelling cleanly - gating on it disabled Cancel in exactly the
+            // state it is needed (returning to a run started with the panel closed).
+            GUI.enabled = now.Busy && !now.CancelRequested;
             if (GUILayout.Button("Cancel", GUILayout.Width(80f))) intent = "Cancel";
             GUI.enabled = true;
-            GUILayout.Label(Dash(parked || (owned && !now.Busy)
-                                 ? StageText.CancelUnavailable(now.Stage) : message));
+            GUILayout.Label(Dash(owned && !now.Busy ? StageText.CancelUnavailable(now.Stage) : message));
             openGroups--; GUILayout.EndHorizontal();
 
             GUILayout.Label("Log tail");
