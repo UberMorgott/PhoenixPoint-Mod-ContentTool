@@ -6,6 +6,7 @@ namespace Morgott.ContentTool.Bake
     /// (tools\ClipEvents, tools\SpiderAxisCheck) can compile the import path that calls it without
     /// dragging AssetsTools.NET in behind it.
     /// </summary>
+    // Split out of SkinFields.cs so a UnityEngine-free tool can link this half alone.
     internal static partial class SkinFields
     {
         /// <summary>
