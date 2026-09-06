@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading;
 using Morgott.ContentTool.Import;
 
@@ -735,6 +736,48 @@ namespace Morgott.ContentTool.Bake
             if (!o.CacheDirExists) return Freshness.Never;
             if (o.HaveAll) return Freshness.Fresh;
             return o.MissingCopies.Length == o.Declared.Length ? Freshness.Never : Freshness.Stale;
+        }
+    }
+
+    /// <summary>
+    /// THE PROJECT SELECTOR'S TWO PIECES OF ARITHMETIC, here because the panel that draws them carries
+    /// UnityEngine and the offline gate cannot link it. Strings and indices only - no directory is read.
+    /// </summary>
+    internal static class LifecycleSelector
+    {
+        /// <summary>Canonical and separator-trimmed, the one spelling every comparison here uses. A path
+        /// this process cannot resolve comes back as it went in rather than throwing out of a paint.</summary>
+        internal static string Canonical(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            try { return Path.GetFullPath(path).TrimEnd('\\', '/'); }
+            catch (Exception) { return path; }
+        }
+
+        /// <summary>
+        /// The index of <paramref name="root"/> in the offered list, by EQUALITY of canonical paths.
+        ///
+        /// NEVER containment: the list is sorted, so a project holding a nested project comes FIRST, an
+        /// ancestor-matches test bound the child while the label named the parent, and `&gt;` then stepped
+        /// off the parent's index and never advanced past it.
+        /// </summary>
+        internal static int IndexOf(string[] roots, string root)
+        {
+            if (roots == null || string.IsNullOrEmpty(root)) return -1;
+            string want = Canonical(root);
+            for (int i = 0; i < roots.Length; i++)
+                if (want.Equals(Canonical(roots[i]), StringComparison.OrdinalIgnoreCase)) return i;
+            return -1;
+        }
+
+        /// <summary>Where `&lt;` and `&gt;` land from <paramref name="at"/>, which is -1 when nothing is
+        /// bound: the LAST root and the FIRST one. Plain `at + by` answered -2 there, and the wrap turned
+        /// that into the second-to-last root - a `&lt;` that skipped one.</summary>
+        internal static int Step(int at, int by, int count)
+        {
+            if (count <= 0) return -1;
+            if (at < 0) return by < 0 ? count - 1 : 0;
+            return (((at + by) % count) + count) % count;
         }
     }
 }

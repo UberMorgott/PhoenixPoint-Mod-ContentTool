@@ -1686,13 +1686,20 @@ namespace Morgott.ContentTool.Dev
             // started through the static RPC seam begins on whatever tab the author is standing on. Either
             // way `Pump(open && tab == TabLifecycle)` never unparked the segment again and Cancel - which
             // lives on that panel - was unreachable, so the job stayed busy for the rest of the session.
+            //
+            // THE PRESS IS DEFERRED PAST EndArea, like `leaving` and `resetting` above and for the same
+            // reason: assigning `tab` here changed which branch below ran MID-EVENT, so the click pass laid
+            // out a different number of controls than the Layout pass had cached - IMGUI's
+            // `ArgumentException`, and OnGUI's catch (:2359) answers that by closing the bench. `Update`'s
+            // SHIP landing (:2189) moves the tab the same way: outside a GUI event.
             GUI.enabled = !doctor.ShipPending && !LifecycleDashboard.Busy;
-            if (GUILayout.Toggle(tab == TabFit, " FIT", GUILayout.Width(70f))) tab = TabFit;
-            if (GUILayout.Toggle(tab == TabDoctor, " MODEL DOCTOR", GUILayout.Width(130f))) tab = TabDoctor;
+            int wanted = tab;
+            if (GUILayout.Toggle(tab == TabFit, " FIT", GUILayout.Width(70f))) wanted = TabFit;
+            if (GUILayout.Toggle(tab == TabDoctor, " MODEL DOCTOR", GUILayout.Width(130f))) wanted = TabDoctor;
             // The Doctor's armed press still gates it: that press fires on a PAINT of its own SHIP label,
             // and it is the leaving of the Doctor's tab - not the lifecycle job - that this half forbids.
             GUI.enabled = !doctor.ShipPending;
-            if (GUILayout.Toggle(tab == TabLifecycle, " LIFECYCLE", GUILayout.Width(100f))) tab = TabLifecycle;
+            if (GUILayout.Toggle(tab == TabLifecycle, " LIFECYCLE", GUILayout.Width(100f))) wanted = TabLifecycle;
             GUI.enabled = true;
             GUILayout.EndHorizontal();
             if (tab == TabLifecycle)
@@ -1700,6 +1707,9 @@ namespace Morgott.ContentTool.Dev
                 LifecycleDashboard.Draw();
                 GUILayout.EndScrollView();
                 GUILayout.EndArea();
+                // BEFORE the close, never after: `Close` puts the tab back to FIT (:1143), and applying a
+                // toggle press on top of that would land the reopened bench on a tab nobody asked for.
+                tab = wanted;
                 if (leaving) message = Close();
                 else if (resetting) message = ResetView();
                 return;
@@ -1717,6 +1727,7 @@ namespace Morgott.ContentTool.Dev
                 if (advanced) slim.Draw(BenchList.ContentWidth(w));
                 GUILayout.EndScrollView();
                 GUILayout.EndArea();
+                tab = wanted;
                 if (leaving) message = Close();
                 else if (resetting) message = ResetView();
                 return;
@@ -1741,6 +1752,7 @@ namespace Morgott.ContentTool.Dev
 
             GUILayout.EndScrollView();
             GUILayout.EndArea();
+            tab = wanted;
             if (leaving) message = Close();
             else if (resetting) message = ResetView();
         }

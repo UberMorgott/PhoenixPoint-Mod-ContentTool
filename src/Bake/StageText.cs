@@ -248,6 +248,19 @@ namespace Morgott.ContentTool.Bake
         internal static string Queued(string stage) { return "Queued: " + stage; }
         internal static string Running(string stage) { return "Running: " + stage; }
 
+        /// <summary>The producer has published its verdict and the pump has not served it yet. The panel
+        /// showed `Ready.` through that window - every control disabled, Cancel saying it was unavailable,
+        /// and the status claiming nothing was owed. A state, not a verdict.</summary>
+        internal static string Finishing(string stage) { return "Finishing: " + stage; }
+
+        /// <summary>W19b: a blocking main segment is parked until this panel is open and has PAINTED
+        /// (design:330-:333). Without it the run reads as stuck, which is the one thing that gate must
+        /// never look like.</summary>
+        internal static string WaitingForPaint(string stage)
+        {
+            return "Waiting for this panel to paint before " + stage + " continues.";
+        }
+
         internal static string CancelRequested(string stage)
         {
             return "Cancel requested; waiting for " + stage + " to stop.";

@@ -464,6 +464,12 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal static void Pump(bool panelReady)
         {
+            // ARRIVING ON THE TAB RESCANS. The only automatic scan was the `rescan = true` initialiser,
+            // served on the first pump - from component Install, before the bench had ever opened - so the
+            // list was built once against whatever existed then. `Drain` does the enumeration, outside
+            // drawing, exactly as the Refresh button's press does.
+            if (panelReady && !wasReady) rescan = true;
+            wasReady = panelReady;
             Drain();
             LifecycleJob.PumpRegistered = true;
             LifecycleJob.Tick(panelReady && Painted);
@@ -518,15 +524,18 @@ namespace Morgott.ContentTool.Dev
         /// different project - `Open("B")` after a Scan left the label naming A while Run and Apply acted
         /// on B. A list that no longer holds the bound root answers -1 rather than sliding the arrows onto
         /// a neighbour.</summary>
-        private static int Chosen
-        {
-            get
-            {
-                for (int i = 0; i < roots.Length; i++) if (Under(root, roots[i])) return i;
-                return -1;
-            }
-        }
+        private static int Chosen { get { return LifecycleSelector.IndexOf(roots, root); } }
         private static bool rescan = true;
+        /// <summary>Last frame's answer to "the Lifecycle tab is the selected one", so <see cref="Pump"/>
+        /// can rescan on ARRIVAL. The one automatic scan used to happen at component Install - before the
+        /// bench had ever opened - so a roster built later, or a project `Acceptance("prepare")` forked,
+        /// stayed invisible until the author pressed Refresh.</summary>
+        private static bool wasReady;
+
+        /// <summary>The GUILayout groups <see cref="Draw"/> currently has open, so its own catch can close
+        /// exactly those and hand IMGUI back a balanced stack. Main thread only, like everything drawing.</summary>
+        private static int openGroups;
+        private static bool openScroll;
 
         /// <summary>The panel's transient line - a refusal, a queued stage, a cancel note. NEVER a verdict:
         /// those live in the rows, and only a producer writes one.</summary>
@@ -556,6 +565,23 @@ namespace Morgott.ContentTool.Dev
             if (UnityEngine.Event.current.type == UnityEngine.EventType.Repaint)
                 paintedFrame = UnityEngine.Time.frameCount;
 
+            // THE PANEL'S OWN GUARD, the half `Pump` already had (FitBench.cs:2147). Without it a throw in
+            // here unwound into OnGUI's catch, which CLOSES the bench - and the job keeps ownership, so the
+            // author loses the Cancel button to the very failure they need it for. The recovery also closes
+            // the groups this method opened: an unbalanced Begin/End is itself a Layout error next frame,
+            // i.e. a second wedge on top of the first.
+            openGroups = 0; openScroll = false;
+            try { Body(); }
+            catch (Exception ex)
+            {
+                if (openScroll) GUILayout.EndScrollView();
+                while (openGroups-- > 0) GUILayout.EndHorizontal();
+                message = "lifecycle: " + ex.GetType().Name + ": " + ex.Message;
+            }
+        }
+
+        private static void Body()
+        {
             LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
             bool owned = now.Busy || Pending(now);
             // THE SESSION BLOCK, asked of the ACTUAL set every frame through the read-only query - never a
@@ -563,31 +589,46 @@ namespace Morgott.ContentTool.Dev
             // operation that finally succeeded) and not one frame earlier. There is no bypass here: the
             // dashboard follows the checkbox's suppression, and the console verb's override is not ours.
             bool blocked = Route7.IsFailed(id);
+            // A BLOCKING MAIN SEGMENT IS PARKED until this panel paints (design:330-:333). It is published
+            // to the wire and was never read here, so Cancel stayed lit over a segment nothing can
+            // interrupt and the wait itself was invisible - a run that merely looked stuck.
+            bool parked = LifecycleJob.ParkedForPaint;
 
-            GUILayout.BeginHorizontal();
+            GUILayout.BeginHorizontal(); openGroups++;
             GUILayout.Label("Project", GUILayout.Width(60f));
             GUI.enabled = !owned && roots.Length > 0;
             int at = Chosen;
-            if (GUILayout.Button("<", GUILayout.Width(26f))) select = at - 1;
+            if (GUILayout.Button("<", GUILayout.Width(26f)))
+                select = LifecycleSelector.Step(at, -1, roots.Length);
             GUI.enabled = true;
-            GUILayout.Label(at >= 0 && at < labels.Length ? labels[at] : "(none)");
+            // BOUND BUT NOT LISTED is a real state - a project SHIP just made, or one forked under a root
+            // this scan did not reach - and "(none)" over it named nothing while `Run all` acted on it.
+            GUILayout.Label(at >= 0 && at < labels.Length ? labels[at]
+                          : string.IsNullOrEmpty(root) ? "(none)"
+                          : Path.GetFileName(LifecycleSelector.Canonical(root)));
             GUI.enabled = !owned && roots.Length > 0;
-            if (GUILayout.Button(">", GUILayout.Width(26f))) select = at + 1;
+            if (GUILayout.Button(">", GUILayout.Width(26f)))
+                select = LifecycleSelector.Step(at, 1, roots.Length);
             GUI.enabled = !owned;
             if (GUILayout.Button("Refresh", GUILayout.Width(80f))) rescan = true;
             GUI.enabled = true;
-            GUILayout.EndHorizontal();
+            openGroups--; GUILayout.EndHorizontal();
 
             // THE GLOBAL STATUS, composed by LifecycleView so the panel and the wire say the same words.
             // The two badges are appended to the transient half, never in place of it: they outlive
             // whatever ran last, and a green stage afterwards must not read as "nothing is owed".
-            GUILayout.Label("Session  " + LifecycleView.Status(now.Busy
-                ? now.CancelRequested ? StageText.CancelRequested(now.Stage) : StageText.Running(now.Stage)
-                : null, ctx.RestartRequired, blocked ? id : null));
+            // `Finishing` is the publication window - owned, not busy - where `Ready.` was a status the
+            // panel invented about a run that still held the job.
+            GUILayout.Label("Session  " + LifecycleView.Status(
+                now.Busy ? now.CancelRequested ? StageText.CancelRequested(now.Stage)
+                         : parked ? StageText.WaitingForPaint(now.Stage)
+                         : StageText.Running(now.Stage)
+                : owned ? StageText.Finishing(now.Stage) : null,
+                ctx.RestartRequired, blocked ? id : null));
 
             foreach (LifecycleView.Row r in view.Rows)
             {
-                GUILayout.BeginHorizontal();
+                GUILayout.BeginHorizontal(); openGroups++;
                 // THE WIDTHS ARE BenchList'S, and asserted there: this row is five FIXED columns, so it
                 // does not shrink to the panel - it is drawn past the edge, silently, with the Run button
                 // off-screen. See BenchList.StageRowFits.
@@ -602,26 +643,26 @@ namespace Morgott.ContentTool.Dev
                 GUI.enabled = !owned && !(blocked && r.Stage == "Apply");
                 if (GUILayout.Button("Run", GUILayout.Width(BenchList.StageRunW))) intent = r.Stage;
                 GUI.enabled = true;
-                GUILayout.EndHorizontal();
+                openGroups--; GUILayout.EndHorizontal();
                 // The row's OWN verdict, never the tail's last line: the two answer different questions and
                 // reading one for the other is how a panel invents a verdict.
                 GUILayout.Label("  " + Dash(r.Verdict));
             }
 
             SlimProgress p = now.Progress;
-            GUILayout.BeginHorizontal();
+            GUILayout.BeginHorizontal(); openGroups++;
             GUILayout.Label("Progress", GUILayout.Width(60f));
             float done = p == null || p.Total <= 0 ? 0f : (float)p.Done / p.Total;
             // A FIXED TRACK with the fill inside it, so the phase label beside it does not walk left and
             // right as the bar grows. SlimPanel.cs:270's bar, unchanged.
-            GUILayout.BeginHorizontal(GUILayout.Width(240f));
+            GUILayout.BeginHorizontal(GUILayout.Width(240f)); openGroups++;
             GUILayout.Box("", GUILayout.Width(Mathf.Max(1f, 240f * done)), GUILayout.Height(6f));
             GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
+            openGroups--; GUILayout.EndHorizontal();
             GUILayout.Label(p == null ? "—" : p.Stage + " " + p.Done + "/" + p.Total);
-            GUILayout.EndHorizontal();
+            openGroups--; GUILayout.EndHorizontal();
 
-            GUILayout.BeginHorizontal();
+            GUILayout.BeginHorizontal(); openGroups++;
             // ...AND `Run all` WITH IT, because the chain contains Apply: admitted, it would run Validate
             // and Bake and then stop at R29, which is a chain that cannot finish by construction.
             GUI.enabled = !owned && !blocked;
@@ -629,16 +670,19 @@ namespace Morgott.ContentTool.Dev
             // A CANCEL IS A REQUEST, and only until one is outstanding. `owned && !busy` is the producer's
             // publication - it has stated its verdict and the pump has not served it yet - which is exactly
             // the window in which there is nothing left to interrupt.
-            GUI.enabled = now.Busy && !now.CancelRequested;
+            // ...AND A PARKED MAIN SEGMENT IS THE OTHER END OF THAT WINDOW: design:319-:320's
+            // "non-interruptible main-thread segment", which has begun and cannot be interrupted.
+            GUI.enabled = now.Busy && !now.CancelRequested && !parked;
             if (GUILayout.Button("Cancel", GUILayout.Width(80f))) intent = "Cancel";
             GUI.enabled = true;
-            GUILayout.Label(Dash(owned && !now.Busy ? StageText.CancelUnavailable(now.Stage) : message));
-            GUILayout.EndHorizontal();
+            GUILayout.Label(Dash(parked || (owned && !now.Busy)
+                                 ? StageText.CancelUnavailable(now.Stage) : message));
+            openGroups--; GUILayout.EndHorizontal();
 
             GUILayout.Label("Log tail");
-            tailScroll = GUILayout.BeginScrollView(tailScroll, GUILayout.Height(120f));
+            tailScroll = GUILayout.BeginScrollView(tailScroll, GUILayout.Height(120f)); openScroll = true;
             GUILayout.Label(string.IsNullOrEmpty(log) ? "—" : StageResult.Tail(log, 12));
-            GUILayout.EndScrollView();
+            openScroll = false; GUILayout.EndScrollView();
         }
 
         private static string Dash(string s) { return string.IsNullOrEmpty(s) ? "—" : s; }
@@ -650,8 +694,10 @@ namespace Morgott.ContentTool.Dev
             int pick = select; select = int.MinValue;
             string want = intent; intent = null;
             // CANCEL IS THE ONE PRESS THAT BELONGS TO A RUNNING JOB, so it is answered before the busy
-            // guard below rather than dropped by it.
-            if (want == "Cancel") { Cancel(); return; }
+            // guard below rather than dropped by it - but it RETURNED, and a `<`/`>` taken in the same
+            // frame went down with it. The selection change falls to the busy guard below like any other,
+            // which is a refusal it can see, not a press that silently vanished.
+            if (want == "Cancel") { Cancel(); want = null; }
             if (Busy) return;
             if (pick != int.MinValue) Choose(pick);
             if (want != null) Run(want);

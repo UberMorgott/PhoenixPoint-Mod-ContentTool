@@ -265,6 +265,27 @@ internal static class LifecycleTests
                         "the transient Message strings are never terminal verdicts - design:390-393");
         checks += Check(StageText.Idle == "\u2014" && StageText.Ready == "Ready.",
                         "the idle row placeholder and the global ready line - design:394");
+        checks += Check(StageText.Finishing("Bake") == "Finishing: Bake" &&
+                        StageText.WaitingForPaint("Apply") ==
+                            "Waiting for this panel to paint before Apply continues.",
+                        "the publication window and the parked main segment say so - `Ready.` said neither");
+
+        // ---- The selector's arithmetic. The panel carries UnityEngine; these two do not.
+        string[] two = { LifecycleSelector.Canonical("C:\\mods\\A"),
+                         LifecycleSelector.Canonical("C:\\mods\\A\\Nested") };
+        checks += Check(LifecycleSelector.IndexOf(two, "C:\\mods\\A\\Nested") == 1 &&
+                        LifecycleSelector.IndexOf(two, "c:\\mods\\a\\nested\\") == 1 &&
+                        LifecycleSelector.IndexOf(two, "C:\\mods\\A") == 0,
+                        "the bound root matches by EQUALITY - a listed ANCESTOR is not the selection");
+        checks += Check(LifecycleSelector.IndexOf(two, "C:\\mods\\A\\Nested\\Deeper") == -1 &&
+                        LifecycleSelector.IndexOf(two, null) == -1 &&
+                        LifecycleSelector.IndexOf(null, "C:\\mods\\A") == -1,
+                        "a root the scan did not list answers -1, never a neighbour");
+        checks += Check(LifecycleSelector.Step(-1, -1, 5) == 4 && LifecycleSelector.Step(-1, 1, 5) == 0,
+                        "from UNBOUND, `<` lands on the last root and `>` on the first - never `at - 1` = -2");
+        checks += Check(LifecycleSelector.Step(0, -1, 5) == 4 && LifecycleSelector.Step(4, 1, 5) == 0 &&
+                        LifecycleSelector.Step(2, 1, 5) == 3 && LifecycleSelector.Step(0, -1, 0) == -1,
+                        "the ends wrap, and an empty list has no index to land on");
 
         // The stage row is five FIXED columns, so it cannot shrink to the panel: IMGUI draws an over-wide
         // horizontal group past the edge of the area, and the Run button on the right is unreachable with
