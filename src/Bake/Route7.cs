@@ -334,6 +334,17 @@ namespace Morgott.ContentTool.Bake
         /// face.</summary>
         internal enum ApplyDisposition { Redirected, Resident, Refused, BakeFailed }
 
+        /// <summary>What an apply's disposition means to the CARRIER, and the only copy of the mapping.
+        /// Both consumers ask here - the lifecycle Apply producer and the Doctor's SHIP handoff - because
+        /// two copies of "Resident is a Success" is exactly how one path publishes PASS for a state the
+        /// other calls a refusal.</summary>
+        internal static BakeDisposition Disposition(ApplyDisposition how)
+        {
+            return how == ApplyDisposition.BakeFailed ? BakeDisposition.Failed
+                 : how == ApplyDisposition.Refused ? BakeDisposition.Refused
+                 : BakeDisposition.Success;
+        }
+
         /// <summary>What became of ONE target, kept instead of thrown away. <c>BundleLive.Install</c> builds
         /// exactly this line per bundle and then folds every one of them into an aggregate (:66), and
         /// <c>ApplyProject</c>'s single-bundle answer can only speak for the ONE bundle its caller named -
@@ -408,15 +419,11 @@ namespace Morgott.ContentTool.Bake
             return ApplyProject(projectName, null, out ignored);
         }
 
-        /// <summary>The SAME apply, with a disposition per declared target - what a five-row panel needs and
-        /// what neither wrapper can give it (see <see cref="TargetInstall"/>). <paramref name="how"/> is
-        /// aggregated CONSERVATIVELY: any refusal survives, then any restart-required target, and a blanket
-        /// "redirected LIVE" is only reported when every target was.</summary>
-        internal static string ApplyProject(string projectName, out IList<TargetInstall> targets,
-                                            out ApplyDisposition how)
-        {
-            return ApplyProject(projectName, null, out targets, out how);
-        }
+        // THE PER-TARGET DOOR IS `ApplyRoot`, not a name-taking wrapper: both consumers that need the
+        // disposition list (the lifecycle Apply producer and the Doctor's SHIP handoff) hold an absolute
+        // root they already resolved, and resolving a NAME back to a folder is the one thing that can hand
+        // either of them the wrong project. The name overloads below stay for the console verb and the
+        // checkbox, which print the log and ask nothing.
 
         /// <param name="forBundle">the ONE shipped bundle the caller cares about, or null for the console
         /// verb, which prints the log and asks nothing.</param>

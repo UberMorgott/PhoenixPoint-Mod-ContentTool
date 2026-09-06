@@ -247,6 +247,13 @@ namespace Morgott.ContentTool.Dev
         /// <summary>The Model Doctor tab. One session per bench visit; <see cref="Close"/> gives its
         /// meshes back and puts the shipped ones on again.</summary>
         private static readonly ModelDoctor doctor = new ModelDoctor();
+
+        /// <summary>The bench's ONE Doctor session, and whether its tab is actually on screen - exactly
+        /// what the lifecycle acceptance seam's `ship` scenario needs in order to press the REAL button
+        /// through the REAL queue. Nothing else reaches in here, and neither of these mutates anything.
+        /// </summary>
+        internal static ModelDoctor Doctor { get { return doctor; } }
+        internal static bool DoctorShowing { get { return open && tab == TabDoctor; } }
         /// <summary>Which of the three columns is drawn. ONE int, not two bools: two flags can both be
         /// true, and "the Doctor and the Lifecycle at once" is a layout stack nobody balances.</summary>
         private const int TabFit = 0, TabDoctor = 1, TabLifecycle = 2;
@@ -2175,6 +2182,11 @@ namespace Morgott.ContentTool.Dev
                         try { doctor.Tick(); }
                         catch (Exception ex)
                         { message = "ct_bench: doctor - " + ex.GetType().Name + ": " + ex.Message; }
+                        // THE SHIP LANDING (design:342). Here, and not inside DoShip: the press has
+                        // already released ownership (`shipPending` goes false before DoShip runs), the
+                        // handoff has already given the panel the project and the Apply result, and this
+                        // is Update - so the tab never moves inside a GUI event, mid-layout.
+                        if (doctor.TakeShipLanding()) tab = TabLifecycle;
                     }
                     if (!open || bay == null || bay.SceneRoot == null) return;
                     Mouse();

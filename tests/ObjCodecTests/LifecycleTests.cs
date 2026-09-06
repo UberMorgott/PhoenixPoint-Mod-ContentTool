@@ -301,6 +301,7 @@ internal static class LifecycleTests
         checks += Cancelling();
         checks += Sequencing();
         checks += Sections();
+        checks += Badges();
         checks += Validating();
         checks += Verifying();
         checks += Producers();
@@ -1622,6 +1623,45 @@ internal static class LifecycleTests
         foreach (string section in new[] { "", "Validate", "Bake", "Apply", "Verify", "Package", "log", "s1s2" })
             checks += Check(view.Section(section).Length < 2000 && Obj(view.Section(section)) != null,
                             "every section fits and parses: " + (section == "" ? "<header>" : section));
+        return checks;
+    }
+
+    /// <summary>THE TWO BADGES (design:292, :344, :347). Both are facts about the SESSION, not about the
+    /// last thing that ran: S1's restart barrier is Apply's own receipt and the session block is membership
+    /// of `Route7.Failed`. Neither is composed from a verdict, which is exactly why a later successful
+    /// Package cannot hide either of them - and the arms below are what pins that.</summary>
+    private static int Badges()
+    {
+        int checks = 0;
+        checks += Check(StageText.RestartRequired == "restart required" &&
+                        StageText.SessionBlock == "session block",
+                        "the two badge words live in StageText beside Idle and Ready - the panel and the " +
+                        "Apply installation column read them, they are not spelled a second time in the UI");
+        checks += Check(LifecycleView.Status(null, false, null) == StageText.Ready,
+                        "nothing running and nothing wrong is the global placeholder, not an empty line");
+        checks += Check(LifecycleView.Status(null, true, null) == "Ready.   restart required",
+                        "S1 shows in the global status even with the session idle - a restart is owed " +
+                        "whatever ran last");
+        checks += Check(LifecycleView.Status(null, false, "morgott.x") ==
+                        "Ready.   session block: morgott.x",
+                        "the block names the id that is actually in the set, which is the header's " +
+                        "failedMember and never a guess from the selector label");
+        checks += Check(LifecycleView.Status(StageText.Running("Package"), true, "morgott.x") ==
+                        "Running: Package   restart required   session block: morgott.x",
+                        "both badges survive beside a running stage, in that order");
+        // The exact hiding this rule exists to prevent: Package PASSED, and neither badge moved.
+        string after = LifecycleView.Status(null, true, "morgott.x");
+        checks += Check(after.Contains(StageText.RestartRequired) && after.Contains(StageText.SessionBlock),
+                        "a later successful Package cannot hide either badge - neither is composed from a " +
+                        "verdict or from the transient message");
+
+        LifecycleView view = new LifecycleView { RestartRequired = true, FailedMember = "morgott.x" };
+        Dictionary<string, object> h = Obj(view.Section(""));
+        checks += Check(h != null && (bool)h["restartRequired"] && (string)h["failedMember"] == "morgott.x",
+                        "the poll header publishes the S1 barrier beside the failed member, so W14/W17 " +
+                        "read both badges off the wire instead of off a screenshot");
+        checks += Check(view.Section("").Length < 2000,
+                        "and the header is still bounded with both of them in it");
         return checks;
     }
 

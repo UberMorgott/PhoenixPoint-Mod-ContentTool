@@ -78,7 +78,7 @@ namespace Morgott.ContentTool.Dev
         /// PAINTED before it starts: Tick N+1 arms, Draw paints during Repaint, Tick N+2 runs. SlimPanel's
         /// volatile-snapshot pattern does not apply here - no worker changes state between Layout and
         /// Repaint, the main thread simply stops.</summary>
-        private bool shipPending, shipLabelPainted;
+        private bool shipPending, shipLabelPainted, shipLanded;
         /// <summary>Ticks the arm has waited for its label. The gate closes on a PAINT, and a panel that is
         /// not drawn at all never paints one: the browser and the prototype tree return out of Draw before
         /// the SHIP section, and the FIT tab does not call Draw while Tick keeps running. Those controls are
@@ -617,6 +617,42 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal bool ShipPending { get { return shipPending; } }
 
+        /// <summary>Why a SHIP press would be refused right now, or null when the button is live. ONE copy
+        /// of the condition: the button's own `GUI.enabled` reads it, and so does the acceptance seam,
+        /// which has to press the REAL button rather than invent the state behind it. Every arm names the
+        /// thing that is missing, because "the button is grey" is not an answer an author can act on.
+        /// </summary>
+        internal string ShipRefusal
+        {
+            get
+            {
+                if (Busy || shipPending) return "the Doctor is still working";
+                if (Path == null || !File.Exists(Path) ||
+                    !Path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase))
+                    return "no .glb is loaded";
+                if (Ready == null || Ready.Outcome != Outcome.ByName ||
+                    Ready.Report.Count(Severity.Blocking) != 0)
+                    return "the report is not green by name";
+                if (Prototype == null || Prototype.Mode != VerifyMode.Replace || Prototype.Live == null)
+                    return "no replaceable slot is picked";
+                if (Prototype.TargetRefusal != null) return Prototype.TargetRefusal;
+                if (Prototype.ShippedBundle == null) return "no shipped target derived for this slot";
+                if (Renderer == null) return "the slot has no renderer";
+                return ProjectScaffold.NameRefusal((projectName ?? "").Trim());
+            }
+        }
+
+        /// <summary>The bench's half of the handoff, read ONCE: a successful SHIP already gave the panel
+        /// its project and its Apply result, and this says the tab may now move. Taken in Update, after
+        /// `DoShip` returned and `shipPending` had already gone false - the tab never changes inside a GUI
+        /// event, and never while SHIP still owns the press (design:342).</summary>
+        internal bool TakeShipLanding()
+        {
+            bool landed = shipLanded;
+            shipLanded = false;
+            return landed;
+        }
+
         /// <summary>
         /// FRAME N+2, and every byte of it. Order is design §4.5: the source is re-read and compared against
         /// the verdict's own hash, the project is written, the COPY is re-judged, the renderer is
@@ -691,8 +727,14 @@ namespace Morgott.ContentTool.Dev
                 // the two cannot disagree about which folder was baked. The DISPOSITION is asked for, not
                 // read out of the log: zero claims taken can mean residency, a catalog Locate failure or
                 // another mod owning that bundle, and only one of the three is S1.
+                // ApplyRoot, not ApplyProject: the same body, entered by the absolute root this press just
+                // wrote instead of by a NAME the console-shaped overload would have to resolve back to a
+                // folder (a duplicate name resolves to the wrong one). The per-target list is asked for
+                // here because the handoff below has to state what became of EVERY target without parsing
+                // the log and without installing a second time.
+                IList<Bake.Route7.TargetInstall> targets;
                 Bake.Route7.ApplyDisposition how;
-                string log = Bake.Route7.ApplyProject(made.Root, shipBundle, out how);
+                string log = Bake.Route7.ApplyRoot(made.Root, shipBundle, out targets, out how);
                 ContentToolMain.Say(log);
                 shipTail = Bake.StageResult.Tail(log, 10);
                 if (how == Bake.Route7.ApplyDisposition.BakeFailed)
@@ -714,6 +756,20 @@ namespace Morgott.ContentTool.Dev
                     shipResult = "NOT APPLIED: " + shipBundle + " was neither redirected nor already " +
                                  "loaded - the log above names the refusal; the project folder is complete and " +
                                  "can be enabled after a restart";
+
+                // THE HANDOFF (design:341), and only after a real install: the panel is given the project
+                // this press MADE and the Apply it already performed, as values. Nothing is re-run - no
+                // second bake, no second install, no stage dispatched. A bake failure or a refusal hands
+                // over nothing, because there is no Apply result to transfer and the author is being sent
+                // back to the lines above.
+                if (how == Bake.Route7.ApplyDisposition.Resident ||
+                    how == Bake.Route7.ApplyDisposition.Redirected)
+                {
+                    string why = LifecycleDashboard.Handoff(made.Root, log, targets, how);
+                    // The tab change itself is the BENCH's, taken in Update once this returns.
+                    if (why == null) shipLanded = true;
+                    else shipResult += "  (the Lifecycle tab was not opened: " + why + ")";
+                }
             }
             catch (InvalidDataException refused) { shipResult = refused.Message; }   // R1, R2, R5, R6, R13
             catch (IOException refused) { shipResult = refused.Message; }            // R3, R4, E5, E6
@@ -1527,13 +1583,11 @@ namespace Morgott.ContentTool.Dev
             // "MyMod " for a trailing space the press would never have sent.
             name = (projectName ?? "").Trim();
             string refusal = ProjectScaffold.NameRefusal(name);
-            bool ready = Ready != null && Ready.Outcome == Outcome.ByName &&
-                         Ready.Report.Count(Severity.Blocking) == 0 &&
-                         Prototype != null && Prototype.Mode == VerifyMode.Replace && Prototype.Live != null &&
-                         Prototype.TargetRefusal == null && Prototype.ShippedBundle != null &&
-                         Renderer != null && Path != null && File.Exists(Path) &&
-                         Path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) &&
-                         refusal == null && !Busy && !shipPending;
+            // THE CONDITION MOVED, unchanged, to `ShipRefusal` - the acceptance seam has to ask the same
+            // question this button asks, and a second copy of it would let a scenario press something the
+            // author cannot. The name refusal above is still what the LABEL says; the enable is the whole
+            // condition.
+            bool ready = ShipRefusal == null;
 
             GUILayout.BeginHorizontal();
             GUI.enabled = ready;

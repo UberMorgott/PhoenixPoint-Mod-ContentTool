@@ -248,6 +248,9 @@ namespace Morgott.ContentTool.Bake
         /// one known warning.</summary>
         internal string S1 { get; set; }
         internal string S2 { get; set; }
+        /// <summary>Apply's S1 barrier, for THIS session - `Admission.RestartRequired`, which nothing but a
+        /// new process clears. A property for the same CS0649 reason S1 and S2 are.</summary>
+        internal bool RestartRequired { get; set; }
         internal long RunId, BarrierRunId;
         /// <summary>A worker is sitting AT the barrier right now - what `Barrier.Parked` publishes, and
         /// never "a scenario armed one": arming alone would let W13's first poll pass before the run
@@ -332,6 +335,7 @@ namespace Morgott.ContentTool.Bake
              .Key("cancelAcknowledged").Val(CancelAcknowledged)
              .Key("parkedForPaint").Val(ParkedForPaint);
             w.Key("failedMember"); Text(w, Clip(FailedMember, FieldRoom));
+            w.Key("restartRequired").Val(RestartRequired);
             w.Key("claimHeld"); Text(w, Clip(ClaimHeld, FieldRoom));
             w.Key("barrierParked").Val(BarrierParked).Key("barrierRunId").Num(BarrierRunId);
 
@@ -373,6 +377,21 @@ namespace Morgott.ContentTool.Bake
         {
             return f == Freshness.Never ? "never" : f == Freshness.Stale ? "stale" : "fresh";
         }
+        /// <summary>THE GLOBAL STATUS LINE (design:292), and the only copy of it. `running` is the panel's
+        /// transient half - Running/Cancel requested, or null for the idle placeholder - and the two BADGES
+        /// are appended to it rather than replacing it: they are facts about the session (Apply's S1 receipt
+        /// and membership of `Route7.Failed`), so a stage that finished afterwards, however green, cannot
+        /// hide either. Composed here rather than in `Draw` so the offline gate can pin the wording without
+        /// Unity, exactly like <see cref="Word(Freshness)"/>.</summary>
+        internal static string Status(string running, bool restartRequired, string failedMember)
+        {
+            string s = string.IsNullOrEmpty(running) ? StageText.Ready : running;
+            if (restartRequired) s += "   " + StageText.RestartRequired;
+            if (!string.IsNullOrEmpty(failedMember))
+                s += "   " + StageText.SessionBlock + ": " + failedMember;
+            return s;
+        }
+
         internal static string Word(GateOutcome o)
         {
             return o == GateOutcome.Pass ? "pass" : o == GateOutcome.Fail ? "fail"

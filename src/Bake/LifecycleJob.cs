@@ -342,9 +342,9 @@ namespace Morgott.ContentTool.Bake
                         Finish(id, "ct_route7 apply THREW: " + ex.Message, BakeDisposition.Failed);
                         return;
                     }
-                    BakeDisposition d = how == Route7.ApplyDisposition.BakeFailed ? BakeDisposition.Failed
-                                      : how == Route7.ApplyDisposition.Refused ? BakeDisposition.Refused
-                                      : BakeDisposition.Success;
+                    // The mapping is Route7's, in one place: the SHIP handoff carries the same disposition
+                    // into the same row and must not answer it differently (Route7.Disposition).
+                    BakeDisposition d = Route7.Disposition(how);
                     // S1, AS A VALUE (plan:869). `Resident` is a PASS the author has to act on, and the
                     // disposition is the only thing that knows it: read back out of `line` it would be a
                     // grep of a sentence, and hard-coded false at the pump it left Admit's R30 unreachable.

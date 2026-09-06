@@ -152,6 +152,10 @@ namespace Morgott.ContentTool.Dev
                 view.CancelAcknowledged = now.CancelAcknowledged;
                 view.ParkedForPaint = LifecycleJob.ParkedForPaint;
                 view.FailedMember = Route7.IsFailed(id) ? id : null;
+                // THE S1 BARRIER, as a header field: it is a fact about the SESSION (`Admission`'s own,
+                // which only a new process clears), so the poll must be able to see it without inferring
+                // it from a row that a later stage has since overwritten.
+                view.RestartRequired = ctx.RestartRequired;
                 view.ClaimHeld = HeldDir();
                 view.BarrierParked = LifecycleJob.Barrier.Parked;
                 view.BarrierRunId = LifecycleJob.Barrier.ParkedRunId;
@@ -189,15 +193,9 @@ namespace Morgott.ContentTool.Dev
                 if (scenario == "change-source") return Accepted(scenario, ChangeSource());
                 if (scenario == "resident") return Accepted(scenario, Resident(mods));
                 if (scenario == "enable-resident") return Accepted(scenario, EnableResident(mods));
-                // ponytail: `ship` needs a Doctor carrying a loaded preview and its `made.Root`
-                // (ModelDoctor.cs:653), which Task 7 Step 1 is what wires. Driving the SHIP path without
-                // it would mean fabricating the very state the row is supposed to measure.
-                if (scenario == "ship")
-                    return Accepted(scenario, "scenario 'ship' needs the Doctor's loaded preview and its " +
-                                              "made.Root, which Task 7 Step 1 wires - it is not decidable " +
-                                              "here yet.");
+                if (scenario == "ship") return Accepted(scenario, Ship());
                 return Accepted(scenario, "unknown scenario '" + scenario + "' - 'prepare', " +
-                                          "'change-source', 'resident', 'enable-resident' and " +
+                                          "'change-source', 'resident', 'enable-resident', 'ship' and " +
                                           "'arm-cancel-bake' are.");
             }
             catch (Exception ex) { return Accepted(scenario, ex.GetType().Name + ": " + ex.Message); }
@@ -298,6 +296,89 @@ namespace Morgott.ContentTool.Dev
             return null;
         }
 
+        /// <summary>W17. It presses the REAL button through the REAL queue - the Doctor's own
+        /// <c>Enqueue("ship")</c>, its two-frame arming gate and <c>DoShip</c> - and it refuses when that
+        /// press would not arm, rather than fabricating the loaded preview and the `made.Root` the row
+        /// exists to measure. Nothing here installs, selects or writes a row: the handoff the press
+        /// performs is what the poll then reads.</summary>
+        private static string Ship()
+        {
+            if (!FitBench.DoctorShowing)
+                return "refused: the bench's MODEL DOCTOR tab is not open and painting - a press arms for " +
+                       "two frames and cancels itself when its own section is not on screen.";
+            // The BUTTON's condition, asked of the Doctor rather than restated here - a second copy of it
+            // would let this scenario press something the author cannot.
+            string why = FitBench.Doctor.ShipRefusal;
+            if (why != null) return "refused: the SHIP button is not live - " + why + ".";
+            FitBench.Doctor.Enqueue("ship");
+            return null;
+        }
+
+        // ---- the SHIP handoff ------------------------------------------------------------------------
+
+        /// <summary>
+        /// THE HANDOFF (design:341), and it runs NOTHING. A successful Doctor SHIP hands the panel the
+        /// project it just made - by the absolute `made.Root` it captured, never a name rebuilt from a
+        /// label - and the Apply it just performed, as VALUES: the producer's own line, the structured
+        /// per-target dispositions and the aggregate. No stage is dispatched, no bake is repeated and no
+        /// install happens twice; the other four rows stay `never`, because SHIP observed nothing about
+        /// them.
+        ///
+        /// It REFUSES while a run owns the job (R26). SHIP's own claim and the lifecycle producer's are
+        /// independent, so a press that landed while a run was in flight must not overwrite that run's
+        /// selection and rows on its way past.
+        ///
+        /// Returns a refusal, or null when the panel took it.
+        /// </summary>
+        internal static string Handoff(string producedRoot, string applyLine,
+                                       IList<Route7.TargetInstall> targets, Route7.ApplyDisposition how)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(producedRoot) || !Directory.Exists(producedRoot))
+                    return "there is no project root to select.";
+                LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
+                if (now.Busy || Pending(now)) return StageText.R26(now.Stage);
+
+                Bind(Path.GetFullPath(producedRoot),
+                     ContentProject.LoadDeclared(producedRoot).Id);
+                captured = LifecycleJob.Capture(root);
+
+                LifecycleView.Row row = view.Of("Apply");
+                row.Verdict = applyLine;
+                // The SAME two rules the pump applies to a dashboard Apply - the carrier's disposition
+                // mapping and the one outcome rule - so a row filled by SHIP and a row filled by the panel
+                // cannot disagree about what `Resident` means.
+                row.Outcome = LifecycleState.Outcome(GateOutcome.None, Route7.Disposition(how));
+                row.Installation = how == Route7.ApplyDisposition.Resident
+                                 ? StageText.RestartRequired : null;
+                // `Starts` stays 0 on purpose: it counts the times THIS panel entered a stage, and the
+                // panel entered none. The row is a receipt of an apply that happened elsewhere.
+                row.Freshness = LifecycleState.Fresh(LifecycleJob.Look(captured));
+                // S1 IS A FACT ABOUT THE SESSION, so it is set here for the same reason the pump sets it:
+                // a Verify after this press must be refused R30, whichever door the apply came through.
+                if (how == Route7.ApplyDisposition.Resident) ctx.RestartRequired = true;
+                view.S1 = Lines(targets, Route7.ApplyDisposition.Resident);
+                view.S2 = Lines(targets, Route7.ApplyDisposition.Redirected);
+                log = applyLine;
+                message = null;
+                return null;
+            }
+            catch (Exception ex) { return ex.GetType().Name + ": " + ex.Message; }
+        }
+
+        /// <summary>The producer's OWN line for each target that ended this way, joined - never re-worded,
+        /// and never recovered by parsing the aggregate log. Null when no target did, which is a different
+        /// fact from an empty string.</summary>
+        private static string Lines(IList<Route7.TargetInstall> targets, Route7.ApplyDisposition kind)
+        {
+            if (targets == null) return null;
+            string joined = null;
+            foreach (Route7.TargetInstall t in targets)
+                if (t.Outcome == kind) joined = joined == null ? t.Line : joined + "\n" + t.Line;
+            return joined;
+        }
+
         /// <summary>A fixture is a COPY of a real project carrying its own id, so two of them can be baked,
         /// applied and claimed without contesting each other. <paramref name="mutate"/> edits the manifest
         /// TEXT, which is how a fixture that must fail gets its defect - a real row naming a real absence.
@@ -383,6 +464,10 @@ namespace Morgott.ContentTool.Dev
                 row.Verdict = now.Result;
                 row.Outcome = LifecycleState.Outcome(now.Outcome, now.How);
                 row.Freshness = LifecycleState.Fresh(LifecycleJob.Seen);
+                // THE INSTALLATION COLUMN, and the whole of it: S1 is the only thing an author has to ACT
+                // on, and it is a carrier value (`RestartRequired`), never a word read off the verdict. A
+                // stage that did not report it clears the column rather than inheriting the last one's.
+                row.Installation = now.RestartRequired ? StageText.RestartRequired : null;
             }
             // The producer's gate log when it published one - Verify's FAIL/VOID lines are what its
             // verdict points at - and the verdict itself for every stage whose verdict is the whole of
@@ -455,6 +540,11 @@ namespace Morgott.ContentTool.Dev
 
             LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
             bool owned = now.Busy || Pending(now);
+            // THE SESSION BLOCK, asked of the ACTUAL set every frame through the read-only query - never a
+            // remembered flag, so it clears exactly when the set clears (a new process, or a producer
+            // operation that finally succeeded) and not one frame earlier. There is no bypass here: the
+            // dashboard follows the checkbox's suppression, and the console verb's override is not ours.
+            bool blocked = Route7.IsFailed(id);
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Project", GUILayout.Width(60f));
@@ -470,9 +560,12 @@ namespace Morgott.ContentTool.Dev
             GUI.enabled = true;
             GUILayout.EndHorizontal();
 
-            GUILayout.Label("Session  " + (now.Busy
+            // THE GLOBAL STATUS, composed by LifecycleView so the panel and the wire say the same words.
+            // The two badges are appended to the transient half, never in place of it: they outlive
+            // whatever ran last, and a green stage afterwards must not read as "nothing is owed".
+            GUILayout.Label("Session  " + LifecycleView.Status(now.Busy
                 ? now.CancelRequested ? StageText.CancelRequested(now.Stage) : StageText.Running(now.Stage)
-                : "Ready."));
+                : null, ctx.RestartRequired, blocked ? id : null));
 
             foreach (LifecycleView.Row r in view.Rows)
             {
@@ -484,7 +577,11 @@ namespace Morgott.ContentTool.Dev
                 GUILayout.Label(LifecycleView.Word(r.Freshness), GUILayout.Width(BenchList.FreshW));
                 GUILayout.Label(LifecycleView.Word(r.Outcome), GUILayout.Width(BenchList.OutcomeW));
                 GUILayout.Label(Dash(r.Installation), GUILayout.Width(BenchList.InstallW));
-                GUI.enabled = !owned;
+                // APPLY ALONE IS BLOCKED by the session block - diagnosis (Validate, Verify) and the
+                // author's own output (Bake, Package) stay pressable, which is what an author needs in
+                // order to find out WHY the bake failed. The seam refuses it too (R29); this is the
+                // button saying so before the press.
+                GUI.enabled = !owned && !(blocked && r.Stage == "Apply");
                 if (GUILayout.Button("Run", GUILayout.Width(BenchList.StageRunW))) intent = r.Stage;
                 GUI.enabled = true;
                 GUILayout.EndHorizontal();
@@ -507,7 +604,9 @@ namespace Morgott.ContentTool.Dev
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
-            GUI.enabled = !owned;
+            // ...AND `Run all` WITH IT, because the chain contains Apply: admitted, it would run Validate
+            // and Bake and then stop at R29, which is a chain that cannot finish by construction.
+            GUI.enabled = !owned && !blocked;
             if (GUILayout.Button("Run all", GUILayout.Width(80f))) intent = "All";
             // A CANCEL IS A REQUEST, and only until one is outstanding. `owned && !busy` is the producer's
             // publication - it has stated its verdict and the pump has not served it yet - which is exactly

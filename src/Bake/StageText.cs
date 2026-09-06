@@ -25,6 +25,20 @@ namespace Morgott.ContentTool.Bake
         internal const string Idle = "\u2014";
         internal const string Ready = "Ready.";
 
+        // ---- The two BADGES (design:292). Words, not verdicts: each states a fact about the SESSION that
+        // outlives whatever ran last, so neither can be hidden by a later successful stage. They live here
+        // for the same reason Idle and Ready do - a second spelling in the panel is a UI that disagrees with
+        // the wire.
+        /// <summary>Apply reported S1: the game is still serving what it loaded. Shown in the global status
+        /// and in the Apply row's installation column (design:344). A barrier, never a failure - and a
+        /// restart alone turns nothing green, which is why this is the whole sentence.</summary>
+        internal const string RestartRequired = "restart required";
+
+        /// <summary>The selected id is in `Route7.Failed` (design:347). The badge only; the sentence with
+        /// the retry hint is R29, which the seam still answers on a press - there is no bypass either
+        /// way.</summary>
+        internal const string SessionBlock = "session block";
+
         // ---- S: the success lines. --------------------------------------------------------------------
         /// <summary>Apply PASS / Resident. Called from src\Dev\ModelDoctor.cs:710.</summary>
         internal static string S1(string name, string bundle, bool hasPreview)
