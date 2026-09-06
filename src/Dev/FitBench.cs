@@ -321,7 +321,12 @@ namespace Morgott.ContentTool.Dev
             /// <summary>
             /// ============ WHY THE HANDLES WENT SOFT OFF THE BODY (2026-08-29) ============
             ///
-            /// The arrows and rings are drawn from <c>OnRenderObject</c>, i.e. straight into the
+            /// HISTORICAL for the handles themselves - they moved to OnGUI, after post-processing and
+            /// after any upscaler, so nothing below can blur them any more. The flag stays because a
+            /// bench with no bloom and no DOF is still the right picture for judging a fit on an edge,
+            /// and because the MODEL is what the remaining blur would land on.
+            ///
+            /// The arrows and rings were drawn from <c>OnRenderObject</c>, i.e. straight into the
             /// camera's colour target - and that target is then handed to POST-PROCESSING before
             /// anyone sees it. The lighting the bench installs (level.View.EditSolderLightingSettings)
             /// brings its own PostProcessVolume: LightingManager.ApplyPostProcessOptions:168-178 reads
@@ -2368,14 +2373,6 @@ namespace Morgott.ContentTool.Dev
                 // arrows are drawn somewhere the mouse cannot reach them.
                 FitGizmo.Aim(cam, LiveMesh(), Mine(weapon) ? BenchList.KeyFor(
                                  weapon == null ? null : weapon.name, WeaponBuild.Fitted()) : null);
-            }
-
-            /// <summary>The handles themselves. OnRenderObject is Unity's only "draw raw geometry into
-            /// this camera" callback that does not need a Renderer, a mesh or a GameObject in the
-            /// scene - which is exactly right for something that must leave nothing behind.</summary>
-            private void OnRenderObject()
-            {
-                if (open) FitGizmo.Render();
             }
 
             /// <summary>

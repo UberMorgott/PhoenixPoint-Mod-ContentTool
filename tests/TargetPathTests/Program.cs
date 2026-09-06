@@ -3095,9 +3095,26 @@ internal static class Program
               Regex.IsMatch(g, @"Shader\.Find\(""Hidden/Internal-Colored""\)") &&
               Regex.IsMatch(g, @"if \(shader == null\)[\s\S]{0,400}?return null;"),
               "the shader is probed once and its absence disables the gizmo cleanly");
+        // WAS `Camera.current != cam`, the guard the handles needed while they were drawn from
+        // OnRenderObject - a camera pass that runs once per camera, into the camera's own target. Under
+        // a temporal upscaler that target is the LOW-RES one and immediate-mode geometry in it writes no
+        // motion vectors, so every line ghosted. They are drawn from OnGUI's Repaint pass now, in
+        // BACKBUFFER pixels, after the upscaler: one pass, one camera, no guard needed - and the
+        // invariant is that NO camera-pass hook draws them at all.
         Check("S37-onecamera",
-              Regex.IsMatch(g, @"Camera\.current != cam"),
-              "the handles are drawn for ONE camera, so no secondary camera duplicates them");
+              Regex.IsMatch(g, @"case EventType\.Repaint:[\s\S]{0,400}?Paint\(\);") &&
+              Regex.IsMatch(g, @"GL\.LoadPixelMatrix\(0f, Screen\.width, 0f, Screen\.height\)") &&
+              !Regex.IsMatch(g, @"internal static void Render\(\)") &&
+              !Regex.IsMatch(src, @"void OnRenderObject"),
+              "the handles are drawn once, from OnGUI's Repaint pass in backbuffer pixels - no " +
+              "camera-pass hook, so nothing duplicates them and no upscaler ghosts them");
+        // A shaft with one end behind the viewer must be CUT at the near plane, not dropped: the camera
+        // pass used to clip for us, and WorldToScreenPoint alone happily returns a mirrored point.
+        Check("S37-nearclip",
+              Regex.IsMatch(g, @"if \(da <= 0f && db <= 0f\) return;") &&
+              Regex.IsMatch(g, @"a = Vector3\.Lerp\(a, b, da / \(da - db\)\)") &&
+              Regex.IsMatch(g, @"b = Vector3\.Lerp\(b, a, db / \(db - da\)\)"),
+              "a segment straddling the near plane is clipped to the part in front, never skipped");
     }
 
     private static void BenchListArm()

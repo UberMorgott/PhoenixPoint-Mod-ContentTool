@@ -278,14 +278,28 @@ namespace Morgott.ContentTool.Dev
         private static readonly Color Dim = new Color(0.45f, 0.45f, 0.45f, 0.5f);
 
         /// <summary>
-        /// Called from <c>OnRenderObject</c>, which runs ONCE PER CAMERA. Without the
-        /// <c>Camera.current</c> test the handles would be drawn again by every reflection probe,
-        /// UI camera and render-texture capture in the scene - each with its own projection, so what
-        /// the player sees is several overlapping ghost gizmos and only one of them clickable.
+        /// ============ DRAWN FROM OnGUI, IN OUTPUT PIXELS - NOT FROM THE CAMERA PASS ============
+        ///
+        /// This used to run from <c>OnRenderObject</c>, in world space, straight into the camera's
+        /// colour target. That target is the wrong surface under a TEMPORAL UPSCALER (Renderforge's
+        /// DLSS SR): geometry injected in the camera pass writes no motion vectors, so the upscaler
+        /// has nothing to reproject it with and every line smears into a ghost streak behind the
+        /// orbit - and the target is the LOW-RES one besides, so the handles came out at the upscale
+        /// ratio. Renderforge's own compat note is
+        /// <c>Renderforge\docs\research\2026-09-05-overlay-mod-compat.md</c>; ours is the Renderforge
+        /// A/B block of <c>internal-docs\planning\2026-09-03-handoff-replace-mesh-wizard.md</c>.
+        ///
+        /// So the handles are now projected here, by hand, and emitted in the BACKBUFFER's pixels -
+        /// the exact basis <c>WorldToScreenPoint</c>, <c>Event.current.mousePosition</c> and the
+        /// Doctor's bone overlay (commit 520f03d) already use. OnGUI runs after the upscaler, so
+        /// there is nothing left to reproject. It also puts the picture and the pick in ONE pass of
+        /// ONE camera, which is what the old <c>Camera.current == cam</c> test was for.
+        ///
+        /// Repaint only, and only from <see cref="Gui"/>.
         /// </summary>
-        internal static void Render()
+        private static void Paint()
         {
-            if (!Ready() || Camera.current != cam) return;
+            if (!Ready()) return;
             Material m = Colored();
             if (m == null) return;
             try
@@ -297,46 +311,94 @@ namespace Morgott.ContentTool.Dev
 
                 m.SetPass(0);
                 GL.PushMatrix();
-                // No matrix of our own: inside OnRenderObject the model-view is already the current
-                // camera's, so plain world coordinates are what the vertices want.
-                GL.Begin(GL.LINES);
-                for (int i = 0; i < 3; i++)
+                try
                 {
-                    GL.Color(Shade(i, valid[i]));
-                    GL.Vertex(pivot);
-                    GL.Vertex(pivot + axes[i] * (size * ShaftFraction));
-                }
-                GL.End();
+                    // The BACKBUFFER's own convention - origin BOTTOM-left, which is what
+                    // WorldToScreenPoint hands back - stated rather than left to the default.
+                    GL.LoadPixelMatrix(0f, Screen.width, 0f, Screen.height);
 
-                GL.Begin(GL.TRIANGLES);
-                for (int i = 0; i < 3; i++) Head(pivot, axes[i], size, Shade(i, valid[i]));
-                GL.End();
-
-                // THE RINGS, as the same sampled polyline the pick walks - in WORLD space here, in
-                // screen space there, but the same RingSegments points either way, so what is grabbable
-                // is what is drawn.
-                float[][] rx, ry; bool[] rvalid; float radius; string why;
-                Vector3 rp; Vector3[] ra;
-                if (ProjectRings(out rx, out ry, out rvalid, out rp, out ra, out radius, out why))
-                {
                     GL.Begin(GL.LINES);
                     for (int i = 0; i < 3; i++)
                     {
-                        GL.Color(Shade(3 + i, rvalid[i]));
-                        Vector3 u = ra[(i + 1) % 3], v = ra[(i + 2) % 3];
-                        for (int s = 0; s < BenchList.RingSegments; s++)
-                        {
-                            float a0 = s * 2f * Mathf.PI / BenchList.RingSegments;
-                            float a1 = (s + 1) * 2f * Mathf.PI / BenchList.RingSegments;
-                            GL.Vertex(rp + u * (Mathf.Cos(a0) * radius) + v * (Mathf.Sin(a0) * radius));
-                            GL.Vertex(rp + u * (Mathf.Cos(a1) * radius) + v * (Mathf.Sin(a1) * radius));
-                        }
+                        GL.Color(Shade(i, valid[i]));
+                        Seg(pivot, pivot + axes[i] * (size * ShaftFraction));
                     }
                     GL.End();
+
+                    GL.Begin(GL.TRIANGLES);
+                    for (int i = 0; i < 3; i++) Head(pivot, axes[i], size, Shade(i, valid[i]));
+                    GL.End();
+
+                    // THE RINGS, as the same sampled polyline the pick walks - the same RingSegments
+                    // points either way, so what is grabbable is what is drawn.
+                    float[][] rx, ry; bool[] rvalid; float radius; string why;
+                    Vector3 rp; Vector3[] ra;
+                    if (ProjectRings(out rx, out ry, out rvalid, out rp, out ra, out radius, out why))
+                    {
+                        GL.Begin(GL.LINES);
+                        for (int i = 0; i < 3; i++)
+                        {
+                            GL.Color(Shade(3 + i, rvalid[i]));
+                            Vector3 u = ra[(i + 1) % 3], v = ra[(i + 2) % 3];
+                            for (int s = 0; s < BenchList.RingSegments; s++)
+                            {
+                                float a0 = s * 2f * Mathf.PI / BenchList.RingSegments;
+                                float a1 = (s + 1) * 2f * Mathf.PI / BenchList.RingSegments;
+                                Seg(rp + u * (Mathf.Cos(a0) * radius) + v * (Mathf.Sin(a0) * radius),
+                                    rp + u * (Mathf.Cos(a1) * radius) + v * (Mathf.Sin(a1) * radius));
+                            }
+                        }
+                        GL.End();
+                    }
                 }
-                GL.PopMatrix();
+                finally
+                {
+                    // PAIRED WITH THE PUSH whatever happens above it: a GL matrix stack left one deep
+                    // leaks into every camera that renders after this one.
+                    GL.PopMatrix();
+                }
             }
-            catch (Exception) { /* a render callback that throws throws every frame; one gizmo is not worth that */ }
+            catch (Exception) { /* a draw that throws throws every frame; one gizmo is not worth that */ }
+        }
+
+        /// <summary>
+        /// One world segment as the two BACKBUFFER-pixel vertices it is drawn as, CLIPPED at the near
+        /// plane rather than dropped. The projection the camera pass did for us is gone with it, and
+        /// <c>WorldToScreenPoint</c> happily returns a plausible MIRRORED point for anything behind the
+        /// viewer - so a shaft with one end behind the camera would otherwise draw as a line shooting
+        /// off the wrong way. Dropping the whole segment instead is just as wrong: an author orbiting
+        /// in close would watch the handle he is dragging vanish. So the segment is cut where it
+        /// crosses the plane and the part in front is drawn.
+        /// </summary>
+        private static void Seg(Vector3 a, Vector3 b)
+        {
+            Vector3 eye = cam.transform.position, fwd = cam.transform.forward;
+            float near = cam.nearClipPlane + 1e-4f;
+            float da = Vector3.Dot(a - eye, fwd) - near;
+            float db = Vector3.Dot(b - eye, fwd) - near;
+            if (da <= 0f && db <= 0f) return;                       // wholly behind: nothing to draw
+            if (da <= 0f) a = Vector3.Lerp(a, b, da / (da - db));
+            else if (db <= 0f) b = Vector3.Lerp(b, a, db / (db - da));
+            Vector3 p = cam.WorldToScreenPoint(a), q = cam.WorldToScreenPoint(b);
+            GL.Vertex3(p.x, p.y, 0f);
+            GL.Vertex3(q.x, q.y, 0f);
+        }
+
+        /// <summary>One cone triangle, or nothing. ponytail: a triangle with any vertex behind the near
+        /// plane is SKIPPED, not clipped - clipping a triangle makes one or two new ones, and a head is
+        /// <see cref="HeadRadius"/> of the handle's length, so the only camera that can straddle one is
+        /// already inside the gun. The shafts and the rings, which are long, are clipped properly by
+        /// <see cref="Seg"/>.</summary>
+        private static void Tri(Vector3 a, Vector3 b, Vector3 c)
+        {
+            float near = cam.nearClipPlane;
+            Vector3 p = cam.WorldToScreenPoint(a);
+            Vector3 q = cam.WorldToScreenPoint(b);
+            Vector3 r = cam.WorldToScreenPoint(c);
+            if (p.z <= near || q.z <= near || r.z <= near) return;
+            GL.Vertex3(p.x, p.y, 0f);
+            GL.Vertex3(q.x, q.y, 0f);
+            GL.Vertex3(r.x, r.y, 0f);
         }
 
         private const float ShaftFraction = 0.82f;
@@ -370,8 +432,8 @@ namespace Morgott.ContentTool.Dev
                 float a0 = s * 2f * Mathf.PI / HeadSegments, a1 = (s + 1) * 2f * Mathf.PI / HeadSegments;
                 Vector3 p0 = baseCentre + u * Mathf.Cos(a0) + v * Mathf.Sin(a0);
                 Vector3 p1 = baseCentre + u * Mathf.Cos(a1) + v * Mathf.Sin(a1);
-                GL.Vertex(apex); GL.Vertex(p0); GL.Vertex(p1);
-                GL.Vertex(baseCentre); GL.Vertex(p1); GL.Vertex(p0);   // the cap, so it is solid edge-on
+                Tri(apex, p0, p1);
+                Tri(baseCentre, p1, p0);                               // the cap, so it is solid edge-on
             }
         }
 
@@ -453,6 +515,8 @@ namespace Morgott.ContentTool.Dev
                 case EventType.Repaint:
                     // Only for the highlight; the picking that matters happens on the press.
                     hover = active >= 0 ? active : Pick(e.mousePosition.x, Flip(e.mousePosition.y));
+                    // ... and then the handles themselves, in the SAME pass that just picked them.
+                    Paint();
                     return;
             }
         }
