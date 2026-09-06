@@ -438,9 +438,17 @@ namespace Morgott.ContentTool.Dev
                        "would delete the tree the panel is bound to. Open(\"\") first, then prepare.";
             if (Directory.Exists(at)) Directory.Delete(at, true);
             Copy(source, at);
+            string modId = "acceptance." + name.ToLowerInvariant();
             string manifest = Path.Combine(at, ContentMods.Manifest);
-            string json = Retarget(File.ReadAllText(manifest), "id", "acceptance." + name.ToLowerInvariant());
+            string json = Retarget(File.ReadAllText(manifest), "id", modId);
             File.WriteAllText(manifest, mutate == null ? json : mutate(json));
+            // AND meta.json WITH IT. The mod manager keys on that file, not on ppcontent.json, so a fork
+            // carrying the source's copy verbatim declared the SOURCE's ID: all four Dashboard* folders
+            // announced themselves as `Replace_Leftleg`, the one MOD_ACTIVATED entry enabled every one of
+            // them at startup, and whichever loaded first claimed the shared bundle before any row ran
+            // (Task 8's D5 - it is what made W10's first attempt VOID). Written through the scaffold's own
+            // composer, so the id is JSON-escaped by the same writer a real project's is.
+            File.WriteAllText(Path.Combine(at, "meta.json"), ProjectScaffold.Meta(modId));
             return null;
         }
 
@@ -505,13 +513,21 @@ namespace Morgott.ContentTool.Dev
             LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
             if (now.Busy || now.RunId == 0 || now.RunId == harvested || now.RunId != dispatched) return;
             harvested = now.RunId;
+            // THE QUEUED LINE IS SPENT. `message` is the transient half beside `Run all`/`Cancel` and only
+            // `Bind`/`Handoff`/`Choose` ever cleared it, so a finished run still read `Queued: Bake` for the
+            // rest of the session (W9, W13). A stage that is about to be dispatched writes its own.
+            message = null;
+            // AND THE FRESHNESS IS RE-MEASURED ON EVERY ROW (design:91's "after completion"): it is one
+            // observation of one project's copies, not a per-row receipt, and writing it on the finishing
+            // row alone left the others reporting an age that was measured stages ago - W16 read `fresh`
+            // while admission refused Verify as stale.
+            Freshen(LifecycleState.Fresh(LifecycleJob.Seen));
 
             LifecycleView.Row row = view.Of(now.Stage);
             if (row != null)
             {
                 row.Verdict = now.Result;
                 row.Outcome = LifecycleState.Outcome(now.Outcome, now.How);
-                row.Freshness = LifecycleState.Fresh(LifecycleJob.Seen);
                 // THE INSTALLATION COLUMN, and the whole of it: S1 is the only thing an author has to ACT
                 // on, and it is a carrier value (`RestartRequired`), never a word read off the verdict. A
                 // stage that did not report it clears the column rather than inheriting the last one's.
@@ -674,7 +690,11 @@ namespace Morgott.ContentTool.Dev
                 openGroups--; GUILayout.EndHorizontal();
                 // The row's OWN verdict, never the tail's last line: the two answer different questions and
                 // reading one for the other is how a panel invents a verdict.
-                GUILayout.Label("  " + Dash(r.Verdict));
+                // ONE LINE OF IT. A Bake verdict is the whole bake log (1 225 445 chars, W10), and drawing
+                // it whole pushed the rows under it, the progress track, both buttons and the log tail off
+                // the screen - the layout moving when a result arrives, which is what design §4 forbids.
+                // The full text is untouched: the tail holds it and `Snapshot("<stage>")` serves it verbatim.
+                GUILayout.Label("  " + Dash(LifecycleView.OneLine(r.Verdict)));
             }
 
             SlimProgress p = now.Progress;
@@ -721,7 +741,10 @@ namespace Morgott.ContentTool.Dev
             // THE REFRESH PRESS RE-MEASURES THE BARRIER TOO. A bundle can become resident while the panel
             // sits idle - another mod, or a screen that loaded it - and R30 is a live fact, not a receipt
             // of what this panel's own Apply did.
-            if (rescan) { rescan = false; Scan(); Barrier(); }
+            // ...AND IT RE-MEASURES THE COPIES, design:91's "explicit refresh". `!Busy` because `Look`
+            // replaces the observation a running producer is writing, and a Refresh press must not reach
+            // into a run's own bookkeeping; the run re-measures for itself at completion anyway.
+            if (rescan) { rescan = false; Scan(); Barrier(); if (!Busy) Refresh(ctx.InRunAll); }
             int pick = select; select = int.MinValue;
             string want = intent; intent = null;
             // CANCEL IS THE ONE PRESS THAT BELONGS TO A RUNNING JOB, so it is answered before the busy
@@ -885,7 +908,7 @@ namespace Morgott.ContentTool.Dev
             ctx.ProjectId = id;
             ctx.RetryHint = Route7.IsFailed(id) ? Route7.RetryHint(root) : null;
             captured = ctx.Selection == LifecycleState.Selection.Ok ? LifecycleJob.Capture(root) : null;
-            ctx.Copies = LifecycleState.Fresh(LifecycleJob.Look(captured));
+            Freshen(LifecycleState.Fresh(LifecycleJob.Look(captured)));
             ctx.LegacyDiskActive = Route7.LegacyDiskActive(id);
             ctx.WriteOutsideRoots = OutsideRoots();
             ctx.InRunAll = inChain;
@@ -917,6 +940,16 @@ namespace Morgott.ContentTool.Dev
         }
 
         private static string Norm(string path) { return Path.GetFullPath(path).TrimEnd('\\', '/'); }
+
+        /// <summary>ONE FRESHNESS, on admission AND on every row (design:91 - recomputed on an explicit
+        /// refresh, at stage start and after completion, never in OnGUI). It is a measurement of the
+        /// selected project's copies, so a row cannot hold an older answer than the one admission acts on:
+        /// W16 refused Verify as stale while all five rows still read `fresh`.</summary>
+        private static void Freshen(Freshness f)
+        {
+            ctx.Copies = f;
+            foreach (LifecycleView.Row r in view.Rows) r.Freshness = f;
+        }
 
         /// <summary>MAIN. Hands the stage - and the capture `Refresh` just took - to the one dispatcher the
         /// buttons will use too.</summary>

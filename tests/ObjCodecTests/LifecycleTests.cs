@@ -566,6 +566,15 @@ internal static class LifecycleTests
                              "restart with no session receipt admits all five (design:196-:200)");
         checks += Check(LifecycleState.Admit("All", ok) == null,
                         "'All' is admitted here and re-asked per stage as the sequencer reaches it (design:187)");
+        // W14: the panel disabled `Run all` under the session block and admission did not, so `Run("All")`
+        // over the RPC seam was ADMITTED while `Run("Apply")` was refused - the button and the door
+        // disagreeing about the same fact. The chain CONTAINS Apply, so it cannot finish by construction.
+        checks += Check(LifecycleState.Admit("All", new LifecycleState.Admission
+                        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo",
+                          Copies = Freshness.Fresh, RetryHint = "'ct_route7 apply Demo'." }) ==
+                        StageText.R29("morgott.demo", "'ct_route7 apply Demo'."),
+                        "the session block refuses `Run all` with the BLOCK'S OWN word (R29), not only the " +
+                        "Apply the chain would reach - W14 admitted the chain over the seam");
 
         // Bake does not read Validate's receipts - it loads and validates the manifest itself.
         LifecycleState.Admission never = new LifecycleState.Admission
@@ -1639,6 +1648,27 @@ internal static class LifecycleTests
                         ((string)inst["installation"]).Length > 0 &&
                         huge.StartsWith((string)inst["installation"]),
                         "an over-long installation line shrinks with the verdict, not outside the budget");
+        // ---- WHAT A ROW DRAWS. The section above serves the verdict verbatim; the PANEL cannot, because a
+        // Bake verdict is the whole bake log (W10 measured 1 225 445 chars) and drawing it whole pushed the
+        // rows under it, the progress track, both buttons and the log tail off the screen.
+        checks += Check(LifecycleView.OneLine(null) == null && LifecycleView.OneLine("") == "",
+                        "no verdict draws as no text - the panel's own dash answers that, not this");
+        checks += Check(LifecycleView.OneLine("ct_project: ALL PASS - D:\\out") ==
+                        "ct_project: ALL PASS - D:\\out",
+                        "a one-line verdict that fits is drawn VERBATIM - no marker, nothing cut");
+        checks += Check(LifecycleView.OneLine("Bake: FAIL - 2 gate(s)\r\nP4 REFUSED ...\nP5 ...") ==
+                        "Bake: FAIL - 2 gate(s) ...",
+                        "a multi-line verdict draws its FIRST line and says there is more");
+        checks += Check(LifecycleView.OneLine("one line\r\n") == "one line" &&
+                        LifecycleView.OneLine("one line\n\n  \n") == "one line",
+                        "a trailing newline is not 'more' - it would mark every AppendLine'd verdict");
+        string bakeLog = huge + "\nand more";
+        checks += Check(LifecycleView.OneLine(bakeLog).Length <= 164 &&
+                        bakeLog.StartsWith(LifecycleView.OneLine(bakeLog).Substring(0, 160)) &&
+                        LifecycleView.OneLine(bakeLog).EndsWith(" ..."),
+                        "and a 4000-char first line is cut to one row's worth, still the producer's own " +
+                        "leading text, with the marker - the full verdict stays in the section and the tail");
+
         Dictionary<string, object> no = Obj(view.Section("Nonsense"));
         checks += Check(!(bool)no["ok"] && ((string)no["error"]).Length > 0,
                         "an unknown section is a parseable refusal, never an exception across the wire");

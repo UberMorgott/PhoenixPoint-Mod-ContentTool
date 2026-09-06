@@ -399,7 +399,10 @@ namespace Morgott.ContentTool.Project
         /// NameRefusal-limited to letters, digits, '.', '_' and '-', but an EXISTING project's came back
         /// DECODED from ManifestFile.Load, so it may hold a quote or a backslash that would end the file's
         /// JSON in the wrong place.</summary>
-        private static string Meta(string id)
+        /// <remarks>`internal` because the dashboard's acceptance fork rewrites a copied meta.json with it
+        /// (LifecycleDashboard.Fork): a fixture that kept the source's ID was announced to the mod manager
+        /// under the SOURCE's name.</remarks>
+        internal static string Meta(string id)
         {
             string quoted = new JsonWriter().Val(id).ToString();     // quoted AND escaped
             return "{\n  \"ID\": " + quoted + ",\n" +

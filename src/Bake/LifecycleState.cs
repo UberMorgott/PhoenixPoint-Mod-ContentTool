@@ -402,6 +402,28 @@ namespace Morgott.ContentTool.Bake
             return s;
         }
 
+        /// <summary>How much of a verdict a ROW draws. The verdict itself is unbounded - a Bake's is the
+        /// whole bake log, measured at 1 225 445 chars in Task 8's W10 - and drawing it whole pushed the
+        /// later rows, the progress track, `Run all`/`Cancel` and the log tail off the screen, which is
+        /// design §4's constant control sequence broken by a result arriving.</summary>
+        private const int RowRoom = 160;
+
+        /// <summary>THE ROW'S ONE LINE: the verdict's first line, bounded, with a marker when there is more.
+        /// The full text is untouched - the log tail holds it and `Section("&lt;stage&gt;")` still serves it
+        /// verbatim - so this cuts the DRAWING and nothing else. Here rather than in the panel for the reason
+        /// <see cref="Word(Freshness)"/> is: the offline gate can pin it, and `LifecycleDashboard` cannot be
+        /// linked.</summary>
+        internal static string OneLine(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            int cut = s.IndexOfAny(new[] { '\r', '\n' });
+            string head = cut < 0 ? s : s.Substring(0, cut);
+            bool more = head.Length > RowRoom || (cut >= 0 && s.Substring(cut).Trim().Length > 0);
+            // ASCII marker on purpose: these files carry no BOM, and `StageText.Idle` escapes its em dash
+            // rather than trust a compiler's codepage guess - three dots need no such trust.
+            return more ? Clip(head, RowRoom) + " ..." : head;
+        }
+
         internal static string Word(GateOutcome o)
         {
             return o == GateOutcome.Pass ? "pass" : o == GateOutcome.Fail ? "fail"
@@ -657,10 +679,20 @@ namespace Morgott.ContentTool.Bake
                         ? null
                         : StageText.R28("Verify", "patched copies", ctx.Copies);
 
+                case "All":
+                    // THE SESSION BLOCK IS ASKED OF THE CHAIN TOO. `All` contains Apply, so a chain admitted
+                    // here runs Validate and Bake and then stops at R29 - a chain that cannot finish by
+                    // construction. The panel's `Run all` button was disabled for exactly this reason
+                    // (LifecycleDashboard.cs:696) and admission was not, so the button and the RPC door
+                    // disagreed: Task 8's W14 pressed `Run("All")` under a standing block and it was
+                    // ADMITTED. R29 is the block's own word - no second sentence for the same fact.
+                    if (!string.IsNullOrEmpty(ctx.RetryHint)) return StageText.R29(ctx.ProjectId, ctx.RetryHint);
+                    return null;
+
                 default:
                     // Validate re-derives its own receipts; Package's payload and empty-destination refusals
-                    // belong to Package.Run alone (Package.cs:78) and are not restated here. "All" is
-                    // admitted and re-asked per stage as the sequencer reaches it. Package needs no chain
+                    // belong to Package.Run alone (Package.cs:78) and are not restated here. Otherwise "All"
+                    // is admitted and re-asked per stage as the sequencer reaches it. Package needs no chain
                     // arm either: it is only ever reached when nothing stopped the chain before it.
                     return null;
             }
