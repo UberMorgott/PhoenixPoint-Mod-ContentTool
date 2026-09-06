@@ -53,6 +53,10 @@ nav:
       - First green bake: getting-started/first-mod.md
       - Choose Replace, Add or Build: getting-started/choose-a-route.md
       - Bake, test, package: getting-started/lifecycle.md
+  - In-game bench:
+      - The in-game bench: bench/index.md
+      - "Model Doctor: check a mesh before you bake": bench/model-doctor.md
+      - "Lifecycle tab: validate, bake, apply, verify, package": bench/lifecycle-tab.md
   - Project files: reference/project-files.md
   - Find game content: find-content/index.md
   - Read bake failures: troubleshooting/bake-errors.md
@@ -82,4 +86,5 @@ nav:
       - CustomCreature: examples/custom-creature.md
       - HumanoidSoldier: examples/humanoid-soldier.md
       - ReplaceCharacterBody: examples/replace-character-body.md
+      - "Worked example: a PX Heavy armour set from a Blender export": examples/replace-armour-set.md
       - WeaponAdd: examples/weapon-add.md

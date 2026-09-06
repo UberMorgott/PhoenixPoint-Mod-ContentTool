@@ -1,5 +1,7 @@
 # Bake, test and package
 
+Use the [Lifecycle tab](../bench/lifecycle-tab.md) to run these producers from the in-game bench.
+
 Use the same order for every project:
 
 ```text

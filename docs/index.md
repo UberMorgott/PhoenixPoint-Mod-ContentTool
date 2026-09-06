@@ -23,6 +23,8 @@ You do not need the authoring commands below just to play with a mod.
 
 ## Modders
 
+Use [the in-game bench](bench/index.md) to inspect meshes and run project stages from a loaded geoscape.
+
 Follow this route once before you pick a specialised recipe:
 
 1. [Make your first green bake](getting-started/first-mod.md). This proves that your folder, manifests,

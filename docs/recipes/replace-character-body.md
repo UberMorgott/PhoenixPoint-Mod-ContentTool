@@ -10,6 +10,8 @@ while receiving a different rig/body. It does not add a second character.
 
 ## What you need before you start
 
+Use [Model Doctor](../bench/model-doctor.md) to inspect a GLB against a prototype slot; that check does not prove this experimental whole-body route.
+
 - Festering Skies installed for the example target `S_SY_Eileen_CharacterTemplateDef`.
 - The full, untrimmed 300-clip humanoid GLB produced by the
   [humanoid soldier pipeline](humanoid-soldier.md). The worked output is
