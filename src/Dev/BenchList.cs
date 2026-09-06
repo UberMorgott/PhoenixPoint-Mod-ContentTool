@@ -505,6 +505,30 @@ namespace Morgott.ContentTool.Dev
             return buttons * buttonW + (buttons - 1) * 2f <= ContentWidth(panelW);
         }
 
+        /// <summary>
+        /// The Model Doctor's header, grouped by the LINE each control is drawn on, plus the browser's
+        /// own top row. They live here for the same reason <see cref="StageW"/> does - the panel that
+        /// draws them carries UnityEngine types, this arithmetic does not - and they are grouped at all
+        /// because IMGUI says nothing when a horizontal row runs past the panel: GUILayout.BeginArea
+        /// simply CLIPS it. That is how the one-line header read "| prototype Hun" and the browser's
+        /// counter, the one control with no width of its own, fell into a vertical column of characters.
+        /// </summary>
+        internal const float DocSourceW = 200f, DocBrowseW = 80f, DocAliasW = 68f,
+                             DocProtoW = 176f, DocChangeW = 68f, DocModeW = 100f,
+                             DocVariantW = 160f, DocBarW = 8f,
+                             DocBackW = 70f, DocSearchLabelW = 46f, DocSearchFieldW = 220f;
+
+        /// <summary>Does every one of those rows fit inside the panel? Same silence as
+        /// <see cref="RowFits"/>'s, and the same assert.</summary>
+        internal static bool DoctorRowsFit(float panelW)
+        {
+            float w = ContentWidth(panelW);
+            return DocSourceW + DocBrowseW + DocAliasW + 3f * RowGap <= w
+                && DocProtoW + DocChangeW + DocModeW + 3f * RowGap <= w
+                && DocVariantW + DocBarW + 3f * RowGap <= w
+                && DocBackW + DocSearchLabelW + DocSearchFieldW + 3f * RowGap <= w;
+        }
+
         /// <summary>A long def name shortened from the MIDDLE, because both ends carry meaning
         /// ("Morgott_VultureAR_WeaponDef" - the author's prefix and the def suffix). Never widens the
         /// panel, which is the whole point: the alternative fix is a wider panel and less unit.</summary>

@@ -1665,48 +1665,58 @@ namespace Morgott.ContentTool.Dev
         }
 
         /// <summary>
-        /// ONE LINE: source, prototype, mode, role, slot - section 6 of the picker design. What the
-        /// verdict below is ABOUT, said in the order it was decided, so the author never has to open
-        /// the browser to find out what they are looking at.
+        /// Source, prototype, mode, role, slot - section 6 of the picker design. What the verdict below
+        /// is ABOUT, said in the order it was decided, so the author never has to open the browser to
+        /// find out what they are looking at.
+        ///
+        /// THREE rows, not one. The panel is <see cref="BenchList.PanelWidth"/> wide and IMGUI does not
+        /// wrap a horizontal group - GUILayout.BeginArea clips it - so the single row this used to be
+        /// was cut mid-word at "| prototype Hun" and everything after it was simply not on screen.
+        /// The widths live in <see cref="BenchList.DoctorRowsFit"/>, which is where they are measured.
         /// </summary>
         private void Header()
         {
             GUILayout.BeginHorizontal();
-            GUILayout.Label("source " + BenchList.Elide(Path == null ? "-" : System.IO.Path.GetFileName(Path), 22),
-                            GUILayout.Width(180f));
+            GUILayout.Label("source " + BenchList.Elide(Path == null ? "-" : System.IO.Path.GetFileName(Path), 23),
+                            GUILayout.Width(BenchList.DocSourceW));
             // DEAD WHILE A PRESS IS ARMED, like every control below it - and these three for a second
             // reason: each one takes Draw down a path that never reaches the SHIP section, so the gate's
             // paint would never happen and the press would sit armed until the panel came back.
             GUI.enabled = !shipPending;
-            if (GUILayout.Button("Browse...", GUILayout.Width(80f)))
+            if (GUILayout.Button("Browse...", GUILayout.Width(BenchList.DocBrowseW)))
                 browser.Show(Path == null ? "" : System.IO.Path.GetDirectoryName(Path));
             GUI.enabled = true;
-            GUILayout.Label("|", GUILayout.Width(8f));
+            if (Ready != null && Ready.Source != null && Ready.Source.AliasesApplied > 0)
+                GUILayout.Label("ALIASES (" + Ready.Source.AliasesApplied + ")",
+                                GUILayout.Width(BenchList.DocAliasW));
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
             GUILayout.Label("prototype " + BenchList.Elide(Prototype == null || Prototype.Record == null
-                                                           ? "-" : Prototype.Record.DisplayName, 18),
-                            GUILayout.Width(160f));
+                                                           ? "-" : Prototype.Record.DisplayName, 17),
+                            GUILayout.Width(BenchList.DocProtoW));
             GUI.enabled = !shipPending;
-            if (GUILayout.Button("Change", GUILayout.Width(70f))) edits.Enqueue(delegate { browserOpen = true; });
+            if (GUILayout.Button("Change", GUILayout.Width(BenchList.DocChangeW)))
+                edits.Enqueue(delegate { browserOpen = true; });
             GUI.enabled = true;
-            GUILayout.Label("|", GUILayout.Width(8f));
             // The mode is a TOGGLE and not a label: Replace and Extend answer two different questions
             // about the same slot, and swapping between them is the comparison the author came for.
             GUI.enabled = !shipPending && Prototype != null;
             if (GUILayout.Button(Prototype == null ? "Replace/Extend" : Prototype.Mode.ToString(),
-                                 GUILayout.Width(100f)))
+                                 GUILayout.Width(BenchList.DocModeW)))
             {
                 PrototypeTarget pick = Prototype;
                 edits.Enqueue(delegate { Flip(pick); });
             }
             GUI.enabled = true;
-            GUILayout.Label("|", GUILayout.Width(8f));
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
             GUILayout.Label(BenchList.Elide(Prototype == null || Prototype.Variant == null
                                             ? "-" : Prototype.Variant.Name, VariantChars),
-                            GUILayout.Width(160f));
-            GUILayout.Label("|", GUILayout.Width(8f));
+                            GUILayout.Width(BenchList.DocVariantW));
+            GUILayout.Label("|", GUILayout.Width(BenchList.DocBarW));
             GUILayout.Label(BenchList.Elide(Prototype == null ? "-" : Prototype.SlotDefName ?? "-", 22));
-            if (Ready != null && Ready.Source != null && Ready.Source.AliasesApplied > 0)
-                GUILayout.Label("ALIASES (" + Ready.Source.AliasesApplied + ")");
             GUILayout.EndHorizontal();
         }
 
@@ -1791,12 +1801,16 @@ namespace Morgott.ContentTool.Dev
         private void Browse()
         {
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("< Back", GUILayout.Width(70f))) edits.Enqueue(delegate { browserOpen = false; });
-            GUILayout.Label("search", GUILayout.Width(46f));
-            query = GUILayout.TextField(query ?? "", GUILayout.Width(220f));
+            if (GUILayout.Button("< Back", GUILayout.Width(BenchList.DocBackW)))
+                edits.Enqueue(delegate { browserOpen = false; });
+            GUILayout.Label("search", GUILayout.Width(BenchList.DocSearchLabelW));
+            query = GUILayout.TextField(query ?? "", GUILayout.Width(BenchList.DocSearchFieldW));
+            GUILayout.EndHorizontal();
+            // ITS OWN LINE. The row above already fills the panel, so the counter - the one control
+            // with no width of its own - was laid out into the few pixels left over and wrapped one
+            // character per line into a vertical column at the panel edge.
             GUILayout.Label(shown.Count + " of " + all.Count + " prototype(s)" +
                             (protoBusy ? "   rebuilding..." : ""));
-            GUILayout.EndHorizontal();
             if (Message.Length > 0) GUILayout.Label(Message);
 
             browserScroll = GUILayout.BeginScrollView(browserScroll);

@@ -3243,6 +3243,13 @@ internal static class Program
               "so the check is a measurement and not a blind pass");
         Check("S29-row-edge", BenchList.RowFits(0, 999f, 100f) && !BenchList.RowFits(1, 999f, 100f),
               "no buttons always fit; one button wider than the panel never does");
+        // The Model Doctor's header and browser row, same silence, same arithmetic: the one-line header
+        // that shipped summed to ~800 px inside 364 and BeginArea clipped it at "| prototype Hun".
+        Check("S29-doctor", BenchList.DoctorRowsFit(BenchList.PanelWidth),
+              "every row of the Doctor's header fits the panel's content width " +
+              BenchList.ContentWidth(BenchList.PanelWidth));
+        Check("S29-doctor-ctl", !BenchList.DoctorRowsFit(340f),
+              "and a narrower panel does NOT, so the check is a measurement and not a blind pass");
 
         // ---- the long def name ----
         const string longName = "Morgott_VultureAssaultRifle_Mk2_WeaponDef";
