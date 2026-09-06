@@ -49,6 +49,10 @@
     <Compile Include="..\..\src\Bake\StageText.cs" Link="StageText.cs" />
     <Compile Include="..\..\src\Bake\OutputClaim.cs" Link="OutputClaim.cs" />
     <Compile Include="..\..\src\Bake\LifecycleState.cs" Link="LifecycleState.cs" />
+    <!-- The apply's OUTCOME VOCABULARY, the UnityEngine-free half of Route7: the aggregate verdict and the
+         restart derivation are what the Apply row, the SHIP handoff and Admit's R30 all read, so the two
+         are pinned here rather than by pressing a panel. -->
+    <Compile Include="..\..\src\Bake\ApplyOutcome.cs" Link="ApplyOutcome.cs" />
     <Compile Include="..\..\src\Bake\StageValidate.cs" Link="StageValidate.cs" />
     <Compile Include="..\..\src\Bake\Publication.cs" Link="Publication.cs" />
     <!-- And the RECEIPT that publication writes last. PatchCache is plain System.IO (its stamps are

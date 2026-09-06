@@ -252,6 +252,13 @@ namespace Morgott.ContentTool.Bake
         /// <summary>Apply's S1 barrier, for THIS session - `Admission.RestartRequired`, which nothing but a
         /// new process clears. A property for the same CS0649 reason S1 and S2 are.</summary>
         internal bool RestartRequired { get; set; }
+        /// <summary>The Doctor's SHIP arm, for the poll that presses it: `Pending` is "a press is armed",
+        /// `Result` is the Doctor's own last SHIP line (its cancellation says so in its own words). Without
+        /// them a press that armed and cancelled itself two frames later looks exactly like one whose
+        /// handoff has not landed yet, and W17 waits for a handoff that is never coming. Properties for the
+        /// same CS0649 reason S1 and S2 are - nothing in this assembly assigns them.</summary>
+        internal bool ShipPending { get; set; }
+        internal string ShipResult { get; set; }
         internal long RunId, BarrierRunId;
         /// <summary>A worker is sitting AT the barrier right now - what `Barrier.Parked` publishes, and
         /// never "a scenario armed one": arming alone would let W13's first poll pass before the run
@@ -337,6 +344,8 @@ namespace Morgott.ContentTool.Bake
              .Key("parkedForPaint").Val(ParkedForPaint);
             w.Key("failedMember"); Text(w, Clip(FailedMember, FieldRoom));
             w.Key("restartRequired").Val(RestartRequired);
+            w.Key("shipPending").Val(ShipPending);
+            w.Key("shipResult"); Text(w, Clip(ShipResult, FieldRoom));
             w.Key("claimHeld"); Text(w, Clip(ClaimHeld, FieldRoom));
             w.Key("barrierParked").Val(BarrierParked).Key("barrierRunId").Num(BarrierRunId);
 

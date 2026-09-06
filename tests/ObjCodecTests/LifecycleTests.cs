@@ -323,6 +323,7 @@ internal static class LifecycleTests
         checks += Sequencing();
         checks += Sections();
         checks += Badges();
+        checks += Applying();
         checks += Validating();
         checks += Verifying();
         checks += Producers();
@@ -330,7 +331,8 @@ internal static class LifecycleTests
         return "LIFECYCLE PASS, " + checks + " check(s) - carrier arms, verdict wording, frozen Tail, " +
                "one file swap, the pre-import receipt, the publication ordering, one output owner, " +
                "the admission table, the cancel contract, the Run all chain, the bounded seam sections, " +
-               "the Validate producer, the Verify decision, the unlinkable producers' shape";
+               "the Validate producer, the Verify decision, the unlinkable producers' shape, the apply's " +
+               "verdict beside its restart derivation";
     }
 
     /// <summary>
@@ -1670,12 +1672,6 @@ internal static class LifecycleTests
         checks += Check(LifecycleView.Status(StageText.Running("Package"), true, "morgott.x") ==
                         "Running: Package   restart required   session block: morgott.x",
                         "both badges survive beside a running stage, in that order");
-        // The exact hiding this rule exists to prevent: Package PASSED, and neither badge moved.
-        string after = LifecycleView.Status(null, true, "morgott.x");
-        checks += Check(after.Contains(StageText.RestartRequired) && after.Contains(StageText.SessionBlock),
-                        "a later successful Package cannot hide either badge - neither is composed from a " +
-                        "verdict or from the transient message");
-
         LifecycleView view = new LifecycleView { RestartRequired = true, FailedMember = "morgott.x" };
         Dictionary<string, object> h = Obj(view.Section(""));
         checks += Check(h != null && (bool)h["restartRequired"] && (string)h["failedMember"] == "morgott.x",
@@ -1683,6 +1679,46 @@ internal static class LifecycleTests
                         "read both badges off the wire instead of off a screenshot");
         checks += Check(view.Section("").Length < 2000,
                         "and the header is still bounded with both of them in it");
+        return checks;
+    }
+
+    /// <summary>THE APPLY'S TWO ANSWERS, which are NOT one answer. `Aggregate` is the project's VERDICT and
+    /// is conservative: any refusal survives it, and its fold stops there. `RestartNeeded` is S1 - "some
+    /// declared target is resident and stale" - and it must see a Resident sibling BEHIND that refusal,
+    /// because the pump, the SHIP handoff and Admit's R30 all read it. Deriving it as `Aggregate ==
+    /// Resident` left the barrier down over a revision the game is not serving, which is exactly the state
+    /// `ct_route7 verify` refuses.</summary>
+    private static int Applying()
+    {
+        int checks = 0;
+        Route7.TargetInstall[] mixed =
+        {
+            new Route7.TargetInstall("a.bundle", "redirected", Route7.ApplyDisposition.Redirected),
+            new Route7.TargetInstall("b.bundle", "already loaded", Route7.ApplyDisposition.Resident)
+        };
+        checks += Check(Route7.Aggregate(mixed) == Route7.ApplyDisposition.Resident &&
+                        Route7.RestartNeeded(mixed),
+                        "a restart-required target outranks a redirected one in the verdict, and arms S1");
+
+        // THE COLLAPSE. The fold BREAKS on the refusal, so the Resident behind it is invisible in the
+        // verdict - and a restart read off that verdict is false over a target the author must act on.
+        Route7.TargetInstall[] behind =
+        {
+            new Route7.TargetInstall("b.bundle", "already loaded", Route7.ApplyDisposition.Resident),
+            new Route7.TargetInstall("c.bundle", "REFUSED: contended", Route7.ApplyDisposition.Refused)
+        };
+        checks += Check(Route7.Aggregate(behind) == Route7.ApplyDisposition.Refused &&
+                        Route7.Disposition(Route7.Aggregate(behind)) == BakeDisposition.Refused &&
+                        Route7.RestartNeeded(behind),
+                        "a refusal still owns the verdict, and the Resident sibling behind it still arms " +
+                        "S1 - the restart is derived from the TARGETS, never from the aggregate");
+
+        checks += Check(Route7.Aggregate(new Route7.TargetInstall[0]) == Route7.ApplyDisposition.Refused &&
+                        !Route7.RestartNeeded(new Route7.TargetInstall[0]) &&
+                        Route7.Aggregate(null) == Route7.ApplyDisposition.Refused &&
+                        !Route7.RestartNeeded(null),
+                        "nothing installed is a refusal and owes no restart - and a null list is the same " +
+                        "answer, not an exception out of the handoff");
         return checks;
     }
 

@@ -617,6 +617,19 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal bool ShipPending { get { return shipPending; } }
 
+        /// <summary>What the last SHIP came to, VERBATIM - the line the panel draws, and the same one
+        /// `CancelShip` writes when an arm outlived the section. Read by the lifecycle seam's poll: a press
+        /// that armed and then cancelled itself two frames later is otherwise indistinguishable from one
+        /// whose handoff has simply not landed yet, and a poll cannot wait out a difference it cannot see.
+        /// "" while a press is in flight, never null.</summary>
+        internal string ShipResult { get { return shipResult; } }
+
+        /// <summary>The Doctor's generation NOW. A press belongs to the generation it was enqueued on, and
+        /// `DoShip` abandons one whose generation moved (:683), so the acceptance seam hands this back with
+        /// an accepted press: a poll that sees it move knows the press was abandoned rather than lost.
+        /// </summary>
+        internal int Generation { get { return gen; } }
+
         /// <summary>Why a SHIP press would be refused right now, or null when the button is live. ONE copy
         /// of the condition: the button's own `GUI.enabled` reads it, and so does the acceptance seam,
         /// which has to press the REAL button rather than invent the state behind it. Every arm names the

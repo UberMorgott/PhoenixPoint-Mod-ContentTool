@@ -156,6 +156,12 @@ namespace Morgott.ContentTool.Dev
                 // which only a new process clears), so the poll must be able to see it without inferring
                 // it from a row that a later stage has since overwritten.
                 view.RestartRequired = ctx.RestartRequired;
+                // THE DOCTOR'S SHIP ARM, as two header fields: a press accepted by `Acceptance("ship")` arms
+                // on the next Tick and CANCELS ITSELF two frames later when the SHIP section is not painted,
+                // and a poll waiting for the handoff cannot tell that from a bake still running. `pending`
+                // is the arm, `result` is the Doctor's own line for how the last one ended - never re-worded.
+                view.ShipPending = FitBench.Doctor.ShipPending;
+                view.ShipResult = FitBench.Doctor.ShipResult;
                 view.ClaimHeld = HeldDir();
                 view.BarrierParked = LifecycleJob.Barrier.Parked;
                 view.BarrierRunId = LifecycleJob.Barrier.ParkedRunId;
@@ -193,7 +199,12 @@ namespace Morgott.ContentTool.Dev
                 if (scenario == "change-source") return Accepted(scenario, ChangeSource());
                 if (scenario == "resident") return Accepted(scenario, Resident(mods));
                 if (scenario == "enable-resident") return Accepted(scenario, EnableResident(mods));
-                if (scenario == "ship") return Accepted(scenario, Ship());
+                if (scenario == "ship")
+                {
+                    int gen;
+                    string why = Ship(out gen);
+                    return Accepted(scenario, why, why == null ? gen : -1);
+                }
                 return Accepted(scenario, "unknown scenario '" + scenario + "' - 'prepare', " +
                                           "'change-source', 'resident', 'enable-resident', 'ship' and " +
                                           "'arm-cancel-bake' are.");
@@ -301,8 +312,9 @@ namespace Morgott.ContentTool.Dev
         /// press would not arm, rather than fabricating the loaded preview and the `made.Root` the row
         /// exists to measure. Nothing here installs, selects or writes a row: the handoff the press
         /// performs is what the poll then reads.</summary>
-        private static string Ship()
+        private static string Ship(out int gen)
         {
+            gen = -1;
             if (!FitBench.DoctorShowing || !FitBench.Doctor.ShipSectionShowing)
                 return "refused: the bench's MODEL DOCTOR tab is not open with its SHIP section on screen " +
                        "(a file or prototype browser takes the whole area) - a press arms for two frames " +
@@ -311,6 +323,12 @@ namespace Morgott.ContentTool.Dev
             // would let this scenario press something the author cannot.
             string why = FitBench.Doctor.ShipRefusal;
             if (why != null) return "refused: the SHIP button is not live - " + why + ".";
+            // THE GENERATION THE PRESS BELONGS TO, handed back with the acceptance. `Enqueue` only queues an
+            // intent: the arm happens on the next Tick and cancels itself two frames later if the SHIP
+            // section stops painting, so "accepted" alone told a poll nothing it could wait on. With this and
+            // the header's `shipPending`/`shipResult`, a dead arm is a fact the poll reads instead of a
+            // handoff it waits for forever.
+            gen = FitBench.Doctor.Generation;
             FitBench.Doctor.Enqueue("ship");
             return null;
         }
@@ -341,9 +359,15 @@ namespace Morgott.ContentTool.Dev
                 LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
                 if (now.Busy || Pending(now)) return StageText.R26(now.Stage);
 
-                Bind(Path.GetFullPath(producedRoot),
-                     ContentProject.LoadDeclared(producedRoot).Id);
-                captured = LifecycleJob.Capture(root);
+                // EVERYTHING THAT CAN THROW HAPPENS BEFORE THE BINDING MOVES. `Bind` replaces the root, the
+                // id, the rows and the chain, so a `Capture` (or a `LoadDeclared`) that threw after it left
+                // the panel bound to the new project with every row cleared while this method's own return
+                // told the Doctor "the Lifecycle tab was not opened" - two answers to one press.
+                string full = Path.GetFullPath(producedRoot);
+                string modId = ContentProject.LoadDeclared(producedRoot).Id;
+                LifecycleJob.Captured taken = LifecycleJob.Capture(full);
+                Bind(full, modId);
+                captured = taken;
                 // A PROJECT THAT DID NOT EXIST A MOMENT AGO is not in the selector's list, and the label
                 // would read "(none)" over a panel whose buttons already act on it. The enumeration itself
                 // happens in `Drain`, outside drawing, like every other one.
@@ -359,19 +383,23 @@ namespace Morgott.ContentTool.Dev
                 // console-shaped call gets; the Doctor keeps `how` for its own S1/S2 sentence about the one
                 // slot it shipped.
                 Route7.ApplyDisposition project = Route7.Aggregate(targets);
+                // ...and the RESTART is asked of the targets SEPARATELY, never read off that verdict: the
+                // aggregate stops at the first refusal, so a Resident sibling behind one left this column
+                // blank while `view.S1` below carried that very target's "already loaded" line - and left
+                // Admit's R30 down over a revision the game is not serving.
+                bool restart = Route7.RestartNeeded(targets);
                 // ...and then the SAME two rules the pump applies to a dashboard Apply - the carrier's
                 // disposition mapping and the one outcome rule - so a row filled by SHIP and a row filled
                 // by the panel cannot disagree about what `Resident` means.
                 row.Outcome = LifecycleState.Outcome(GateOutcome.None, Route7.Disposition(project));
-                row.Installation = project == Route7.ApplyDisposition.Resident
-                                 ? StageText.RestartRequired : null;
+                row.Installation = restart ? StageText.RestartRequired : null;
                 // `Starts` stays 0 on purpose: it counts the times THIS panel entered a stage, and the
                 // panel entered none. The row is a receipt of an apply that happened elsewhere.
                 row.Freshness = LifecycleState.Fresh(LifecycleJob.Look(captured));
                 // S1 IS A FACT ABOUT THE SESSION, so it is set here for the same reason the pump sets it:
                 // a Verify after this press must be refused R30, whichever door the apply came through -
                 // and for ANY target that needs it, not only the slot SHIP named.
-                if (project == Route7.ApplyDisposition.Resident) ctx.RestartRequired = true;
+                if (restart) ctx.RestartRequired = true;
                 view.S1 = Lines(targets, Route7.ApplyDisposition.Resident);
                 view.S2 = Lines(targets, Route7.ApplyDisposition.Redirected);
                 log = applyLine;
@@ -690,7 +718,10 @@ namespace Morgott.ContentTool.Dev
         /// <summary>MAIN, from the pump: the enumeration and every press happen HERE, outside drawing.</summary>
         private static void Drain()
         {
-            if (rescan) { rescan = false; Scan(); }
+            // THE REFRESH PRESS RE-MEASURES THE BARRIER TOO. A bundle can become resident while the panel
+            // sits idle - another mod, or a screen that loaded it - and R30 is a live fact, not a receipt
+            // of what this panel's own Apply did.
+            if (rescan) { rescan = false; Scan(); Barrier(); }
             int pick = select; select = int.MinValue;
             string want = intent; intent = null;
             // CANCEL IS THE ONE PRESS THAT BELONGS TO A RUNNING JOB, so it is answered before the busy
@@ -809,7 +840,30 @@ namespace Morgott.ContentTool.Dev
             }
             ctx.InRunAll = false;
             ctx.ValidateOutcome = ctx.BakeOutcome = ctx.ApplyOutcome = GateOutcome.None;
+            // THE BARRIER IS NOT THE PANEL'S MEMORY, it is a fact about the live claims - so the flag is
+            // cleared and then RE-ASKED for the project being bound. Selecting B and coming back to A used
+            // to drop A's barrier, and a Verify on A was then admitted over copies the game is not serving.
             ctx.RestartRequired = false;
+            Barrier();
+        }
+
+        /// <summary>R30 AS A MEASUREMENT, the one rule `ct_route7 verify` asks (Route7.cs:421) and never a
+        /// second idea of it: any declared bundle of the SELECTED project that is resident and not served
+        /// through a standing claim of ours arms the barrier. ORed into the session flag, never able to
+        /// clear it - the S1 an Apply set in this session is cleared by nothing but a new process
+        /// (LifecycleState.cs:252). Silent on a manifest it cannot read: the selection's own refusal path
+        /// says that, and a picker rescan is not the place to raise it.</summary>
+        private static void Barrier()
+        {
+            if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(id)) return;
+            try
+            {
+                foreach (ShippedReplacement r in ContentProject.LoadDeclared(root).Replace)
+                    if (string.IsNullOrEmpty(r.video) && !string.IsNullOrEmpty(r.bundle) &&
+                        BundleClaims.RestartRequired(id, r.bundle, BundleLive.ResidentNow(r.bundle)))
+                    { ctx.RestartRequired = true; return; }
+            }
+            catch (Exception) { }
         }
 
         /// <summary>
@@ -927,10 +981,13 @@ namespace Morgott.ContentTool.Dev
             return w.EndObj().ToString();
         }
 
-        private static string Accepted(string scenario, string error)
+        /// <param name="gen">the Doctor generation an accepted `ship` press belongs to, or -1 for every
+        /// scenario that arms nothing - the key is then absent rather than a number that means nothing.</param>
+        private static string Accepted(string scenario, string error, int gen = -1)
         {
             JsonWriter w = new JsonWriter().Obj().Key("ok").Val(error == null)
                                                  .Key("scenario").Val(scenario ?? "");
+            if (gen >= 0) w.Key("gen").Val(gen);
             w.Key("error"); if (error == null) w.Null(); else w.Val(error);
             return w.EndObj().ToString();
         }

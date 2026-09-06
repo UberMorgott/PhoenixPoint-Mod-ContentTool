@@ -32,7 +32,7 @@ namespace Morgott.ContentTool.Bake
     /// itself a write into the player's game. The one sanctioned repair is Steam -> Phoenix Point ->
     /// Properties -> Installed Files -> "Verify integrity of game files".
     /// </summary>
-    internal static class Route7
+    internal static partial class Route7
     {
         /// <summary>One mod's LEGACY on-disk claim on one shipped bundle. Read, never written.</summary>
         private sealed class Rec
@@ -327,63 +327,9 @@ namespace Morgott.ContentTool.Bake
             return log.ToString();
         }
 
-        /// <summary>What became of ONE bundle in an apply. A wizard cannot read this out of the log: zero
-        /// claims taken is not the same fact as residency - a catalog Locate failure (BundleLive.cs:215-218)
-        /// and an ownership conflict (BundleClaims.Claim:250) also take no claim, and reporting either of
-        /// those as "restart and enable" is the tool telling the author something untrue with a straight
-        /// face.</summary>
-        internal enum ApplyDisposition { Redirected, Resident, Refused, BakeFailed }
-
-        /// <summary>What an apply's disposition means to the CARRIER, and the only copy of the mapping.
-        /// Both consumers ask here - the lifecycle Apply producer and the Doctor's SHIP handoff - because
-        /// two copies of "Resident is a Success" is exactly how one path publishes PASS for a state the
-        /// other calls a refusal.</summary>
-        /// <summary>What the whole PROJECT's apply came to, from the per-target list - CONSERVATIVELY: any
-        /// refusal survives, then any restart-required target (that is the one the author has to act on),
-        /// and a blanket "redirected LIVE" only when every target was. An empty list is a refusal, because
-        /// nothing was installed.
-        ///
-        /// EXTRACTED because a second consumer arrived. `Applied` computes it for the console-shaped call
-        /// that names no bundle, and the dashboard needs the same answer for a SHIP that DID name one:
-        /// `how` then speaks for that ONE slot (<c>:594</c>-<c>:601</c>), and a five-row panel showing it as
-        /// the project's Apply would publish PASS over a sibling target that was refused, or miss a restart
-        /// another target needs.</summary>
-        internal static ApplyDisposition Aggregate(IList<TargetInstall> targets)
-        {
-            ApplyDisposition how = ApplyDisposition.Refused;
-            if (targets == null) return how;
-            foreach (TargetInstall t in targets)
-                if (t.Outcome == ApplyDisposition.Refused) { how = ApplyDisposition.Refused; break; }
-                else if (t.Outcome == ApplyDisposition.Resident) how = ApplyDisposition.Resident;
-                else if (how != ApplyDisposition.Resident) how = ApplyDisposition.Redirected;
-            return how;
-        }
-
-        internal static BakeDisposition Disposition(ApplyDisposition how)
-        {
-            return how == ApplyDisposition.BakeFailed ? BakeDisposition.Failed
-                 : how == ApplyDisposition.Refused ? BakeDisposition.Refused
-                 : BakeDisposition.Success;
-        }
-
-        /// <summary>What became of ONE target, kept instead of thrown away. <c>BundleLive.Install</c> builds
-        /// exactly this line per bundle and then folds every one of them into an aggregate (:66), and
-        /// <c>ApplyProject</c>'s single-bundle answer can only speak for the ONE bundle its caller named -
-        /// so a panel with five rows had two ways to learn what happened to the other four: parse the log,
-        /// or install twice. Both are forbidden, and this is the third.</summary>
-        internal sealed class TargetInstall
-        {
-            internal readonly string Bundle;
-            /// <summary>The producer's own line for this target, VERBATIM - never re-composed, and never
-            /// parsed to work out <see cref="Outcome"/>, which is measured separately.</summary>
-            internal readonly string Line;
-            internal readonly ApplyDisposition Outcome;
-
-            internal TargetInstall(string bundle, string line, ApplyDisposition outcome)
-            {
-                Bundle = bundle; Line = line; Outcome = outcome;
-            }
-        }
+        // THE OUTCOME VOCABULARY - `ApplyDisposition`, `TargetInstall`, `Aggregate`, `RestartNeeded` and
+        // `Disposition` - lives in ApplyOutcome.cs, the UnityEngine-free half of this partial class, so the
+        // rules every consumer reads are pinned by the offline gate instead of by pressing a panel.
 
         /// <summary>
         /// `ct_route7 verify &lt;project&gt;` - the console consumer of the ONE Verify producer. It prints

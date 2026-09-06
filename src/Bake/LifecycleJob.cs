@@ -346,9 +346,12 @@ namespace Morgott.ContentTool.Bake
                     // into the same row and must not answer it differently (Route7.Disposition).
                     BakeDisposition d = Route7.Disposition(how);
                     // S1, AS A VALUE (plan:869). `Resident` is a PASS the author has to act on, and the
-                    // disposition is the only thing that knows it: read back out of `line` it would be a
+                    // per-target list is the only thing that knows it: read back out of `line` it would be a
                     // grep of a sentence, and hard-coded false at the pump it left Admit's R30 unreachable.
-                    bool restart = how == Route7.ApplyDisposition.Resident;
+                    // ASKED OF THE TARGETS, NOT OF `how`: the aggregate stops at the first refusal, so a
+                    // Resident sibling behind one is invisible in it and the barrier stayed down over a
+                    // target the game is still serving an older revision of (Route7.RestartNeeded).
+                    bool restart = Route7.RestartNeeded(targets);
                     // ...and plan:870's `Applicable`, UNCONDITIONALLY true here: the only row without a gate
                     // was answered above, before ApplyRoot ran, so anything this segment reports - a pass, a
                     // bake failure, R37/R38, a contended output - is a gate that answered and must stop the
