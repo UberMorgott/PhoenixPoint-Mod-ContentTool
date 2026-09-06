@@ -504,7 +504,7 @@ namespace Morgott.ContentTool.Dev
             // served on the first pump - from component Install, before the bench had ever opened - so the
             // list was built once against whatever existed then. `Drain` does the enumeration, outside
             // drawing, exactly as the Refresh button's press does.
-            if (panelReady && !wasReady) rescan = true;
+            if (panelReady && !wasReady) { rescan = true; readyFrame = UnityEngine.Time.frameCount; }
             wasReady = panelReady;
             Drain();
             LifecycleJob.PumpRegistered = true;
@@ -593,10 +593,25 @@ namespace Morgott.ContentTool.Dev
 
         private static UnityEngine.Vector2 tailScroll;
         private static int paintedFrame = -2;
+        /// <summary>The frame <see cref="wasReady"/> went true - the tab was JUST selected and this frame's
+        /// Repaint has not happened yet. Without it the very first press after switching to the Lifecycle
+        /// tab was refused R39 over a panel that was about to paint later in the same frame.</summary>
+        private static int readyFrame = -2;
 
         /// <summary>The panel has PAINTED within a frame of now - what a blocking main segment waits for
-        /// (design:323-:333), and the same two-frame shape as SHIP's arming gate (ModelDoctor.cs:443).</summary>
-        private static bool Painted { get { return UnityEngine.Time.frameCount - paintedFrame <= 1; } }
+        /// (design:323-:333), and the same two-frame shape as SHIP's arming gate (ModelDoctor.cs:443).
+        ///
+        /// ARRIVING ON THE TAB COUNTS AS PAINTABLE. `Pump` runs from Update and the panel draws later in
+        /// the same frame, so on the arrival frame `paintedFrame` still predates the switch while the
+        /// panel is, in fact, about to paint - the same one-frame window, measured from the other end.</summary>
+        private static bool Painted
+        {
+            get
+            {
+                int now = UnityEngine.Time.frameCount;
+                return now - paintedFrame <= 1 || now - readyFrame <= 1;
+            }
+        }
 
         /// <summary>
         /// MAIN, from FitBench's Lifecycle tab. It DRAWS and it records presses; it decides nothing. Every
@@ -921,7 +936,7 @@ namespace Morgott.ContentTool.Dev
             // press this admits is one the pump can serve. `wasReady` is last frame's `panelReady`: the
             // press is drained from Update and the panel paints later in the frame, which is exactly the
             // one-frame window `Painted` allows.
-            ctx.PaintUnavailable = atPress && !(wasReady && Painted);
+            ctx.PaintUnavailable = LifecycleState.PaintMissing(atPress, wasReady, Painted);
             return ctx;
         }
 

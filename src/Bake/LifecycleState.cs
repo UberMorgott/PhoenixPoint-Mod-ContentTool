@@ -648,6 +648,19 @@ namespace Morgott.ContentTool.Bake
             }
         }
 
+        /// <summary>
+        /// R39's field, MEASURED - the one producer of it, so what the panel refuses and what the pump
+        /// drains parked work with (`panelReady &amp;&amp; Painted`, LifecycleDashboard.cs) cannot drift apart.
+        ///
+        /// Only a PRESS asks: a chain already running keeps the closed-window policy, which PARKS the
+        /// blocking segment and resumes it when the tab comes back (LifecycleJob.Tick). Refusing mid-chain
+        /// would break that on purpose, so <paramref name="atPress"/> false is always "available".
+        /// </summary>
+        internal static bool PaintMissing(bool atPress, bool ready, bool painted)
+        {
+            return atPress && !(ready && painted);
+        }
+
         /// <summary>The refusal this stage would print, or null when it may run. Design section 4.6, row by
         /// row. Order matters: an unknown token is answered before anything is asked about the project, and
         /// the selection before the busy seam, because a panel with nothing selected is never running.</summary>
