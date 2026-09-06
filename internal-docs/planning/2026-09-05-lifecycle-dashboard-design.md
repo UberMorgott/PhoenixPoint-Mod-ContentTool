@@ -461,8 +461,14 @@ D 'Snapshot'
 
 RPC and console JSON follow `E:/DEV/PhoenixPoint/PPCLI/PLAYBOOK.md:306`, `:319`; screenshot JSON `:323`–`:324`. The class
 namespace follows `src/Dev/ModelDoctor.cs:13` and `src/Dev/FitBench.cs:28`. Every `D 'Snapshot'` after an asynchronous
-`Run`/`Acceptance` denotes **bounded polling until that run reports `busy=false`**; a timeout is a failed row, not a pass.
-Capture queued/running screenshots before waiting where specified.
+`Run`/`Acceptance` denotes **bounded polling until `busy=false` AND `runId >= the id `Run` returned`**; a timeout is a
+failed row, not a pass. Capture queued/running screenshots before waiting where specified.
+
+**`>=`, never `==`, and Task 8 is where that was measured** (W10). `Run("All")` is a CHAIN: the pump dispatches one stage
+at a time and each dispatch takes a new run handle, so the header's `runId` ADVANCES once per stage — 5 → 9 across
+W10's five rows. A poll written as "until `runId` still equals the id `Run` returned" therefore ends the moment the
+second stage begins and reads the FIRST stage's terminal state as the chain's. For a single stage the two rules
+coincide, because nothing else advances the id while the seam is owned.
 
 **The seam's transport is fixed by PPCLI, not chosen** (plan review, blocker 3). `Reflect.Project` `:1080` never
 enumerates or walks properties: a non-trivial reference returns `{h, type}` and a collection a handle plus a count, with
@@ -472,8 +478,8 @@ therefore arrive as one unusable handle. So **every seam method is `public stati
 truncates at 2000 chars (`PPCLI/src/Protocol.cs:56`, `:256`) into JSON that will not parse. `Snapshot` is consequently
 **sectioned**: `Snapshot("")` is a compact poll header (ids, `busy`, `stage`, cancel flags, `claimHeld`, `barrierParked`,
 `barrierRunId`, and per row only stage/freshness/outcome), and `Snapshot("<stage>")` / `("log")` / `("s1s2")` fetch one
-verbatim payload at a time. `Run` returns the accepted `runId` and every poll matches it, so a poll cannot read a newer
-run's state. The mod composes these with the existing `Morgott.ContentTool.Import.JsonWriter` (`src/Import/Json.cs`), so
+verbatim payload at a time. `Run` returns the accepted `runId` and every poll compares against it — equal for a single
+stage, `>=` for a chain, per the rule above — so a poll cannot read an OLDER run's state as this one's. The mod composes these with the existing `Morgott.ContentTool.Import.JsonWriter` (`src/Import/Json.cs`), so
 no JSON dependency is added.
 
 The public static seam on the dashboard class is `Open(string projectName)`, `Run(string stage)`, `Cancel()`,

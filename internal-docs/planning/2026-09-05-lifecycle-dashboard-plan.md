@@ -1106,7 +1106,8 @@ was sent, in both runs. Identity preflight: the seam's `gameRoot` read `D:\PP-In
 this session's scratchpad (`…\703f4713-…\scratchpad\W*.png`; every capture also wrote a `.scene.png` — the IMGUI is
 in the primary file).
 
-**Result: 12 of 14 rows PASS, W14 and W20 FAIL.** Defects found (NOT fixed here — a fix agent follows):
+**Result: 12 of 14 rows PASS, W14 and W20 FAIL.** Defects found (fixed afterwards — each entry carries its
+**FIXED**/**NOT A DEFECT** line; the gates after the fixes read `LIFECYCLE PASS, 230`, everything else unchanged):
 
 - **D1 — the row verdict is drawn unbounded, and it destroys the panel.** `LifecycleDashboard.cs:677`
   (`GUILayout.Label("  " + Dash(r.Verdict))`) prints the whole verdict; a Bake verdict is the whole bake log
@@ -1114,26 +1115,52 @@ in the primary file).
   `Progress`, `Run all`/`Cancel` and the whole `Log tail` are pushed off screen. Directly contradicts design §4's
   constant control sequence ("nothing about the layout moves when a result arrives"). Evidence `W10.png`, `W14.png`,
   `W11.png`. The `Snapshot` wire is fine — `LifecycleView` clips; only the DRAWING is unbounded.
+  **FIXED:** `LifecycleView.OneLine` (`LifecycleState.cs:416`, `RowRoom` 160 at `:409`) — the verdict's first line, cut to one
+  row's worth with a ` ...` marker; the panel draws it (`LifecycleDashboard.cs:697`). The full text is untouched:
+  `Snapshot("<stage>")` still serves it verbatim and the log tail still holds it. Six offline arms in `Sections()`.
 - **D2 — the seam admits `Run("All")` while the session block stands.** With `failedMember` set,
   `Run("Apply")` is refused R29 but `Run("All")` returns `{"ok":true,"runId":17}`. The panel's button is disabled
   (`LifecycleDashboard.cs:696`) and `LifecycleState.Admit` is not, so the button and the PPCLI door disagree. W14.
+  **FIXED:** an `All` arm in `Admit` (`LifecycleState.cs:682`) returning the block's OWN word, R29 — no new refusal
+  string, so `REFUSAL-COUNT` stays 17. One offline arm in `Admission()`.
 - **D3 — the transient `message` is never cleared on completion.** After a finished run the line beside
   `Run all`/`Cancel` still reads `Queued: <stage>` (`W9.png`, `W13.png`); `message` is set at
   `LifecycleDashboard.cs:944` and cleared only by `Bind`/`Handoff`/`Choose`.
+  **FIXED:** the pump clears it at harvest (`LifecycleDashboard.cs:519`), which is where a run stops being pending;
+  a chain's next stage writes its own `Queued:` one line later, and a refusal — which never harvests — survives.
 - **D4 — W20's recipe cannot fire R37 (plan/design, not code).** `Barrier.Wait(id)` is the first statement on the
   worker (`LifecycleJob.cs:157`–`:159`) and the `OutputClaim` is taken inside `ProjectBake.Run`
   (`ProjectBake.cs:88`–`:93`); at the armed point no claim is held, so a competing `ct_project` is not refused. Either
   the barrier moves past the claim or the row is reworded.
+  **NOT A DEFECT — verdict checked against the design, no code changed.** §5 says the claim is "**claimed at entry to
+  that body**" (`…-design.md:228`), the body being `ProjectBake.Run`/`Bake`; R37 is a PRODUCER guard, and a run parked
+  at the acceptance barrier has not entered a producer. So the invariant the design states holds exactly as written,
+  and W20's recipe arms a window in which R37 is unreachable BY DESIGN — the row measures a rule the design never
+  made. Nor is there a real hole behind it: every writing segment of a dashboard stage is a PARKED MAIN segment
+  (`LifecycleJob.Park(..., true)`), and the console verb runs on that same main thread, so the two serialise into two
+  sequential bakes rather than an interleave. R37's real proof stays G7's offline arm ("a competing admission (R37)
+  while a claim is held → refused immediately, the holder's bytes untouched", `…-design.md:434`) plus `Ownership()`.
+  **W20 is therefore reworded, not repaired:** to observe R37 in game the competing `ct_project` must land while the
+  holder is INSIDE `ProjectBake.Bake` — which the barrier cannot arrange, and which by hand is a race. Drop the row,
+  or add a scenario that parks inside the bake if it is ever worth in-game evidence.
 - **D5 — every fixture ships `Replace_Leftleg`'s `meta.json`.** `Fork` rewrites only `ppcontent.json`'s `id`
   (`LifecycleDashboard.cs:441`–`:443`), so all four `Dashboard*` folders declare mod ID `Replace_Leftleg`; the single
   `Replace_Leftleg` entry in `MOD_ACTIVATED` therefore enables ALL of them at the next start, and one of them claims
   the shared bundle before any row runs. This is what made W10's first attempt VOID and W15's first arm contested,
   and it must be handled (`Route7.Toggle(<source>, false)` was used here) before any W10-shaped row.
+  **FIXED:** `Fork` now writes the fixture's own `meta.json` through the scaffold's composer —
+  `ProjectScaffold.Meta(modId)` (made `internal`, `ProjectScaffold.cs:405`) at `LifecycleDashboard.cs:451` — so each
+  fixture declares `acceptance.<name>`, the id it already claims under. Not a string replace: the id is escaped by the
+  same `JsonWriter` a real project's is.
 - **D6 — a row's freshness word is not re-measured.** W16: admission refuses Verify as stale while the rows still
   read `fresh`, because `Freshness` is written only at harvest and `ctx.Copies` only at admission.
+  **FIXED:** one measurement writes both — `LifecycleDashboard.Freshen` (`:948`) sets `ctx.Copies` AND every row, and
+  it is called at the three points design:91 names: an explicit Refresh/rescan (`Drain`, `:747`, guarded `!Busy` so a
+  press cannot reach into a running producer's observation), stage start (`Refresh`, `:911`) and after completion
+  (`Pump`, `:524`). A row can no longer hold an age older than the one admission acts on.
 - **Poll rule correction for design §8.2:** for `Run("All")` the header's `runId` ADVANCES once per stage (5→9 on
   W10), so "poll until `runId` still equals the id `Run` returned" is wrong for the chain; poll `runId >= startId
-  AND busy=false`.
+  AND busy=false`. **FIXED in the design** (`…-design.md:464`–`:471`, and the seam paragraph at `:481`).
 
 **Bench state at exit:** the run-2 process was stopped, `D:\PP-Instance2\Mods\PPBridge\ppcli-enabled` deleted,
 `ct-acceptance-enabled` left in place (it is gitignored and Instance2-only). Left behind on Instance2:
