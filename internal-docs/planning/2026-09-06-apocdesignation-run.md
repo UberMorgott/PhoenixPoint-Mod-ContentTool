@@ -302,3 +302,192 @@ every launch (T1).
    Point it at the shipped Texture2D to overwrite and fix the bundle, e.g.
    `{ "bundle": "px_heavy_assets_all.bundle", "asset": "CHR_PX_HVY_TS_M_V01_Albedo", "texture": "RR_soldier_albedo" }`
    — pick the target from the `ct_list` names above.
+
+---
+
+# Run 4 — suspect part as warning, 2026-09-06
+
+Same bench (`D:\PP-Instance2`, profile `76561197996210592`), ContentTool at HEAD `380f4ab`, REBUILT:
+`dotnet build -c Release` → `bin\Release\ContentTool\ContentTool.dll` 1 978 368 B / 06.09.2026 18:58:45,
+SHA-256 `CDFEB536CCC6D2C7244B123547882613507D71F4E443A31F27B39D6F70EDBE09`, and `deploy.ps1` put a
+BYTE-IDENTICAL file at `D:\PP-Instance2\Mods\ContentTool\ContentTool.dll` (hashes compared, same
+length and timestamp). PPBridge not redeployed — `build=3068ae67` in every reply, never `stale`.
+Three hand launches, each gated on `connect state` answering first: `ct-apocd4.log` PID 2272,
+`ct-apocd4b.log` PID 34544, `ct-apocd4c.log` PID 9528. Project sources unchanged from run 3 (raw
+GLBs + `Content\Textures\RR_soldier_albedo.png`).
+
+## R39 probe — `Validate` is NOT covered by it, `All` is
+
+From the MAIN MENU, bench never opened, straight after `Open`:
+
+| Press | Reply |
+|---|---|
+| `Run("Validate")` | **ADMITTED** — `{"ok":true,"runId":1,"refusal":null}`, and it really ran: `Validate: PASS - 'Wizard.ApocDesignation' - key 40816436338c15798cc9d8bf5b2eee164eb9e329.` |
+| `Run("All")` | **REFUSED** — `{"ok":false,"runId":0,"refusal":"Lifecycle: All blocked; its main-thread work has to run behind an OPEN, painted panel. Open the bench (ct_bench open, from a loaded geoscape) and select the LIFECYCLE tab, then run it again."}` |
+
+By design: `LifecycleState.NeedsPaint` (`LifecycleState.cs:743`) is `Bake || Apply || Verify || All`,
+so Validate never sees R39 and never parks — it has no blocking main segment. The trap-T2 case
+(`Run("All")` from the menu, which used to sit at `parkedForPaint:true` forever) is now a one-line
+refusal that names the way in.
+
+## Doctor — the suspect part is now visible BEFORE the bake
+
+`FitBench.tab = 1`, `ShowPrototype(CHR_Human_Rig_Ready, "Human / PX_HeavyStarting")`, `SlotTargets()`
+→ 10 targets, `Doctor.PickTarget(Human_Torso_SlotDef)`, `Doctor.PickFile(D:\PP-Instance2\Mods\
+Wizard.ApocDesignation\Content\Meshes\CHR_PX_HVY_TS_M_V01.glb)`.
+
+**Header, verbatim:** `BY NAME - your weights will be used (1 warning(s) below)`
+**Rows: 1**, `Code = SubmeshMaterials`, `Severity = Warning`, `Side = File`:
+
+> `CHR_PX_HVY_TS_M_V01.glb part 1 of 2 has only 1 triangle while part 2 has 15647. The game paints
+> part N with the target's material N, so part 1 (1 triangle) -> material 'CHR_PX_HVY_TS_M_V01',
+> part 2 (15647 triangles) -> material 'CHR_PX_HVY_SHD_M_V01'. A part that small is almost always a
+> leftover shard, and every part after it takes the material meant for the part before - which is why
+> your real geometry is painted wrongly. In Blender select the mesh, Edit Mode, select all (A) and
+> Mesh > Merge > By Distance, or assign every face to ONE material slot, then re-export - or order the
+> parts to match the target's materials. Baked anyway; nothing was skipped.`
+
+Run 2's "zero diagnostic rows" for the same file is gone (`cefde46`). The Doctor names the LIVE
+renderer's two materials; the bake names the three renderer variants it can be (`GOLD/XMAS/V01`) —
+same rule, different amount of context, both correct.
+
+## Stage verdicts — pass A, the project EXACTLY as the author has it
+
+`ct_bench open` → `FitBench.tab = 2` → `Open` → `Run("All")`.
+
+| Stage | freshness / outcome / starts | Verdict |
+|---|---|---|
+| Validate | stale / **pass** / 1 | `Validate: PASS - 'Wizard.ApocDesignation' - key 40816436338c15798cc9d8bf5b2eee164eb9e329.` |
+| Bake | stale / **fail** / 1 | 9 543 chars — the torso row is now a WARNING, the texture row is still the one refusal |
+| Apply | stale / **fail** / 1 | 9 935 chars, `installation` EMPTY |
+| Verify | stale / none / **0** | never entered |
+| Package | stale / none / **0** | never entered |
+
+**The torso row baked.** `patch px_heavy_assets_all.bundle: mesh 'CHR_PX_HVY_TS_M_V01' <-
+chr_px_hvy_ts_m_v01 verts=17561 indices=46944 … - skinned BY NAME onto the target's own 10 bones,
+carrying 4 of the file's own influences per vertex`, followed by `P4 WARN … Baked anyway; nothing was
+skipped.` All three meshes bake BY NAME; no nearest-bone, no armature complaint anywhere.
+
+**The only failure left is F2, the texture ROW.** Verbatim, read with `connect console ct_project
+Wizard.ApocDesignation` (`truncated:false`, saved as scratchpad `bake4.txt`):
+
+> `P1 REFUSED target 'RR_soldier_albedo' is not a Texture2D in px_assault_assets_all.bundle - no
+> Texture2D named 'RR_soldier_albedo' in unity=2019.4.31f1 assets=1735 cldbTypes=320 - list the names
+> it does hold with: ct_list assets px_assault_assets_all.bundle Texture2D`
+
+and the run ends `ct_project: 1 FAILURE(S) - 1 warning(s), baked anyway` — the new summary line
+counts the two kinds apart. Apply's own last line (`ct_route7 apply Wizard.ApocDesignation`, saved as
+`apply4.txt`):
+
+> `NOT APPLIED: patching the shipped bundle(s) reported 1 failure(s), named in the P0/REFUSED line(s)
+> above; nothing was installed and no copy was marked current.`
+
+**So `31cab05` did exactly what it says: run 3's 2 failures are now 1 failure + 1 warning, the torso
+bakes, and the project is one bad `asset` string away from installing.** Nothing else changed.
+
+## Stage verdicts — pass B, the texture row PARKED (bench copy only)
+
+The goal of run 4 was a served bundle and a render, and F2 is the author's decision, not ours. So the
+BENCH copy's `ppcontent.json` had the fourth (texture) replacement moved aside, byte copy kept beside
+it as `ppcontent.json.run4bak`. The three mesh rows are untouched; the repo copy and the raw-GLB
+folder were never written to.
+
+`ct_route7 apply` in pass A had marked the project failed for the session (`'Wizard.ApocDesignation'
+failed to bake earlier in this session - not baking it again.` — T1's refusal, from the dev shortcut
+rather than a startup bake), so the game was restarted before pass B.
+
+| Stage | outcome / starts | Verdict |
+|---|---|---|
+| Validate | **pass** / 1 | `Validate: PASS - 'Wizard.ApocDesignation' - key f573240953f4b2756bf98df78717a5324d609392.` (key moves with the manifest) |
+| Bake | **pass** / 1 | 8 690 chars, 3 replacement(s), all three meshes BY NAME, the `P4 WARN` torso row still printed |
+| Apply | **pass** / 1 | 769 chars — `installing 1 patched copy(ies) as 'Wizard.ApocDesignation'` / `REFUSED: restart required: px_heavy_assets_all.bundle is already loaded (as '4e130b87ae4219d20db6fde21aa06aaa.bundle'). Unity rejects a second bundle of the same identity, and unloading the game's copy would pull it out from under live objects. Restart, then enable 'Wizard.ApocDesignation'.` / `0/1 bundle(s) redirected LIVE for 'Wizard.ApocDesignation' - nothing was written to the game installation`; `installation: restart required` |
+| Verify | **pass** / 1 | after the restart — `Verify: PASS - load-back gates passed; 1 of 1 declared target(s) served from this project's copies for 'Wizard.ApocDesignation'.` |
+| Package | **pass** / 1 | `PACKAGED 31 file(s), 40809953 B into C:\Users\Morgott\AppData\Local\ContentTool\Packages\Wizard.ApocDesignation\20260906-191239-2` |
+
+Serving needed the S1 restart AND activation: `"Wizard.ApocDesignation"` was added to the profile's
+`MOD_ACTIVATED` (19 → 20, count mirrored in `ArrayDimensions.CollectionValues`; byte copy kept as
+`Options.jopt.bak-run4`) and Instance2 relaunched. With the bake now PASSING, T1 does not bite — the
+startup bake succeeds and the dashboard opens clean. After the restart the header reads
+`restartRequired: false`.
+
+**Bundles served: `px_heavy_assets_all.bundle`** (1 of 1 declared), from
+`…\ContentTool\Patched\<hash>\Wizard.ApocDesignation`. **Package dir:**
+`C:\Users\Morgott\AppData\Local\ContentTool\Packages\Wizard.ApocDesignation\20260906-191239-2`
+(31 files, 40 809 953 B).
+
+## Visual — the render that runs 2 and 3 could not produce
+
+`Human / PX_HeavyStarting` standing on the bench platform with the bundle SERVED, camera pinned the
+same way as the run-2 baseline (`YawTarget/Yaw 180`, `PitchTarget/Pitch 0`, back frame at yaw 0).
+The 3D is in the `.scene.png` as always.
+
+| File | What it shows |
+|---|---|
+| `apoc4-front.scene.png` | PX Heavy wearing the author's torso + both legs, yaw 180 |
+| `apoc4-back.scene.png` | same soldier, yaw 0 |
+| `apoc4-front-close.scene.png` | tighter front frame |
+
+Against `apoc-before-front.scene.png` (identical framing, stock soldier) the change is unmistakable:
+the stock torso's tan/olive camo plate with the row of circular back vents is gone, replaced by a
+smooth dark-grey chest and back plate with an orange stripe and a red-orange helmet-height accent;
+both legs are new geometry too — segmented thigh and shin plates instead of the shipped rounded ones.
+Torso and both legs changed; head, arms and jetpack are untouched slots and look identical.
+
+**The 1-triangle shard itself is invisible** (one triangle at this scale is sub-pixel), but its
+CONSEQUENCE is on screen: the whole torso is painted in ONE dark material rather than the shipped
+tan camo, which is what "part 2 takes the material meant for part 1" produces. It reads as a plausible
+alternate colourway rather than as corruption, so an author could easily ship it without noticing —
+which is exactly why the WARNING earns its place.
+
+## Observations
+
+- **`Run("Validate")` is reachable from the main menu** and really validates. Useful: the cheapest
+  possible smoke test of a project needs no campaign, no bench and no tab.
+- **`ct_route7 apply` poisons the session the same way an activated startup bake does.** Pass A used
+  it to read the untruncated Apply tail, and the next `Run("All")` came back with the T1 refusal
+  (`failed to bake earlier in this session`) even though `ppcontent.json` had changed in between. The
+  block is keyed on the project id, not on its content — a restart is the only way out. Prefer
+  `connect console ct_project <id>` for reading a long verdict: same text, no session block.
+- **The wire clip is still the thing to plan around.** `Snapshot("Bake")` returned `truncated:true`
+  at 9 543 bytes and `Snapshot("log")` clips from the FRONT, so neither carries the summary line.
+  `connect console ct_project <id>` returns `truncated:false` and is the way to read a whole verdict.
+- `PARTIAL … 1 row(s) above were REFUSED and the copy was rewritten anyway` still counts correctly
+  (1, the texture row) — run 3's wording complaint is resolved by the torso no longer being a failure.
+- **No PPCLI defect** — nothing appended to `PPCLI\ISSUES.md`. Usage notes for the next driver:
+  an INSTANCE call needs `"target":{"$h":"h:4:N"}` (a bare `"h":…` is refused `code:"args"`,
+  `call needs "type" (static) or "target" (instance)`); `items` rows carry only `h`/`type`, so a name
+  has to be read per row with a follow-up `get`.
+
+## Bench state at exit
+
+`ct_bench close` → `ct_bench closed - the screen you came from was never left, so it is still there.`
+Instance2 stopped path-filtered (`Where-Object { $_.Path -like 'D:\PP-Instance2\*' }`, never by name);
+no `PhoenixPointWin64` process anywhere afterwards. `D:\PP-Instance2\Mods\PPBridge\ppcli-enabled`
+deleted.
+
+**The project is ACTIVATED** in `…\Steam\76561197996210592\Options.jopt` (20 entries; original kept as
+`Options.jopt.bak-run4`) and **the patched `px_heavy_assets_all.bundle` is left SERVED** — that is what
+makes the render above reproducible on the next launch. The bench copy's `ppcontent.json` is the
+3-row (mesh-only) manifest; the author's original 4-row file is beside it as `ppcontent.json.run4bak`.
+
+To put the bench back exactly as the author has it:
+`Copy-Item 'D:\PP-Instance2\Mods\Wizard.ApocDesignation\ppcontent.json.run4bak' 'D:\PP-Instance2\Mods\Wizard.ApocDesignation\ppcontent.json' -Force`
+— and then DEACTIVATE it again (restore `Options.jopt.bak-run4`), because with the texture row back the
+startup bake fails and T1 poisons every session.
+
+## What the author still has to fix — TWO things, both in his own files
+
+1. **The texture ROW (F2) — the only thing blocking a clean install.** `"asset": "RR_soldier_albedo"`
+   names his own png stem; `asset` must name a **shipped** Texture2D. Real candidates, read live with
+   `ct_list assets px_heavy_assets_all.bundle Texture2D`: `CHR_PX_HVY_TS_M_V01_Albedo`,
+   `CHR_PX_HVY_SHD_M_V01_Albedo`, `CHR_PX_HVY_ARM_M_V01_Albedo`, `CHR_PX_HVY_Legs_M_V01_albedo`,
+   `CHR_PX_HVY_HG_M_V01_Albedo`. E.g.
+   `{ "bundle": "px_heavy_assets_all.bundle", "asset": "CHR_PX_HVY_TS_M_V01_Albedo", "texture": "RR_soldier_albedo" }`.
+   Note the bundle changes too: the PX **Heavy** albedos are NOT in `px_assault_assets_all.bundle`.
+2. **The torso's 1-triangle part (F1) — no longer fatal, still wrong on screen.** The run installs and
+   renders with it, but the torso is painted with the material meant for the shoulder pad. In Blender:
+   Edit Mode → select all (A) → `Mesh > Merge > By Distance`, or put every face in ONE material slot,
+   then re-export.
+
+Everything else is done: the three raw GLBs from `APOCD GLBs for content tool without apply
+tranforms\` bind BY NAME, and `Content\Textures\RR_soldier_albedo.png` is where P1 wants it.
