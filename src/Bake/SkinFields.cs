@@ -37,7 +37,7 @@ namespace Morgott.ContentTool.Bake
     /// still show a skin BINDING (half the vertices follow a bone, half do not). Real weights come
     /// from an imported skinned format; an .obj has none to carry.
     /// </summary>
-    internal static class SkinFields
+    internal static partial class SkinFields
     {
         private const int ChannelBlendWeight = 12, ChannelBlendIndices = 13;
         private const int FormatFloat32 = 0, FormatUInt32 = 10;
@@ -791,30 +791,6 @@ namespace Morgott.ContentTool.Bake
 
             WriteSkin(mesh, baked, bind, idx, w, inf);
             return true;
-        }
-
-        /// <summary>
-        /// The heaviest of a glTF vertex's four influences, dominant first, one per slot of
-        /// <paramref name="slots"/>; -1 for a slot the file has no non-zero weight left for. Shared
-        /// with the P6 arm so the gate and the bake cannot disagree about WHICH of the four survive a
-        /// narrower target - the arm's own question is which BONE they land on, and that it derives
-        /// independently.
-        /// </summary>
-        internal static void Heaviest(float[] weights, int vertex, int[] slots)
-        {
-            for (int s = 0; s < slots.Length; s++)
-            {
-                int best = -1;
-                for (int k = 0; k < 4; k++)
-                {
-                    if (weights[vertex * 4 + k] <= 0f) continue;
-                    bool taken = false;
-                    for (int t = 0; t < s; t++) if (slots[t] == k) { taken = true; break; }
-                    if (taken) continue;
-                    if (best < 0 || weights[vertex * 4 + k] > weights[vertex * 4 + best]) best = k;
-                }
-                slots[s] = best;
-            }
         }
 
         /// <summary>The shipped bind poses, row-major [R|t] - the same eRC naming Bindpose() writes.</summary>

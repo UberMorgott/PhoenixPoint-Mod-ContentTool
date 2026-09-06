@@ -151,6 +151,7 @@
     <!-- U5's skin fields carry no UnityEngine type either, so the bones/bind-poses/weights round
          trip runs here too. -->
     <Compile Include="..\..\src\Bake\SkinFields.cs" Link="SkinFields.cs" />
+    <Compile Include="..\..\src\Bake\SkinFieldsHeaviest.cs" Link="SkinFieldsHeaviest.cs" />
     <!-- The Material's fields carry no UnityEngine type either, so what a baked material CONTAINS -
          the paint a renderer needs to draw anything but white - is proven here. -->
     <Compile Include="..\..\src\Bake\MaterialFields.cs" Link="MaterialFields.cs" />

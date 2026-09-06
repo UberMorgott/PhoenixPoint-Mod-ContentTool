@@ -24,6 +24,10 @@
     <Compile Include="..\..\src\Import\MaterialCodec.cs" Link="MaterialCodec.cs" />
     <Compile Include="..\..\src\Import\ModelBuild.cs" Link="ModelBuild.cs" />
     <Compile Include="..\..\src\Import\Treadmill.cs" Link="Treadmill.cs" />
+    <Compile Include="..\..\src\Import\SkinCompatibility.cs" Link="SkinCompatibility.cs" />
+    <Compile Include="..\..\src\Bake\MeshMerge.cs" Link="MeshMerge.cs" />
+    <Compile Include="..\..\src\Doctor\PrototypeCatalog.cs" Link="PrototypeCatalog.cs" />
+    <Compile Include="..\..\src\Bake\SkinFieldsHeaviest.cs" Link="SkinFieldsHeaviest.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.ValueTuple"><HintPath>..\..\lib\System.ValueTuple.dll</HintPath></Reference>
