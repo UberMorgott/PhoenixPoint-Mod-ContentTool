@@ -226,8 +226,11 @@ namespace Morgott.ContentTool.Dev
         {
             sampled.Clear(); source.Clear();
             AnimatorOverrideController over = null;
-            try { over = animator == null ? null
-                       : animator.runtimeAnimatorController as AnimatorOverrideController; }
+            try
+            {
+                over = animator == null ? null
+                       : animator.runtimeAnimatorController as AnimatorOverrideController;
+            }
             catch (Exception) { }
 
             for (int i = 0; i < clips.Count; i++)

@@ -222,12 +222,21 @@ internal static class CatalogTests
 
         var gapRig = new RigScan { RigName = "GAP2_Rig_Ready" };
         gapRig.Bones.Add(new PrototypeBone { Name = "GAP2_Rig_Ready", Parent = null, Path = "GAP2_Rig_Ready" });
-        gapRig.Bones.Add(new PrototypeBone { Name = "Hips", Parent = "GAP2_Rig_Ready",
-                                             Path = "GAP2_Rig_Ready/Hips" });
+        gapRig.Bones.Add(new PrototypeBone
+        {
+            Name = "Hips",
+            Parent = "GAP2_Rig_Ready",
+            Path = "GAP2_Rig_Ready/Hips"
+        });
         var sets = new List<ManagerScan>();
         foreach (string rep in reps)
-            sets.Add(new ManagerScan { ManagerName = "Human_AddonsManagerDef", RigName = gapRig.RigName,
-                                       HasRig = true, RepresentativeCharacter = rep });
+            sets.Add(new ManagerScan
+            {
+                ManagerName = "Human_AddonsManagerDef",
+                RigName = gapRig.RigName,
+                HasRig = true,
+                RepresentativeCharacter = rep
+            });
         PrototypeRecord shared = PrototypeCatalog.Build(new List<RigScan> { gapRig }, sets)[0];
         checks += Check(shared.Variants.Count == 2,
                         "two armour sets under one manager are two variants, not " + shared.Variants.Count);

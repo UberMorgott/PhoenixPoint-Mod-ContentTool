@@ -302,8 +302,13 @@ namespace Morgott.ContentTool.Import
                               F((float)seconds) + " s = " + F(speed) + "/s, " + F(travel) + " over the " +
                               F(duration) + " s clip, against a rig " + F(height) + " tall";
             if (travel < MinTravelOfHeight * height)
-                return new Locomotion { Any = false, Height = height, Why = "no ramp: " + measured +
-                    " - the clip either stands still or already carries its own root motion" };
+                return new Locomotion
+                {
+                    Any = false,
+                    Height = height,
+                    Why = "no ramp: " + measured +
+                    " - the clip either stands still or already carries its own root motion"
+                };
             return new Locomotion
             {
                 Any = true,

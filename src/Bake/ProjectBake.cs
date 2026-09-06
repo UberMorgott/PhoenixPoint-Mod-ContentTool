@@ -1529,7 +1529,10 @@ namespace Morgott.ContentTool.Bake
                 }
                 return new ImportedTexture
                 {
-                    Name = name.ToLowerInvariant(), Width = t.width, Height = t.height, Rgba32 = rgba
+                    Name = name.ToLowerInvariant(),
+                    Width = t.width,
+                    Height = t.height,
+                    Rgba32 = rgba
                 };
             }
             finally { UnityEngine.Object.Destroy(t); }
@@ -2527,8 +2530,8 @@ namespace Morgott.ContentTool.Bake
             // and 1: a reversal leaves the MIDDLE slot where it is, so on an odd bone count that pair
             // could land on the one bone whose slot never moved and P6 would have nothing to measure.
             ushort j0 = (ushort)(n - 1), j1 = 0;
-            m.Joints = new ushort[] { j0, 0, 0, 0,  j0, j1, 0, 0,  j1, 0, 0, 0 };
-            m.Weights = new[] { 1f, 0f, 0f, 0f,  0.5f, 0.5f, 0f, 0f,  1f, 0f, 0f, 0f };
+            m.Joints = new ushort[] { j0, 0, 0, 0, j0, j1, 0, 0, j1, 0, 0, 0 };
+            m.Weights = new[] { 1f, 0f, 0f, 0f, 0.5f, 0.5f, 0f, 0f, 1f, 0f, 0f, 0f };
             return GlbCodec.Write(m);
         }
 

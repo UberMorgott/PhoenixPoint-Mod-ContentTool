@@ -636,8 +636,8 @@ namespace Morgott.ContentTool.Dev
             m.Materials.Add("ct_remap");
 
             ushort ja = (ushort)(n - 1 - a), jb = (ushort)(n - 1 - b);
-            m.Joints = new ushort[] { ja, 0, 0, 0,  ja, jb, 0, 0,  jb, 0, 0, 0 };
-            m.Weights = new[] { 1f, 0f, 0f, 0f,  0.5f, 0.5f, 0f, 0f,  1f, 0f, 0f, 0f };
+            m.Joints = new ushort[] { ja, 0, 0, 0, ja, jb, 0, 0, jb, 0, 0, 0 };
+            m.Weights = new[] { 1f, 0f, 0f, 0f, 0.5f, 0.5f, 0f, 0f, 1f, 0f, 0f, 0f };
             return GlbCodec.Write(m);
         }
 

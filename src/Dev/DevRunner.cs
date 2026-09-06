@@ -41,7 +41,8 @@ namespace Morgott.ContentTool.Dev
                 case "on": return On(args != null && args.Length > 1 ? args[1] : null);
                 case "off": return Off();
                 case "status": return Status();
-                case "sets": return "ct_dev sets: " + string.Join(", ", DevLoop.Sets().ToArray()) +
+                case "sets":
+                    return "ct_dev sets: " + string.Join(", ", DevLoop.Sets().ToArray()) +
                                     " | active '" + DevLoop.ActiveSet + "'";
                 case "next": return Switch(DevLoop.Next());
                 case "set":
@@ -49,7 +50,8 @@ namespace Morgott.ContentTool.Dev
                     string why;
                     if (!DevLoop.Select(args[1], out why)) return "ct_dev REFUSED: " + why;
                     return Switch(DevLoop.ActiveSet);
-                case "reload": return DevLoop.Enabled
+                case "reload":
+                    return DevLoop.Enabled
                     ? (SeamSwap.ReapplyAll() ?? "ct_dev reload: no file-backed binding to re-apply")
                     : "ct_dev is OFF - run 'ct_dev on' first";
                 default: return "usage: ct_dev [on [project] | off | status | sets | set <name> | next | reload]";

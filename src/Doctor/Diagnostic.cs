@@ -48,8 +48,12 @@ namespace Morgott.ContentTool.Doctor
         {
             Rows.Add(new Diagnostic
             {
-                Code = code, Severity = severity, Side = side,
-                Message = message, Remedy = remedy, Subject = subject
+                Code = code,
+                Severity = severity,
+                Side = side,
+                Message = message,
+                Remedy = remedy,
+                Subject = subject
             });
         }
 

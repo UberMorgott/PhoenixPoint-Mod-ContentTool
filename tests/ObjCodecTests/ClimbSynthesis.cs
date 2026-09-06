@@ -71,10 +71,13 @@ internal static class ClimbSynthesis
         // hands the state it enters have to be the same part, or the wait can never end.
         foreach (ClimbPlan.Family f in ClimbPlan.Table)
         {
-            if (!f.Sequence) { Check(ClimbPlan.PartOfSlot(f.Slot + "Alt") == f.Part,
+            if (!f.Sequence)
+            {
+                Check(ClimbPlan.PartOfSlot(f.Slot + "Alt") == f.Part,
                   "'" + f.Slot + "Alt' - the twin the engine alternates onto " +
                   "(TacticalPathProcessor._useAlternativeAnimSlot) - takes the SAME part, or every " +
-                  "other crossing silently degrades"); continue; }
+                  "other crossing silently degrades"); continue;
+            }
             for (int i = 0; i < ClimbPlan.Parts.Length; i++)
                 Check(ClimbPlan.PartOfSlot(f.Slot + "." + ClimbPlan.Slots[i]) == ClimbPlan.Parts[i],
                       "'" + f.Slot + "." + ClimbPlan.Slots[i] + "' takes the '" + ClimbPlan.Parts[i] +

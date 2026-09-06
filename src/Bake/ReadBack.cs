@@ -175,8 +175,11 @@ namespace Morgott.ContentTool.Bake
         /// recorded with whatever separators the installer handed it.</summary>
         private static bool Same(string a, string b)
         {
-            try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b),
-                                       StringComparison.OrdinalIgnoreCase); }
+            try
+            {
+                return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b),
+                                       StringComparison.OrdinalIgnoreCase);
+            }
             catch (Exception) { return false; }
         }
 

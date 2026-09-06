@@ -201,8 +201,15 @@ namespace Morgott.ContentTool.Import
                         continue;
                     }
 
-                    curve = new Curve { Output = output, Input = input, Animation = ai, Path = path,
-                                        Values = values, Usable = values != null };
+                    curve = new Curve
+                    {
+                        Output = output,
+                        Input = input,
+                        Animation = ai,
+                        Path = path,
+                        Values = values,
+                        Usable = values != null
+                    };
                     curves[output] = curve;
                     if (values == null) continue;
                     curve.Stride = Lanes(GlbSlim.Obj(accessors[output]));

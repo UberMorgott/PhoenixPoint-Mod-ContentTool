@@ -821,8 +821,11 @@ namespace Morgott.ContentTool.Tactical
                         const float Least = 2.5f;   // and the least we accept having travelled
                         MoveAbilityTargetData[] spots;
                         try { spots = move.GetTargetsDataInRange(null, Want).ToArray(); }
-                        catch (Exception ex) { spots = new MoveAbilityTargetData[0];
-                                               log.AppendLine("C1-walk targets THREW " + ex.Message); }
+                        catch (Exception ex)
+                        {
+                            spots = new MoveAbilityTargetData[0];
+                            log.AppendLine("C1-walk targets THREW " + ex.Message);
+                        }
                         // The FURTHEST reachable spot inside the ask: nearest-first would let a
                         // half-tile shuffle satisfy an arm whose whole point is that it travels.
                         MoveAbilityTargetData spot = spots.OrderByDescending(s => s.PathLength).FirstOrDefault();
@@ -834,8 +837,11 @@ namespace Morgott.ContentTool.Tactical
                             blew = "GetTargetsDataInRange(" + Want.ToString("F0") + ") offered no " +
                                    "reachable tile at all - either the actor is walled in or its nav " +
                                    "agent resolves to nothing";
-                        else { try { move.Activate(spot.ToTarget()); }
-                               catch (Exception ex) { blew = ex.Message; } }
+                        else
+                        {
+                            try { move.Activate(spot.ToTarget()); }
+                            catch (Exception ex) { blew = ex.Message; }
+                        }
 
                         // Deterministic completion is the SAME signal the bash arm waits on: the
                         // ability stays IsExecuting until its PlayingAction ends, and MoveAbility
@@ -959,8 +965,11 @@ namespace Morgott.ContentTool.Tactical
                             for (int attempt = 0; attempt < 3; attempt++)
                             {
                                 try { all = move.GetTargetsDataInRange(null, Reach).ToArray(); }
-                                catch (Exception ex) { all = new MoveAbilityTargetData[0];
-                                                       log.AppendLine("C1-traverse targets THREW " + ex.Message); }
+                                catch (Exception ex)
+                                {
+                                    all = new MoveAbilityTargetData[0];
+                                    log.AppendLine("C1-traverse targets THREW " + ex.Message);
+                                }
                                 Vector3 at = actor.Pos;
                                 MoveAbilityTargetData pick = all
                                     .Where(s => (s.Position.y - at.y) * want > 0.5f &&

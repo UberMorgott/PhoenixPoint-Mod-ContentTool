@@ -521,11 +521,14 @@ internal static class GlbZipTests
                          values.Length % times.Length != 0
                     ? null
                     : new Curve
-                      {
-                          Times = times, Values = values, Stride = values.Length / times.Length,
-                          Rotation = path == "rotation", Step = interpolation == "STEP",
-                          Cubic = interpolation == "CUBICSPLINE"
-                      });
+                    {
+                        Times = times,
+                        Values = values,
+                        Stride = values.Length / times.Length,
+                        Rotation = path == "rotation",
+                        Step = interpolation == "STEP",
+                        Cubic = interpolation == "CUBICSPLINE"
+                    });
             }
         }
         return list;

@@ -570,8 +570,12 @@ internal static class LifecycleTests
         // over the RPC seam was ADMITTED while `Run("Apply")` was refused - the button and the door
         // disagreeing about the same fact. The chain CONTAINS Apply, so it cannot finish by construction.
         checks += Check(LifecycleState.Admit("All", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo",
-                          Copies = Freshness.Fresh, RetryHint = "'ct_route7 apply Demo'." }) ==
+        {
+            Selection = LifecycleState.Selection.Ok,
+            ProjectId = "morgott.demo",
+            Copies = Freshness.Fresh,
+            RetryHint = "'ct_route7 apply Demo'."
+        }) ==
                         StageText.R29("morgott.demo", "'ct_route7 apply Demo'."),
                         "the session block refuses `Run all` with the BLOCK'S OWN word (R29), not only the " +
                         "Apply the chain would reach - W14 admitted the chain over the seam");
@@ -603,10 +607,10 @@ internal static class LifecycleTests
         checks += Check(LifecycleState.Admit("Bake", new LifecycleState.Admission()) == StageText.R25(),
                         "no selection is R25, before anything else is asked");
         checks += Check(LifecycleState.Admit("Bake", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Unavailable }) == StageText.R27(),
+        { Selection = LifecycleState.Selection.Unavailable }) == StageText.R27(),
                         "a deleted, moved or ambiguous project is R27 - refresh the list");
         checks += Check(LifecycleState.Admit("Bake", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, RunningStage = "Bake" }) ==
+        { Selection = LifecycleState.Selection.Ok, RunningStage = "Bake" }) ==
                         StageText.R26("Bake"),
                         "a stage already running is R26, naming the stage that holds the seam");
         checks += Check(LifecycleState.Admit("Ship", ok) == StageText.R33("Ship"),
@@ -614,13 +618,16 @@ internal static class LifecycleTests
 
         // Apply's own three, all of them producer facts the caller supplies.
         checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo",
-                          RetryHint = "'ct_route7 apply Demo'." }) ==
+        {
+            Selection = LifecycleState.Selection.Ok,
+            ProjectId = "morgott.demo",
+            RetryHint = "'ct_route7 apply Demo'."
+        }) ==
                         StageText.R29("morgott.demo", "'ct_route7 apply Demo'."),
                         "Route7's session Failed set suppresses Apply through R29 - the hint comes from " +
                         "Route7.RetryHint, the only thing that knows which argument resolves back");
         checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, LegacyDiskActive = true }) == StageText.R36() &&
+        { Selection = LifecycleState.Selection.Ok, LegacyDiskActive = true }) == StageText.R36() &&
                         LifecycleState.Admit("Apply", new LifecycleState.Admission
                         { Selection = LifecycleState.Selection.Ok, WriteOutsideRoots = true }) == StageText.R34(),
                         "legacy on-disk patching is R36 and a write outside the apply path or author " +
@@ -629,17 +636,25 @@ internal static class LifecycleTests
         // ContentTool's on-disk edit is answered BEFORE anything about where this apply would write, and
         // both outrank the retry hint - the author is told the oldest blocking fact first.
         checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, LegacyDiskActive = true,
-                          WriteOutsideRoots = true, ProjectId = "morgott.demo",
-                          RetryHint = "'ct_route7 apply Demo'." }) == StageText.R36(),
+        {
+            Selection = LifecycleState.Selection.Ok,
+            LegacyDiskActive = true,
+            WriteOutsideRoots = true,
+            ProjectId = "morgott.demo",
+            RetryHint = "'ct_route7 apply Demo'."
+        }) == StageText.R36(),
                         "R36 outranks R34 and R29 when all three hold");
         checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, WriteOutsideRoots = true,
-                          ProjectId = "morgott.demo", RetryHint = "'ct_route7 apply Demo'." }) ==
+        {
+            Selection = LifecycleState.Selection.Ok,
+            WriteOutsideRoots = true,
+            ProjectId = "morgott.demo",
+            RetryHint = "'ct_route7 apply Demo'."
+        }) ==
                         StageText.R34(),
                         "R34 outranks R29 - a write outside the roots is refused before a retry is offered");
         checks += Check(LifecycleState.Admit("Apply", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo" }) == null,
+        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo" }) == null,
                         "neither field set admits Apply - R36 and R34 are facts the caller measured, " +
                         "never a default");
 
@@ -647,8 +662,12 @@ internal static class LifecycleTests
         // only an open, painted Lifecycle tab drains, so `Run("All")` pressed from the main menu was
         // ADMITTED and then sat at `parkedForPaint:true` with no word at all (2026-09-06, trap T2).
         LifecycleState.Admission blind = new LifecycleState.Admission
-        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.demo", Copies = Freshness.Fresh,
-          PaintUnavailable = true };
+        {
+            Selection = LifecycleState.Selection.Ok,
+            ProjectId = "morgott.demo",
+            Copies = Freshness.Fresh,
+            PaintUnavailable = true
+        };
         checks += Check(LifecycleState.Admit("All", blind) == StageText.R39("All") &&
                         LifecycleState.Admit("Bake", blind) == StageText.R39("Bake") &&
                         LifecycleState.Admit("Apply", blind) == StageText.R39("Apply") &&
@@ -664,8 +683,11 @@ internal static class LifecycleTests
                         "the default is 'the panel is there' - R39 is a fact the caller measured, never " +
                         "a default (the same shape as R34/R36)");
         checks += Check(LifecycleState.Admit("Bake", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, RunningStage = "Bake",
-                          PaintUnavailable = true }) == StageText.R26("Bake"),
+        {
+            Selection = LifecycleState.Selection.Ok,
+            RunningStage = "Bake",
+            PaintUnavailable = true
+        }) == StageText.R26("Bake"),
                         "R26 outranks R39 - a run already holding the seam is the older fact");
 
         // ---- The ONE freshness observation. Route7.cs:308-:310 computes `fresh && Directory.Exists(patched)`
@@ -702,8 +724,11 @@ internal static class LifecycleTests
                         "a project that declares no patched target is FRESH - there is nothing to verify, " +
                         "so it can be neither never nor stale (design:390, S8)");
         checks += Check(LifecycleState.Admit("Verify", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, ProjectId = "morgott.introvideo",
-                          Copies = LifecycleState.Fresh(videoOnly) }) == null,
+        {
+            Selection = LifecycleState.Selection.Ok,
+            ProjectId = "morgott.introvideo",
+            Copies = LifecycleState.Fresh(videoOnly)
+        }) == null,
                         "and Verify is ADMITTED for it - it reports S8 instead of refusing forever");
         checks += Check(LifecycleState.Fresh(good) == Freshness.Fresh && good.HaveAll,
                         "receipt matches and every declared copy is there - this is Route7's `haveAll`");
@@ -816,9 +841,12 @@ internal static class LifecycleTests
                          true, true);
         checks += Check(applied.Latest.RestartRequired && applied.Latest.Applicable &&
                         LifecycleState.Admit("Verify", new LifecycleState.Admission
-                        { Selection = LifecycleState.Selection.Ok, ProjectId = "demo",
-                          Copies = Freshness.Fresh,
-                          RestartRequired = applied.Latest.RestartRequired }) == StageText.R30("demo"),
+                        {
+                            Selection = LifecycleState.Selection.Ok,
+                            ProjectId = "demo",
+                            Copies = Freshness.Fresh,
+                            RestartRequired = applied.Latest.RestartRequired
+                        }) == StageText.R30("demo"),
                         "Apply's Resident disposition reaches the snapshot as RestartRequired, which is " +
                         "what makes Admit's R30 arm reachable at all");
         long seventh = applied.Begin("Apply");
@@ -948,7 +976,7 @@ internal static class LifecycleTests
             File.WriteAllBytes(a, old); File.WriteAllBytes(b, old);
             bool late = false;
             checks += Check(Publication.Run(Pair(dir, fresh, a, b), key, "NEWKEY",
-                                            delegate(string dest) { late = true; return null; },
+                                            delegate (string dest) { late = true; return null; },
                                             delegate { return late; }, out message) ==
                             PublishOutcome.Published &&
                             Same(File.ReadAllBytes(a), fresh) && Same(File.ReadAllBytes(b), fresh) &&
@@ -960,7 +988,7 @@ internal static class LifecycleTests
             File.WriteAllText(key, "OLDKEY");
             string r38 = StageText.R38(b);
             checks += Check(Publication.Run(Pair(dir, fresh, a, b), key, "NEWKEY",
-                                            delegate(string dest) { return dest == b ? r38 : null; },
+                                            delegate (string dest) { return dest == b ? r38 : null; },
                                             null, out message) == PublishOutcome.Refused &&
                             message == r38 &&
                             Same(File.ReadAllBytes(a), old) && Same(File.ReadAllBytes(b), old) &&
@@ -1409,7 +1437,7 @@ internal static class LifecycleTests
         {
             string failAt = stages[i];
             ran.Clear();
-            string terminal = Drive(Fresh(), ran, delegate(string s)
+            string terminal = Drive(Fresh(), ran, delegate (string s)
             { return s == failAt ? Fail(s + " broke") : Pass("ok"); });
             checks += Check(ran.Count == i + 1 && ran[ran.Count - 1] == failAt && terminal == failAt + " broke",
                             "a FAIL at " + failAt + " stops the chain there, with the producer's own line");
@@ -1418,7 +1446,7 @@ internal static class LifecycleTests
         // The one the design names explicitly (design:280): a Verify that cannot prove itself stops the
         // chain, and PACKAGE IS NOT ENTERED. A green Package under an unproven Verify is the whole point.
         ran.Clear();
-        Drive(Fresh(), ran, delegate(string s)
+        Drive(Fresh(), ran, delegate (string s)
         { return s == "Verify" ? Void("Verify: VOID - nothing proved it", true) : Pass("ok"); });
         checks += Check(ran.Count == 4 && !ran.Contains("Package"),
                         "an absent mandatory proof stays VOID and blocks completion - Package is not entered");
@@ -1435,7 +1463,7 @@ internal static class LifecycleTests
         verify.Complete(vr, produced.Verdict, produced.How, null, false, produced.Applicable,
                         produced.Outcome);
         LifecycleRun.Snapshot published = verify.Latest;
-        checks += Check(Drive(Fresh(), ran, delegate(string s)
+        checks += Check(Drive(Fresh(), ran, delegate (string s)
                         {
                             return s == "Verify"
                                 ? new LifecycleState.StageReport(
@@ -1449,7 +1477,7 @@ internal static class LifecycleTests
 
         // ...but a VOID with no applicable gate at all is a reason, not a failure (design:281).
         ran.Clear();
-        checks += Check(Drive(Fresh(), ran, delegate(string s)
+        checks += Check(Drive(Fresh(), ran, delegate (string s)
                         { return s == "Apply" ? Void("Apply: VOID - no non-video target", false) : Pass("ok"); }) == null &&
                         ran.Count == 5,
                         "a non-applicable row is VOID with a reason and does NOT stop the chain");
@@ -1459,7 +1487,7 @@ internal static class LifecycleTests
         // demos/AddUiSounds-shaped project. The same disposition WITH a gate - R37/R38, a contended output,
         // an admission's own refusal - still stops it.
         ran.Clear();
-        checks += Check(Drive(Fresh(), ran, delegate(string s)
+        checks += Check(Drive(Fresh(), ran, delegate (string s)
                         {
                             return s == "Apply"
                                 ? new LifecycleState.StageReport(GateOutcome.Void,
@@ -1475,7 +1503,7 @@ internal static class LifecycleTests
         // after ApplyRoot. It has a gate, so it stops here and Verify never displaces the reason.
         ran.Clear();
         string held = StageText.R37("D:\\x\\Dist");
-        checks += Check(Drive(Fresh(), ran, delegate(string s)
+        checks += Check(Drive(Fresh(), ran, delegate (string s)
                         {
                             return s == "Apply"
                                 ? new LifecycleState.StageReport(GateOutcome.Void, held,
@@ -1499,7 +1527,7 @@ internal static class LifecycleTests
                         "while the shape that shipped fails the same check, so the arm above is a " +
                         "measurement and not a blind pass");
         ran.Clear();
-        checks += Check(Drive(Fresh(), ran, delegate(string s)
+        checks += Check(Drive(Fresh(), ran, delegate (string s)
                         {
                             return s == "Apply"
                                 ? new LifecycleState.StageReport(GateOutcome.Void, "REFUSED: R38",
@@ -1537,7 +1565,7 @@ internal static class LifecycleTests
         stopped.Complete(ar, StageText.R31("Apply"), BakeDisposition.Cancelled);
         LifecycleRun.Snapshot ack = stopped.Latest;
         checks += Check(ack.CancelAcknowledged && !ack.Busy &&
-                        Drive(Fresh(), ran, delegate(string s)
+                        Drive(Fresh(), ran, delegate (string s)
                         {
                             return s == "Apply"
                                 ? new LifecycleState.StageReport(
@@ -1552,7 +1580,7 @@ internal static class LifecycleTests
         // R30 arm - the sequencer never learns what S1 means, it only re-asks Admit.
         ran.Clear();
         LifecycleState.Admission s1 = Fresh();
-        string after = Drive(s1, ran, delegate(string s)
+        string after = Drive(s1, ran, delegate (string s)
         {
             return s == "Apply"
                 ? new LifecycleState.StageReport(GateOutcome.Pass, "applied", BakeDisposition.Success,
@@ -1587,7 +1615,7 @@ internal static class LifecycleTests
         // CANCELLATION. The producer's Cancelled disposition is what stops it, and the terminal line says
         // later stages were not run - it never claims a rollback.
         ran.Clear();
-        checks += Check(Drive(Fresh(), ran, delegate(string s)
+        checks += Check(Drive(Fresh(), ran, delegate (string s)
                         {
                             return s == "Bake"
                                 ? new LifecycleState.StageReport(GateOutcome.Void, "stopped",
@@ -1601,7 +1629,7 @@ internal static class LifecycleTests
         ran.Clear();
         LifecycleState.Admission stale = Fresh();
         stale.Copies = Freshness.Never;
-        Drive(stale, ran, delegate(string s)
+        Drive(stale, ran, delegate (string s)
         {
             if (s == "Apply") stale.Copies = Freshness.Fresh;    // the earlier stage's output admits the later
             return Pass("ok");
@@ -1856,8 +1884,10 @@ internal static class LifecycleTests
     { return new LifecycleState.StageReport(GateOutcome.Fail, line, BakeDisposition.Failed, false, true, null); }
 
     private static LifecycleState.StageReport Void(string line, bool applicable)
-    { return new LifecycleState.StageReport(GateOutcome.Void, line, BakeDisposition.Success, false, applicable,
-                                            null); }
+    {
+        return new LifecycleState.StageReport(GateOutcome.Void, line, BakeDisposition.Success, false, applicable,
+                                            null);
+    }
 
     /// <summary>Drives one whole chain and records what was dispatched. Returns the terminal line when the
     /// chain stopped, or null when all five completed.</summary>

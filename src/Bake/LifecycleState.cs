@@ -286,7 +286,7 @@ namespace Morgott.ContentTool.Bake
         {
             if (name == null) name = "";
             if (name == "") return Header();
-            if (name == "log") return Bounded(Len(Log), delegate(int room, bool cut)
+            if (name == "log") return Bounded(Len(Log), delegate (int room, bool cut)
             {
                 Import.JsonWriter w = Open("log");
                 return w.Key("log").Val(Clip(Log, room) ?? "").Key("bytes").Val(Len(Log))
@@ -295,7 +295,7 @@ namespace Morgott.ContentTool.Bake
             // TWO variable fields, ONE budget, and they shrink TOGETHER: Apply's S1 and S2 are producer
             // lines with no length bound of their own, and this section used to hardcode `truncated:false`
             // over them - the exact silent 2000-char clip the sectioning exists to prevent.
-            if (name == "s1s2") return Bounded(Math.Max(Len(S1), Len(S2)), delegate(int room, bool cut)
+            if (name == "s1s2") return Bounded(Math.Max(Len(S1), Len(S2)), delegate (int room, bool cut)
             {
                 Import.JsonWriter w = Open("s1s2");
                 w.Key("s1"); Text(w, Clip(S1, room));
@@ -313,7 +313,7 @@ namespace Morgott.ContentTool.Bake
             // `installation` shrinks with the verdict: it is Apply's own line, as unbounded as the verdict
             // beside it, and leaving it outside the loop let a long one overrun a payload that measured as
             // fitting.
-            return Bounded(Math.Max(Len(row.Verdict), Len(row.Installation)), delegate(int room, bool cut)
+            return Bounded(Math.Max(Len(row.Verdict), Len(row.Installation)), delegate (int room, bool cut)
             {
                 Import.JsonWriter w = Open(name);
                 w.Key("stage").Val(row.Stage)
@@ -449,7 +449,7 @@ namespace Morgott.ContentTool.Bake
         {
             string full = compose(widest, false);
             if (full.Length <= MaxPayload || widest <= 0) return full;
-            for (int room = widest; room > 0; )
+            for (int room = widest; room > 0;)
             {
                 room = room * 3 / 4;
                 string json = compose(room, true);

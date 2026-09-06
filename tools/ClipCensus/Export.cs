@@ -632,11 +632,16 @@ internal static class Export
     {
         var b = new Banks
         {
-            StreamCurves = 1, DenseCurves = 1, ConstCount = 1,
-            DenseFrames = 3, DenseBegin = 0f, DenseRate = 10f,
+            StreamCurves = 1,
+            DenseCurves = 1,
+            ConstCount = 1,
+            DenseFrames = 3,
+            DenseBegin = 0f,
+            DenseRate = 10f,
             Dense = new[] { 0f, 10f, 20f },        // one curve, frames 0/0.1/0.2 -> a ramp
             Const = new[] { 7f },
-            Start = 0f, Stop = 1f,
+            Start = 0f,
+            Stop = 1f,
             Keys = new List<float[]>[1],
         };
         b.Keys[0] = new List<float[]> { new[] { 0f, 1f, 0f, 0f, 0f } };   // v = dt^3
@@ -652,11 +657,25 @@ internal static class Export
         Fail(Math.Abs(b.Duration - 1f) < 1e-6f, "duration is m_StopTime - m_StartTime, not what the banks happen to reach");
 
         // a constant-only clip still has a real length, and a still cubic-bulging curve is not still
-        var only = new Banks { ConstCount = 3, Const = new[] { 1f, 2f, 3f }, Start = 0f, Stop = 2.5f,
-                               Keys = new List<float[]>[0], Dense = new float[0] };
+        var only = new Banks
+        {
+            ConstCount = 3,
+            Const = new[] { 1f, 2f, 3f },
+            Start = 0f,
+            Stop = 2.5f,
+            Keys = new List<float[]>[0],
+            Dense = new float[0]
+        };
         Fail(Math.Abs(only.Duration - 2.5f) < 1e-6f, "a constant-only clip must not collapse to zero length");
-        var bulge = new Banks { StreamCurves = 1, Start = 0f, Stop = 1f, Keys = new List<float[]>[1],
-                                Dense = new float[0], Const = new float[0] };
+        var bulge = new Banks
+        {
+            StreamCurves = 1,
+            Start = 0f,
+            Stop = 1f,
+            Keys = new List<float[]>[1],
+            Dense = new float[0],
+            Const = new float[0]
+        };
         // v(dt) = dt^3 - 1.5 dt^2 + 0.5 dt: zero at t=0, at t=0.5 and at t=1, 0.048 in between
         bulge.Keys[0] = new List<float[]> { new[] { 0f, 1f, -1.5f, 0.5f, 0f } };
         var grid = new Verdict { Frames = 3, Step = 0.5f };
@@ -666,16 +685,31 @@ internal static class Export
         // The scale classifier, both ways round. The bundle exercises only one of them - all 28451
         // shipped scale curves turn out to be bake noise - so the branch that KEEPS a squash would
         // otherwise ship with no coverage at all.
-        var scale = new Banks { ConstCount = 3, Start = 0f, Stop = 1f, Keys = new List<float[]>[0],
-                                Dense = new float[0], Const = new[] { 1.000045f, 0.999955f, 1.000045f } };
+        var scale = new Banks
+        {
+            ConstCount = 3,
+            Start = 0f,
+            Stop = 1f,
+            Keys = new List<float[]>[0],
+            Dense = new float[0],
+            Const = new[] { 1.000045f, 0.999955f, 1.000045f }
+        };
         var one = new Verdict { Frames = 2, Step = 1f };
         Fail(Still(scale, 0, 3, one, UnitScale) && Near(scale, 0, 3, new[] { 1f, 1f, 1f }, 0f, UnitScale),
              "1.0 +-4.5e-5 per component is the bake's own noise and must read as UNIT scale");
         scale.Const = new[] { 1.2f, 1f, 1f };
         Fail(!Near(scale, 0, 3, new[] { 1f, 1f, 1f }, 0f, UnitScale),
              "a constant 1.2 is a SQUASH the animator meant and must be kept, not dropped with the noise");
-        var ramp = new Banks { StreamCurves = 1, ConstCount = 2, Start = 0f, Stop = 1f,
-                               Keys = new List<float[]>[1], Dense = new float[0], Const = new[] { 1f, 1f } };
+        var ramp = new Banks
+        {
+            StreamCurves = 1,
+            ConstCount = 2,
+            Start = 0f,
+            Stop = 1f,
+            Keys = new List<float[]>[1],
+            Dense = new float[0],
+            Const = new[] { 1f, 1f }
+        };
         ramp.Keys[0] = new List<float[]> { new[] { 0f, 0f, 0f, 0.5f, 1f } };   // 1 -> 1.5 over the clip
         Fail(!Still(ramp, 0, 3, one, UnitScale), "an animated scale must not read as unit");
 

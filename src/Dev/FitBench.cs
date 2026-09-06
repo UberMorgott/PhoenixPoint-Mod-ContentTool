@@ -117,14 +117,15 @@ namespace Morgott.ContentTool.Dev
             string verb = args != null && args.Length > 0 ? args[0] : (entered ? "close" : "open");
             switch (verb)
             {
-                case "open":  return open ? "ct_bench: already open" : Open();
+                case "open": return open ? "ct_bench: already open" : Open();
                 case "close": return entered ? Close() : "ct_bench: not open";
                 case "reset": return entered ? ResetView() : "ct_bench: not open";
-                case "unit":  return open ? Choose(args) : "ct_bench: not open";
+                case "unit": return open ? Choose(args) : "ct_bench: not open";
                 // Not gated on the bench being open: the catalogue is read off DefRepository and
                 // nothing else, and this is the seam the Advanced row's Rescan button shares.
                 case "rescan": return RescanPrototypes();
-                default:      return "ct_bench: args are [open|close|reset|rescan|unit <name>], or none " +
+                default:
+                    return "ct_bench: args are [open|close|reset|rescan|unit <name>], or none " +
                                      "to toggle. Hotkey " + HotkeyLabel;
             }
         }
@@ -583,19 +584,28 @@ namespace Morgott.ContentTool.Dev
             viewScale = 1f; scaleText = "1.00";
             try { if (bay != null && bay.SceneRoot != null) bay.SceneRoot.rotation = sceneRotation; }
             catch (Exception) { }
-            try { if (level != null && level.SceneReferences != null)
-                      level.SceneReferences.ActivateScene(GeoSceneReferences.ActiveSceneReference.SquadBay); }
+            try
+            {
+                if (level != null && level.SceneReferences != null)
+                    level.SceneReferences.ActivateScene(GeoSceneReferences.ActiveSceneReference.SquadBay);
+            }
             catch (Exception) { }
-            try { if (lighting != null && level != null && level.View != null)
-                      lighting.SetLighting(level.View.EditSolderLightingSettings, null); }
+            try
+            {
+                if (lighting != null && level != null && level.View != null)
+                    lighting.SetLighting(level.View.EditSolderLightingSettings, null);
+            }
             catch (Exception) { }
             try { Hide(); } catch (Exception) { }
             // The transport is a knob like the others: RESET VIEW puts the animator's speed back and
             // stands the unit in the weapon's own idle again, then re-binds against the live rig.
             try { FitAnim.Release(); } catch (Exception) { }
-            try { if (bay != null && bay.CharacterBuilder != null)
-                      FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips(),
-                                   PrototypeClips()); }
+            try
+            {
+                if (bay != null && bay.CharacterBuilder != null)
+                    FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips(),
+                                 PrototypeClips());
+            }
             catch (Exception) { }
             // The pose re-asserted through the ordinary path, so the preview scale just put back to 1
             // is actually ON SCREEN rather than waiting for the next rebuild.
@@ -637,8 +647,11 @@ namespace Morgott.ContentTool.Dev
                 if (d == null) continue;
                 bool ours = Ours(d);
                 if (ours) ourUnits.Add(d);
-                try { if (ours || (d.GetAddonsMangerDef() != null && d.GetViewElementDef() != null))
-                          units.Add(d); }
+                try
+                {
+                    if (ours || (d.GetAddonsMangerDef() != null && d.GetViewElementDef() != null))
+                        units.Add(d);
+                }
                 catch (Exception) { }
             }
             weapons = new List<WeaponDef>();
@@ -767,8 +780,10 @@ namespace Morgott.ContentTool.Dev
                 {
                     var target = new PrototypeTarget
                     {
-                        Record = record, Variant = variant,
-                        SlotDefName = slot.SlotDefName, Mode = VerifyMode.Replace
+                        Record = record,
+                        Variant = variant,
+                        SlotDefName = slot.SlotDefName,
+                        Mode = VerifyMode.Replace
                     };
                     KeyValuePair<Addon, SkinnedMeshRenderer> made;
                     if (slot.SlotDefName != null && live.TryGetValue(slot.SlotDefName, out made) && made.Value != null)
@@ -918,9 +933,15 @@ namespace Morgott.ContentTool.Dev
                 catch (Exception) { ok = false; }
                 try { if (h.post != null) h.post.enabled = true; }
                 catch (Exception) { ok = false; }
-                try { if (h.camera != null) { h.camera.transform.position = h.position;
-                                              h.camera.transform.rotation = h.rotation;
-                                              h.camera.nearClipPlane = h.near; } }
+                try
+                {
+                    if (h.camera != null)
+                    {
+                        h.camera.transform.position = h.position;
+                        h.camera.transform.rotation = h.rotation;
+                        h.camera.nearClipPlane = h.near;
+                    }
+                }
                 catch (Exception) { ok = false; }
                 if (ok) continue;
                 left.Add(h);
@@ -1149,11 +1170,13 @@ namespace Morgott.ContentTool.Dev
             // the game's OWN handler (UIModuleActorCycle.OnCharacterRebuilded:435-473) is what finishes
             // it, after this method has returned. The field is kept when the restore FAILED, so a
             // second close retries exactly it - that is this method's whole bookkeeping contract.
-            Step(failed, "the squad bay's own soldier", () => {
+            Step(failed, "the squad bay's own soldier", () =>
+            {
                 // The targets hold LIVE renderer instance ids, so they go with the session that made
                 // them - keeping them would let a later close snapshot a rig that no longer exists.
                 pendingRecord = null; pendingVariant = null; shownVariant = null; slotTargets.Clear();
-                if (proto != null) { proto.Dispose(); proto = null; } });
+                if (proto != null) { proto.Dispose(); proto = null; }
+            });
             // A trim in flight owns a temp file and a pool thread, neither of which the bench closing
             // has any business leaving running. The file on disk is safe either way - SlimJob only
             // ever swaps a finished temp into place.
@@ -1161,38 +1184,55 @@ namespace Morgott.ContentTool.Dev
             // The animator BEFORE the rebuild callback goes: it puts the speed back and plays the
             // default state, and both need the builder this callback still points at.
             Step(failed, "the animator's speed and the weapon's idle pose", FitAnim.Release);
-            Step(failed, "the rebuild callback", () => {
+            Step(failed, "the rebuild callback", () =>
+            {
                 if (bay != null && bay.CharacterBuilder != null)
-                    bay.CharacterBuilder.OnCharacterRebuilded -= Posed; });
+                    bay.CharacterBuilder.OnCharacterRebuilded -= Posed;
+            });
             // Hole 1's other half: an Open that threw before the first rebuild left the addons manager
             // quiesced. Un-quiescing costs nothing when it is already on, and a manager stuck with
             // autorefresh off silently stops re-resolving skins for the rest of the session.
-            Step(failed, "the addons manager's autorefresh", () => {
+            Step(failed, "the addons manager's autorefresh", () =>
+            {
                 if (bay != null && bay.CharacterBuilder != null &&
                     bay.CharacterBuilder.AddonsManager != null)
-                    bay.CharacterBuilder.AddonsManager.SetAutorefreshOnTagsChanged(true); });
+                    bay.CharacterBuilder.AddonsManager.SetAutorefreshOnTagsChanged(true);
+            });
             ReleaseCamera(failed);
-            Step(failed, "the camera director hint", () => {
-                if (director != null) director.RemoveHint(CameraDirectorHint.GeoscapeSoldierEditCenter); });
+            Step(failed, "the camera director hint", () =>
+            {
+                if (director != null) director.RemoveHint(CameraDirectorHint.GeoscapeSoldierEditCenter);
+            });
             // THE LIGHTING THAT WAS THERE, off the snapshot - not DefaultLightingSettings, which is
             // simply one more state the game may or may not have been in.
-            Step(failed, "the lighting settings", () => {
-                if (lighting != null && lightingTaken) { lighting.SetLighting(priorLighting, null);
-                                                         lightingTaken = false; } });
-            Step(failed, "the squad bay's pose", () => {
+            Step(failed, "the lighting settings", () =>
+            {
+                if (lighting != null && lightingTaken)
+                {
+                    lighting.SetLighting(priorLighting, null);
+                    lightingTaken = false;
+                }
+            });
+            Step(failed, "the squad bay's pose", () =>
+            {
                 if (bay != null && bay.SceneRoot != null)
                 {
                     bay.SceneRoot.rotation = sceneRotation;
                     bay.SceneRoot.localPosition = scenePosition;
                     bay.SceneRoot.localScale = sceneScale;
-                } });
-            Step(failed, "the character platform's scale", () => {
+                }
+            });
+            Step(failed, "the character platform's scale", () =>
+            {
                 if (bay != null && bay.CharBuilderPlatform != null)
-                    bay.CharBuilderPlatform.localScale = platformScale; });
+                    bay.CharBuilderPlatform.localScale = platformScale;
+            });
             // ... and the scene that was switched on, likewise off the snapshot.
-            Step(failed, "the active scene", () => {
+            Step(failed, "the active scene", () =>
+            {
                 if (level != null && level.SceneReferences != null)
-                    level.SceneReferences.ActivateScene(priorScene); });
+                    level.SceneReferences.ActivateScene(priorScene);
+            });
 
             if (failed.Count > 0)
                 return "ct_bench NOT FULLY CLOSED - the panel is gone but " + failed.Count +
@@ -1779,12 +1819,18 @@ namespace Morgott.ContentTool.Dev
             {
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("view", GUILayout.Width(40f));
-                if (GUILayout.Button("in"))      view.WheelAt(1f, 0f, 0f);
-                if (GUILayout.Button("out"))     view.WheelAt(-1f, 0f, 0f);
-                if (GUILayout.Button("up"))      { lift = BenchList.Clamp(lift - BenchList.LiftStep,
-                                                                         BenchList.LiftMin, BenchList.LiftMax); Reframe(); }
-                if (GUILayout.Button("down"))    { lift = BenchList.Clamp(lift + BenchList.LiftStep,
-                                                                         BenchList.LiftMin, BenchList.LiftMax); Reframe(); }
+                if (GUILayout.Button("in")) view.WheelAt(1f, 0f, 0f);
+                if (GUILayout.Button("out")) view.WheelAt(-1f, 0f, 0f);
+                if (GUILayout.Button("up"))
+                {
+                    lift = BenchList.Clamp(lift - BenchList.LiftStep,
+                                                                         BenchList.LiftMin, BenchList.LiftMax); Reframe();
+                }
+                if (GUILayout.Button("down"))
+                {
+                    lift = BenchList.Clamp(lift + BenchList.LiftStep,
+                                                                         BenchList.LiftMin, BenchList.LiftMax); Reframe();
+                }
                 if (GUILayout.Button("reframe")) { Reframe(); }
                 GUILayout.EndHorizontal();
                 // Which drag direction reads as "natural" is a matter of the hand, not of the code, so

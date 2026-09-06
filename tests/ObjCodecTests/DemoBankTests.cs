@@ -57,7 +57,7 @@ internal static class DemoBankTests
     {
         // Measured 2026-09-01 off the committed banks; the same numbers the demo's meta.json and
         // README quote. A re-bake with different audio must update all three together.
-        var expect = new Dictionary<uint, int> { { 18839791, 340 },{ 633458426, 444 }, { 940964934, 601 } };
+        var expect = new Dictionary<uint, int> { { 18839791, 340 }, { 633458426, 444 }, { 940964934, 601 } };
 
         string dist = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                                                     @"..\..\..\..\..\demos\ReplaceUiSounds\Dist\Sounds"));

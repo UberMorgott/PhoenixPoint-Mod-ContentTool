@@ -356,8 +356,8 @@ namespace Morgott.ContentTool.Dev
             // Both callbacks land on the POOL thread. They assign volatile fields and nothing else -
             // result BEFORE running, so the frame that first sees the run finished already has the
             // sentence to show for it.
-            Action<SlimProgress> onProgress = delegate(SlimProgress p) { progress = p; };
-            Action<string> onComplete = delegate(string r) { result = r; running = false; };
+            Action<SlimProgress> onProgress = delegate (SlimProgress p) { progress = p; };
+            Action<string> onComplete = delegate (string r) { result = r; running = false; };
 
             if (mode == Mode.Skel)
             {

@@ -133,8 +133,8 @@ internal static class MeshRoundTrip
         // The FIRST and LAST live bones. A reversal leaves the middle slot where it is, so a rig with
         // an odd bone count would have one pair the arm cannot tell apart - these two always move.
         ushort j0 = (ushort)(n - 1), j1 = 0;                     // live bone 0, and live bone n-1
-        model.Joints = new ushort[] { j0, 0, 0, 0,  j0, j1, 0, 0,  j1, 0, 0, 0 };
-        model.Weights = new[] { 1f, 0f, 0f, 0f,  0.5f, 0.5f, 0f, 0f,  1f, 0f, 0f, 0f };
+        model.Joints = new ushort[] { j0, 0, 0, 0, j0, j1, 0, 0, j1, 0, 0, 0 };
+        model.Weights = new[] { 1f, 0f, 0f, 0f, 0.5f, 0.5f, 0f, 0f, 1f, 0f, 0f, 0f };
 
         // Through the FILE, not the object: a .glb an author drops in is read by GlbReader, and the
         // joint NAMES this arm depends on only exist after that read (the writer keeps them in nodes).

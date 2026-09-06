@@ -382,8 +382,11 @@ namespace Morgott.ContentTool.Project
 
             ContentProject p = new ContentProject
             {
-                Root = root, Id = m.id, BundleName = m.bundle,
-                LoopDeclaration = m.loop, PlayDeclaration = m.play
+                Root = root,
+                Id = m.id,
+                BundleName = m.bundle,
+                LoopDeclaration = m.loop,
+                PlayDeclaration = m.play
             };
             p.Scale = ScaleOrRefuse(m.scale, p.SourceRefusals);
             // ONE SOURCE FILE CANNOT TAKE THE PROJECT DOWN WITH IT: every importer below throws by
@@ -529,8 +532,13 @@ namespace Morgott.ContentTool.Project
                 }
                 list.Add(new ShippedReplacement
                 {
-                    bundle = row.Bundle, asset = row.Asset, texture = row.Texture,
-                    material = row.Material, mesh = row.Mesh, clip = row.Clip, video = row.Video
+                    bundle = row.Bundle,
+                    asset = row.Asset,
+                    texture = row.Texture,
+                    material = row.Material,
+                    mesh = row.Mesh,
+                    clip = row.Clip,
+                    video = row.Video
                 });
             }
             if (list.Count == 0 && (refusals == null || refusals.Count == marked))
@@ -718,7 +726,9 @@ namespace Morgott.ContentTool.Project
                 return new ImportedTexture
                 {
                     Name = Path.GetFileNameWithoutExtension(path).ToLowerInvariant(),
-                    Width = t.width, Height = t.height, Rgba32 = rgba
+                    Width = t.width,
+                    Height = t.height,
+                    Rgba32 = rgba
                 };
             }
             finally { UnityEngine.Object.Destroy(t); }

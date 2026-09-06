@@ -984,9 +984,17 @@ namespace Morgott.ContentTool.Tactical
         {
             Dialled f = new Dialled
             {
-                manifest = e.manifest, entry = e, prefab = prefab, node = node, auto = auto,
-                src = src, dst = dst, solved = solved, offset = e.offset,
-                euler = new[] { euler[0], euler[1], euler[2] }, scale = scale
+                manifest = e.manifest,
+                entry = e,
+                prefab = prefab,
+                node = node,
+                auto = auto,
+                src = src,
+                dst = dst,
+                solved = solved,
+                offset = e.offset,
+                euler = new[] { euler[0], euler[1], euler[2] },
+                scale = scale
             };
             // Straight off the manifest, so a fit nobody has touched reads SAVED rather than MODIFIED.
             f.MarkSaved();
@@ -1252,15 +1260,15 @@ namespace Morgott.ContentTool.Tactical
             string arg = args.Length >= 3 ? args[2] : null;
             switch (verb)
             {
-                case "save":   return Save(key1);
+                case "save": return Save(key1);
                 case "reload": return Reload(key1);
-                case "move":   return Adjust(key1, Vec3(Need(arg, verb)), Vector3.zero, 0f);
-                case "turn":   return Adjust(key1, Vector3.zero, Vec3(Need(arg, verb)), 0f);
-                case "pos":    return Set(key1, Vec3(Need(arg, verb)), euler, scale);
-                case "rot":    return Set(key1, pos, Vec3(Need(arg, verb)), scale);
-                case "scale":  return Set(key1, pos, euler, P(Need(arg, verb)));
+                case "move": return Adjust(key1, Vec3(Need(arg, verb)), Vector3.zero, 0f);
+                case "turn": return Adjust(key1, Vector3.zero, Vec3(Need(arg, verb)), 0f);
+                case "pos": return Set(key1, Vec3(Need(arg, verb)), euler, scale);
+                case "rot": return Set(key1, pos, Vec3(Need(arg, verb)), scale);
+                case "scale": return Set(key1, pos, euler, P(Need(arg, verb)));
                 // Bare "x,y,z" is a position nudge - what ct_fit has always meant.
-                default:       return Adjust(key1, Vec3(verb), Vector3.zero, 0f);
+                default: return Adjust(key1, Vec3(verb), Vector3.zero, 0f);
             }
         }
 

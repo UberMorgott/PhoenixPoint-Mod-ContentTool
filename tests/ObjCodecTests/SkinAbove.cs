@@ -180,8 +180,8 @@ internal static class SkinAbove
         int weights = b.Vec(3, "VEC4", 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f);
         int indices = b.Indices(0, 1, 2);
         int bind = b.Vec(2, "MAT4",
-            1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,   0, -1, 0, 1,
-            0, -1, 0, 0, 1, 0, 0, 0,  0, 0, 1, 0,  -1,  1, 0, 1);
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1, 0, 1,
+            0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, -1, 1, 0, 1);
         // The animated twin drives 'arm_addon' - a ROOT of the imported rig whose parent is NOT a
         // joint. Its samples are stated against that parent, which the dropped fold leaves in neither
         // the hierarchy nor `above`, so there is no space left to play them in.
@@ -278,7 +278,7 @@ internal static class SkinAbove
     {
         // Unity-space transform of the armature object, hand-derived above: columns are the images of
         // X, Y and Z, each 100 long.
-        float[] over = { 100, 0, 0, 0,  0, 0, -100, 0,  0, 100, 0, 0,  0, 0, 0, 1 };
+        float[] over = { 100, 0, 0, 0, 0, 0, -100, 0, 0, 100, 0, 0, 0, 0, 0, 1 };
 
         string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
             @"..\..\..\..\..\lib\u8_rootfold.glb");

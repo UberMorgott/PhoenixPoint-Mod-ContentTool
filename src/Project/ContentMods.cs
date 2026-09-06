@@ -24,18 +24,18 @@ namespace Morgott.ContentTool.Project
         /// <summary>The manifest that makes a folder a content project. Its PRESENCE is the declaration.</summary>
         internal const string Manifest = "ppcontent.json";
 
-    /// <summary>The mesh extensions Content\Meshes\ accepts, as GetFiles patterns - the list
-    /// ContentProject.Sources scans that folder with. It lives HERE, beside the manifest's own name and
-    /// UnityEngine-free, because ProjectScaffold has to refuse a same-stem file under any of the OTHERS
-    /// before it ships one, and a second spelling there would quietly stop guarding the day a format is
-    /// added. ContentProject.cs itself cannot join the offline compile list (see ObjCodecTests.csproj).</summary>
-    internal static readonly string[] MeshPatterns = { "*.obj", "*.glb" };
+        /// <summary>The mesh extensions Content\Meshes\ accepts, as GetFiles patterns - the list
+        /// ContentProject.Sources scans that folder with. It lives HERE, beside the manifest's own name and
+        /// UnityEngine-free, because ProjectScaffold has to refuse a same-stem file under any of the OTHERS
+        /// before it ships one, and a second spelling there would quietly stop guarding the day a format is
+        /// added. ContentProject.cs itself cannot join the offline compile list (see ObjCodecTests.csproj).</summary>
+        internal static readonly string[] MeshPatterns = { "*.obj", "*.glb" };
 
-    /// <summary>The texture extensions Content\Textures\ accepts, the list ContentProject.Load scans that
-    /// folder with (:398). Here for the same reason as <see cref="MeshPatterns"/>: the Validate stage has
-    /// to answer "is this row's file where the bake will look for it" without ContentProject, which cannot
-    /// join the offline compile list.</summary>
-    internal static readonly string[] TexturePatterns = { "*.png", "*.jpg", "*.jpeg" };
+        /// <summary>The texture extensions Content\Textures\ accepts, the list ContentProject.Load scans that
+        /// folder with (:398). Here for the same reason as <see cref="MeshPatterns"/>: the Validate stage has
+        /// to answer "is this row's file where the bake will look for it" without ContentProject, which cannot
+        /// join the offline compile list.</summary>
+        internal static readonly string[] TexturePatterns = { "*.png", "*.jpg", "*.jpeg" };
 
         /// <summary>
         /// The file in <c>Content\folder\</c> whose STEM is <paramref name="stem"/> - what a "replace" row

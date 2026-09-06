@@ -166,7 +166,7 @@ namespace Morgott.ContentTool.Bake
                     try
                     {
                         r = ProjectBake.Bake(on.Root, false, cancel,
-                                             delegate(string phase, int done, int total)
+                                             delegate (string phase, int done, int total)
                                              { Run.Progress(id, new SlimProgress(phase, done, total, on.Id)); });
                     }
                     catch (Exception ex)

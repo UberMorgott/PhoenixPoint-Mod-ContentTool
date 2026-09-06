@@ -244,7 +244,7 @@ namespace Morgott.ContentTool.Dev
             // A REAL MissingTarget (ProjectBake.cs:1807), not a fabricated FAIL: the row names an asset the
             // shipped bundle does not contain, so the bake fails the way a broken project fails.
             why = why ?? Fork(source, "DashboardPatchFail",
-                 delegate(string json) { return Retarget(json, "asset", "ContentToolNoSuchTarget"); });
+                 delegate (string json) { return Retarget(json, "asset", "ContentToolNoSuchTarget"); });
             // ponytail: the plan words this fixture as "retargeted to a bundle no other fixture and no live
             // claim contests". Its own ID already is that: R38 asks whether THIS project's copy is being
             // served (Capture -> ProjectBake.Live over PatchedDir(id)\<bundle>), and a distinct id is a

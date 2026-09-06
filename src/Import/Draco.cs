@@ -530,7 +530,7 @@ namespace Morgott.ContentTool.Import
         private List<int>[] faceToVertex;
         private int[] oppositeCorners;
         private int[] cornerToVertex;                        // the POSITION corner table
-            private int[] vertexCorners;
+        private int[] vertexCorners;
         private bool[] isVertHole;
         private int[] vertexValences;
         private readonly List<int> activeCornerStack = new List<int>();
@@ -570,25 +570,25 @@ namespace Morgott.ContentTool.Import
                 long last = 0;
                 for (int i = 0; i < numFaces; i++)
                     for (int j = 0; j < 3; j++)
-                {
-                    uint encoded = symbols[i * 3 + j];
-                    long diff = encoded >> 1;
-                    if ((encoded & 1) != 0) diff = -diff;
-                    last += diff;
-                    faceToVertex[j].Add(Point(last));
-                }
+                    {
+                        uint encoded = symbols[i * 3 + j];
+                        long diff = encoded >> 1;
+                        if ((encoded & 1) != 0) diff = -diff;
+                        last += diff;
+                        faceToVertex[j].Add(Point(last));
+                    }
             }
             else if (method == SEQUENTIAL_UNCOMPRESSED_INDICES)
             {
                 for (int i = 0; i < numFaces; i++)
                     for (int j = 0; j < 3; j++)
-                {
-                    long value = numPoints < 256 ? U8()
-                        : numPoints < (1 << 16) ? U16()
-                        : numPoints < (1 << 21) ? Var("indices")
-                        : (long)U32();
-                    faceToVertex[j].Add(Point(value));
-                }
+                    {
+                        long value = numPoints < 256 ? U8()
+                            : numPoints < (1 << 16) ? U16()
+                            : numPoints < (1 << 21) ? Var("indices")
+                            : (long)U32();
+                        faceToVertex[j].Add(Point(value));
+                    }
             }
             else throw Bad2("a Draco stream stores its indices in form " +
                 method.ToString(CultureInfo.InvariantCulture) + ", which the format does not define");
@@ -876,141 +876,141 @@ namespace Morgott.ContentTool.Import
             switch (lastSymbol)
             {
                 case TOPOLOGY_C:
-                {
-                    int cornerA = Top();
-                    int cornerB = Previous(cornerA);
-                    int guard = 0;
-                    while (PosOpposite(cornerB) >= 0)
                     {
-                        cornerB = Previous(PosOpposite(cornerB));
-                        if (++guard > oppositeCorners.Length) throw Bad2("a Draco vertex fan does not close");
+                        int cornerA = Top();
+                        int cornerB = Previous(cornerA);
+                        int guard = 0;
+                        while (PosOpposite(cornerB) >= 0)
+                        {
+                            cornerB = Previous(PosOpposite(cornerB));
+                            if (++guard > oppositeCorners.Length) throw Bad2("a Draco vertex fan does not close");
+                        }
+                        SetOppositeCorners(cornerA, newCorner + 1);
+                        SetOppositeCorners(cornerB, newCorner + 2);
+                        activeCornerStack[activeCornerStack.Count - 1] = newCorner;
+                        vert = CornerToVertPos(Next(cornerA));
+                        next = CornerToVertPos(Next(cornerB));
+                        prev = CornerToVertPos(Previous(cornerA));
                     }
-                    SetOppositeCorners(cornerA, newCorner + 1);
-                    SetOppositeCorners(cornerB, newCorner + 2);
-                    activeCornerStack[activeCornerStack.Count - 1] = newCorner;
-                    vert = CornerToVertPos(Next(cornerA));
-                    next = CornerToVertPos(Next(cornerB));
-                    prev = CornerToVertPos(Previous(cornerA));
-                }
-                if (ebTraversalType == VALENCE_EDGEBREAKER)
-                {
-                    vertexValences[Vert(next)] += 1;
-                    vertexValences[Vert(prev)] += 1;
-                }
-                PushFace(vert, next, prev);
-                isVertHole[Vert(vert)] = false;
-                SetLeftMost(Vert(prev), newCorner + 2);
-                break;
-
-                case TOPOLOGY_S:
-                {
-                    int cornerB = Pop();
-                    for (int i = 0; i < topologySplitId.Count; i++)
-                        if (topologySplitId[i] == symbolId) activeCornerStack.Add(splitActiveCorners[i]);
-                    int cornerA = Top();
-                    SetOppositeCorners(cornerA, newCorner + 2);
-                    SetOppositeCorners(cornerB, newCorner + 1);
-                    activeCornerStack[activeCornerStack.Count - 1] = newCorner;
-
-                    vert = CornerToVertPos(Previous(cornerA));
-                    next = CornerToVertPos(Next(cornerA));
-                    prev = CornerToVertPos(Previous(cornerB));
-                    int cornerN = Next(cornerB);
-                    int vertexN = CornerToVertPos(cornerN);
-                    if (ebTraversalType == VALENCE_EDGEBREAKER)
-                        vertexValences[Vert(vert)] += vertexValences[Vert(vertexN)];
                     if (ebTraversalType == VALENCE_EDGEBREAKER)
                     {
                         vertexValences[Vert(next)] += 1;
                         vertexValences[Vert(prev)] += 1;
                     }
                     PushFace(vert, next, prev);
+                    isVertHole[Vert(vert)] = false;
                     SetLeftMost(Vert(prev), newCorner + 2);
-                    // The merge, as the reference performs it: the left-most corner of the vertex
-                    // that survives becomes the one of the vertex that disappears, and the whole
-                    // fan around the old vertex is re-mapped by swinging LEFT from it. The spec's
-                    // version instead rewrites every face in the mesh (ReplaceVerts) and swings
-                    // from a different corner - same faces, different left-most corners.
-                    SetLeftMost(Vert(vert), vertexCorners[Vert(vertexN)]);
-                    int first = cornerN;
-                    while (cornerN >= 0)
+                    break;
+
+                case TOPOLOGY_S:
                     {
-                        MapCornerToVertex(cornerN, vert);
-                        cornerN = SwingLeftAttr(-1, cornerN);
-                        if (cornerN == first) throw Bad2("a Draco merge swings back on itself");
+                        int cornerB = Pop();
+                        for (int i = 0; i < topologySplitId.Count; i++)
+                            if (topologySplitId[i] == symbolId) activeCornerStack.Add(splitActiveCorners[i]);
+                        int cornerA = Top();
+                        SetOppositeCorners(cornerA, newCorner + 2);
+                        SetOppositeCorners(cornerB, newCorner + 1);
+                        activeCornerStack[activeCornerStack.Count - 1] = newCorner;
+
+                        vert = CornerToVertPos(Previous(cornerA));
+                        next = CornerToVertPos(Next(cornerA));
+                        prev = CornerToVertPos(Previous(cornerB));
+                        int cornerN = Next(cornerB);
+                        int vertexN = CornerToVertPos(cornerN);
+                        if (ebTraversalType == VALENCE_EDGEBREAKER)
+                            vertexValences[Vert(vert)] += vertexValences[Vert(vertexN)];
+                        if (ebTraversalType == VALENCE_EDGEBREAKER)
+                        {
+                            vertexValences[Vert(next)] += 1;
+                            vertexValences[Vert(prev)] += 1;
+                        }
+                        PushFace(vert, next, prev);
+                        SetLeftMost(Vert(prev), newCorner + 2);
+                        // The merge, as the reference performs it: the left-most corner of the vertex
+                        // that survives becomes the one of the vertex that disappears, and the whole
+                        // fan around the old vertex is re-mapped by swinging LEFT from it. The spec's
+                        // version instead rewrites every face in the mesh (ReplaceVerts) and swings
+                        // from a different corner - same faces, different left-most corners.
+                        SetLeftMost(Vert(vert), vertexCorners[Vert(vertexN)]);
+                        int first = cornerN;
+                        while (cornerN >= 0)
+                        {
+                            MapCornerToVertex(cornerN, vert);
+                            cornerN = SwingLeftAttr(-1, cornerN);
+                            if (cornerN == first) throw Bad2("a Draco merge swings back on itself");
+                        }
+                        vertexCorners[Vert(vertexN)] = kInvalidCornerIndex;
                     }
-                    vertexCorners[Vert(vertexN)] = kInvalidCornerIndex;
-                }
-                break;
+                    break;
 
                 case TOPOLOGY_R:
-                {
-                    int cornerA = Top();
-                    SetOppositeCorners(newCorner + 2, cornerA);
-                    activeCornerStack[activeCornerStack.Count - 1] = newCorner;
-                    checkTopologySplit = true;
-                    vert = CornerToVertPos(Previous(cornerA));
-                    next = CornerToVertPos(Next(cornerA));
-                    prev = ++lastVertAdded;
-                }
-                if (ebTraversalType == VALENCE_EDGEBREAKER)
-                {
-                    vertexValences[Vert(vert)] += 1;
-                    vertexValences[Vert(next)] += 1;
-                    vertexValences[Vert(prev)] += 2;
-                }
-                PushFace(vert, next, prev);
-                // R: the new vertex sits at corner+2 and the vertex at corner ('r') gets a new
-                // left-most corner too - eb_impl.cc SetLeftMostCorner(new_vert_index, opp_corner)
-                // and SetLeftMostCorner(vertex_r, corner_r).
-                SetLeftMost(Vert(prev), newCorner + 2);
-                SetLeftMost(Vert(vert), newCorner);
-                break;
+                    {
+                        int cornerA = Top();
+                        SetOppositeCorners(newCorner + 2, cornerA);
+                        activeCornerStack[activeCornerStack.Count - 1] = newCorner;
+                        checkTopologySplit = true;
+                        vert = CornerToVertPos(Previous(cornerA));
+                        next = CornerToVertPos(Next(cornerA));
+                        prev = ++lastVertAdded;
+                    }
+                    if (ebTraversalType == VALENCE_EDGEBREAKER)
+                    {
+                        vertexValences[Vert(vert)] += 1;
+                        vertexValences[Vert(next)] += 1;
+                        vertexValences[Vert(prev)] += 2;
+                    }
+                    PushFace(vert, next, prev);
+                    // R: the new vertex sits at corner+2 and the vertex at corner ('r') gets a new
+                    // left-most corner too - eb_impl.cc SetLeftMostCorner(new_vert_index, opp_corner)
+                    // and SetLeftMostCorner(vertex_r, corner_r).
+                    SetLeftMost(Vert(prev), newCorner + 2);
+                    SetLeftMost(Vert(vert), newCorner);
+                    break;
 
                 case TOPOLOGY_L:
-                {
-                    int cornerA = Top();
-                    SetOppositeCorners(newCorner + 1, cornerA);
-                    activeCornerStack[activeCornerStack.Count - 1] = newCorner;
-                    checkTopologySplit = true;
-                    vert = CornerToVertPos(Next(cornerA));
-                    next = ++lastVertAdded;
-                    prev = CornerToVertPos(Previous(cornerA));
-                }
-                if (ebTraversalType == VALENCE_EDGEBREAKER)
-                {
-                    vertexValences[Vert(vert)] += 1;
-                    vertexValences[Vert(next)] += 2;
-                    vertexValences[Vert(prev)] += 1;
-                }
-                PushFace(vert, next, prev);
-                // L: the new vertex sits at corner+1, and 'r' is corner+2.
-                SetLeftMost(Vert(next), newCorner + 1);
-                SetLeftMost(Vert(prev), newCorner + 2);
-                break;
+                    {
+                        int cornerA = Top();
+                        SetOppositeCorners(newCorner + 1, cornerA);
+                        activeCornerStack[activeCornerStack.Count - 1] = newCorner;
+                        checkTopologySplit = true;
+                        vert = CornerToVertPos(Next(cornerA));
+                        next = ++lastVertAdded;
+                        prev = CornerToVertPos(Previous(cornerA));
+                    }
+                    if (ebTraversalType == VALENCE_EDGEBREAKER)
+                    {
+                        vertexValences[Vert(vert)] += 1;
+                        vertexValences[Vert(next)] += 2;
+                        vertexValences[Vert(prev)] += 1;
+                    }
+                    PushFace(vert, next, prev);
+                    // L: the new vertex sits at corner+1, and 'r' is corner+2.
+                    SetLeftMost(Vert(next), newCorner + 1);
+                    SetLeftMost(Vert(prev), newCorner + 2);
+                    break;
 
                 case TOPOLOGY_E:
-                activeCornerStack.Add(newCorner);
-                checkTopologySplit = true;
-                vert = lastVertAdded + 1;
-                next = vert + 1;
-                prev = next + 1;
-                if (ebTraversalType == VALENCE_EDGEBREAKER)
-                {
-                    vertexValences[Vert(vert)] += 2;
-                    vertexValences[Vert(next)] += 2;
-                    vertexValences[Vert(prev)] += 2;
-                }
-                PushFace(vert, next, prev);
-                lastVertAdded = prev;
-                SetLeftMost(Vert(vert), newCorner);
-                SetLeftMost(Vert(next), newCorner + 1);
-                SetLeftMost(Vert(prev), newCorner + 2);
-                break;
+                    activeCornerStack.Add(newCorner);
+                    checkTopologySplit = true;
+                    vert = lastVertAdded + 1;
+                    next = vert + 1;
+                    prev = next + 1;
+                    if (ebTraversalType == VALENCE_EDGEBREAKER)
+                    {
+                        vertexValences[Vert(vert)] += 2;
+                        vertexValences[Vert(next)] += 2;
+                        vertexValences[Vert(prev)] += 2;
+                    }
+                    PushFace(vert, next, prev);
+                    lastVertAdded = prev;
+                    SetLeftMost(Vert(vert), newCorner);
+                    SetLeftMost(Vert(next), newCorner + 1);
+                    SetLeftMost(Vert(prev), newCorner + 2);
+                    break;
 
                 default:
-                throw Bad2("a Draco stream names topology symbol " +
-                    lastSymbol.ToString(CultureInfo.InvariantCulture));
+                    throw Bad2("a Draco stream names topology symbol " +
+                        lastSymbol.ToString(CultureInfo.InvariantCulture));
             }
 
             if (ebTraversalType == VALENCE_EDGEBREAKER)
@@ -1084,7 +1084,7 @@ namespace Morgott.ContentTool.Import
         private int[] attDecDecoderType, attDecTraversalMethod;
         private List<int>[][] attrFaceToVertex;    // [attr][3]
 
-            private void CornerToVertsInternal(List<int>[] ftv, int corner, out int v, out int n, out int prev)
+        private void CornerToVertsInternal(List<int>[] ftv, int corner, out int v, out int n, out int prev)
         {
             if (corner < 0) throw Bad2("a Draco stream reads corner " + corner.ToString(CultureInfo.InvariantCulture));
             int local = corner % 3, face = corner / 3;
@@ -1112,7 +1112,7 @@ namespace Morgott.ContentTool.Import
         /// reference marks its channel's connectivity "not used" for exactly that reason.
         /// </summary>
         private int Attr(int attDec) =>
-            // null while the connectivity is still being decoded: there is only the position table then.
+        // null while the connectivity is still being decoded: there is only the position table then.
         attDecDataId != null && attrFaceToVertex != null &&
             encoderMethod == MESH_EDGEBREAKER_ENCODING && attDecDataId[attDec] >= 0 &&
             attDecDecoderType[attDec] == MESH_CORNER_ATTRIBUTE ? attDecDataId[attDec] : -1;
@@ -1180,16 +1180,16 @@ namespace Morgott.ContentTool.Import
         private bool[][] genericValues;
         private List<bool>[][][] creaseEdges;      // [attDec][att][parallelogram]
 
-            private bool[][] isEdgeOnSeam;          // [attribute channel][corner]
-            private int[][] attrCornerToVertex;     // [attribute channel][corner]
-            private List<int>[] seamSrc, seamDest;
+        private bool[][] isEdgeOnSeam;          // [attribute channel][corner]
+        private int[][] attrCornerToVertex;     // [attribute channel][corner]
+        private List<int>[] seamSrc, seamDest;
         private int[] cornerToPointMap;
         private int[] vertexVisitedPointIds;
         private List<int>[] valueIndexToCorner;    // [attDec]
-            private int[][] vertexToValueIndex;        // [attDec][vertex]
-            private List<int>[] vertexToLeftMostCorner; // [attr]
-            private int[][] indicesMap;                            // [attDec][point]
-            private bool[] isFaceVisited, isVertexVisited;
+        private int[][] vertexToValueIndex;        // [attDec][vertex]
+        private List<int>[] vertexToLeftMostCorner; // [attr]
+        private int[][] indicesMap;                            // [attDec][point]
+        private bool[] isFaceVisited, isVertexVisited;
         private int[] predictionDegree;
         private List<int>[] traversalStacks;
         private int bestPriority;
@@ -1250,10 +1250,10 @@ namespace Morgott.ContentTool.Import
             positionDecoder = -1;
             for (int i = 0; i < numAttributesDecoders; i++)
                 for (int j = 0; j < attDecNumAttributes[i]; j++)
-                if (attType[i][j] == ATTRIBUTE_POSITION && positionDecoder < 0)
-            {
-                positionDecoder = i; positionAttribute = j;
-            }
+                    if (attType[i][j] == ATTRIBUTE_POSITION && positionDecoder < 0)
+                    {
+                        positionDecoder = i; positionAttribute = j;
+                    }
         }
 
         /// <summary>Where the POSITION attribute lives, by declared type - not by index. See
@@ -1297,7 +1297,7 @@ namespace Morgott.ContentTool.Import
 
             for (int i = 0; i < numAttributesDecoders; i++)
                 for (int j = 0; j < attDecNumAttributes[i]; j++)
-                numValuesToDecode[i][j] = valueIndexToCorner[i].Count;
+                    numValuesToDecode[i][j] = valueIndexToCorner[i].Count;
 
             for (int i = 0; i < numAttributesDecoders; i++)
             {
@@ -1372,32 +1372,32 @@ namespace Morgott.ContentTool.Import
             }
             for (int j = 0; j < numFaces; j++)
                 for (int k = 0; k < 3; k++)
-            {
-                int corner = j * 3 + k;
-                int v, n, prev;
-                CornerToVertsPos(corner, out v, out n, out prev);
-                int opp = PosOpposite(corner);
-                if (opp >= 0)
                 {
-                    if (opp < corner) continue;
-                    for (int a = 0; a < seams; a++)
-                        if (RabsDescRead(decoders[a], attributeConnectivityProbZero[a]))
+                    int corner = j * 3 + k;
+                    int v, n, prev;
+                    CornerToVertsPos(corner, out v, out n, out prev);
+                    int opp = PosOpposite(corner);
+                    if (opp >= 0)
                     {
-                        seamSrc[a].Add(n); seamDest[a].Add(prev);
-                        isEdgeOnSeam[a][corner] = true;
-                        int oppV, oppN, oppP;
-                        CornerToVertsPos(opp, out oppV, out oppN, out oppP);
-                        seamSrc[a].Add(oppN); seamDest[a].Add(oppP);
-                        isEdgeOnSeam[a][opp] = true;
+                        if (opp < corner) continue;
+                        for (int a = 0; a < seams; a++)
+                            if (RabsDescRead(decoders[a], attributeConnectivityProbZero[a]))
+                            {
+                                seamSrc[a].Add(n); seamDest[a].Add(prev);
+                                isEdgeOnSeam[a][corner] = true;
+                                int oppV, oppN, oppP;
+                                CornerToVertsPos(opp, out oppV, out oppN, out oppP);
+                                seamSrc[a].Add(oppN); seamDest[a].Add(oppP);
+                                isEdgeOnSeam[a][opp] = true;
+                            }
                     }
+                    else
+                        for (int a = 0; a < seams; a++)
+                        {
+                            seamSrc[a].Add(n); seamDest[a].Add(prev);
+                            isEdgeOnSeam[a][corner] = true;
+                        }
                 }
-                else
-                    for (int a = 0; a < seams; a++)
-                {
-                    seamSrc[a].Add(n); seamDest[a].Add(prev);
-                    isEdgeOnSeam[a][corner] = true;
-                }
-            }
             // The spec's IsVertexOnAttributeSeam() is a LINEAR scan of that list per vertex, which is
             // O(vertices x seam edges) - minutes on a 40 000 vertex model. Same answer, one set.
             seamVertices = new HashSet<int>[seams];
@@ -1525,20 +1525,20 @@ namespace Morgott.ContentTool.Import
                 int first = c;
                 if (!isVertHole[v])
                     for (int a = 0; a < numAttributeData; a++)
-                {
-                    if (!IsVertexOnAttributeSeam(a, CornerToVertPos(c))) continue;
-                    int vertId = attrCornerToVertex[a][c];
-                    int actC = SwingRightAttr(-1, c);
-                    bool found = false;
-                    int guard = 0;
-                    while (actC != c && actC >= 0)
                     {
-                        if (attrCornerToVertex[a][actC] != vertId) { first = actC; found = true; break; }
-                        actC = SwingRightAttr(-1, actC);
-                        if (++guard > cornerToPointMap.Length) throw Bad2("a Draco vertex fan does not close");
+                        if (!IsVertexOnAttributeSeam(a, CornerToVertPos(c))) continue;
+                        int vertId = attrCornerToVertex[a][c];
+                        int actC = SwingRightAttr(-1, c);
+                        bool found = false;
+                        int guard = 0;
+                        while (actC != c && actC >= 0)
+                        {
+                            if (attrCornerToVertex[a][actC] != vertId) { first = actC; found = true; break; }
+                            actC = SwingRightAttr(-1, actC);
+                            if (++guard > cornerToPointMap.Length) throw Bad2("a Draco vertex fan does not close");
+                        }
+                        if (found) break;
                     }
-                    if (found) break;
-                }
 
                 c = first;
                 cornerToPointMap[c] = count++;
@@ -1559,8 +1559,8 @@ namespace Morgott.ContentTool.Import
             Points(count);
             for (int i = 0; i < cornerToPointMap.Length; i++)
                 if (cornerToPointMap[i] < 0)
-                throw Bad2("a Draco stream leaves corner " + i.ToString(CultureInfo.InvariantCulture) +
-                " without a point");
+                    throw Bad2("a Draco stream leaves corner " + i.ToString(CultureInfo.InvariantCulture) +
+                    " without a point");
         }
 
         private void GenerateSequence()
@@ -1703,12 +1703,12 @@ namespace Morgott.ContentTool.Import
         {
             for (int i = bestPriority; i < kMaxPriority; i++)
                 if (traversalStacks[i].Count > 0)
-            {
-                int ret = traversalStacks[i][traversalStacks[i].Count - 1];
-                traversalStacks[i].RemoveAt(traversalStacks[i].Count - 1);
-                bestPriority = i;
-                return ret;
-            }
+                {
+                    int ret = traversalStacks[i][traversalStacks[i].Count - 1];
+                    traversalStacks[i].RemoveAt(traversalStacks[i].Count - 1);
+                    bestPriority = i;
+                    return ret;
+                }
             return kInvalidCornerIndex;
         }
 
@@ -1760,15 +1760,15 @@ namespace Morgott.ContentTool.Import
             for (int i = 0; i < numPoints; i++) map[i] = -1;
             for (int f = 0; f < numFaces; f++)
                 for (int c = 0; c < 3; c++)
-            {
-                int corner = f * 3 + c;
-                int point = cornerToPointMap[corner];
-                int vert, next, prev;
-                CornerToVerts(currAttDec, corner, out vert, out next, out prev);
-                if (point < 0 || point >= numPoints)
-                    throw Bad2("a Draco corner names point " + point.ToString(CultureInfo.InvariantCulture));
-                map[point] = vertexToValueIndex[currAttDec][Bounded(vert, vertexToValueIndex[currAttDec].Length)];
-            }
+                {
+                    int corner = f * 3 + c;
+                    int point = cornerToPointMap[corner];
+                    int vert, next, prev;
+                    CornerToVerts(currAttDec, corner, out vert, out next, out prev);
+                    if (point < 0 || point >= numPoints)
+                        throw Bad2("a Draco corner names point " + point.ToString(CultureInfo.InvariantCulture));
+                    map[point] = vertexToValueIndex[currAttDec][Bounded(vert, vertexToValueIndex[currAttDec].Length)];
+                }
             indicesMap[currAttDec] = map;
         }
 
@@ -1823,19 +1823,19 @@ namespace Morgott.ContentTool.Import
             var values = new float[entries * components];
             for (int i = 0; i < values.Length; i++)
                 switch (type)
-            {
-                case DT_INT8: values[i] = (sbyte)U8(); break;
-                case DT_UINT8: values[i] = U8(); break;
-                case DT_INT16: values[i] = (short)U16(); break;
-                case DT_UINT16: values[i] = U16(); break;
-                case DT_INT32: values[i] = (int)U32(); break;
-                case DT_UINT32: values[i] = U32(); break;
-                case DT_FLOAT32: values[i] = F32(); break;
-                default:
-                throw Bad(what + " stores an unquantized Draco attribute as number format " +
-                    type.ToString(CultureInfo.InvariantCulture) + ", which this mod does not " +
-                    "read; export the model again with an up-to-date tool");
-            }
+                {
+                    case DT_INT8: values[i] = (sbyte)U8(); break;
+                    case DT_UINT8: values[i] = U8(); break;
+                    case DT_INT16: values[i] = (short)U16(); break;
+                    case DT_UINT16: values[i] = U16(); break;
+                    case DT_INT32: values[i] = (int)U32(); break;
+                    case DT_UINT32: values[i] = U32(); break;
+                    case DT_FLOAT32: values[i] = F32(); break;
+                    default:
+                        throw Bad(what + " stores an unquantized Draco attribute as number format " +
+                            type.ToString(CultureInfo.InvariantCulture) + ", which this mod does not " +
+                            "read; export the model again with an up-to-date tool");
+                }
             dequantizedValues[currAttDec][currAtt] = values;
             genericValues[currAttDec][currAtt] = true;
         }
@@ -1959,7 +1959,7 @@ namespace Morgott.ContentTool.Import
             {
                 normalMaxQ[currAttDec][currAtt] = (int)U32();
                 U32();   // "unused_center_value", prediction.decoder.md
-                    if (normalMaxQ[currAttDec][currAtt] < 2)
+                if (normalMaxQ[currAttDec][currAtt] < 2)
                     throw Bad2("a Draco normal attribute declares a quantization of " +
                     normalMaxQ[currAttDec][currAtt].ToString(CultureInfo.InvariantCulture));
             }
@@ -2078,9 +2078,9 @@ namespace Morgott.ContentTool.Import
                 case MESH_PREDICTION_TEX_COORDS_PORTABLE: TexCoords(numValues); break;
                 case MESH_PREDICTION_GEOMETRIC_NORMAL: GeometricNormal(numValues); break;
                 default:
-                throw Bad(what + " stores a Draco attribute predicted by scheme " +
-                    method.ToString(CultureInfo.InvariantCulture) + ", which the Draco specification " +
-                    "does not describe; export the model again with an up-to-date tool");
+                    throw Bad(what + " stores a Draco attribute predicted by scheme " +
+                        method.ToString(CultureInfo.InvariantCulture) + ", which the Draco specification " +
+                        "does not describe; export the model again with an up-to-date tool");
             }
         }
 
@@ -2461,13 +2461,13 @@ namespace Morgott.ContentTool.Import
                     var result = new float[values * components];
                     for (int v = 0; v < values; v++)
                         for (int c = 0; c < components; c++)
-                    {
-                        int val = source[v * components + c];
-                        bool negative = val < 0;
-                        float norm = (negative ? -val : val) * factor;
-                        if (negative) norm = -norm;
-                        result[v * components + c] = norm * range + min[c];
-                    }
+                        {
+                            int val = source[v * components + c];
+                            bool negative = val < 0;
+                            float norm = (negative ? -val : val) * factor;
+                            if (negative) norm = -norm;
+                            result[v * components + c] = norm * range + min[c];
+                        }
                     dequantizedValues[currAttDec][i] = result;
                 }
             }
@@ -2506,42 +2506,42 @@ namespace Morgott.ContentTool.Import
             model.Indices = new int[numFaces * 3];
             for (int f = 0; f < numFaces; f++)
                 for (int c = 0; c < 3; c++)
-            {
-                int index = encoderMethod == MESH_EDGEBREAKER_ENCODING
-                    ? cornerToPointMap[f * 3 + c]
-                    : faceToVertex[c][f];
-                model.Indices[f * 3 + c] = Bounded(index, numPoints);
-            }
+                {
+                    int index = encoderMethod == MESH_EDGEBREAKER_ENCODING
+                        ? cornerToPointMap[f * 3 + c]
+                        : faceToVertex[c][f];
+                    model.Indices[f * 3 + c] = Bounded(index, numPoints);
+                }
 
             for (int i = 0; i < numAttributesDecoders; i++)
                 for (int j = 0; j < attDecNumAttributes[i]; j++)
-            {
-                currAttDec = i; currAtt = j;
-                int components = seqDecoderType[i][j] == SEQUENTIAL_ATTRIBUTE_ENCODER_NORMALS
-                    ? 3 : genericValues[i][j] ? attNumComponents[i][j] : GetNumComponents();
-                float[] source = dequantizedValues[i][j];
-                var values = new float[(long)numPoints * components <= int.MaxValue
-                    ? numPoints * components : 0];
-                if (values.Length == 0 && numPoints > 0)
-                    throw Bad2("a Draco attribute is too large to read");
-                int[] map = encoderMethod == MESH_EDGEBREAKER_ENCODING ? indicesMap[i] : null;
-                for (int point = 0; point < numPoints; point++)
                 {
-                    int entry = map == null ? point : map[point];
-                    int at = Bounded(entry, numValuesToDecode[i][j]) * components;
-                    for (int c = 0; c < components; c++) values[point * components + c] = source[at + c];
-                }
-                model.Attributes.Add(new Attribute
-                {
-                    UniqueId = attUniqueId[i][j],
+                    currAttDec = i; currAtt = j;
+                    int components = seqDecoderType[i][j] == SEQUENTIAL_ATTRIBUTE_ENCODER_NORMALS
+                        ? 3 : genericValues[i][j] ? attNumComponents[i][j] : GetNumComponents();
+                    float[] source = dequantizedValues[i][j];
+                    var values = new float[(long)numPoints * components <= int.MaxValue
+                        ? numPoints * components : 0];
+                    if (values.Length == 0 && numPoints > 0)
+                        throw Bad2("a Draco attribute is too large to read");
+                    int[] map = encoderMethod == MESH_EDGEBREAKER_ENCODING ? indicesMap[i] : null;
+                    for (int point = 0; point < numPoints; point++)
+                    {
+                        int entry = map == null ? point : map[point];
+                        int at = Bounded(entry, numValuesToDecode[i][j]) * components;
+                        for (int c = 0; c < components; c++) values[point * components + c] = source[at + c];
+                    }
+                    model.Attributes.Add(new Attribute
+                    {
+                        UniqueId = attUniqueId[i][j],
                         Type = attType[i][j],
                         Components = components,
                         DataType = attDataType[i][j],
                         Normalized = attNormalized[i][j] != 0,
                         Prediction = predScheme[i][j],
                         Values = values,
-                });
-            }
+                    });
+                }
             return model;
         }
 
