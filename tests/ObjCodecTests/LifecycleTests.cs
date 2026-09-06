@@ -690,6 +690,51 @@ internal static class LifecycleTests
         }) == StageText.R26("Bake"),
                         "R26 outranks R39 - a run already holding the seam is the older fact");
 
+        // ---- AND THE FIELD ITSELF, MEASURED. Every arm above SETS PaintUnavailable by hand, so the rule
+        // that fills it in - Refresh's `PaintMissing(atPress, wasReady, Painted)` - was the one thing R39
+        // had no arm for: it false-refused the first press after the Lifecycle tab was selected, where
+        // `wasReady` is true from that frame's Pump and `paintedFrame` still predates the switch (the
+        // dashboard answers that by counting the ARRIVAL frame as paintable, which is `painted` here).
+        LifecycleState.Admission pressed = new LifecycleState.Admission
+        {
+            Selection = LifecycleState.Selection.Ok,
+            ProjectId = "morgott.demo",
+            Copies = Freshness.Fresh,
+            PaintUnavailable = LifecycleState.PaintMissing(true, false, false)
+        };
+        checks += Check(LifecycleState.Admit("All", pressed) == StageText.R39("All"),
+                        "a PRESS with nothing that can paint is R39, through the measurement rather than " +
+                        "a field set by the test");
+        LifecycleState.Admission arrived = new LifecycleState.Admission
+        {
+            Selection = LifecycleState.Selection.Ok,
+            ProjectId = "morgott.demo",
+            Copies = Freshness.Fresh,
+            PaintUnavailable = LifecycleState.PaintMissing(true, true, true)
+        };
+        checks += Check(!arrived.PaintUnavailable && LifecycleState.Admit("All", arrived) == null,
+                        "and the open, painted tab is ADMITTED - the arrival frame counts as painted, " +
+                        "which is the false refusal this pair exists to catch");
+        // MID-CHAIN THE ANSWER IS 'PARK', NOT 'REFUSE'. The pump passes atPress:false on purpose, so a
+        // bench the author closed mid-chain parks the blocking segment and LifecycleJob.Tick resumes it
+        // when the tab comes back. Restating R39 there would kill a run that is merely waiting.
+        LifecycleState.Admission midChain = new LifecycleState.Admission
+        {
+            Selection = LifecycleState.Selection.Ok,
+            ProjectId = "morgott.demo",
+            Copies = Freshness.Fresh,
+            InRunAll = true,
+            ValidateOutcome = GateOutcome.Pass,
+            BakeOutcome = GateOutcome.Pass,
+            PaintUnavailable = LifecycleState.PaintMissing(false, false, false)
+        };
+        checks += Check(!midChain.PaintUnavailable &&
+                        LifecycleState.Admit("Bake", midChain) != StageText.R39("Bake") &&
+                        LifecycleState.Admit("Apply", midChain) != StageText.R39("Apply") &&
+                        LifecycleState.Admit("Bake", midChain) == null,
+                        "a closed bench mid-chain PARKS: the field is false without a press, so no stage " +
+                        "restates R39 at it");
+
         // ---- The ONE freshness observation. Route7.cs:308-:310 computes `fresh && Directory.Exists(patched)`
         // and then clears it for every declared copy that is absent; `HaveAll` IS that expression and
         // ApplyProject now asks it here, so the panel and the checkbox cannot drift by a single term.
@@ -1187,6 +1232,55 @@ internal static class LifecycleTests
                 "{ \"mesh\": \"absent\", \"bundle\": \"b.bundle\", \"asset\": \"Torso\" } ] }");
             checks += Check(StageValidate.Run(root, goneRow, shipped, off).Outcome == GateOutcome.Fail,
                             "and a mesh row naming no file at all FAILS, the way the bake's P4 refuses it");
+
+            // ---- THE NAMESAKE IS ONE THE DESTINATION WOULD ACCEPT. Matching on the stem alone sent the
+            // author off to move a .glb into Content\Textures\, where the bake ignores it - one more
+            // failed bake for following the advice.
+            File.WriteAllBytes(Path.Combine(meshes, "ghost.glb"), rigged);
+            string ghostRow = Path.Combine(root, "ghost.json");
+            File.WriteAllText(ghostRow,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " +
+                "{ \"texture\": \"ghost\", \"bundle\": \"b.bundle\", \"asset\": \"Skin\" } ] }");
+            LifecycleState.StageReport wrongKind = StageValidate.Run(root, ghostRow, shipped, off);
+            checks += Check(wrongKind.Outcome == GateOutcome.Fail &&
+                            wrongKind.Verdict.IndexOf("the file IS in the project",
+                                                      StringComparison.Ordinal) < 0,
+                            "a texture row whose only namesake is a .glb is told nothing about it: " +
+                            wrongKind.Verdict);
+            // AND A NAMESAKE DIRECTLY IN Content\ IS NAMED WHERE IT IS. The relative path is empty there,
+            // and the sentence rendered "Content\\loose.png" - a path with a doubled separator.
+            File.WriteAllBytes(Path.Combine(Path.Combine(root, "Content"), "loose.png"), new byte[] { 1 });
+            string looseRow = Path.Combine(root, "loose.json");
+            File.WriteAllText(looseRow,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " +
+                "{ \"texture\": \"loose\", \"bundle\": \"b.bundle\", \"asset\": \"Skin\" } ] }");
+            string looseSaid = StageValidate.Run(root, looseRow, shipped, off).Verdict;
+            checks += Check(looseSaid.IndexOf("at Content\\loose.png", StringComparison.Ordinal) > 0 &&
+                            looseSaid.IndexOf("Content\\\\", StringComparison.Ordinal) < 0,
+                            "the loose namesake is at Content\\loose.png, with one separator: " + looseSaid);
+
+            // ---- EQUIVALENCE 3, ON REAL FILES: a row Validate PASSes is a row the bake RESOLVES. The two
+            // stages ran two enumerators, and they disagreed at exactly the place that matters - the bake
+            // drops BOTH files of a stem collision, Validate saw only the first and PASSed, and P1 then
+            // refused a row whose file the author can see sitting in the right folder.
+            File.WriteAllBytes(Path.Combine(textures, "albedo.jpg"), new byte[] { 1 });
+            LifecycleState.StageReport clash = StageValidate.Run(root, texRow, shipped, off);
+            List<string> dropped = new List<string>();
+            checks += Check(clash.Outcome == GateOutcome.Fail &&
+                            ContentMods.Sources(root, "Textures", dropped,
+                                                ContentMods.TexturePatterns).Length == 0 &&
+                            dropped.Count == 1 &&
+                            clash.Verdict.IndexOf(dropped[0], StringComparison.Ordinal) > 0,
+                            "a stem collision FAILS Validate in the enumerator's OWN sentence, and that " +
+                            "enumerator is the bake's: " + clash.Verdict);
+            File.Delete(Path.Combine(textures, "albedo.jpg"));
+            string resolved;
+            checks += Check(StageValidate.Run(root, texRow, shipped, off).Outcome == GateOutcome.Pass &&
+                            ContentMods.SourceFile(root, "Textures", "albedo",
+                                                   ContentMods.TexturePatterns, out resolved) != null &&
+                            resolved == null,
+                            "and with the collision gone the row PASSes AND resolves - the equivalence " +
+                            "the Validate stage rests on, measured both ways on the same files");
         }
         finally { try { Directory.Delete(root, true); } catch (Exception) { } }
         return checks;
