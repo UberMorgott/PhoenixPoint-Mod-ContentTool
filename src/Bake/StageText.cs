@@ -62,6 +62,16 @@ namespace Morgott.ContentTool.Bake
             return "Validate: PASS - '" + name + "' - key " + key + ".";
         }
 
+        /// <summary>What Validate saw but will not fail a project over - appended to <see cref="S3"/>, and
+        /// EMPTY when there is nothing to say, so a clean row is the same string it always was.</summary>
+        internal static string ValidateNotes(System.Collections.Generic.IList<string> notes)
+        {
+            if (notes == null || notes.Count == 0) return "";
+            string said = " NOTE: ";
+            for (int i = 0; i < notes.Count; i++) said += (i == 0 ? "" : " ") + notes[i];
+            return said;
+        }
+
         /// <summary>Bake PASS. Quotes ProjectBake.cs:402.</summary>
         internal static string S4(string outPath) { return "ct_project: ALL PASS - " + outPath; }
 

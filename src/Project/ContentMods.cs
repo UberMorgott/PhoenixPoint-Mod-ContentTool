@@ -31,6 +31,55 @@ namespace Morgott.ContentTool.Project
     /// added. ContentProject.cs itself cannot join the offline compile list (see ObjCodecTests.csproj).</summary>
     internal static readonly string[] MeshPatterns = { "*.obj", "*.glb" };
 
+    /// <summary>The texture extensions Content\Textures\ accepts, the list ContentProject.Load scans that
+    /// folder with (:398). Here for the same reason as <see cref="MeshPatterns"/>: the Validate stage has
+    /// to answer "is this row's file where the bake will look for it" without ContentProject, which cannot
+    /// join the offline compile list.</summary>
+    internal static readonly string[] TexturePatterns = { "*.png", "*.jpg", "*.jpeg" };
+
+        /// <summary>
+        /// The file in <c>Content\folder\</c> whose STEM is <paramref name="stem"/> - what a "replace" row
+        /// names - or null when the bake will find nothing there. Top level only and with the EXTENSION
+        /// re-checked, exactly as ContentProject.Sources does it (:665-:677): NTFS matches a pattern
+        /// against the 8.3 short name too, so "*.glb" also answers body.glbx.
+        /// </summary>
+        internal static string SourceFile(string root, string folder, string stem, string[] patterns)
+        {
+            if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(stem)) return null;
+            string dir = Path.Combine(Path.Combine(root, "Content"), folder);
+            if (!Directory.Exists(dir)) return null;
+            foreach (string pattern in patterns)
+                foreach (string f in Directory.GetFiles(dir, pattern))
+                    if (string.Equals(Path.GetExtension(f), pattern.Substring(1), StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(Path.GetFileNameWithoutExtension(f), stem, StringComparison.OrdinalIgnoreCase))
+                        return f;
+            return null;
+        }
+
+        /// <summary>
+        /// " - the file IS in the project, at Content\...; move it into Content\folder\ and bake again",
+        /// or "" when it is nowhere. THE one copy of that sentence: ProjectBake's P1/P4 refusals and the
+        /// Validate stage both say it, and the misplaced-texture case (2026-09-06:
+        /// Content\Meshes\materials\RR_soldier_albedo.png) is the one an author most needs it for.
+        /// </summary>
+        internal static string Elsewhere(string root, string stem, string folder)
+        {
+            string content = Path.Combine(root, "Content");
+            if (string.IsNullOrEmpty(stem) || !Directory.Exists(content)) return "";
+            string want = Path.Combine(content, folder);
+            foreach (string f in Directory.GetFiles(content, "*", SearchOption.AllDirectories))
+            {
+                string dir = Path.GetDirectoryName(f);
+                if (string.Equals(dir, want, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(Path.GetFileNameWithoutExtension(f), stem, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                return " - the file IS in the project, at Content\\" +
+                       dir.Substring(content.Length).Trim('\\', '/') + "\\" + Path.GetFileName(f) +
+                       "; move it into Content\\" + folder + "\\ and bake again";
+            }
+            return "";
+        }
+
         /// <summary>
         /// Every ENABLED mod folder that carries <paramref name="marker"/> (a file or a directory,
         /// relative to the mod folder), with one line per refusal appended to <paramref name="log"/>

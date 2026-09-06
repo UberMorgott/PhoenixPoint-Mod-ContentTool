@@ -1039,8 +1039,14 @@ internal static class LifecycleTests
             File.WriteAllText(manifest,
                 "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " +
                 "{ \"mesh\": \"torso\", \"bundle\": \"b.bundle\", \"asset\": \"Torso\" } ] }");
-            File.WriteAllBytes(Path.Combine(root, "Content", "torso.glb"), new byte[] { 1, 2, 3 });
-            string[] shipped = { Path.Combine(root, "Content", "torso.glb") };
+            // A REAL RIGGED .glb, WHERE THE BAKE LOOKS FOR IT. Validate answers the half of P1/P4 that
+            // needs no bundle now, so a row's file has to be under Content\Meshes\ and has to be readable
+            // - a stem sitting loose in Content\ is exactly the project this stage used to PASS.
+            string meshes = Path.Combine(Path.Combine(root, "Content"), "Meshes");
+            Directory.CreateDirectory(meshes);
+            byte[] rigged = File.ReadAllBytes(AliasTests.Probe());
+            File.WriteAllBytes(Path.Combine(meshes, "torso.glb"), rigged);
+            string[] shipped = { Path.Combine(meshes, "torso.glb") };
             Dictionary<string, bool> off = new Dictionary<string, bool>(StringComparer.Ordinal);
             off[ModGate.Key(root)] = false;
 
@@ -1095,13 +1101,64 @@ internal static class LifecycleTests
 
             // §4.1's key, DRIVEN THROUGH THE PRODUCER. Computing one here proved only that this file can
             // call PatchCache; the claim is that StageValidate computes it, so the verdict carries it and
-            // it is the same key B1 would take.
+            // it is the same key B1 would take. BEFORE the row arms below, which add source files to the
+            // project on purpose - and every one of them moves this key, as it should.
             string expected = PatchCache.Key(root, shipped);
             checks += Check(!string.IsNullOrEmpty(expected) &&
                             ok.Verdict.IndexOf(expected, StringComparison.Ordinal) > 0 &&
                             StageValidate.Run(root, manifest, new string[0], off).Verdict != ok.Verdict,
                             "the pre-import key is computed BY the producer, stated in its verdict, and is " +
                             "the key of THIS census - dropping the shipped bundle moves it");
+
+            // ---- THE ROWS THEMSELVES, offline. Run 2 of 2026-09-06 PASSed a project whose every row the
+            // bake then refused: a texture that is not under Content\Textures\ and a torso .glb carrying
+            // no armature. Both are answerable without opening a bundle, and this is where they are.
+            string texRow = Path.Combine(root, "tex.json");
+            File.WriteAllText(texRow,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " +
+                "{ \"texture\": \"albedo\", \"bundle\": \"b.bundle\", \"asset\": \"Skin\" } ] }");
+            LifecycleState.StageReport noTexture = StageValidate.Run(root, texRow, shipped, off);
+            checks += Check(noTexture.Outcome == GateOutcome.Fail &&
+                            noTexture.Verdict.IndexOf("not a .png/.jpg under Content\\Textures\\",
+                                                      StringComparison.Ordinal) > 0,
+                            "a texture row with no file under Content\\Textures\\ FAILS Validate: " +
+                            noTexture.Verdict);
+            // THE 2026-09-06 CASE VERBATIM: the file is in the project, in the wrong folder, and the
+            // refusal says where - the same sentence ProjectBake's P1 says, from the same function.
+            string beside = Path.Combine(Path.Combine(root, "Content"), "Meshes\\materials");
+            Directory.CreateDirectory(beside);
+            File.WriteAllBytes(Path.Combine(beside, "albedo.png"), new byte[] { 1 });
+            checks += Check(StageValidate.Run(root, texRow, shipped, off).Verdict
+                                .IndexOf("the file IS in the project, at Content\\Meshes\\materials\\albedo.png",
+                                         StringComparison.Ordinal) > 0,
+                            "and a misplaced texture is named where it actually is");
+            string textures = Path.Combine(Path.Combine(root, "Content"), "Textures");
+            Directory.CreateDirectory(textures);
+            File.WriteAllBytes(Path.Combine(textures, "albedo.png"), new byte[] { 1 });
+            checks += Check(StageValidate.Run(root, texRow, shipped, off).Outcome == GateOutcome.Pass,
+                            "moving it into Content\\Textures\\ is all this stage asks - whether the " +
+                            "BUNDLE holds that target is the bake's question");
+
+            // A .glb THAT DECLARES NO ARMATURE is a NOTE, not a failure: whether it costs the weights or
+            // refuses the row depends on the target, which only the bake can open.
+            File.WriteAllBytes(Path.Combine(meshes, "flat.glb"),
+                               GlbCodec.Write(PreflightTests.Skinless(GlbReader.Read(rigged))));
+            string flatRow = Path.Combine(root, "flat.json");
+            File.WriteAllText(flatRow,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " +
+                "{ \"mesh\": \"flat\", \"bundle\": \"b.bundle\", \"asset\": \"Torso\" } ] }");
+            LifecycleState.StageReport flat = StageValidate.Run(root, flatRow, shipped, off);
+            checks += Check(flat.Outcome == GateOutcome.Pass &&
+                            flat.Verdict.IndexOf("'flat.glb' carries no armature", StringComparison.Ordinal) > 0,
+                            "a skinless .glb is NOTED on a PASSing Validate: " + flat.Verdict);
+            checks += Check(ok.Verdict.IndexOf("carries no armature", StringComparison.Ordinal) < 0,
+                            "while the rigged file beside it says nothing - the note is a measurement");
+            string goneRow = Path.Combine(root, "gone.json");
+            File.WriteAllText(goneRow,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ " +
+                "{ \"mesh\": \"absent\", \"bundle\": \"b.bundle\", \"asset\": \"Torso\" } ] }");
+            checks += Check(StageValidate.Run(root, goneRow, shipped, off).Outcome == GateOutcome.Fail,
+                            "and a mesh row naming no file at all FAILS, the way the bake's P4 refuses it");
         }
         finally { try { Directory.Delete(root, true); } catch (Exception) { } }
         return checks;

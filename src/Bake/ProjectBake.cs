@@ -2258,20 +2258,10 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         private static string Elsewhere(ContentProject p, string name, string folder)
         {
-            string content = Path.Combine(p.Root, "Content");
-            if (string.IsNullOrEmpty(name) || !Directory.Exists(content)) return "";
-            string want = Path.Combine(content, folder);
-            foreach (string f in Directory.GetFiles(content, "*", SearchOption.AllDirectories))
-            {
-                string dir = Path.GetDirectoryName(f);
-                if (string.Equals(dir, want, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!string.Equals(Path.GetFileNameWithoutExtension(f), name, StringComparison.OrdinalIgnoreCase))
-                    continue;
-                return " - the file IS in the project, at Content\\" +
-                       dir.Substring(content.Length).Trim('\\', '/') + "\\" + Path.GetFileName(f) +
-                       "; move it into Content\\" + folder + "\\ and bake again";
-            }
-            return "";
+            // ONE COPY OF THE SENTENCE, in ContentMods: StageValidate says it too now, before a bake runs
+            // at all, and a second spelling here is how the two stages would start disagreeing about
+            // where a source file belongs.
+            return ContentMods.Elsewhere(p.Root, name, folder);
         }
 
         /// <summary>INTERNAL since Verify - it resolves a row to the same import the patch loop did

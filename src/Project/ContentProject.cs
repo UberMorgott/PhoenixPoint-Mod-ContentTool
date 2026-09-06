@@ -395,7 +395,7 @@ namespace Morgott.ContentTool.Project
             // counted once, in ONE place, at the end of this method. Adding it twice would report two
             // failures for one unreadable .glb.
             if (pump != null) pump.At("textures", 1, phases);
-            SourceImport.Each(Sources(root, "Textures", p.SourceRefusals, "*.png", "*.jpg", "*.jpeg"),
+            SourceImport.Each(Sources(root, "Textures", p.SourceRefusals, ContentMods.TexturePatterns),
                               p.Textures, p.SourceRefusals, ImportTexture);
             if (pump != null) pump.At("meshes", 2, phases);
             SourceImport.Each(Sources(root, "Meshes", p.SourceRefusals, ContentMods.MeshPatterns),

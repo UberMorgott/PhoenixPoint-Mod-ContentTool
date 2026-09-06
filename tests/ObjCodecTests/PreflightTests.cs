@@ -264,7 +264,7 @@ internal static class PreflightTests
     /// <summary>The same geometry with the rig taken off it entirely. GlbCodec.Write keys "static" on
     /// JointNodes and refuses a model that keeps a hierarchy or weights without joints
     /// (GlbCodec.cs:1021), so every skin field has to go, not just the names.</summary>
-    private static SkinnedModel Skinless(SkinnedModel model)
+    internal static SkinnedModel Skinless(SkinnedModel model)
     {
         model.JointNames.Clear();
         model.JointNodes = new int[0];
