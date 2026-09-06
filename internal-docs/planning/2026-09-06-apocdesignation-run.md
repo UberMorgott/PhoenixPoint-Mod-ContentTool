@@ -168,3 +168,137 @@ in-game mod manager.
 3. Move `Content\Meshes\materials\RR_soldier_albedo.png` to `Content\Textures\RR_soldier_albedo.png`.
 
 All three raw files under `APOCD GLBs for content tool without apply tranforms\` already satisfy 1 and 2.
+
+---
+
+# Run 3 — corrected sources, 2026-09-06
+
+The same bench (`D:\PP-Instance2`, profile `76561197996210592`, project NOT activated), ContentTool at
+HEAD `559c2d1`. Deployed DLL verified current rather than rebuilt: `D:\PP-Instance2\Mods\ContentTool\
+ContentTool.dll` 1 974 784 B / 06.09.2026 17:02:27 is byte-for-byte the `bin\Release` output, and no
+`src\*.cs` is newer. Launch `-mods -logFile D:\PP-Instance2\ct-apocd3.log`, PID 30900,
+`build=3068ae67`, never `stale`. Recipe from run 2 followed exactly: start-campaign (37 steps, 14.8 s)
+→ `ct_bench open` → `FitBench.tab=2` → `Open` → `Run`. Nothing parked.
+
+## What was changed in the INSTANCE2 COPY only
+
+| Change | Why |
+|---|---|
+| `Content\Meshes\CHR_PX_HVY_{TS,RL,LL}_M_V01.glb` ← the three raw GLBs, renamed (hash suffix dropped); old files kept as `*.glb.broken` beside | run 2 proved the raw export is the correct one |
+| `Content\Textures\RR_soldier_albedo.png` ← **COPIED** from `Content\Meshes\materials\` | P1's placement rule. **Copied, not moved**: every `Content\Meshes\materials\*.mat.json` names `"file":"materials/RR_soldier_albedo.png"` relative to the mesh folder, so a move breaks all 16 sidecars |
+| `ppcontent.json` | **untouched** — but P1 now says the texture ROW itself is wrong, see below |
+
+The repo folder and the raw-GLB folder were not written to.
+
+## Stage verdicts, verbatim
+
+| Stage | freshness / outcome / starts | Verdict |
+|---|---|---|
+| Validate | stale / **pass** / 1 | `Validate: PASS - 'Wizard.ApocDesignation' - key 40816436338c15798cc9d8bf5b2eee164eb9e329.` (key moved — sources changed) |
+| Bake | stale / **fail** / 1 | 9 811 chars, `ct_project: 2 FAILURE(S)` — rows below |
+| Apply | stale / **fail** / 1 | 10 203 chars; it re-baked (`…were built from a different project, game build or ContentTool format - re-baking them`) and ended `NOT APPLIED: patching the shipped bundle(s) reported 2 failure(s), named in the P0/REFUSED line(s) above; nothing was installed and no copy was marked current.` `installation` empty |
+| Verify | stale / none / **0** | never entered |
+| Package | stale / none / **0** | never entered |
+
+Restart required: header `restartRequired:true` from the geoscape load, but **irrelevant this run — no
+Apply ever completed**. Bundles served: **none**. Package dir: none. `Run("Apply")` was accepted
+(`runId 3`, `refusal:null`) rather than refused — the admission gate lets Apply run after a failed
+Bake and the producer re-bakes; the refusal is the producer's, not the gate's.
+
+Panel proof `apoc2-lifecycle-run3.png` (+ `.scene.png`) — Validate pass / Bake fail / Apply fail /
+Verify none / Package none, `Session Ready. restart required session block: Wizard.ApocDesignation`.
+
+**Wire trap:** the seam clips a section at ~2 000 chars (`truncated:true`) and this run's verdict never
+reached the game log, so the full text was taken from `connect console ct_project Wizard.ApocDesignation`,
+which returns `truncated:false` — that is the way to read a long verdict. Saved to scratchpad `bake3.txt`.
+
+## The three meshes are FIXED — the raw GLBs work
+
+`patch px_heavy_assets_all.bundle: mesh 'CHR_PX_HVY_{TS,RL,LL}_M_V01' <- … - skinned BY NAME onto the
+target's own 10 bones, carrying 4 of the file's own influences per vertex` for all three. Read-back:
+`P4 PASS`, `P4-ctl-shipped PASS`, `P4-bytes PASS`, `P5 PASS` (bindposes=10, rootHash=2424243207,
+boneMax 9/8/9, inRange=yes), `P6 VOID` on each. No armature complaint, no added-bone complaint, no
+nearest-bone anywhere. Torso verts 5 566 → 17 561, RL 3 234 → 13 222, LL 3 241 → 12 599.
+
+## The two failures that remain — both are in the author's own files
+
+**F1 — the torso GLB carries a 1-triangle stray part, and that is a COUNTED failure.**
+
+> `P4 WARN chr_px_hvy_ts_m_v01 part 1 of 2 has only 1 triangle while part 2 has 15647. The game paints
+> part N with the target's material N, so part 1 (1 triangle) -> material 'CHR_PX_HVY_TS_M_GOLD_V02 or
+> CHR_PX_HVY_TS_M_XMAS_V02 or CHR_PX_HVY_TS_M_V01 (varies by renderer variant)', part 2 (15647
+> triangles) -> material 'CHR_PX_HVY_SHD_M_GOLD_V02 or CHR_PX_HVY_SHD_M_XMAS_V02 or
+> CHR_PX_HVY_SHD_M_V01 (varies by renderer variant)'. A part that small is almost always a leftover
+> shard, and every part after it takes the material meant for the part before - which is why your real
+> geometry is painted wrongly. In Blender select the mesh, Edit Mode, select all (A) and Mesh > Merge >
+> By Distance, or assign every face to ONE material slot, then re-export - or order the parts to match
+> the target's materials. Baked anyway; nothing was skipped.`
+
+`ProjectBake.cs:1827`–`:1828`: the WARN prints and then `if (suspect) failures++`. So the row bakes but
+the RUN fails, and a failing run installs nothing. The Doctor never saw this in run 2 — its preview
+does not compare part order against the target's material list, so "zero diagnostic rows" and this
+warning are both true. **This is the single thing standing between the project and a served render.**
+
+**F2 — the texture row names an asset that does not exist.** The placement fix worked (the file is
+imported, `1 texture(s)`); the refusal moved on to the TARGET:
+
+> `P1 REFUSED target 'RR_soldier_albedo' is not a Texture2D in px_assault_assets_all.bundle - no
+> Texture2D named 'RR_soldier_albedo' in unity=2019.4.31f1 assets=1735 cldbTypes=320 - list the names
+> it does hold with: ct_list assets px_assault_assets_all.bundle Texture2D`
+
+`RR_soldier_albedo` is the author's OWN png stem. `asset` must name a **shipped** Texture2D; `texture`
+is the stem of his png. Real names, read live with `ct_list` — `px_assault_assets_all.bundle` holds
+only `CHR_PX_ASS_*` / `CHR_PX_OP_*` albedos, and the PX **Heavy** ones live in the other bundle:
+`CHR_PX_HVY_TS_M_V01_Albedo`, `CHR_PX_HVY_SHD_M_V01_Albedo`, `CHR_PX_HVY_ARM_M_V01_Albedo`,
+`CHR_PX_HVY_Legs_M_V01_albedo`, `CHR_PX_HVY_HG_M_V01_Albedo` (note the capital `A` on the `_V01_Albedo`
+ones). Not corrected on the bench: which one he means is his decision, not a guess to make for him.
+
+Both bundle copies were still written (`px_heavy_assets_all.bundle` 124 027 774 B,
+`px_assault_assets_all.bundle` 116 009 227 B) and each carries `PARTIAL … 1 row(s) above were REFUSED
+and the copy was rewritten anyway`, plus `Dist\ApocDesignation.bundle` 2 902 086 B with
+`TEX PASS assets/wizard.apocdesignation/textures/rr_soldier_albedo -> 2048x2048 RGBA32 px[0,0]=79,77,60,255`.
+
+## Visual — NOT delivered, and why
+
+No after-screenshot of a PX Heavy wearing the replacements exists, because nothing could be served:
+`ct_route7 apply Wizard.ApocDesignation` (the dev shortcut, run as the last resort) ends with the same
+`NOT APPLIED: … nothing was installed and no copy was marked current.` A served render needs F1 fixed
+first. The Doctor's live preview cannot substitute for a full set either — `ModelDoctor.PickTarget`
+calls `Revert()` before arming the next slot (`ModelDoctor.cs:160`, `:183`), so only ONE slot can be
+previewed at a time; run 2's `apoc-torso-B-raw.scene.png` remains the best picture of the new torso.
+
+## Observations
+
+- `Run("Apply")` after a failed Bake is ADMITTED and re-bakes from scratch (~90 s) instead of being
+  refused on the spot. Not a defect — but the fastest way to burn two minutes learning nothing new.
+- `PARTIAL … 1 row(s) above were REFUSED` counts the torso row, which was **not** refused: its own line
+  says `Baked anyway; nothing was skipped`. Wording only; the count is right, the verb is not.
+- **No PPCLI defect** — nothing appended to `PPCLI\ISSUES.md`. One usage note: `connect call` takes
+  `op:"invoke"` for a method; `op:"call"` is refused with `code:"op"`.
+
+## Bench state at exit
+
+`ct_bench close` → `ct_bench closed - the screen you came from was never left, so it is still there.`
+Instance2 stopped path-filtered (`Where-Object { $_.Path -like 'D:\PP-Instance2\*' }`); no
+`PhoenixPointWin64` process anywhere afterwards. `ppcli-enabled` deleted. The project stays on the
+bench with the CORRECTED sources in place (raw GLBs + `Content\Textures\RR_soldier_albedo.png`, old
+meshes kept as `*.glb.broken`) and **NOT activated** in `Options.jopt` (0 occurrences) — activation
+would serve nothing anyway, since Apply installed nothing, and it would re-run the failing bake at
+every launch (T1).
+
+## What the author has to do — the exact file-level changes in HIS repo folder
+
+1. **Meshes (done, verified):** replace `Content\Meshes\CHR_PX_HVY_TS_M_V01.glb` /
+   `_RL_M_V01.glb` / `_LL_M_V01.glb` with `CHR_PX_HVY_TS_M_V01_7c71cfba6f4e08f7.glb` /
+   `CHR_PX_HVY_RL_M_V01_559e4dcb43d8484b.glb` / `CHR_PX_HVY_LL_M_V01_0fa9bde0c679e665.glb` from
+   `APOCD GLBs for content tool without apply tranforms\`, renamed to the plain names.
+2. **Torso, in Blender — the blocker.** `CHR_PX_HVY_TS_M_V01_7c71cfba6f4e08f7.glb` exports 2 parts,
+   the first holding 1 triangle. Edit Mode → select all (A) → `Mesh > Merge > By Distance`, or put
+   every face in ONE material slot; re-export. Until this is done the bake reports a failure and
+   **nothing is ever installed**.
+3. **Texture file:** put a copy of `RR_soldier_albedo.png` at `Content\Textures\RR_soldier_albedo.png`.
+   Keep the one under `Content\Meshes\materials\` — the `.mat.json` sidecars point at it by that path.
+4. **Texture row in `ppcontent.json`:** `"asset": "RR_soldier_albedo"` names nothing that exists.
+   Point it at the shipped Texture2D to overwrite and fix the bundle, e.g.
+   `{ "bundle": "px_heavy_assets_all.bundle", "asset": "CHR_PX_HVY_TS_M_V01_Albedo", "texture": "RR_soldier_albedo" }`
+   — pick the target from the `ct_list` names above.
