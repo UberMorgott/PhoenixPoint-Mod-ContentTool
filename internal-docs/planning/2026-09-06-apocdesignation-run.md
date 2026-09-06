@@ -491,3 +491,84 @@ startup bake fails and T1 poisons every session.
 
 Everything else is done: the three raw GLBs from `APOCD GLBs for content tool without apply
 tranforms\` bind BY NAME, and `Content\Textures\RR_soldier_albedo.png` is where P1 wants it.
+
+---
+
+# Data fix (2026-09-06) — both remaining defects fixed FOR the author, offline
+
+No game was launched. **Blender is not installed on this machine** (`Get-Command blender` → not found,
+no `C:\Program Files\Blender Foundation`), so the torso was fixed with the tool's own code instead:
+three offline arms added to `tests\ObjCodecTests\Program.cs`, which already links every production
+type this needs (`GlbDocument`, `MeshFields`, `SkinFields`, `AssetIndex`, `ReplacementPreflight`,
+`StageValidate`).
+
+| Arm | What it does |
+|---|---|
+| `--dropshard <in.glb> <out.glb>` | deletes every primitive drawn by ≤8 triangles while a bigger one survives — `MeshFields`' own shard rule (`ShardTriangles`), applied instead of only reported. Container surgery through `GlbDocument`, so weights, skin, nodes and BIN are untouched |
+| `--fit <bundle> <Mesh> [file.glb]` | the shipped target read offline: material slots in PAINT order, the Texture2D each of those materials samples, bind poses and bone names — then `ReplacementPreflight` on the file, the Doctor's own verdict |
+| `--uses <bundle> <Texture2D>` | what a texture row would actually repaint: the shipped texture's size/format, every material sampling it, every mesh those materials draw |
+| `--validate <projectDir> [bundle…]` | the dashboard's Validate stage on a real folder, offline |
+
+## F1 — the torso
+
+`--dropshard` on `APOCD GLBs…\CHR_PX_HVY_TS_M_V01_7c71cfba6f4e08f7.glb`:
+`dropping part 1 of 2 (1 triangle(s)) from mesh 'CHR_PX_HVY_TS_M_V01'` → 4 675 412 B (was 4 675 544 B).
+
+**Which slot is the body**, read off the shipped bundle (`--fit … CHR_PX_HVY_TS_M_V01`):
+`2 material slot(s), 10 bind pose(s), 10 named bone(s)`, **slot 0 = `CHR_PX_HVY_TS_M_GOLD_V02 or
+CHR_PX_HVY_TS_M_XMAS_V02 or CHR_PX_HVY_TS_M_V01`** (the torso material — `_MainTex`
+`CHR_PX_HVY_TS_M_V01_Albedo`), slot 1 = the `CHR_PX_HVY_SHD_*` shoulder-pad material. So the body has
+to be primitive 1, which is exactly what dropping the leading shard leaves.
+
+Preflight on the fixed file, verbatim:
+
+> `CHR_PX_HVY_TS_M_V01.glb: BY NAME - your weights will be used | outcome ByName | 1 row(s)`
+> `  [Info/File] SubmeshMaterials: CHR_PX_HVY_TS_M_V01.glb: part 1 (15647 triangles) -> material 'CHR_PX_HVY_TS_M_GOLD_V02 or CHR_PX_HVY_TS_M_XMAS_V02 or CHR_PX_HVY_TS_M_V01 (varies by renderer variant)'`
+
+The warning is gone — the one row left is INFO, the mapping statement, and it names the BODY material.
+Both legs re-checked the same way: `BY NAME …| outcome ByName | 0 row(s)` each.
+
+## F2 — the texture rows
+
+`--uses` on the candidates (all `2048x2048 format=10 (DXT1) mips=12 streamed=True`):
+
+| Texture2D | materials | meshes those materials draw |
+|---|---|---|
+| `CHR_PX_HVY_TS_M_V01_Albedo` | `CHR_PX_HVY_TS_M_V01` `_MainTex` | `CHR_PX_HVY_TS_M_V01` (replaced), `CHR_PX_HVY_TS_F_V01` |
+| `CHR_PX_HVY_Legs_M_V01_albedo` | `CHR_PX_HVY_Legs_M_V01` `_MainTex` | `CHR_PX_HVY_{LL,RL}_M_V01` (both replaced), `CHR_PX_HVY_{LL,RL}_F_V01` |
+| `CHR_PX_HVY_SHD_M_V01_Albedo` | `CHR_PX_HVY_SHD_M_V01` `_MainTex` | `CHR_PX_HVY_TS_M_V01`, `CHR_PX_HVY_TS_F_V01` |
+
+So the two rows written are **`CHR_PX_HVY_TS_M_V01_Albedo`** and **`CHR_PX_HVY_Legs_M_V01_albedo`**,
+both in `px_heavy_assets_all.bundle`, both sourced from the author's one `RR_soldier_albedo` png (his
+16 `.mat.json` all name it, and the GLB's own material is `rr_source_atlas` — one atlas for the set).
+Two rows with the same `texture` stem are legal: `Manifest.Validate` dedups on `bundle+asset+kind`
+(`Manifest.cs:214-222`), not on the source file.
+
+**`CHR_PX_HVY_SHD_M_V01_Albedo` deliberately NOT written.** With the shard gone the torso replacement
+has ONE part, so it paints slot 0 only and the SHD material now draws nothing on the male torso — the
+only geometry that row could still repaint is the shipped FEMALE torso's shoulder pad, with an atlas
+whose UVs were never meant for it.
+
+**What the bake will do to those two textures:** it does not require parity. `FillTexture2D`
+(`BundleBaker.cs:731-761`) rewrites the header from the png — `m_Width/m_Height` = the png's,
+`m_TextureFormat = 4` (RGBA32), `m_MipCount = 1`, `colorSpace = 1`, `m_StreamData` cleared. The png is
+2048×2048, same as both shipped textures, so UVs are safe; the cost is **12 mip levels lost** (some
+shimmer at distance) and ~16 MB uncompressed in place of a streamed DXT1.
+
+## Files changed (both copies; every replaced file kept beside as `.orig`)
+
+`E:\DEV\PhoenixPoint\ContentTool\Wizard.ApocDesignation\` (the master copy now):
+`Content\Meshes\CHR_PX_HVY_TS_M_V01.glb` (the de-sharded file), `_RL_`/`_LL_M_V01.glb` (the raw
+exports), new `Content\Textures\RR_soldier_albedo.png` (copied, the `.mat.json` sidecars still need the
+one under `Content\Meshes\materials\`), `ppcontent.json` (5 rows). Four `.orig` files beside them.
+
+`D:\PP-Instance2\Mods\Wizard.ApocDesignation\`: the same fixed torso (old raw file → `.glb.orig`, the
+author's original still `.glb.broken`) and the same `ppcontent.json` (previous 3-row bench manifest →
+`.orig`, author's 4-row original still `.run4bak`). Legs and texture were already correct there.
+
+`--validate` on both, offline: **`Pass - Validate: PASS - 'Wizard.ApocDesignation' - key
+2c3185381500a7016b997cd49727ff179e0535ee.`** (repo copy) and the same PASS for the bench copy
+(key `5cc12cda…`, the folders differ by the kept `.orig`/`.broken` files).
+
+**Still owed:** a game run. Nothing here was baked, applied or rendered — the next in-game pass should
+see 5 rows, 0 failures, and a torso painted with the body material instead of the shoulder pad's.

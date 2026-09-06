@@ -1,5 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using AssetsTools.NET;
+using AssetsTools.NET.Extra;
+using Morgott.ContentTool.Bake;
+using Morgott.ContentTool.Doctor;
 using Morgott.ContentTool.Import;
 using Morgott.ContentTool.Wwise;
 
@@ -57,10 +62,198 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// `--dropshard &lt;in.glb&gt; &lt;out.glb&gt;`: delete every mesh primitive drawn by 8 triangles or fewer
+    /// while a bigger one survives - MeshFields' own shard rule (SubmeshReport), APPLIED to the file
+    /// instead of only reported about it. Unity paints submesh i with material i and the bake keeps
+    /// the file's primitive order, so a leftover shard in front of the body pushes the real geometry
+    /// onto the material after it; dropping it is exactly what the Blender advice does by hand, for
+    /// an author who has no Blender. Container surgery only - GlbDocument interprets no glTF, the
+    /// accessors the dropped primitive owned are simply left unreferenced.
+    /// </summary>
+    private static int DropShard(string[] a)
+    {
+        GlbDocument doc = GlbDocument.Load(a[1]);
+        var accessors = (List<object>)doc.Json["accessors"];
+        int dropped = 0;
+        foreach (object meshObj in (List<object>)doc.Json["meshes"])
+        {
+            var mesh = (Dictionary<string, object>)meshObj;
+            var prims = (List<object>)mesh["primitives"];
+            var tris = new int[prims.Count];
+            int most = 0;
+            for (int i = 0; i < prims.Count; i++)
+            {
+                var acc = (Dictionary<string, object>)accessors[(int)(double)((Dictionary<string, object>)prims[i])["indices"]];
+                tris[i] = (int)(double)acc["count"] / 3;
+                if (tris[i] > most) most = tris[i];
+            }
+            for (int i = prims.Count - 1; i >= 0; i--)
+            {
+                if (tris[i] > 8 || most <= 8) continue;
+                Console.WriteLine("dropping part " + (i + 1) + " of " + prims.Count + " (" + tris[i] +
+                                  " triangle(s)) from mesh '" + mesh["name"] + "'");
+                prims.RemoveAt(i);
+                dropped++;
+            }
+        }
+        if (dropped == 0) { Console.WriteLine("no shard in " + a[1] + " - nothing written"); return 1; }
+        doc.Dirty = true;
+        doc.Write(a[2]);
+        Console.WriteLine("WROTE " + a[2] + " " + new FileInfo(a[2]).Length + " B, " + dropped + " part(s) dropped");
+        return 0;
+    }
+
+    /// <summary>
+    /// `--fit &lt;bundle&gt; &lt;MeshName&gt; [replacement.glb]`: what the SHIPPED target really is - its
+    /// material slots in PAINT order, the Texture2D each of those materials samples, its bind poses
+    /// and its bone names - and, when a file is named, the Doctor's own verdict on it. The same
+    /// MeshFields / SkinFields / ReplacementPreflight the bake and the panel run, driven offline, so
+    /// a manifest row can be written from what the bundle holds instead of from a guess.
+    /// </summary>
+    private static int Fit(string[] a)
+    {
+        AssetsManager man = new AssetsManager();
+        man.LoadClassPackage(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                          @"..\..\..\..\..\lib\classdata.tpk"));
+        BundleFileInstance bun = man.LoadBundleFile(a[1], true);
+        AssetsFileInstance af = man.LoadAssetsFileFromBundle(bun, 0, false);
+        man.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
+        string[] slots, bones;
+        int poses;
+        try
+        {
+            long meshId = AssetIndex.FindUnique(man, af, AssetClassID.Mesh, a[2], a[1]).PathId;
+            slots = MeshFields.MaterialNames(man, af, meshId);
+            bones = SkinFields.BoneNames(man, af, meshId);
+            poses = PrefabFields.Get(man, af, meshId)["m_BindPose"]["Array"].Children.Count;
+            Console.WriteLine(a[2] + ": " + (slots == null ? 0 : slots.Length) + " material slot(s), " +
+                              poses + " bind pose(s), " + (bones == null ? 0 : bones.Length) + " named bone(s)");
+            for (int i = 0; slots != null && i < slots.Length; i++)
+            {
+                Console.WriteLine("  slot " + i + " -> material '" + slots[i] + "'");
+                // The slot text is the FOLD of the renderer variants, so the alternatives are split back
+                // out here to look each material up. A material genuinely named 'Red or Blue' would
+                // split wrongly - this is a dump, not the bake's own rule (MeshFields.Fold keeps names).
+                foreach (string alt in slots[i].Replace(" (varies by renderer variant)", "")
+                                               .Split(new[] { " or " }, StringSplitOptions.None))
+                    foreach (AssetFileInfo m in af.file.Metadata.GetAssetsOfType(AssetClassID.Material))
+                    {
+                        AssetTypeValueField mat = man.GetBaseField(af, m);
+                        if (mat["m_Name"].AsString != alt) continue;
+                        foreach (AssetTypeValueField t in mat["m_SavedProperties"]["m_TexEnvs"]["Array"].Children)
+                        {
+                            long tex = t["second"]["m_Texture"]["m_PathID"].AsLong;
+                            if (tex == 0) continue;
+                            Console.WriteLine("      " + alt + " " + t["first"].AsString + " -> " +
+                                              PrefabFields.Name(man, af, tex));
+                        }
+                    }
+            }
+        }
+        finally { man.UnloadAll(); }
+
+        if (a.Length < 4) return 0;
+        var target = new RigTarget
+        {
+            BoneNames = bones,
+            MaterialNames = slots,
+            Rigged = poses > 0,
+            BindPoseCount = poses,
+            MeshName = a[2]
+        };
+        ReplacementPreflightResult r = ReplacementPreflight.Run(File.ReadAllBytes(a[3]), a[3], target);
+        Console.WriteLine(Path.GetFileName(a[3]) + ": " + r.Report.Header() + " | outcome " + r.Outcome +
+                          " | " + r.Report.Rows.Count + " row(s)");
+        foreach (Diagnostic d in r.Report.Rows)
+            Console.WriteLine("  [" + d.Severity + "/" + d.Side + "] " + d.Code + ": " + d.Message);
+        // A mapping row is INFO - the report states which part lands where even when nothing is wrong -
+        // so the gate is "no row that is more than information", not "no rows".
+        return r.Outcome == Outcome.ByName && r.Report.Count(Severity.Info) == r.Report.Rows.Count ? 0 : 1;
+    }
+
+    /// <summary>
+    /// `--uses &lt;bundle&gt; &lt;Texture2D&gt;`: what a texture row would actually repaint - the shipped
+    /// texture's own size and format, every material that samples it, and every mesh those materials
+    /// draw. A row aimed at a texture whose materials also paint geometry the project does NOT
+    /// replace repaints that geometry with an atlas whose UVs were never meant for it, and this is
+    /// the only way to see that before baking 120 MB.
+    /// </summary>
+    private static int Uses(string[] a)
+    {
+        AssetsManager man = new AssetsManager();
+        man.LoadClassPackage(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                          @"..\..\..\..\..\lib\classdata.tpk"));
+        BundleFileInstance bun = man.LoadBundleFile(a[1], true);
+        AssetsFileInstance af = man.LoadAssetsFileFromBundle(bun, 0, false);
+        man.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
+        try
+        {
+            AssetFileInfo texInfo = AssetIndex.FindUnique(man, af, AssetClassID.Texture2D, a[2], a[1]);
+            AssetTypeValueField tex = man.GetBaseField(af, texInfo);
+            Console.WriteLine(a[2] + ": " + tex["m_Width"].AsInt + "x" + tex["m_Height"].AsInt +
+                              " format=" + tex["m_TextureFormat"].AsInt + " mips=" + tex["m_MipCount"].AsInt +
+                              " streamed=" + (tex["m_StreamData"]["path"].AsString.Length > 0));
+            foreach (AssetFileInfo mi in af.file.Metadata.GetAssetsOfType(AssetClassID.Material))
+            {
+                AssetTypeValueField mat = man.GetBaseField(af, mi);
+                foreach (AssetTypeValueField t in mat["m_SavedProperties"]["m_TexEnvs"]["Array"].Children)
+                {
+                    if (t["second"]["m_Texture"]["m_PathID"].AsLong != texInfo.PathId) continue;
+                    Console.WriteLine("  material '" + mat["m_Name"].AsString + "' " + t["first"].AsString);
+                    foreach (AssetClassID kind in new[] { AssetClassID.SkinnedMeshRenderer, AssetClassID.MeshRenderer })
+                        foreach (AssetFileInfo ri in af.file.Metadata.GetAssetsOfType(kind))
+                        {
+                            AssetTypeValueField r = man.GetBaseField(af, ri);
+                            bool draws = false;
+                            foreach (AssetTypeValueField slot in r["m_Materials"]["Array"].Children)
+                                draws |= slot["m_PathID"].AsLong == mi.PathId;
+                            if (!draws) continue;
+                            long meshId = r["m_Mesh"]["m_PathID"].AsLong;
+                            if (kind == AssetClassID.MeshRenderer)
+                            {
+                                // A static renderer names no mesh: its MeshFilter on the same GameObject does.
+                                long go = r["m_GameObject"]["m_PathID"].AsLong;
+                                meshId = 0;
+                                foreach (AssetFileInfo fi in af.file.Metadata.GetAssetsOfType(AssetClassID.MeshFilter))
+                                {
+                                    AssetTypeValueField f = man.GetBaseField(af, fi);
+                                    if (f["m_GameObject"]["m_PathID"].AsLong == go)
+                                        meshId = f["m_Mesh"]["m_PathID"].AsLong;
+                                }
+                            }
+                            Console.WriteLine("      drawn on mesh '" + PrefabFields.Name(man, af, meshId) + "'");
+                        }
+                }
+            }
+        }
+        finally { man.UnloadAll(); }
+        return 0;
+    }
+
+    /// <summary>
+    /// `--validate &lt;projectDir&gt; [shipped.bundle ...]`: the dashboard's Validate stage, run offline on a
+    /// real project folder. The same StageValidate the panel's first row runs - manifest shape, every
+    /// row's source file, and the patch key - so a manifest edit can be proven before a game launch.
+    /// </summary>
+    private static int Validate(string[] a)
+    {
+        var shipped = new List<string>();
+        for (int i = 2; i < a.Length; i++) shipped.Add(a[i]);
+        LifecycleState.StageReport r = StageValidate.Run(a[1], Path.Combine(a[1], "ppcontent.json"),
+                                                         shipped, new Dictionary<string, bool>());
+        Console.WriteLine(r.Outcome + " - " + r.Verdict);
+        return r.Outcome == GateOutcome.Pass ? 0 : 1;
+    }
+
     private static int Main(string[] args)
     {
         if (args.Length == 5 && args[0] == "--bake") return Bake(args);
         if (args.Length == 2 && args[0] == "--u9probe") return U9Probe(args);
+        if (args.Length == 3 && args[0] == "--dropshard") return DropShard(args);
+        if ((args.Length == 3 || args.Length == 4) && args[0] == "--fit") return Fit(args);
+        if (args.Length == 3 && args[0] == "--uses") return Uses(args);
+        if (args.Length >= 2 && args[0] == "--validate") return Validate(args);
         ObjDocument quad = ObjCodec.Parse("v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1 4/4/1\n");
         Check(quad.Positions.Count == 4, "positions");
         Check(quad.TextureCoordinates.Count == 4 && quad.Normals.Count == 1, "uv and normals");
