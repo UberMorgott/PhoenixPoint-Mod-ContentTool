@@ -1,0 +1,13 @@
+#!/bin/sh
+# Quality gate. Installed by quality-gate -- do not edit here.
+# git runs this through sh.exe on Windows, where `command -v qgate.cmd` is FALSE
+# even though qgate.cmd runs fine, and a bare `qgate` exits 127 (bin/ has only
+# qgate.cmd and qgate.ps1). Switch on the platform instead. `uname -o` is one
+# word (Msys) under both sh.exe and bash.exe; `uname -s` differs between them.
+# -Quiet: silent on green, full report on red -- a commit is an agent tool call
+# and this output is billed back into the model context.
+if uname -o 2>/dev/null | grep -q Msys; then
+  exec qgate.cmd -All -Full -Quiet
+else
+  exec qgate -All -Full -Quiet
+fi
