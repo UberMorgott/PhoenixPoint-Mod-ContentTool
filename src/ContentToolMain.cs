@@ -379,7 +379,13 @@ namespace Morgott.ContentTool
             {
                 try
                 {
-                    if (console != null) { WriteLines(console, msg ?? ""); return; }
+                    if (console is GameConsoleWindow) { WriteLines(console, msg ?? ""); return; }
+                    // ANY OTHER IConsole is a capture, not a pane: `ppcli connect console` hands in its
+                    // own (PPBridgeMain.Capture) and READS the string back. It gets the whole verdict,
+                    // in one call and unbounded - the vertex limit below is the game pane's problem and
+                    // nothing else's, and a bounded reply would make the one machine-readable path
+                    // useless for exactly the commands that need it.
+                    if (console != null) { console.WriteLine("{0}", msg ?? ""); return; }
                 }
                 catch (Exception) { }
                 log?.LogInfo(msg);
@@ -393,30 +399,48 @@ namespace Morgott.ContentTool
             /// it rendered NOTHING while still taking up its layout height - the blank output with
             /// "invisible characters". The console already trims itself to 200 line objects, which only
             /// works if lines arrive as lines.
+            ///
+            /// Per-line was not enough. `ct_project` prints thousands of lines and the pane still went
+            /// blank (2026-09-06, 22 UpdateGeometry throws), so what ONE command may add is capped in
+            /// total too - Dev.ConsoleText owns that arithmetic - and the whole text goes to a file the
+            /// last line names. There is no `clear` command to recover with (`cls` exists but only
+            /// GameConsoleWindow's own dispatcher reaches it), so the pane must not be filled at all.
             /// </summary>
-            private const int MaxConsoleLines = 80;
-            private const int MaxConsoleLineChars = 400;
-
             private static void WriteLines(IConsole console, string msg)
             {
-                string[] lines = msg.Split('\n');
-                int n = Math.Min(lines.Length, MaxConsoleLines);
-                bool lost = lines.Length > n;
-                for (int i = 0; i < n; i++)
+                int dropped;
+                List<string> lines = Dev.ConsoleText.Bound(msg, out dropped);
+                foreach (string line in lines) console.WriteLine("{0}", line);
+                if (dropped <= 0 && !Dev.ConsoleText.Clipped(msg)) return;
+                // Nothing is allowed to disappear: whatever the pane could not take goes to a file
+                // whole, and to Player.log, and the pane is told where. The console writes what it DID
+                // show to Console.log by itself (AppendToLogFile).
+                string spilled = Spill(msg);
+                console.WriteLine("{0}", spilled != null
+                    ? "... the whole output is in " + spilled
+                    : "... the whole output is in Player.log");
+                log?.LogInfo(msg);
+            }
+
+            /// <summary>
+            /// The whole verdict on disk, under the folder every other generated file already lives in.
+            /// Named by timestamp only: the command's own name is not reachable here (the game console
+            /// invokes the method by reflection and hands us nothing but the IConsole), and the file's
+            /// first lines say what it was. Failure to write one is not a failure of the command.
+            /// </summary>
+            private static string Spill(string msg)
+            {
+                try
                 {
-                    string line = lines[i].TrimEnd('\r');
-                    if (line.Length > MaxConsoleLineChars)
-                    {
-                        line = line.Substring(0, MaxConsoleLineChars) + " ...(clipped)";
-                        lost = true;
-                    }
-                    console.WriteLine("{0}", line);
+                    string dir = Path.Combine(Path.Combine(
+                        UnityEngine.Application.persistentDataPath, "ContentTool"), "Logs");
+                    Directory.CreateDirectory(dir);
+                    string path = Path.Combine(dir, "console-" +
+                        DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".txt");
+                    File.WriteAllText(path, msg ?? "");
+                    return path;
                 }
-                if (lines.Length > n)
-                    console.WriteLine("{0}", "... " + (lines.Length - n) + " more line(s) not shown");
-                // Nothing is allowed to disappear: whatever the console could not take goes to the log
-                // whole. The console writes what it DID show there by itself (AppendToLogFile).
-                if (lost) log?.LogInfo(msg);
+                catch (Exception) { return null; }
             }
 
             [ConsoleCommand(Command = "ct_version", Description = "ContentTool: version, and whether the merged AssetsTools.NET and the embedded classdata.tpk are present.")]
@@ -525,10 +549,10 @@ namespace Morgott.ContentTool
             public static void CtOutTest(IConsole console)
             {
                 System.Text.StringBuilder b = new System.Text.StringBuilder();
-                b.AppendLine("ct_outtest HEAD - readable = sink survived; expect a clipped y-line, 80 lines, then '... more line(s) not shown'");
+                b.AppendLine("ct_outtest HEAD - readable = sink survived; expect a clipped y-line, a '... N line(s) not shown' marker, the TAIL line below, and the file it all went to");
                 b.AppendLine(new string('y', 5000));
                 for (int i = 0; i < 200; i++) b.AppendLine("ct_outtest line " + i + " " + new string('x', 120));
-                b.Append("ct_outtest TAIL - only in Player.log");
+                b.Append("ct_outtest TAIL - the LAST line is reserved, so this must be on screen");
                 Out(console, b.ToString());
             }
 

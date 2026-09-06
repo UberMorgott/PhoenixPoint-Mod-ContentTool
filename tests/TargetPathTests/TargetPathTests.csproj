@@ -36,6 +36,10 @@
          free of UnityEngine (System.IO only; the Unity half is src\Dev\DevRunner.cs), so gate S2
          runs offline against real folders and a real FileSystemWatcher. -->
     <Compile Include="..\..\src\Dev\DevLoop.cs" Link="DevLoop.cs" />
+    <!-- What the GAME'S console pane may be handed. UnityEngine-free on purpose (the Unity half is
+         ContentToolMain.ConsoleBridge), so gate S42 measures the bound on a string instead of by
+         blanking a console with no `clear` command to recover with. -->
+    <Compile Include="..\..\src\Dev\ConsoleText.cs" Link="ConsoleText.cs" />
     <!-- And how a published key's declared "type" becomes a real Type. System.Reflection only (the
          Unity half is nothing but the assembly LIST), so gate S16 measures the module-split rule
          offline against real, split assemblies. -->

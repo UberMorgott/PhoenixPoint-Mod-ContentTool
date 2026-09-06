@@ -3215,6 +3215,57 @@ internal static class Program
         BenchOrbitArm();
         BenchSavedArm();
         BenchRecoveryArm();
+        ConsoleBoundArm();
+    }
+
+    /// <summary>
+    /// ============ S42: WHAT THE GAME CONSOLE PANE IS HANDED ============
+    /// `ct_project`'s verdict is thousands of lines. Handed to the pane whole it threw
+    /// "Mesh can not have more than 65000 vertices" in UI.Text.UpdateGeometry 22 times and the pane
+    /// rendered EMPTY - and there is no `clear` a player can type to recover. The bound is arithmetic
+    /// over a string, so it is decidable here, which is the only place it CAN be decided: in game the
+    /// symptom is an empty rectangle with nothing anywhere to say why.
+    /// </summary>
+    private static void ConsoleBoundArm()
+    {
+        int dropped;
+        List<string> small = ConsoleText.Bound("one\ntwo\nthree", out dropped);
+        Check("S42-whole", dropped == 0 && small.Count == 3 && small[2] == "three",
+              "a short message reaches the pane untouched");
+
+        // The ct_outtest payload, which is the shipped falsifiable case.
+        var b = new System.Text.StringBuilder();
+        b.AppendLine("HEAD");
+        b.AppendLine(new string('y', 5000));
+        for (int i = 0; i < 2000; i++) b.AppendLine("line " + i + " " + new string('x', 120));
+        b.Append("TAIL - the verdict");
+        string huge = b.ToString();
+        List<string> bounded = ConsoleText.Bound(huge, out dropped);
+        int chars = 0;
+        foreach (string line in bounded) chars += line.Length + 1;
+        Check("S42-total", chars <= ConsoleText.MaxTotalChars,
+              "2002 lines reach the pane as " + chars + " character(s), under the " +
+              ConsoleText.MaxTotalChars + " the UI.Text mesh limit allows");
+        Check("S42-lines", bounded.Count <= ConsoleText.MaxLines + 1,
+              "in at most " + (ConsoleText.MaxLines + 1) + " line objects, not " + bounded.Count);
+        Check("S42-tail", bounded[bounded.Count - 1] == "TAIL - the verdict",
+              "and the LAST line - every ct_ command's verdict - is still on screen");
+        Check("S42-marker", dropped > 0 && bounded.Contains("... " + dropped + " line(s) not shown"),
+              "with a marker saying how many lines stand between the head and it");
+        Check("S42-clip", ConsoleText.Clipped(huge) &&
+              bounded[1] == new string('y', ConsoleText.MaxLineChars) + " ...(clipped)",
+              "one 5000-character line is cut rather than handed to a single Text");
+        // The control in the same run: without the total cap, 60 lines of 400 characters would still be
+        // 24000 characters of pane, twice what the mesh limit allows.
+        Check("S42-total-ctl", ConsoleText.MaxLines * (ConsoleText.MaxLineChars + 1) > ConsoleText.MaxTotalChars,
+              "the line count alone does NOT bound the pane, so the character cap is doing real work");
+        // A message that fits by characters but is mostly short lines must not be truncated by accident.
+        var many = new System.Text.StringBuilder();
+        for (int i = 0; i < ConsoleText.MaxLines - ConsoleText.TailLines; i++) many.AppendLine("x");
+        many.Append("end");
+        List<string> tight = ConsoleText.Bound(many.ToString(), out dropped);
+        Check("S42-short", dropped == 0 && tight[tight.Count - 1] == "end",
+              "and " + ConsoleText.MaxLines + " tiny lines all fit: " + dropped + " dropped");
     }
 
     /// <summary>
