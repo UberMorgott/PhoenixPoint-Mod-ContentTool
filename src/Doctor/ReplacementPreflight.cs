@@ -133,10 +133,11 @@ namespace Morgott.ContentTool.Doctor
 
         /// <summary>
         /// THE BAKE'S SUSPECT-PART RULE, asked HERE too, through the one function that owns it.
-        /// <c>ProjectBake.cs:1827</c>-<c>:1828</c> prints <see cref="Bake.MeshFields.SubmeshReport"/> and
-        /// COUNTS a suspect mapping as a bake failure - so a file this panel called clean took the run
-        /// down minutes later (2026-09-06: chr_px_hvy_ts_m_v01, part 1 of 2 = 1 triangle, "BY NAME - your
-        /// weights will be used" with zero rows). The Doctor is where that has to be read.
+        /// <c>ProjectBake.Patch</c> prints <see cref="Bake.MeshFields.SubmeshReport"/> and counts a suspect
+        /// mapping as a WARNING (its `warned`, never `failures`) - so a file this panel called clean bakes,
+        /// applies, and says so on the terminal line (2026-09-06: chr_px_hvy_ts_m_v01, part 1 of 2 =
+        /// 1 triangle, "BY NAME - your weights will be used" with zero rows). Both sides agree it is a
+        /// warning; the Doctor is where the author reads it BEFORE the bake.
         ///
         /// Asked only when the target's MATERIALS are known: the game paints part N with material N, and
         /// with no material list there is nothing to state a mapping against. A prototype Extend has no

@@ -658,50 +658,19 @@ namespace Morgott.ContentTool.Project
         }
 
         /// <summary>
-        /// Sorted so an ID allocated for a file does not move when a sibling is added.
+        /// Sorted so an ID allocated for a file does not move when a sibling is added, and the same-stem
+        /// collision refused by name rather than resolved by a rule nobody can remember.
         ///
-        /// A record is named by its file STEM, so two files that differ only in extension
-        /// (swatch.png next to swatch.jpg) would both answer to "swatch" and the first one found
-        /// would win silently. That is refused, by name, rather than resolved by a rule nobody can
-        /// remember - and it is refused as a pair of SOURCES, not as the project: the collision used to
-        /// throw out of Load before <see cref="SourceImport.Each"/> could contain it, so swatch.jpg
-        /// beside swatch.png cost the author every mesh, model and sound in the project too. Both
-        /// colliding files are left out (choosing one is exactly what this refuses to do) and the other
-        /// kinds are untouched. A null <paramref name="refusals"/> keeps the old throw, for a caller
-        /// with no refusal channel to write into.
+        /// IT IS <see cref="ContentMods.Sources"/>, not a second copy of it. The Validate stage has to
+        /// answer "is this row's file where the bake will look for it" WITHOUT ContentProject (which
+        /// cannot join the offline compile list), and the two enumerators drifted at exactly the place
+        /// that matters: Validate PASSed swatch.png beside swatch.jpg and the bake then refused the row
+        /// at P1, because only this one dropped both files.
         /// </summary>
         private static string[] Sources(string root, string folder, List<string> refusals,
                                         params string[] patterns)
         {
-            string dir = Path.Combine(Path.Combine(root, "Content"), folder);
-            if (!Directory.Exists(dir)) return new string[0];
-            List<string> files = new List<string>();
-            // The EXTENSION is re-checked because NTFS matches a search pattern against a file's 8.3 SHORT
-            // name too: "*.glb" also answers body.glbx, and the pair-collision rule below would then see the
-            // stem "body" twice and skip BOTH - the real body.glb among them.
-            foreach (string pattern in patterns)
-                foreach (string f in Directory.GetFiles(dir, pattern))
-                    if (string.Equals(Path.GetExtension(f), pattern.Substring(1), StringComparison.OrdinalIgnoreCase))
-                        files.Add(f);
-            files.Sort(StringComparer.OrdinalIgnoreCase);
-            int i = files.Count - 1;
-            while (i > 0)
-            {
-                if (!string.Equals(Path.GetFileNameWithoutExtension(files[i]),
-                                   Path.GetFileNameWithoutExtension(files[i - 1]),
-                                   StringComparison.OrdinalIgnoreCase))
-                { i--; continue; }
-                string why = "Content\\" + folder + "\\ holds two files with the same name: " +
-                             Path.GetFileName(files[i - 1]) + " and " + Path.GetFileName(files[i]) +
-                             " - a replacement names the stem, so one of them has to go; BOTH were " +
-                             "SKIPPED, the project's other sources are unaffected";
-                if (refusals == null) throw new InvalidDataException(why);
-                refusals.Add(why);
-                files.RemoveAt(i);
-                files.RemoveAt(i - 1);
-                i -= 2;
-            }
-            return files.ToArray();
+            return ContentMods.Sources(root, folder, refusals, patterns);
         }
 
         /// <summary>

@@ -79,19 +79,28 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         private static void Sources(string root, ReplaceRow row, List<string> missing, List<string> noted)
         {
+            // A COLLIDING STEM IS THE BAKE'S OWN SENTENCE, not "the file is not there": both files are
+            // dropped by the one enumerator (ContentMods.Sources), so the author is looking at a file
+            // that IS in the right folder and would be told it is missing.
+            string collision;
             if (!string.IsNullOrEmpty(row.Texture))
             {
-                if (ContentMods.SourceFile(root, "Textures", row.Texture, ContentMods.TexturePatterns) == null)
-                    missing.Add("'" + row.Texture + "' is not a .png/.jpg under Content\\Textures\\" +
-                                ContentMods.Elsewhere(root, row.Texture, "Textures") + ".");
+                if (ContentMods.SourceFile(root, "Textures", row.Texture, ContentMods.TexturePatterns,
+                                           out collision) == null)
+                    missing.Add(collision ??
+                                "'" + row.Texture + "' is not a .png/.jpg under Content\\Textures\\" +
+                                ContentMods.Elsewhere(root, row.Texture, "Textures",
+                                                      ContentMods.TexturePatterns) + ".");
                 return;
             }
             if (string.IsNullOrEmpty(row.Mesh)) return;
-            string mesh = ContentMods.SourceFile(root, "Meshes", row.Mesh, ContentMods.MeshPatterns);
+            string mesh = ContentMods.SourceFile(root, "Meshes", row.Mesh, ContentMods.MeshPatterns,
+                                                 out collision);
             if (mesh == null)
             {
-                missing.Add("'" + row.Mesh + "' is not a .obj or .glb under Content\\Meshes\\" +
-                            ContentMods.Elsewhere(root, row.Mesh, "Meshes") + ".");
+                missing.Add(collision ??
+                            "'" + row.Mesh + "' is not a .obj or .glb under Content\\Meshes\\" +
+                            ContentMods.Elsewhere(root, row.Mesh, "Meshes", ContentMods.MeshPatterns) + ".");
                 return;
             }
             if (!mesh.EndsWith(".glb", StringComparison.OrdinalIgnoreCase)) return;

@@ -38,22 +38,94 @@ namespace Morgott.ContentTool.Project
         internal static readonly string[] TexturePatterns = { "*.png", "*.jpg", "*.jpeg" };
 
         /// <summary>
-        /// The file in <c>Content\folder\</c> whose STEM is <paramref name="stem"/> - what a "replace" row
-        /// names - or null when the bake will find nothing there. Top level only and with the EXTENSION
-        /// re-checked, exactly as ContentProject.Sources does it (:665-:677): NTFS matches a pattern
-        /// against the 8.3 short name too, so "*.glb" also answers body.glbx.
+        /// THE ONE ENUMERATOR of <c>Content\folder\</c> - what the BAKE imports (ContentProject.Load hands
+        /// its refusal list in) and what the Validate stage answers a row from, so the two stages cannot
+        /// disagree about which files are there. Top level only, with the EXTENSION re-checked because NTFS
+        /// matches a search pattern against the 8.3 SHORT name too ("*.glb" also answers body.glbx).
+        ///
+        /// A record is named by its file STEM, so two files that differ only in extension (swatch.png next
+        /// to swatch.jpg) would both answer to "swatch" and the first one found would win silently. That is
+        /// refused, by name: EVERY file of a colliding stem is left out (choosing one is exactly what this
+        /// refuses to do) and the other stems are untouched. A null <paramref name="refusals"/> keeps the
+        /// throw, for a caller with no refusal channel to write into.
         /// </summary>
-        internal static string SourceFile(string root, string folder, string stem, string[] patterns)
+        internal static string[] Sources(string root, string folder, List<string> refusals,
+                                         params string[] patterns)
         {
+            List<string> files = Listed(root, folder, patterns);
+            files.Sort(StringComparer.OrdinalIgnoreCase);
+            List<string> kept = new List<string>();
+            // Sorted, so a stem's files are ADJACENT: '.' is lower than any character a stem may continue
+            // with, which is the same assumption the pairwise walk this replaced already made.
+            for (int i = 0; i < files.Count;)
+            {
+                int j = i + 1;
+                while (j < files.Count && SameStem(files[j], files[i])) j++;
+                if (j - i == 1) kept.Add(files[i]);
+                else
+                {
+                    string why = Collision(folder, files[i], files[i + 1]);
+                    if (refusals == null) throw new InvalidDataException(why);
+                    refusals.Add(why);
+                }
+                i = j;
+            }
+            return kept.ToArray();
+        }
+
+        /// <summary>
+        /// The file in <c>Content\folder\</c> whose STEM is <paramref name="stem"/> - what a "replace" row
+        /// names - or null when the bake will find nothing there. <paramref name="refusal"/> carries the
+        /// collision sentence when the stem is answered by more than one file: the bake drops both, so a
+        /// Validate that only reported "not a .png/.jpg under Content\Textures\" described a file the author
+        /// can SEE sitting there (swatch.png + swatch.jpg - PASSed Validate, P1 REFUSED at bake).
+        /// </summary>
+        internal static string SourceFile(string root, string folder, string stem, string[] patterns,
+                                          out string refusal)
+        {
+            refusal = null;
             if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(stem)) return null;
+            List<string> hits = Listed(root, folder, patterns);
+            for (int i = hits.Count - 1; i >= 0; i--)
+                if (!string.Equals(Path.GetFileNameWithoutExtension(hits[i]), stem,
+                                   StringComparison.OrdinalIgnoreCase))
+                    hits.RemoveAt(i);
+            hits.Sort(StringComparer.OrdinalIgnoreCase);
+            if (hits.Count == 1) return hits[0];
+            if (hits.Count > 1) refusal = Collision(folder, hits[0], hits[1]);
+            return null;
+        }
+
+        /// <summary>The refusal both stages say, in one wording. Its subject is the STEM, not the project:
+        /// the colliding files are skipped and everything else in the folder bakes.</summary>
+        internal static string Collision(string folder, string a, string b)
+        {
+            return "Content\\" + folder + "\\ holds two files with the same name: " +
+                   Path.GetFileName(a) + " and " + Path.GetFileName(b) +
+                   " - a replacement names the stem, so one of them has to go; BOTH were " +
+                   "SKIPPED, the project's other sources are unaffected";
+        }
+
+        /// <summary>Every file at the top of <c>Content\folder\</c> that one of <paramref name="patterns"/>
+        /// really matches - the extension is re-checked, see <see cref="Sources"/>.</summary>
+        private static List<string> Listed(string root, string folder, string[] patterns)
+        {
+            List<string> files = new List<string>();
+            if (string.IsNullOrEmpty(root)) return files;
             string dir = Path.Combine(Path.Combine(root, "Content"), folder);
-            if (!Directory.Exists(dir)) return null;
+            if (!Directory.Exists(dir)) return files;
             foreach (string pattern in patterns)
                 foreach (string f in Directory.GetFiles(dir, pattern))
-                    if (string.Equals(Path.GetExtension(f), pattern.Substring(1), StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(Path.GetFileNameWithoutExtension(f), stem, StringComparison.OrdinalIgnoreCase))
-                        return f;
-            return null;
+                    if (string.Equals(Path.GetExtension(f), pattern.Substring(1),
+                                      StringComparison.OrdinalIgnoreCase))
+                        files.Add(f);
+            return files;
+        }
+
+        private static bool SameStem(string a, string b)
+        {
+            return string.Equals(Path.GetFileNameWithoutExtension(a), Path.GetFileNameWithoutExtension(b),
+                                 StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -61,22 +133,36 @@ namespace Morgott.ContentTool.Project
         /// or "" when it is nowhere. THE one copy of that sentence: ProjectBake's P1/P4 refusals and the
         /// Validate stage both say it, and the misplaced-texture case (2026-09-06:
         /// Content\Meshes\materials\RR_soldier_albedo.png) is the one an author most needs it for.
+        ///
+        /// ONLY A FILE THE DESTINATION WOULD ACCEPT. Matching on the stem alone told the author to move
+        /// Content\Meshes\body.glb into Content\Textures\, where the bake would then ignore it - advice
+        /// that costs a second failed bake. <paramref name="patterns"/> is the destination folder's own
+        /// list, so the namesake named here is one that will actually be imported once it is moved.
         /// </summary>
-        internal static string Elsewhere(string root, string stem, string folder)
+        internal static string Elsewhere(string root, string stem, string folder, string[] patterns)
         {
             string content = Path.Combine(root, "Content");
             if (string.IsNullOrEmpty(stem) || !Directory.Exists(content)) return "";
             string want = Path.Combine(content, folder);
-            foreach (string f in Directory.GetFiles(content, "*", SearchOption.AllDirectories))
-            {
-                string dir = Path.GetDirectoryName(f);
-                if (string.Equals(dir, want, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!string.Equals(Path.GetFileNameWithoutExtension(f), stem, StringComparison.OrdinalIgnoreCase))
-                    continue;
-                return " - the file IS in the project, at Content\\" +
-                       dir.Substring(content.Length).Trim('\\', '/') + "\\" + Path.GetFileName(f) +
-                       "; move it into Content\\" + folder + "\\ and bake again";
-            }
+            // Enumerate, not GetFiles: the FIRST namesake ends the walk, and this runs on a refusal path
+            // where the whole tree would otherwise be materialised for one row.
+            foreach (string pattern in patterns)
+                foreach (string f in Directory.EnumerateFiles(content, pattern, SearchOption.AllDirectories))
+                {
+                    string dir = Path.GetDirectoryName(f);
+                    if (string.Equals(dir, want, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.Equals(Path.GetExtension(f), pattern.Substring(1),
+                                       StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.Equals(Path.GetFileNameWithoutExtension(f), stem,
+                                       StringComparison.OrdinalIgnoreCase)) continue;
+                    // A namesake sitting directly in Content\ has no sub-path at all, and the empty
+                    // Substring rendered it as "Content\\name.png" - a path with a doubled separator that
+                    // is not where the file is.
+                    string under = dir.Substring(content.Length).Trim('\\', '/');
+                    return " - the file IS in the project, at Content\\" +
+                           (under.Length == 0 ? "" : under + "\\") + Path.GetFileName(f) +
+                           "; move it into Content\\" + folder + "\\ and bake again";
+                }
             return "";
         }
 

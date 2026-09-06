@@ -68,20 +68,22 @@ namespace Morgott.ContentTool.Doctor
         /// for help.</summary>
         internal string Header()
         {
+            // THE WARNING COUNT RIDES ON EVERY VERDICT, not just the clean one. A "BY NAME" that hid a
+            // SubmeshMaterials warning told the author to stop reading (the 1-triangle torso of
+            // 2026-09-06) - and a NEAREST-BONE or REFUSED header counting its OWN reasons only hid the
+            // same row just as well, because the count LOOKS like the number of rows below it.
+            int warned = Count(Severity.Warning);
+            string also = warned > 0 ? ", " + warned + " warning(s)" : "";
             switch (Outcome)
             {
-                // THE WARNING COUNT RIDES ON THE VERDICT. A clean "BY NAME" over a row the BAKE counts as
-                // a failure (SubmeshMaterials) is the panel telling the author to stop reading - which is
-                // exactly what happened to the 1-triangle torso of 2026-09-06.
                 case Outcome.ByName:
-                    int warned = Count(Severity.Warning);
                     return "BY NAME - your weights will be used" +
                            (warned > 0 ? " (" + warned + " warning(s) below)" : "");
                 case Outcome.NearestBone:
                     return "NEAREST-BONE - the bake would import this but NOT use your weights (" +
-                           Count(Severity.Downgrade) + " reason(s))";
+                           Count(Severity.Downgrade) + " reason(s)" + also + ")";
                 case Outcome.NotRigged: return "NOT RIGGED - the target carries no bind poses";
-                default: return "IMPORT REFUSED (" + Count(Severity.Blocking) + " reason(s))";
+                default: return "IMPORT REFUSED (" + Count(Severity.Blocking) + " reason(s)" + also + ")";
             }
         }
     }

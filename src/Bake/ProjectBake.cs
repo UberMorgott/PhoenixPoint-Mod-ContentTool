@@ -204,6 +204,10 @@ namespace Morgott.ContentTool.Bake
             // - that every one of them says how the run ended.
             int patchFailed;
             int failures = 0;
+            // HEURISTIC FINDINGS, kept out of `failures` and out of `patchFailed` on purpose (see Patch's
+            // `warned`): a warning states what the bake COULD not know, so the run passes with it and the
+            // apply proceeds. It rides the terminal line so the summary agrees with the rows above it.
+            int warnings = 0;
 
             // The replacement count is ALWAYS printed, including 0. A declared "replace" that parses
             // to nothing used to produce no output at all (ct_project 13:51) - the run looked clean
@@ -244,7 +248,7 @@ namespace Morgott.ContentTool.Bake
                 // failures, disposition Refused, and Apply reads the disposition rather than the counts.
                 string live;
                 PublishOutcome published;
-                int refused = Patch(p, log, pump, cacheKey, out live, out published);
+                int refused = Patch(p, log, pump, cacheKey, out live, out published, out warnings);
                 if (live != null) return new BakeResult(0, 0, log.Append(live).ToString(), BakeDisposition.Refused);
                 // R38 AT B5 IS THE SAME ANSWER AS R38 AT ENTRY - a claim can arrive while the bake runs, and
                 // the boundary asks again with the temps already written. Nothing was published either way.
@@ -274,7 +278,8 @@ namespace Morgott.ContentTool.Bake
                         ? StageText.BakeNothingToBake()
                         : patchedBundles > 0
                             ? StageText.BakeNoOwnBundle()
-                            : StageText.BakeNothingPatched(p.Replace.Count)).ToString(),
+                            : StageText.BakeNothingPatched(p.Replace.Count))
+                    .Append(StageText.BakeWarnings(warnings)).ToString(),
                     failures != 0 ? BakeDisposition.Failed : BakeDisposition.Success);
             }
             failures += ClipNamesDeclared(p, log);
@@ -570,7 +575,8 @@ namespace Morgott.ContentTool.Bake
             }
 
             return new BakeResult(failures, patchFailed,
-                log.Append(failures == 0 ? StageText.S4(outPath) : StageText.S5(failures)).ToString(),
+                log.Append(failures == 0 ? StageText.S4(outPath) : StageText.S5(failures))
+                   .Append(StageText.BakeWarnings(warnings)).ToString(),
                 failures == 0 ? BakeDisposition.Success : BakeDisposition.Failed);
         }
 
@@ -1684,10 +1690,16 @@ namespace Morgott.ContentTool.Bake
         /// down unchanged (see its note). Recomputing it here - which is what this used to do - reads the
         /// sources AFTER Load already imported them, so a source saved during the import is stamped as
         /// though these copies carried it.</param>
+        /// <param name="warned">HEURISTIC findings, counted apart from the return value on purpose: the
+        /// suspect-part rule (MeshFields.SubmeshReport) is a guess about what the author MEANT, and its own
+        /// line already says "Baked anyway; nothing was skipped". Counting it as a failure made
+        /// route vii refuse the apply and block the mod for the session (Route7.cs:491) over a copy that
+        /// carried every row it declared - 2026-09-06, chr_px_hvy_ts_m_v01. A warning never fails a run.</param>
         private static int Patch(ContentProject p, StringBuilder log, LoadPump pump, string key,
-                                 out string liveRefusal, out PublishOutcome published)
+                                 out string liveRefusal, out PublishOutcome published, out int warned)
         {
             int failures = 0;
+            warned = 0;
             published = PublishOutcome.Published;
             string outDir = ContentToolMain.PatchedDir(p.Id);
             liveRefusal = LiveReader(p, outDir);
@@ -1750,12 +1762,6 @@ namespace Morgott.ContentTool.Bake
                         // was refused. It is NOT the previous bake's copy - this one overwrites it - which
                         // is what the line after Write says out loud rather than leaving to be discovered.
                         int refusedHere = failures;
-                        // A SUSPECT PART IS COUNTED BUT NOT REFUSED - its own line says "Baked anyway;
-                        // nothing was skipped" - so it must not be subtracted into the PARTIAL sentence
-                        // below, which tells the author which rows are MISSING from the copy. Measured
-                        // 2026-09-06: a copy carrying every row it declared reported "1 row(s) above were
-                        // REFUSED".
-                        int suspectHere = 0;
                         foreach (ShippedReplacement r in p.Replace)
                         {
                             if (!string.Equals(r.bundle, bundleFile, StringComparison.OrdinalIgnoreCase)) continue;
@@ -1809,7 +1815,7 @@ namespace Morgott.ContentTool.Bake
                                 if (im == null)
                                 {
                                     log.AppendLine("P4 REFUSED '" + r.mesh + "' is not a .obj or .glb under Content\\Meshes\\" +
-                                                   Elsewhere(p, r.mesh, "Meshes"));
+                                                   Elsewhere(p, r.mesh, "Meshes", ContentMods.MeshPatterns));
                                     failures++; continue;
                                 }
                                 gone = baker.WhyNot(AssetClassID.Mesh, r.asset);
@@ -1831,10 +1837,15 @@ namespace Morgott.ContentTool.Bake
                                 meshes.Add(new KeyValuePair<string, ImportedMesh>(r.asset, im));
                                 log.AppendLine("patch " + bundleFile + ": mesh '" + r.asset + "' <- " + im.Name +
                                                " " + im.Baked.Describe() + " - skinned " + how);
-                                // Reported and counted, never fatal - the file is legal, just probably not
-                                // what its author meant, so the bake stands and the run does not say ALL PASS.
+                                // A WARNING, NEVER A FAILURE. The file is legal and every row is in the copy;
+                                // the rule is a HEURISTIC about what the author meant (a part with 1 triangle
+                                // beside one with 15647). Counted as a failure it reached Route7's
+                                // `patchFailed` and blocked both the apply and the mod's checkbox for the
+                                // session, while this row's own line said "Baked anyway; nothing was skipped"
+                                // and the PARTIAL sentence reported 0 refused - three producers disagreeing
+                                // about one copy (2026-09-06). Counted here, reported by the terminal line.
                                 if (mapping != null) log.AppendLine((suspect ? "P4 WARN " : "P4 materials ") + mapping);
-                                if (suspect) { failures++; suspectHere++; }
+                                if (suspect) warned++;
                                 continue;
                             }
 
@@ -1842,7 +1853,8 @@ namespace Morgott.ContentTool.Bake
                             if (t == null)
                             {
                                 log.AppendLine("P1 REFUSED '" + r.texture + "' is not a .png/.jpg under Content\\Textures\\" +
-                                               Elsewhere(p, r.texture, "Textures"));
+                                               Elsewhere(p, r.texture, "Textures",
+                                                         ContentMods.TexturePatterns));
                                 failures++; continue;
                             }
                             gone = baker.WhyNot(AssetClassID.Texture2D, r.asset);
@@ -1867,7 +1879,7 @@ namespace Morgott.ContentTool.Bake
                         // temp's name is a GUID nobody can act on.
                         log.AppendLine("WROTE " + copy + " " + new FileInfo(copyTmp).Length + " B as " +
                                        baker.WrittenIdentity + " (shipped source is " + new FileInfo(shipped).Length + " B)");
-                        refusedHere = failures - refusedHere - suspectHere;
+                        refusedHere = failures - refusedHere;
                         if (refusedHere > 0)
                             log.AppendLine("PARTIAL " + bundleFile + ": " + refusedHere + " row(s) above were " +
                                            "REFUSED and the copy was rewritten anyway - what the game loads is " +
@@ -2257,14 +2269,15 @@ namespace Morgott.ContentTool.Bake
         ///
         /// ponytail: matches on the file STEM, the same thing a replacement names - so a project with
         /// the same stem in two places names the first one found, which is still a better answer than
-        /// silence.
+        /// silence. It is a namesake the DESTINATION would accept, though: `patterns` is that folder's
+        /// own extension list, so a texture row is never sent off to move a .glb into Content\Textures\.
         /// </summary>
-        private static string Elsewhere(ContentProject p, string name, string folder)
+        private static string Elsewhere(ContentProject p, string name, string folder, string[] patterns)
         {
             // ONE COPY OF THE SENTENCE, in ContentMods: StageValidate says it too now, before a bake runs
             // at all, and a second spelling here is how the two stages would start disagreeing about
             // where a source file belongs.
-            return ContentMods.Elsewhere(p.Root, name, folder);
+            return ContentMods.Elsewhere(p.Root, name, folder, patterns);
         }
 
         /// <summary>INTERNAL since Verify - it resolves a row to the same import the patch loop did

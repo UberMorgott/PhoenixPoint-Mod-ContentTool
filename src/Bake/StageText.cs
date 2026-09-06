@@ -78,6 +78,15 @@ namespace Morgott.ContentTool.Bake
         /// <summary>Bake FAIL. Quotes ProjectBake.cs:402 (and :128, the same sentence).</summary>
         internal static string S5(int failures) { return "ct_project: " + failures + " FAILURE(S)"; }
 
+        /// <summary>What the bake WARNED about - appended to <see cref="S4"/>/<see cref="S5"/>, and EMPTY
+        /// when there is nothing, so a clean run is the same line it always was. A warning is a HEURISTIC
+        /// finding (the suspect-part rule): every row is in the copy, so it never fails the run and never
+        /// blocks the apply - it only has to be SAID, because the rows above already say it.</summary>
+        internal static string BakeWarnings(int warnings)
+        {
+            return warnings == 0 ? "" : " - " + warnings + " warning(s), baked anyway";
+        }
+
         /// <summary>Verify PASS. NEW. Says how many of the DECLARED targets this project's own copies serve -
         /// a per-target census, never BundleLive.Holds, which passes on one matching claim.
         ///
