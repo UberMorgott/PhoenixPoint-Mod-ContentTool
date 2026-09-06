@@ -90,8 +90,24 @@ internal static class PreflightTests
             RigTarget flat = Rig(own);
             flat.Rigged = false;
             flat.BindPoseCount = 0;
-            checks += Check(ReplacementPreflight.Run(bytes, glb, flat).Outcome == Outcome.NotRigged,
+            ReplacementPreflightResult onFlat = ReplacementPreflight.Run(bytes, glb, flat);
+            checks += Check(onFlat.Outcome == Outcome.NotRigged,
                             "a target with no bind poses is NOT RIGGED");
+            // A RIGGED file onto a static target is the case --fit used to exit 0 for: the bake writes
+            // the mesh and drops the armature, so it is a downgrade row, never a refusal - and never
+            // information, or the arm's Info-only rule would pass it again.
+            checks += Check(Has(onFlat, "RiggedOntoStatic") &&
+                            Severity(onFlat, "RiggedOntoStatic") == Morgott.ContentTool.Doctor.Severity.Downgrade,
+                            "and a rigged file onto it says its weights are dropped: " + Codes(onFlat));
+            checks += Check(onFlat.Report.Header().EndsWith("and your file's weights are dropped"),
+                            "which the header says too: " + onFlat.Report.Header());
+            // The static-onto-static half of the SAME outcome stays a clean pass - the row is about the
+            // FILE, so a file with no armature has nothing to lose. Judged directly: every committed
+            // probe is rigged, and inventing a static .glb fixture to assert an absence is not worth it.
+            var plain = new ReplacementPreflightResult();
+            ReplacementPreflight.Judge(plain, new SkinnedModel(), flat);
+            checks += Check(plain.Outcome == Outcome.NotRigged && !Has(plain, "RiggedOntoStatic"),
+                            "a static file onto a static target loses nothing: " + Codes(plain));
 
             // ---- bind poses and named bones DISAGREE. Analyze cannot see this - it is handed names
             // only - but SkinFields.RebindByName throws on it (SkinFields.cs:738-741) and the bake

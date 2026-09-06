@@ -82,7 +82,12 @@ namespace Morgott.ContentTool.Doctor
                 case Outcome.NearestBone:
                     return "NEAREST-BONE - the bake would import this but NOT use your weights (" +
                            Count(Severity.Downgrade) + " reason(s)" + also + ")";
-                case Outcome.NotRigged: return "NOT RIGGED - the target carries no bind poses";
+                // A rigged file onto a static target is still NOT RIGGED - the mesh is written - but the
+                // author's weights are gone, and a header that said only "the target carries no bind
+                // poses" read as "nothing of yours is affected".
+                case Outcome.NotRigged:
+                    return "NOT RIGGED - the target carries no bind poses" +
+                           (Count(Severity.Downgrade) > 0 ? " and your file's weights are dropped" : "");
                 default: return "IMPORT REFUSED (" + Count(Severity.Blocking) + " reason(s)" + also + ")";
             }
         }

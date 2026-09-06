@@ -301,8 +301,20 @@ namespace Morgott.ContentTool.Doctor
                                   "In Blender give the mesh an Armature modifier with vertex groups, " +
                                   "weight it to the bones the target already has, and export as .glb.");
             else if (outcome == Outcome.NotRigged)
+            {
                 result.Report.Add("TargetNotRigged", Severity.Info, DiagnosticSide.Target,
                                   "not rigged - the target carries no bind poses", "");
+                // Decide folds two different files into this one outcome (ReplacementDecision.cs:41-42):
+                // a STATIC file onto a static target loses nothing, while a RIGGED one has its armature
+                // and its weights dropped by SkinFields.Rebind (BundleBaker.cs:208). Not a refusal - the
+                // mesh is written and the target has no skeleton to be wrong about - but not information
+                // either, so a caller sweeping files by exit code does not read it as a fit.
+                if (armature)
+                    result.Report.Add("RiggedOntoStatic", Severity.Downgrade, DiagnosticSide.File,
+                                      "this file is rigged but the target is not, so its armature and its " +
+                                      "weights are dropped and the mesh is written static",
+                                      "Nothing to fix if that is what you meant - otherwise pick a rigged target.");
+            }
             else
             {
                 foreach (BindingIssue issue in issues)
