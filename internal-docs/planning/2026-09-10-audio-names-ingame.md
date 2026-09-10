@@ -248,3 +248,65 @@ profile untouched. **Yesterday's 3105 `.wav` (3.2 GB) deleted** from
 `…\Phoenix Point\ContentTool\Extracted\audio`. `ct_project Sample` baked into
 `…\ContentTool\Patched\d29f58a2\morgott.sample\` (bench-only output of our own demo project) and
 left it there.
+
+---
+
+# Re-check 2 (`2e2c39f`) — 2026-09-11
+
+Same bench `D:\PP-Instance2`, profile `76561197996210592`, main menu only. Built + deployed by the
+repo's own `deploy.ps1`; `D:\PP-Instance2\Mods\ContentTool\ContentTool.dll` 1 991 168 B, SHA-256
+`AF8C1EE9E86987177C45566ACF897C4EC43E10E639EC54B799BEB5DDE2A8068B`, byte-identical to
+`bin\Release\ContentTool\ContentTool.dll`. Banner
+`ContentTool 1.2.0.0 | build=0f81298c | AssetsTools.NET merged: True | classdata.tpk embedded: 289605 B`.
+PPBridge NOT redeployed (`build=69a823ae`, no `stale:true`). Log `D:\PP-Instance2\ct-recheck2-0911.log`
+(explicit `-logFile`). Registration again early: frame 5 (0,383 s). Real pane driven by the
+`GameConsoleWindow.Create` -> `DisableConsoleAccess=false` -> `ToggleVisibility` ->
+`ExecuteCommandLine` recipe above.
+
+## (1) `ct_project Sample` on the real pane — PARTIAL PASS: pane SURVIVES, one line lost
+
+The blanking is GONE. After `ct_version` / `ct_project Sample` / `ct_version` the pane renders, and
+the whole bounded verdict reached it — the game's own `AppendToLogFile` mirror carries all of it:
+
+```
+... 21 line(s) not shown
+extract: 1 stream(s), 0 rewritten | AddBasePath(D:\PP-Instance2\Mods\ContentTool\WwiseAudio\): AK_Success | ...
+BANK PASS assets/morgott.sample/audio/banks/morgott_sample.bnk -> UnloadBank: AK_UnknownBankID | ...
+ct_project: 1 FAILURE(S)
+... the whole output is in C:/Users/Morgott/AppData/LocalLow/Snapshot Games Inc/Phoenix Point\ContentTool\Logs\console-20260911-003533-131.txt
+```
+
+Spill file exists, 47 149 B (byte-identical in size to yesterday's `console-20260911-001928-565.txt`).
+
+**But on screen the spill trailer is MISSING**: the rendered pane goes straight from
+`ct_project: 1 FAILURE(S)` to the next `ct_version` banner. It is the LAST line written before
+`Say(msg)`, it was accepted by the console (it is in the `[CONSOLE]` mirror at log line 833), and it
+is the only line lost — yesterday the entire pane went blank. Screenshot
+`docs\console-ct_project.png` (crop `docs\crop-tail.png`).
+
+## (2) Mesh exceptions — FAIL, 5 (was 6)
+
+`ChunkedLog` works: the long transcript went out as `(part 1/7)` … `(part 7/7)`, each its own
+`Debug.Log`. But **5 `ArgumentException: Mesh can not have more than 65000 vertices`** still fire,
+all AFTER `(part 7/7)` (log lines 944, 961, 978, 995, 1012), at
+`UnityEngine.UI.VertexHelper.FillMesh` -> `Graphic.DoMeshGeneration` -> `Graphic.UpdateGeometry`.
+
+So the per-message cap is not the whole limit: the sink ACCUMULATES. 7 messages of <=8000 chars
+each still push one `UI.Text` over 65000 vertices when they land back-to-back. Bounding each message
+turned a total blank into one dropped line; it cannot reach zero while the budget is per-canvas and
+the spend is per-run.
+
+## (3) `ct_list audio taunt` — PASS, unchanged
+
+`263 of 7696 media match 'taunt' - 258 loose (extractable), 5 in-bank (not extractable)`, 10 rows
+(`32151022 1CBMN_Taunt1 … loose` first, `727362411 1f_IND_Taunt_2` last), trailer
+`... 253 more - the whole list is in …\ct_list-audio-20260911-003739-623.txt` (20 873 B).
+Rendered and readable; the mesh count did NOT move (still 5) — this path stays clean.
+Screenshot `docs\console-ct_list-audio.png`.
+
+## Bench state at exit
+
+Process stopped by the path filter (`Path -like 'D:\PP-Instance2\*'`); `ppcli-enabled` deleted;
+profile untouched. `ct_project Sample` re-baked into
+`…\ContentTool\Patched\d29f58a2\morgott.sample\` and left there. Log kept at
+`D:\PP-Instance2\ct-recheck2-0911.log`.
