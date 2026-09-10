@@ -495,7 +495,7 @@ namespace Morgott.ContentTool.Dev
         /// sequencer for the next stage.
         ///
         /// <paramref name="panelReady"/> is the bench's half of "the panel is open and has painted" - the
-        /// Lifecycle tab is the selected one. <see cref="Repainted"/> is the other half, and it is ANDed HERE
+        /// Lifecycle tab is the selected one. <see cref="Repainted"/> is the other half, and it is AND-ed HERE
         /// rather than at the call site so the paint gate cannot be forgotten by a second caller.
         /// </summary>
         internal static void Pump(bool panelReady)

@@ -1,0 +1,54 @@
+# typos-cli config for the quality-gate `typos` phase (qgate -Full). A word mapped to itself is
+# declared correct; this silences a false positive without switching the check off.
+
+[files]
+# Captured game data and vendored maps are not our prose: rig censuses, the Wwise name index.
+extend-exclude = [
+    "internal-docs/research/*.json",
+    "data/*.json",
+]
+
+[default.extend-identifiers]
+# Local variables: fmt offset / chunk length in the RIFF parsers, ancestor path, nav def,
+# index stream + index writer, octahedral t coordinate, "invert Y" flag.
+fo = "fo"
+clen = "clen"
+anc = "anc"
+nd = "nd"
+ist = "ist"
+ot = "ot"
+iy = "iy"
+# The game's own identifiers, misspelled by the game, quoted verbatim in comments and docs.
+Equipments = "Equipments"
+UIStateModManagment = "UIStateModManagment"
+SubtitltesTool = "SubtitltesTool"
+OnCharacterRebuilded = "OnCharacterRebuilded"
+Rebuilded = "Rebuilded"
+VisibleInCinematicLibarary = "VisibleInCinematicLibarary"
+LoadBundleFromDependecies = "LoadBundleFromDependecies"
+UpperHighlighLightName = "UpperHighlighLightName"
+StatConfim = "StatConfim"
+# Plural of a file format, split by typos into PN + Gs.
+PNGs = "PNGs"
+
+[default.extend-words]
+# The user's real folder name, quoted verbatim in the worked example and in .gitignore.
+tranforms = "tranforms"
+# The hyphenated prefix in "mis-tagged", "mis-scaled".
+mis = "mis"
+# Unity shader property names, quoted verbatim: "_Metallic" / "_Metalness".
+metalness = "metalness"
+# The "prev minus next" vector in the Draco normal-octahedron predictor: pnX/pnY/pnZ, cnDotPn.
+pn = "pn"
+# Deliberate typographic emphasis in a spec quote: "PropertIES, plural".
+propert = "propert"
+# Fragments of hashes and escaped test fixtures: a bundle-name sha, "café", "Fo\"o".
+ba = "ba"
+caf = "caf"
+fo = "fo"
+# Deliberately scrambled bone names in the rename fixture: body_02 -> bdoy_02, back_03 -> bcak_03.
+bcak = "bcak"
+# Console output quoted verbatim, elided mid-word: "166 varian...".
+varian = "varian"
+# Our own refusal wording; the gate's shared config maps it to itself, this repo's needs it too.
+unparseable = "unparseable"

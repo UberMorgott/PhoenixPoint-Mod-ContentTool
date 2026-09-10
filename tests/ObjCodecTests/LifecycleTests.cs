@@ -1699,7 +1699,7 @@ internal static class LifecycleTests
         chained.BakeOutcome = GateOutcome.Fail;
         checks += Check(LifecycleState.Admit("Bake", chained) == null &&
                         LifecycleState.Admit("Apply", chained) == StageText.R28All("Apply", "Bake"),
-                        "and Apply is refused after a Bake that FAILED - never after one that merely VOIDed");
+                        "and Apply is refused after a Bake that FAILED - never after one that merely VOID-ed");
         chained.BakeOutcome = GateOutcome.Void;
         chained.ApplyOutcome = GateOutcome.None;
         checks += Check(LifecycleState.Admit("Apply", chained) == null &&
