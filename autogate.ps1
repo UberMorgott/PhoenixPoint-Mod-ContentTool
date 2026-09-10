@@ -8,6 +8,7 @@
     .\autogate.ps1 -Commands ct_bake,ct_audio        # a specific list
     .\autogate.ps1 -Commands ct_project -Then 'ct_route7 verify'   # two launches
     .\autogate.ps1 -KeepOpen                         # leave the last launch running
+    .\autogate.ps1 -SelfCheck                        # prove the report half offline, launch nothing
 
   There is no -UnityAudio switch any more, and nothing here edits a game file. It used to flip
   Unity's m_DisableAudio in globalgamemanagers so the ENGINE could decode an author's .ogg/.mp3;
@@ -28,10 +29,62 @@ param(
     [int]      $TimeoutSeconds = 300,
     [int]      $InitTimeoutSeconds = 90,
     [switch]   $KeepOpen,
-    [switch]   $NoDeploy
+    [switch]   $NoDeploy,
+    # Proves the report half of this script - the only part that is arithmetic rather than a game -
+    # on a synthetic log, and exits. Nothing is launched, nothing is deployed.
+    [switch]   $SelfCheck
 )
 
 $ErrorActionPreference = 'Stop'
+
+# A command spends ONE bounded log call and puts the WHOLE text in a file it names on the last line
+# (Dev\ChunkedLog.cs:39 "the whole message is in", src\ContentToolMain.cs:465 "the whole output is in").
+# Reading only the Unity log therefore lost the middle of every long report - and the filter below,
+# which has no reason to match a path, dropped the very line naming the file, so the spill was
+# invisible from here. Follow it: the spill's full text joins the log's, and the log stays the
+# fallback when the file is gone (a cleared persistentDataPath, a run on another machine).
+function Get-GateLines {
+    param([string[]] $LogText, [string] $Phase)
+    $text = @($LogText)
+    foreach ($m in ($text | Select-String -Pattern '\.\.\. the whole (?:message|output) is in (.+?)\s*$')) {
+        $spill = $m.Matches[0].Groups[1].Value
+        if ($spill -eq 'Player.log') { continue }      # the file could not be written; the log IS the text
+        if (Test-Path -LiteralPath $spill) { $text += @(Get-Content -LiteralPath $spill) }
+        else { Write-Warning "${Phase}: the log names a spill that is not there: $spill" }
+    }
+    # VOID is in the pattern on purpose: a gate that could not answer must be visible here, or a run
+    # that measured nothing reads exactly like a run that measured everything.
+    # Strip the Unity log prefix ONLY - '[INFO] 34 (1,847): '. The old rule cut everything up to the
+    # last '| ', which silently ate the GATE NAME off every arm whose summary contains a pipe
+    # (U3a-refs, U4-wrote, U5-wrote): a FAIL there would have been printed as an anonymous fragment.
+    $text | Select-String -Pattern 'ct_autorun|PASS|FAIL|VOID|REFUSED|THREW|FAILURE' |
+        ForEach-Object { $_.Line -replace '^\[\w+\] \d+ \([^)]*\): ', '' }
+}
+
+if ($SelfCheck) {
+    $dir = Join-Path $env:TEMP ("ct-autogate-selfcheck-$PID")
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    try {
+        $spill = Join-Path $dir 'log-20260911-120000-123.txt'
+        Set-Content -LiteralPath $spill -Value @('head', 'U4-wrote | PASS deep in the middle', 'tail') -Encoding UTF8
+        $log = @('[INFO] 34 (1,847): ct_autorun: START',
+                 '[INFO] 34 (1,847): U1 PASS',
+                 'head',
+                 "... the whole message is in $spill",
+                 '[INFO] 34 (1,847): ct_autorun: DONE')
+        $got = @(Get-GateLines -LogText $log -Phase 'selfcheck')
+        if ($got -notcontains 'U4-wrote | PASS deep in the middle') {
+            throw "SELF-CHECK FAILURE: the spilled PASS line was not followed: $($got -join ' / ')" }
+        if ($got -notcontains 'U1 PASS' -or $got -notcontains 'ct_autorun: DONE') {
+            throw "SELF-CHECK FAILURE: the log's own lines were lost: $($got -join ' / ')" }
+        if (@(Get-GateLines -LogText @('... the whole output is in Player.log', '[INFO] 1 (1,1): U1 PASS') `
+              -Phase 'selfcheck' 3>$null) -notcontains 'U1 PASS') {
+            throw 'SELF-CHECK FAILURE: the could-not-spill fallback broke the report' }
+        Write-Host "AUTOGATE SELF-CHECK PASS, 3 check(s) - the report follows a spill and keeps the log"
+        exit 0
+    }
+    finally { Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue }
+}
 $modDir  = Join-Path $PPRoot 'Mods\ContentTool'
 $autorun = Join-Path $modDir 'autorun.txt'
 $exe     = Join-Path $PPRoot 'PhoenixPointWin64.exe'
@@ -139,13 +192,7 @@ $ok = $true
 for ($i = 0; $i -lt $results.Count; $i++) {
     Write-Host ''
     Write-Host "--- phase $($i + 1) ($($results[$i].Log)) ---"
-    # VOID is in the pattern on purpose: a gate that could not answer must be visible here, or a run
-    # that measured nothing reads exactly like a run that measured everything.
-    # Strip the Unity log prefix ONLY - '[INFO] 34 (1,847): '. The old rule cut everything up to the
-    # last '| ', which silently ate the GATE NAME off every arm whose summary contains a pipe
-    # (U3a-refs, U4-wrote, U5-wrote): a FAIL there would have been printed as an anonymous fragment.
-    Select-String -Path $results[$i].Log -Pattern 'ct_autorun|PASS|FAIL|VOID|REFUSED|THREW|FAILURE' |
-        ForEach-Object { $_.Line -replace '^\[\w+\] \d+ \([^)]*\): ', '' }
+    Get-GateLines -LogText (Get-Content -LiteralPath $results[$i].Log) -Phase "phase $($i + 1)"
     if (-not $results[$i].Found -or -not $results[$i].Build) { $ok = $false }
 }
 if (-not $ok) { exit 1 }
