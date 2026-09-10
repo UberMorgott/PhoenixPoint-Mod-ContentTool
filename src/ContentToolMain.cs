@@ -199,7 +199,13 @@ namespace Morgott.ContentTool
             Tactical.CreatureFit.Uninstall();
             Project.ModRoster.Uninstall();
             ConsoleBridge.Unregister();
-            log = null;
+            // NOT null: the field's invariant is "never null" (see its comment), and a background
+            // runner started before the switch (MusicWatch.Runner from ct_voices) can still finish
+            // after this and call Say(). An inner-less ChunkedLog drops the message to Player.log
+            // instead of throwing out of that runner's finally - the throw is what used to leak
+            // AsyncGate.Pending and the runner's GameObject. Logger must not outlive the mod, so the
+            // inner goes; this is the same state the field starts life in, before OnModEnabled.
+            log = new Dev.ChunkedLog(null);
         }
 
         /// <summary>
