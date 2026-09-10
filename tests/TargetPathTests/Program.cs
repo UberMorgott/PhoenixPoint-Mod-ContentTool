@@ -3270,25 +3270,32 @@ internal static class Program
     }
 
     /// <summary>
-    /// ============ S43: WHAT ONE Debug.Log CALL MAY CARRY ============
+    /// ============ S43: WHAT ONE COMMAND MAY PUT IN THE LOG ============
     /// The SECOND mesh limit, and the one S42 could not reach. The bench of 2026-09-10 bounded the
-    /// pane to 61 short lines and the pane STILL rendered blank, with exactly one
+    /// pane to 61 short lines and the pane STILL rendered blank, with one
     /// "Mesh can not have more than 65000 vertices" per `ct_list audio taunt` - one per run, not one
-    /// per line. The cause is not the pane: LlockhamIndustries.Misc.DebugManager subscribes to
-    /// Application.logMessageReceived (DebugManager.cs:37) and writes every message WHOLE into one
-    /// UnityEngine.UI.Text (DebugEntry.cs:39), a plain Text at 4 vertices per character, and the
-    /// spill branch handed it the entire ~26000-character report in a single call. A Graphic that
-    /// throws in UpdateGeometry aborts the whole CanvasUpdateRegistry batch, so the console's own
-    /// lines - queued in the same frame - never got geometry either. Arithmetic over a string again,
-    /// so it is decidable here; in game it is an empty rectangle and a stack trace with no author.
+    /// per line. The cause is not the pane: both of ModLogger's sinks take a message WHOLE into one
+    /// UnityEngine.UI.Text - the console line it instantiates (ModLogger.cs:22 ->
+    /// GameConsoleWindow.cs:238-253, whose ConsoleLine prefab carries a Shadow, doubling the mesh to
+    /// ~8 vertices per character) and the log overlay (ModLogger.cs:23 -> DebugManager.cs:37 ->
+    /// DebugEntry.cs:39, plain, 4 per character) - and the spill branch handed them the whole report.
+    ///
+    /// Splitting that report was NOT the fix. Neither sink accumulates; both are per CALL. The
+    /// 2026-09-11 bench (2e2c39f) chunked one verdict into 7 calls of <=8000 characters and still got
+    /// exactly 5 throws - one per call over the real ceiling, five separate Texts in one
+    /// CanvasUpdateRegistry batch - while the 4928-character call threw nothing. So the budget this
+    /// arm defends is per COMMAND: one call, under MaxLogChars, and the rest in a file.
+    /// Arithmetic over a string, so it is decidable here; in game it is an empty rectangle and a
+    /// stack trace with no author.
     /// </summary>
     private static void ConsoleLogArm()
     {
-        // 65000 vertices / 4 per character = 16250. The budget is that, halved, so the overlay's
-        // "Log : " and the loader's "[Mods] [com.morgott.ContentTool] " prefixes cannot eat the margin.
-        Check("S43-budget", ConsoleText.MaxLogChars * 4 <= 65000 / 2,
-              "one log call costs at most " + (ConsoleText.MaxLogChars * 4) +
-              " vertices, half of the 65000 UI.Text dies at");
+        // 65000 vertices / 8 per character (4 per glyph quad, doubled by the ConsoleLine Shadow)
+        // = 8125. The budget is well under that, so the loader's "[Mods] [com.morgott.ContentTool] "
+        // and the overlay's "Log : " prefixes cannot eat the margin.
+        Check("S43-budget", ConsoleText.MaxLogChars * 8 <= 65000,
+              "one log call costs at most " + (ConsoleText.MaxLogChars * 8) +
+              " vertices, inside the 65000 UI.Text dies at even with the Shadow doubling it");
 
         var b = new System.Text.StringBuilder();
         // The bench's own rows, to the column: two spaces, id padded to 10, name padded to 34,
@@ -3297,10 +3304,31 @@ internal static class Program
         for (int i = 0; i < 263; i++)
             b.AppendLine("  " + (100000000 + i).ToString().PadRight(10) + " " +
                          ("1CBMN_Taunt" + i).PadRight(34) + "Barks".PadRight(26) + "loose");
+        b.Append("ct_list: 263 of 7696");
         string report = b.ToString();
-        Check("S43-repro", report.Length * 4 > 65000,
+        Check("S43-repro", report.Length * 8 > 65000,
               "the bench's own ct_list report is " + report.Length +
-              " characters = " + (report.Length * 4) + " vertices in one Text, over the limit");
+              " characters = " + (report.Length * 8) + " vertices in one Text, over the limit");
+
+        // THE BUDGET PER COMMAND. Not "every message is legal" - one message, and the file has the rest.
+        bool spill;
+        string oneCall = ConsoleText.OneLogCall(report, out spill);
+        // 128 covers "\n... the whole message is in <path>"; OneLogCall reserves TrailerRoom for it.
+        Check("S43-one", spill && oneCall.Length + 128 <= ConsoleText.MaxLogChars,
+              "a whole command's report reaches the log as ONE call of " + oneCall.Length +
+              " characters = " + (oneCall.Length * 8) + " vertices, trailer included, and the caller is " +
+              "told it must spill the rest");
+        string[] shown = oneCall.Split('\n');
+        Check("S43-one-verdict", shown[shown.Length - 1] == "ct_list: 263 of 7696",
+              "with the verdict - the line the command was run for - still the last thing in it");
+        bool marked = false;
+        foreach (string line in shown) if (line.StartsWith("... ") && line.EndsWith(" line(s) not shown")) marked = true;
+        Check("S43-one-marker", marked && shown.Length <= ConsoleText.MaxLines + 1,
+              "and the gap named rather than silent, in at most " + (ConsoleText.MaxLines + 1) +
+              " lines, not " + shown.Length);
+        string small = ConsoleText.OneLogCall("ct_version 1.2.0.0", out spill);
+        Check("S43-one-short", !spill && small == "ct_version 1.2.0.0",
+              "a one-line verdict is unaltered and needs no file: " + small);
 
         List<string> parts = ConsoleText.LogChunks(report);
         int longest = 0, mid = 0;
@@ -3314,9 +3342,11 @@ internal static class Program
             if (!part.StartsWith("(part " + (++mid) + "/" + parts.Count + ")\n")) head = -2;
             joined.Append(head >= 0 ? part.Substring(head + 1) : "<UNMARKED>");
         }
+        // The SAFETY NET, not the normal path: ChunkedLog falls back to this only when the spill file
+        // could not be written, because then the split is the only place the text can still go.
         Check("S43-split", parts.Count > 1 && longest <= ConsoleText.MaxLogChars,
-              "it reaches Player.log as " + parts.Count + " calls, longest " + longest +
-              " characters = " + (longest * 4) + " vertices");
+              "with no file to spill to it reaches Player.log as " + parts.Count + " calls, longest " +
+              longest + " characters = " + (longest * 8) + " vertices");
         Check("S43-whole", joined.ToString() == report,
               "and nothing is lost: strip the (part i/n) headers and the pieces concatenate back to " +
               "the report byte for byte");

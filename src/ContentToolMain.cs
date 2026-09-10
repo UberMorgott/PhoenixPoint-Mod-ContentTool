@@ -443,10 +443,13 @@ namespace Morgott.ContentTool
             /// GameConsoleWindow's own dispatcher reaches it), so the pane must not be filled at all.
             ///
             /// And that was still not enough, because the pane was never the only mesh in the frame:
-            /// the SPILL branch below used to hand Player.log the whole report in one Debug.Log, which
-            /// the game's own log overlay concentrates into a single UI.Text (Dev.ConsoleText.MaxLogChars
-            /// carries the proof). One throw there aborts the canvas rebuild for everything, so the
-            /// short legal lines written just above rendered as nothing. Say() bounds that call now.
+            /// the SPILL branch below used to ALSO hand the mod logger the whole report, and both of
+            /// that logger's sinks put a whole message in one UI.Text (Dev.ConsoleText.MaxLogChars
+            /// carries the proof). Chunking it did not close it either - 7 legal calls were still 5
+            /// over-budget Graphics in one frame on 2026-09-11. It is simply not logged any more: the
+            /// pane's own WriteLineWithColor mirrors every line it showed into Player.log by itself
+            /// (AppendToLogFile, GameConsoleWindow.cs:266), and what the pane could not take is in the
+            /// spill file, whose path is the last line the pane is given.
             /// </summary>
             private static void WriteLines(IConsole console, string msg)
             {
@@ -455,13 +458,11 @@ namespace Morgott.ContentTool
                 foreach (string line in lines) console.WriteLine("{0}", line);
                 if (dropped <= 0 && !Dev.ConsoleText.Clipped(msg)) return;
                 // Nothing is allowed to disappear: whatever the pane could not take goes to a file
-                // whole, and to Player.log, and the pane is told where. The console writes what it DID
-                // show to Console.log by itself (AppendToLogFile).
+                // whole and the pane is told where. If the file cannot be written the log is the only
+                // place left, and Say() bounds and spills that call on its own.
                 string spilled = Spill("console", msg);
-                console.WriteLine("{0}", spilled != null
-                    ? "... the whole output is in " + spilled
-                    : "... the whole output is in Player.log");
-                Say(msg);
+                if (spilled == null) { console.WriteLine("{0}", "... the whole output is in Player.log"); Say(msg); return; }
+                console.WriteLine("{0}", "... the whole output is in " + spilled);
             }
 
             [ConsoleCommand(Command = "ct_version", Description = "ContentTool: version, and whether the merged AssetsTools.NET and the embedded classdata.tpk are present.")]
