@@ -285,18 +285,16 @@ namespace Morgott.ContentTool
         /// Named by prefix and timestamp: what the console pane cannot take is "console", and a
         /// command that knows its own name (ct_list audio) passes it so the file can be found later.
         /// Failure to write one is not a failure of the command - the caller gets null and says so.
+        /// The naming and the create-never-overwrite rule live in <see cref="Dev.SpillFile"/>, which
+        /// is UnityEngine-free so the collision rule can be proven offline; this method is the one
+        /// thing that needs a player: where persistentDataPath is.
         /// </summary>
         internal static string Spill(string prefix, string msg)
         {
             try
             {
-                string dir = Path.Combine(Path.Combine(
-                    UnityEngine.Application.persistentDataPath, "ContentTool"), "Logs");
-                Directory.CreateDirectory(dir);
-                string path = Path.Combine(dir, prefix + "-" +
-                    DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".txt");
-                File.WriteAllText(path, msg ?? "");
-                return path;
+                return Dev.SpillFile.Write(Path.Combine(Path.Combine(
+                    UnityEngine.Application.persistentDataPath, "ContentTool"), "Logs"), prefix, msg);
             }
             catch (Exception) { return null; }
         }

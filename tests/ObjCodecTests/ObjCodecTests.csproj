@@ -34,6 +34,11 @@
     <Compile Include="BinderFrozen.cs" />
     <Compile Include="DecisionGolden.cs" />
     <Compile Include="AliasTests.cs" />
+    <!-- The spill NAMER carries no UnityEngine type on purpose (ContentToolMain keeps the one line
+         that needs a player), so "a spill never lands on another spill" is proven on 200 real files
+         here rather than by losing a report in a game session. -->
+    <Compile Include="..\..\src\Dev\SpillFile.cs" Link="SpillFile.cs" />
+    <Compile Include="SpillTests.cs" />
     <Compile Include="..\..\src\IO\AtomicFile.cs" Link="AtomicFile.cs" />
     <Compile Include="..\..\src\Project\Manifest.cs" Link="Manifest.cs" />
     <Compile Include="ManifestTests.cs" />
