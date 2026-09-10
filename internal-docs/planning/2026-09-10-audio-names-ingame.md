@@ -310,3 +310,75 @@ Process stopped by the path filter (`Path -like 'D:\PP-Instance2\*'`); `ppcli-en
 profile untouched. `ct_project Sample` re-baked into
 `…\ContentTool\Patched\d29f58a2\morgott.sample\` and left there. Log kept at
 `D:\PP-Instance2\ct-recheck2-0911.log`.
+
+---
+
+# Re-check 3 (`47e757e`) — 2026-09-11
+
+Same bench `D:\PP-Instance2`, profile `76561197996210592`, main menu only. `dotnet build -c Release`
+then the repo's own `deploy.ps1`; `D:\PP-Instance2\Mods\ContentTool\ContentTool.dll` 1 991 680 B,
+SHA-256 `2A4B871FE944412C60AE68CFB5E0135288FB6F3FC06CECF75DC98C8B51F53A09`, byte-identical to
+`bin\Release\ContentTool\ContentTool.dll`. Banner
+`ContentTool 1.2.0.0 | build=c0b5d02a | AssetsTools.NET merged: True | classdata.tpk embedded: 289605 B`.
+PPBridge NOT redeployed (`build=69a823ae`, no `stale:true`). Registration again at frame 5 (0,384 s).
+Real pane driven by the `GameConsoleWindow.Create` -> `DisableConsoleAccess=false` ->
+`ToggleVisibility` -> `ExecuteCommandLine` recipe. Logs `D:\PP-Instance2\ct-recheck3-0911.log`
+(console run) and `D:\PP-Instance2\ct-recheck3-startup.log` (startup run).
+
+## (1) `ct_version` / `ct_project Sample` / `ct_version` — PASS, trailer included
+
+The pane renders the whole bounded verdict AND the spill trailer, which re-check 2 was still losing.
+Verbatim tail on screen (`docs\console-ct_project.png`, crop `docs\crop-top.png`):
+
+```
+... 21 line(s) not shown
+extract: 1 stream(s), 0 rewritten | AddBasePath(D:\PP-Instance2\Mods\ContentTool\WwiseAudio\): AK_Success | 3338666242: cached
+BANK PASS assets/morgott.sample/audio/banks/morgott_sample.bnk -> UnloadBank: AK_UnknownBankID | LoadBankMemoryCopy: AK_Success bankId=157178304
+ct_project: 1 FAILURE(S)
+... the whole output is in C:/Users/Morgott/AppData/LocalLow/Snapshot Games Inc/Phoenix Point\ContentTool\Logs\console-20260911-005758-690.txt
+ContentTool 1.2.0.0 | build=c0b5d02a | ...
+```
+
+Spill file `…\ContentTool\Logs\console-20260911-005758-690.txt` exists, **47 149 B / 81 lines**
+(= the 60 shown + the 21 not shown), last line `ct_project: 1 FAILURE(S)` — the full verdict.
+
+## (2) Mesh exceptions — PASS, **0** (was 5, was 6)
+
+`Mesh can not have more than 65000 vertices`: **0** in the whole console run. `Exception` anywhere in
+that log: **0**. Bounding the whole command to ONE message finished what per-message chunking started.
+
+## (3) `ct_list audio taunt` — PASS, unchanged
+
+`263 of 7696 media match 'taunt' - 258 loose (extractable), 5 in-bank (not extractable)`, 10 rows
+(`32151022 1CBMN_Taunt1 … loose` first, `727362411 1f_IND_Taunt_2` last), trailer
+`... 253 more - the whole list is in …\ct_list-audio-…txt`. Mesh count did not move (still 0).
+
+## (4) Startup path (`OnModEnabled` bake) — PASS
+
+`Wizard.ApocDesignation` was **NOT** in the bench profile's `MOD_ACTIVATED` (first run logged
+`Wizard.ApocDesignation: skipped, disabled in the mod manager`), so the array was edited by hand
+(7 -> 8 entries, `ArrayDimensions.CollectionValues` bumped to match; backup
+`Options.jopt.bak-recheck3`) and the game restarted.
+
+The bake's whole transcript reached the log as ONE `Debug.Log` (one `(Filename: …Debug.bindings.h)`
+trailer), bounded exactly like a command:
+
+```
+... 11 line(s) not shown
+copies ready in …\ContentTool\Patched\d29f58a2\Wizard.ApocDesignation - nothing to install: ticking …
+ct_project: 1 FAILURE(S) - 1 warning(s), baked anyway
+NOT APPLIED: patching the shipped bundle(s) reported 1 failure(s), named in the P0/REFUSED line(s) above; …
+... the whole message is in C:/Users/Morgott/AppData/LocalLow/Snapshot Games Inc/Phoenix Point\ContentTool\Logs\log-20260911-010031-953.txt
+```
+
+Spill file 8 576 B / **31 lines** (20 shown + 11 not shown). Startup log: **0** mesh throws,
+**0** `Exception`. (The `1 FAILURE(S)` is the pre-existing P4 one-triangle-part warning on
+`chr_px_hvy_ts_m_v01`, not a logging defect.)
+
+## Bench state at exit
+
+Process stopped by the path filter (`Path -like 'D:\PP-Instance2\*'`); `ppcli-enabled` deleted.
+Profile CHANGED on purpose: `Wizard.ApocDesignation` left ON in `MOD_ACTIVATED` (backup kept beside
+it). `ct_project Sample` re-baked into `…\Patched\d29f58a2\morgott.sample\`, and the Apoc bake wrote
+`…\Patched\d29f58a2\Wizard.ApocDesignation\px_heavy_assets_all.bundle` (124 027 774 B); both left in
+place. Both logs kept.
