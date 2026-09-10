@@ -44,7 +44,7 @@ shows both locations so you can see the boundary.
    Read the media ID from a matching row:
 
    ```text
-     6372602    5_IND_Taunt_03                    VoiceBank                 loose
+     6372602    5_IND_Taunt_03                    Barks                     loose
    ```
 
    Extract it and listen to the WAV:
@@ -60,8 +60,12 @@ shows both locations so you can see the boundary.
    ```
 
    Find the output in `%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\Extracted\audio\`.
-   Allow a few minutes for 3105 decodes; you get progress every 200 files.
+   In-game, the whole library took 124 s and produced 3.2 GB of WAVs:
+   `extracted 3105 of 3105 loose media (4591 in-bank skipped)`.
+   You get progress every 200 files.
    Add a filter with `ct_extract audio --all taunt` to decode only matching loose media.
+   In-game, this took 4.4 s:
+   `extracted 258 of 258 loose media (5 in-bank skipped) into <dir>`.
    A failed decode is counted and named; it does not stop the run.
 
    You can extract the 3105 `loose` media from their `.wem` files.
@@ -79,12 +83,17 @@ shows both locations so you can see the boundary.
    If the XML is missing or unreadable, the header ends with ` - NO NAMES: <reason>` and names
    fall back to numbers.
 
-   The console pane shows at most 60 lines. Read the full uncapped list in the spill file named
-   by the console: `<persistentDataPath>\ContentTool\Logs\console-<stamp>.txt`.
-   The header reports `N of M media match 'taunt' - X loose (extractable), Y in-bank (not extractable)`.
+   The pane shows the first 10 rows and then names a file; the WHOLE list is always written to ContentTool\Logs\ct_list-audio-<stamp>.txt, and a capture such as PPCLI still receives every row.
+   The pane shows the header before those rows. The file contains the header and every row at
+   `<persistentDataPath>\ContentTool\Logs\ct_list-audio-<stamp>.txt`, even when 10 or fewer media match.
+   For 70 matches, the trailer is `... 60 more - the whole list is in <path>`;
+   for 10 or fewer, it is `... the whole list is in <path>`.
+   In-game, `ct_list audio taunt` reports
+   `263 of 7696 media match 'taunt' - 258 loose (extractable), 5 in-bank (not extractable)`.
+   To filter by bank, use `ct_list audio Barks`.
 
-   Use `index.csv` to search all 7692 media, including in-bank entries; its columns are
-   `id,shortName,bank,loose,wav`. The name map has 7691 named media.
+   Use `index.csv` to search all 7696 media, including in-bank entries; its columns are
+   `id,shortName,bank,loose,wav`. The `loose` column holds `yes`/`no`.
    The bulk run ends with `extracted N of M loose media (K in-bank skipped) into <dir>`.
    Your extracted `.wem` keeps its numeric filename. The WAV uses `<ShortName>__<id>.wav`:
    remove `.wav` from ShortName, replace invalid filename characters with `_`, trim it and limit
