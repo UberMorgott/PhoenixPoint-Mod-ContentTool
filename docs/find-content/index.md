@@ -47,16 +47,22 @@ For one animation clip, inspect its serialised fields:
 ct_list clip <bundleFile> <clipName>
 ```
 
-## Find loose media or definitions
+## Find media or definitions
 
 ```text
 ct_list videos <nameFilter>
-ct_list audio <nameFilter>
+ct_list audio [filter]
 ct_list defs <nameFilter> [typeFilter]
 ```
 
-Videos and Wwise media are loose files, not bundle assets. Definitions are live game defs. Do not
-put a video name into a bundle field because no such bundle exists.
+Use `ct_list audio [filter]` to find media by name, ID or bank; the filter is a case-insensitive
+substring. ContentTool 1.2.1 reads names from the game's `SoundbanksInfo.xml` and lists
+`<id>  <name>  <bank>  loose|in-bank`. You can extract `loose` media; you can only list `in-bank` media.
+The pane shows at most 60 lines; read the full list in the spill file the console names:
+`<persistentDataPath>\ContentTool\Logs\console-<stamp>.txt`.
+
+Videos are loose files; Wwise media can also live inside soundbanks. Definitions are live game defs.
+Do not put a video name into a bundle field because no such bundle exists.
 
 ## Extract an editable starting point
 
@@ -64,8 +70,13 @@ put a video name into a bundle field because no such bundle exists.
 ct_extract tex <bundleFile> <assetName>
 ct_extract mesh <bundleFile> <assetName>
 ct_extract video <name>
-ct_extract audio <wemName>
+ct_extract audio <mediaId>
+ct_extract audio --all [filter]
 ```
+
+Use the media ID from a `.wem` filename, not an `AK.Wwise.Event` ID; see [find a sound](../recipes/sounds.md#steps).
+Extract one audio file as the numeric `.wem` byte for byte plus a `.wav` named after the sound.
+Use `--all [filter]` to decode matching loose media to `<ShortName>__<id>.wav` and write `index.csv` for all media, including in-bank entries.
 
 A successful texture or mesh extraction starts with `ct_extract wrote <path>`. Extracted files go
 under:
@@ -75,7 +86,7 @@ under:
   Extracted\
     <bundle-name>\            <- texture PNGs and mesh GLBs
     videos\                   <- copied WEBM files
-    audio\                    <- copied WEM plus decoded WAV when supported
+    audio\                    <- numeric WEM, named WAV; index.csv with --all
 ```
 
 Extraction does not put the file into a project. Copy the edited result into the source folder named

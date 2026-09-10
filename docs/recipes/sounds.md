@@ -7,8 +7,8 @@ new event; content alone cannot decide when to play.
 ## What you need before you start
 
 - WAV, OGG or MP3 sources. FLAC, M4A/AAC, WMA and Opus are not accepted.
-- For Replace: the numeric media ID Phoenix Point owns. `ct_extract audio` accepts a shipped WEM
-  name and writes both the WEM and a decoded WAV for comparison.
+- For Replace: the numeric media ID Phoenix Point owns. `ct_extract audio <mediaId>` writes the numeric `.wem` byte for byte
+  plus a `.wav` named after the sound for comparison.
 - For Add: a unique file stem and a [behaviour DLL](behavior-dll.md) that loads/posts the event.
 - Short replacement audio that suits the event. Replacement banks preserve the target's loop
   policy; an accidental long loop is still an accidental long loop.
@@ -35,13 +35,63 @@ shows both locations so you can see the boundary.
 
 ## Steps
 
-1. For a replacement, identify and optionally extract the shipped media. `ct_list audio` filters the
-   shipped audio index; use the numeric ID it prints:
+1. In ContentTool 1.2.1, find a sound by name:
 
    ```text
-   ct_list audio confirm
-   ct_extract audio 633458426
+   ct_list audio taunt
    ```
+
+   Read the media ID from a matching row:
+
+   ```text
+     6372602    5_IND_Taunt_03                    VoiceBank                 loose
+   ```
+
+   Extract it and listen to the WAV:
+
+   ```text
+   ct_extract audio 6372602
+   ```
+
+   Or dump all loose media once, then search `index.csv` or the WAV filenames on disk:
+
+   ```text
+   ct_extract audio --all
+   ```
+
+   Find the output in `%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\Extracted\audio\`.
+   Allow a few minutes for 3105 decodes; you get progress every 200 files.
+   Add a filter with `ct_extract audio --all taunt` to decode only matching loose media.
+   A failed decode is counted and named; it does not stop the run.
+
+   You can extract the 3105 `loose` media from their `.wem` files.
+   You can list the 4591 `in-bank` media inside `.bnk` soundbanks, but you cannot extract them.
+
+   Use the Wwise media ID from a loose `.wem` filename for extraction and replacement.
+   If your ID comes from a def's `AK.Wwise.Event` or a Wwise tool, check its type: an event ID is
+   an FNV hash of the event name, is never a loose filename, and cannot be used with ContentTool;
+   search the event's name in `ct_list audio` instead.
+
+   ContentTool reads names at runtime from
+   `<install>\PhoenixPointWin64_Data\StreamingAssets\Audio\GeneratedSoundBanks\Windows\SoundbanksInfo.xml`.
+   The XML maps media and events to names; the list shows media only, with named entries first,
+   in alphabetical order. Your filter matches a case-insensitive substring of the name, ID or bank.
+   If the XML is missing or unreadable, the header ends with ` - NO NAMES: <reason>` and names
+   fall back to numbers.
+
+   The console pane shows at most 60 lines. Read the full uncapped list in the spill file named
+   by the console: `<persistentDataPath>\ContentTool\Logs\console-<stamp>.txt`.
+   The header reports `N of M media match 'taunt' - X loose (extractable), Y in-bank (not extractable)`.
+
+   Use `index.csv` to search all 7692 media, including in-bank entries; its columns are
+   `id,shortName,bank,loose,wav`. The name map has 7691 named media.
+   The bulk run ends with `extracted N of M loose media (K in-bank skipped) into <dir>`.
+   Your extracted `.wem` keeps its numeric filename. The WAV uses `<ShortName>__<id>.wav`:
+   remove `.wav` from ShortName, replace invalid filename characters with `_`, trim it and limit
+   it to 80 characters before the suffix. Unnamed media use `<id>.wav`.
+
+   For your replacement, use your chosen media ID in the manifest and the numeric bank filename.
+   The remaining example uses `633458426`.
 
 2. Name your replacement file `sting_confirm.mp3` and put it directly in
    `Content\Audio\Replace`. For an added sound, name it `blip_rise.wav` and put it directly in
