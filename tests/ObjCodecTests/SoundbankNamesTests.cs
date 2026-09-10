@@ -25,8 +25,8 @@ internal static class SoundbankNamesTests
     private static int checks;
 
     /// <summary>
-    /// 6 media across 2 banks plus one event: id 100 is streamed (loose, and claimed by VoiceBank only
-    /// through ReferencedStreamedFiles), 200 is repeated inside an Event and again in the bank body,
+    /// 6 media across 2 banks plus one event: id 100 is streamed (loose, and claimed by BOTH banks, only
+    /// through their ReferencedStreamedFiles), 200 is repeated inside an Event and again in the bank body,
     /// 201 is named with characters no file name may carry, and 300/301/302 live in a second bank.
     /// </summary>
     private const string Fixture = @"<?xml version=""1.0"" encoding=""utf-8""?>
@@ -80,6 +80,12 @@ internal static class SoundbankNamesTests
         <File Id=""301"" Language=""SFX""><ShortName>Combat_Theme.wav</ShortName><Path>SFX\c.wem</Path></File>
         <File Id=""302"" Language=""SFX""><ShortName>Menu_Theme.wav</ShortName><Path>SFX\m.wem</Path></File>
       </IncludedMemoryFiles>
+      <ReferencedStreamedFiles>
+        <File Id=""100"" Language=""SFX"">
+          <ShortName>6_IND_Taunt_02.wav</ShortName>
+          <Path>SFX\6_IND_Taunt_02_AAAA1111.wem</Path>
+        </File>
+      </ReferencedStreamedFiles>
     </SoundBank>
   </SoundBanks>
 </SoundBanksInfo>";
@@ -103,8 +109,9 @@ internal static class SoundbankNamesTests
 
         // ---- the bank column, including the one case that fills it late
         Check(n.Bank(300) == "MusicBank" && n.Bank(200) == "VoiceBank", "a bank's own ShortName lands on its media");
-        Check(n.Bank(100) == "VoiceBank",
-              "a STREAMED media gets its bank from ReferencedStreamedFiles, not from where it was first seen");
+        Check(n.Bank(100) == "VoiceBank+MusicBank",
+              "a STREAMED media gets its banks from ReferencedStreamedFiles, not from where it was first seen, " +
+              "and a media SEVERAL banks carry keeps them all (got '" + n.Bank(100) + "')");
 
         // ---- what is on disk vs what the XML names: 100 and 201 are loose, 999 is a file no XML mentions,
         //      readme is a loose file whose name is not a number at all, and 200/300/301/302 are in-bank.
@@ -125,8 +132,22 @@ internal static class SoundbankNamesTests
         Check(Marked(taunt, "in-bank") == 1 && Marked(taunt, "loose") == 1,
               "the filtered listing keeps the loose/in-bank marking");
         Check(Rows(n.Report(loose, "301")) == 1, "an id still filters, for the caller who already has one");
-        Check(Rows(n.Report(loose, "musicbank")) == 3, "a BANK name filters to that bank's media");
-        Check(Rows(n.Report(loose, "MUSICbank")) == 3, "the filter is case-insensitive");
+        Check(Rows(n.Report(loose, "musicbank")) == 4, "a BANK name filters to that bank's media");
+        Check(Rows(n.Report(loose, "MUSICbank")) == 4, "the filter is case-insensitive");
+
+        // ---- A MEDIA IN SEVERAL BANKS. Filing it under the FIRST bank only lost it for every other
+        //      bank's filter: measured on the shipped file, `ct_list audio TutorialCinematics` answered 0
+        //      although that bank holds 4 media - each recorded under Cinematics, which was seen first.
+        Check(n.Matches(100, "100", "MusicBank") && n.Matches(100, "100", "VoiceBank"),
+              "EITHER bank of a multi-bank media matches, not just the one that was seen first");
+        Check(!n.Matches(100, "100", "VoiceBank+Music"),
+              "each bank is matched on its own - a filter cannot span the '+' that joins two of them");
+        Check(Marked(n.Report(loose, "MusicBank"), "loose") == 1,
+              "the later bank's filter reaches the LOOSE media, so `ct_extract audio --all` stops skipping it");
+        Check(n.Report(loose, "6_IND_Taunt_02").Contains("VoiceBank+MusicBank"),
+              "the row shows every bank, joined with '+'");
+        Check(n.Report(loose, "301").Contains("  301" + Sp(8) + "Combat_Theme" + Sp(22) + "MusicBank" + Sp(17) + "in-bank"),
+              "a SINGLE-bank row is byte-identical to before: id, name, bank, marking in fixed columns");
         Check(Rows(n.Report(loose, "readme")) == 1, "a loose file's own name still filters when nothing names it");
         Check(Rows(n.Report(loose, "nothing-is-called-this")) == 0, "a filter that matches nothing prints no rows");
         Check(n.InBankMatches(loose, "taunt") == 1 && n.InBankMatches(loose, null) == 4,
@@ -155,8 +176,8 @@ internal static class SoundbankNamesTests
         string[] lines = csv.TrimEnd('\n').Split('\n');
         Check(lines[0] == "id,shortName,bank,loose,wav", "the header names the five columns");
         Check(lines.Length == 9, "one row per media, in-bank included (got " + (lines.Length - 1) + ")");
-        Check(csv.Contains("100,6_IND_Taunt_02.wav,VoiceBank,yes,6_IND_Taunt_02__100.wav"),
-              "a written media carries the .wav that was actually produced for it");
+        Check(csv.Contains("100,6_IND_Taunt_02.wav,VoiceBank+MusicBank,yes,6_IND_Taunt_02__100.wav"),
+              "a written media carries the .wav that was actually produced for it, and every bank that holds it");
         Check(csv.Contains("300,Geoscape_Theme.wav,MusicBank,no,"),
               "an in-bank media is in the map, marked not loose, with no .wav");
         Check(csv.Contains("201,\"Confirm: Yes/No, ok.wav\",VoiceBank,yes,"),
@@ -190,8 +211,8 @@ internal static class SoundbankNamesTests
 
         string real = Real();
         Directory.Delete(dir, true);
-        return "SOUNDBANK names PASS, " + checks + " check(s) - fixture: 6 media, 2 banks, " +
-               "loose/in-bank marked, missing + truncated XML survived" + real;
+        return "SOUNDBANK names PASS, " + checks + " check(s) - fixture: 6 media, 2 banks, one media in " +
+               "BOTH, loose/in-bank marked, missing + truncated XML survived" + real;
     }
 
     /// <summary>
@@ -242,6 +263,9 @@ internal static class SoundbankNamesTests
             if (line.StartsWith("  ") && line.TrimEnd().EndsWith(marking)) n++;
         return n;
     }
+
+    /// <summary>Column padding, spelled out so a hand-counted literal cannot drift off by one.</summary>
+    private static string Sp(int n) { return new string(' ', n); }
 
     private static void Check(bool ok, string what)
     {

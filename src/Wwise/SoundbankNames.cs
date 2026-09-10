@@ -33,8 +33,14 @@ namespace Morgott.ContentTool.Wwise
     {
         internal struct Media
         {
-            internal string ShortName;   // as the XML spells it, e.g. "6_IND_Taunt_02.wav"
-            internal string Bank;        // "" for a streamed media no bank claims
+            internal string ShortName;      // as the XML spells it, e.g. "6_IND_Taunt_02.wav"
+            internal List<string> Banks;    // EVERY bank that carries it, first-seen order; empty when none does
+        }
+
+        /// <summary>The banks as one column: "Cinematics+TutorialCinematics", or "" when no bank claims it.</summary>
+        private static string Join(List<string> banks)
+        {
+            return banks == null || banks.Count == 0 ? "" : string.Join("+", banks.ToArray());
         }
 
         private readonly Dictionary<uint, Media> byId = new Dictionary<uint, Media>();
@@ -120,20 +126,21 @@ namespace Morgott.ContentTool.Wwise
             }
         }
 
-        /// <summary>First name wins; a bank column is filled the first time some bank claims the media.</summary>
+        /// <summary>
+        /// First name wins; EVERY bank that claims the media is kept. Keeping only the first one lost
+        /// the media for any other bank's filter - `ct_list audio TutorialCinematics` answered 0 while
+        /// that bank holds 4 media, because each was recorded under whichever bank was seen first.
+        /// The list is a reference inside the struct on purpose: a later claim appends without a re-store.
+        /// </summary>
         private void Add(uint id, string shortName, string bank)
         {
             Media m;
-            if (byId.TryGetValue(id, out m))
+            if (!byId.TryGetValue(id, out m))
             {
-                if (string.IsNullOrEmpty(m.Bank) && !string.IsNullOrEmpty(bank))
-                {
-                    m.Bank = bank;
-                    byId[id] = m;
-                }
-                return;
+                m = new Media { ShortName = shortName, Banks = new List<string>() };
+                byId[id] = m;
             }
-            byId[id] = new Media { ShortName = shortName, Bank = bank ?? "" };
+            if (!string.IsNullOrEmpty(bank) && !m.Banks.Contains(bank)) m.Banks.Add(bank);
         }
 
         internal bool TryGet(uint id, out Media m) { return byId.TryGetValue(id, out m); }
@@ -154,10 +161,11 @@ namespace Morgott.ContentTool.Wwise
             return byId.TryGetValue(id, out m) ? m.ShortName ?? "" : "";
         }
 
+        /// <summary>Every bank carrying the media, joined with '+', or "" when none does.</summary>
         internal string Bank(uint id)
         {
             Media m;
-            return byId.TryGetValue(id, out m) ? m.Bank ?? "" : "";
+            return byId.TryGetValue(id, out m) ? Join(m.Banks) : "";
         }
 
         /// <summary>The id a loose .wem's file name spells, or 0 when the name is not a number.</summary>
@@ -174,9 +182,10 @@ namespace Morgott.ContentTool.Wwise
 
         /// <summary>
         /// The one filter rule both the listing and the bulk extract use: a case-insensitive substring
-        /// against the sound's NAME, its id, or its bank. Matching the name is the whole point - the
-        /// filter used to be the file name, which for these files is a number, so "confirm" matched
-        /// nothing that exists.
+        /// against the sound's NAME, its id, or ANY of its banks. Matching the name is the whole point -
+        /// the filter used to be the file name, which for these files is a number, so "confirm" matched
+        /// nothing that exists. Each bank is tested on its own, never the joined column: a filter is a
+        /// bank name, and it must not be able to match across the '+' that separates two of them.
         /// </summary>
         internal bool Matches(uint id, string fileStem, string filter)
         {
@@ -184,7 +193,11 @@ namespace Morgott.ContentTool.Wwise
             if (Has(fileStem, filter)) return true;
             Media m;
             if (id == 0 || !byId.TryGetValue(id, out m)) return false;
-            return Has(m.ShortName, filter) || Has(m.Bank, filter);
+            if (Has(m.ShortName, filter)) return true;
+            if (m.Banks != null)
+                foreach (string b in m.Banks)
+                    if (Has(b, filter)) return true;
+            return false;
         }
 
         /// <summary>
@@ -236,7 +249,7 @@ namespace Morgott.ContentTool.Wwise
                     Id = e.Key,
                     Stem = e.Key.ToString(CultureInfo.InvariantCulture),
                     Name = Name(e.Key),
-                    Bank = e.Value.Bank ?? "",
+                    Bank = Join(e.Value.Banks),
                     Loose = loose.Contains(e.Key),
                 });
             foreach (uint id in loose)
