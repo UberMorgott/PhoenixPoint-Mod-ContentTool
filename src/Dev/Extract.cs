@@ -57,7 +57,7 @@ namespace Morgott.ContentTool.Dev
             if (what == "videos")
                 return LooseFiles.Report(VideoRoot, ".webm", args.Length > 1 ? args[1] : null, 60);
             if (what == "audio")
-                return LooseFiles.Report(AudioRoot, ".wem", args.Length > 1 ? args[1] : null, 60);
+                return AudioList(args.Length > 1 ? args[1] : null);
             if (what == "defs")
                 return Defs(args.Length > 1 ? args[1] : null, args.Length > 2 ? args[2] : null);
             // AssetIndex.FindUnique answers a misspelled or an ambiguous name by THROWING, which the
@@ -76,7 +76,7 @@ namespace Morgott.ContentTool.Dev
             }
             catch (InvalidOperationException ex) { return "ct_list REFUSED - " + ex.Message; }
             return "usage: ct_list bundles [nameFilter] | ct_list assets <bundleFile> [typeFilter] [nameFilter]" +
-                   " | ct_list videos [nameFilter] | ct_list audio [nameFilter]" +
+                   " | ct_list videos [nameFilter] | ct_list audio [filter] (name, id or bank)" +
                    " | ct_list defs <nameFilter> [typeFilter]" +
                    " | ct_list bones <bundleFile> <meshName> [nameFilter]" +
                    " | ct_list props <bundleFile> <materialName>" +
@@ -260,9 +260,13 @@ namespace Morgott.ContentTool.Dev
             if (verb == "tex" && args.Length > 2) return Texture(args[1], args[2]);
             if (verb == "mesh" && args.Length > 2) return Mesh(args[1], args[2]);
             if (verb == "video" && args.Length > 1) return Video(args[1]);
-            if (verb == "audio" && args.Length > 1) return Audio(args[1]);
+            if (verb == "audio" && args.Length > 1)
+                return string.Equals(args[1], "--all", StringComparison.OrdinalIgnoreCase)
+                    ? AudioAll(args.Length > 2 ? args[2] : null)
+                    : Audio(args[1]);
             return "usage: ct_extract tex <bundleFile> <assetName> | ct_extract mesh <bundleFile> <assetName>" +
-                   " | ct_extract video <name> | ct_extract audio <wemName> | ct_extract gate";
+                   " | ct_extract video <name> | ct_extract audio <mediaId> | ct_extract audio --all [filter]" +
+                   " | ct_extract gate";
         }
 
         /// <summary>The shipped Wwise media - 3105 loose .wem, in no bundle either.</summary>
@@ -271,18 +275,61 @@ namespace Morgott.ContentTool.Dev
             get { return Path.Combine(Application.streamingAssetsPath, "Audio"); }
         }
 
+        /// <summary>The game's own media name map. Missing is survivable - see SoundbankNames.</summary>
+        private static string SoundbanksXml
+        {
+            get
+            {
+                return Path.Combine(Path.Combine(Path.Combine(AudioRoot, "GeneratedSoundBanks"), "Windows"),
+                                    "SoundbanksInfo.xml");
+            }
+        }
+
+        private static SoundbankNames Names { get { return SoundbankNames.Cached(SoundbanksXml); } }
+
+        /// <summary>
+        /// The loose .wem as bare file names - which, for these, is their media id. The paths stay
+        /// relative to the root because the shipped files sit under GeneratedSoundBanks\Windows\, not
+        /// in the Audio folder itself.
+        /// </summary>
+        private static List<string> Stems(List<string> relPaths)
+        {
+            var stems = new List<string>(relPaths.Count);
+            foreach (string rel in relPaths) stems.Add(Path.GetFileNameWithoutExtension(rel));
+            return stems;
+        }
+
+        /// <summary>
+        /// Every shipped sound, BY NAME. The loose .wem are named by their Wwise media id and nothing
+        /// else, so the old listing printed 3105 numbers, cut at 60, and its filter (a file-name
+        /// substring) could not match a word a human would type. The names come off the game's own
+        /// SoundbanksInfo.xml, and the in-bank media are listed too - marked, since those cannot be
+        /// extracted - because finding the id a NAME belongs to is the whole point.
+        /// </summary>
+        private static string AudioList(string filter)
+        {
+            if (!Directory.Exists(AudioRoot)) return "ct_list VOID - no audio folder at " + AudioRoot;
+            return Names.Report(Stems(LooseFiles.Find(AudioRoot, ".wem", null)), filter);
+        }
+
         /// <summary>
         /// One shipped .wem out: the .wem itself byte for byte, because that is the asset, PLUS the
         /// decoded .wav. Both codecs the game ships are handled - 3097 of the 3105 .wem are Wwise
         /// Vorbis and 8 are PCM - and anything that is neither is still refused BY NAME rather than
         /// left as a silent empty .wav.
+        ///
+        /// The .wem keeps the shipped numeric name (it IS the shipped file); the .wav takes the
+        /// sound's own name, which is the half an author has to recognise in a folder.
         /// </summary>
         private static string Audio(string name)
         {
             if (!Directory.Exists(AudioRoot)) return "ct_extract VOID - no audio folder at " + AudioRoot;
             string wem = LooseFiles.CopyOut(AudioRoot, ".wem", name, OutDir("audio"));
 
-            string wavPath = Path.ChangeExtension(wem, ".wav");
+            string stem = Path.GetFileNameWithoutExtension(wem);
+            uint id = SoundbankNames.IdOf(stem);
+            string wavPath = Path.Combine(Path.GetDirectoryName(wem),
+                                          SoundbankNames.WavName(Names.Name(id), id, stem) + ".wav");
             string why = WwiseWem.ToWav(File.ReadAllBytes(wem), wavPath);
             if (why != null)
                 return "ct_extract wrote " + wem + " (" + new FileInfo(wem).Length + " B) - NO .wav: " + why;
@@ -291,6 +338,60 @@ namespace Morgott.ContentTool.Dev
             return "ct_extract wrote " + wem + " and " + wavPath + " (" +
                    new FileInfo(wavPath).Length + " B, " + i.Channels + " ch, " + i.SampleRate + " Hz, " +
                    (i.IsVorbis ? "Wwise Vorbis" : "PCM") + ")";
+        }
+
+        /// <summary>
+        /// EVERY loose media the filter matches, decoded in one go. Extracting sounds one id at a time
+        /// was the only way to get at them, which for 3105 files is not a way at all.
+        ///
+        /// A failing decode is COUNTED AND NAMED, never fatal: one unreadable file must not cost the
+        /// other 3104. index.csv covers ALL media including the in-bank ones, so the name -> id map
+        /// survives outside the console for the sounds this cannot write.
+        /// </summary>
+        private static string AudioAll(string filter)
+        {
+            if (!Directory.Exists(AudioRoot)) return "ct_extract VOID - no audio folder at " + AudioRoot;
+            SoundbankNames names = Names;
+            List<string> rel = LooseFiles.Find(AudioRoot, ".wem", null);
+            List<string> stems = Stems(rel);
+            string dir = OutDir("audio");
+            Directory.CreateDirectory(dir);
+
+            var wavByMedia = new Dictionary<uint, string>();
+            var failures = new List<string>();
+            int matched = 0, done = 0;
+            for (int k = 0; k < stems.Count; k++)
+            {
+                string stem = stems[k];
+                uint id = SoundbankNames.IdOf(stem);
+                if (!names.Matches(id, stem, filter)) continue;
+                matched++;
+                string wav = Path.Combine(dir, SoundbankNames.WavName(names.Name(id), id, stem) + ".wav");
+                string why;
+                try
+                {
+                    why = WwiseWem.ToWav(File.ReadAllBytes(
+                        Path.Combine(AudioRoot, rel[k].Replace('/', Path.DirectorySeparatorChar))), wav);
+                }
+                catch (Exception ex) { why = ex.GetType().Name + ": " + ex.Message; }
+                if (why == null) { done++; if (id != 0) wavByMedia[id] = Path.GetFileName(wav); }
+                else failures.Add(stem + " (" + (names.Name(id) == "" ? "unnamed" : names.Name(id)) + ") - " + why);
+                if (matched % 200 == 0)
+                    Debug.Log("[ContentTool] ct_extract audio --all: " + done + " of " + matched + " so far");
+            }
+
+            int inBank = names.InBankMatches(stems, filter);
+            string csv = Path.Combine(dir, "index.csv");
+            File.WriteAllText(csv, names.Csv(stems, wavByMedia));
+
+            StringBuilder b = new StringBuilder();
+            b.Append("ct_extract wrote ").Append(csv).Append(" (").Append(names.Count)
+             .Append(" named media").Append(names.Why == null ? "" : " - NO NAMES: " + names.Why).Append(")");
+            for (int i = 0; i < failures.Count; i++) b.Append("\n  FAILED ").Append(failures[i]);
+            b.Append("\nextracted ").Append(done).Append(" of ").Append(matched)
+             .Append(" loose media (").Append(inBank).Append(" in-bank skipped) into ").Append(dir);
+            if (failures.Count > 0) b.Append(" - ").Append(failures.Count).Append(" FAILED, named above");
+            return b.ToString();
         }
 
         /// <summary>

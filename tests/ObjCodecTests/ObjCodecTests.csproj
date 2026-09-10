@@ -118,6 +118,12 @@
          are proven against the REAL shipped Catalog.json here, not in a game session. -->
     <Compile Include="..\..\src\Bake\CatalogText.cs" Link="CatalogText.cs" />
     <Compile Include="AudioExtractTests.cs" />
+    <!-- WHAT a shipped sound is called. The name map is the game's own SoundbanksInfo.xml and the
+         parse touches no UnityEngine type, so the whole map - names, banks, loose vs in-bank, the
+         filter every audio command shares, and the missing-file fallback to numeric names - is proven
+         on a fixture here instead of by reading a console pane in a running game. -->
+    <Compile Include="..\..\src\Wwise\SoundbankNames.cs" Link="SoundbankNames.cs" />
+    <Compile Include="SoundbankNamesTests.cs" />
     <Compile Include="WavReadTests.cs" />
     <Compile Include="SourceAudioTests.cs" />
     <Compile Include="SourceDecodeTests.cs" />

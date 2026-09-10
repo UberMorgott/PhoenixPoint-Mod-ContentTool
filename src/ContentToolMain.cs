@@ -591,14 +591,14 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_voices THREW " + ex); }
             }
 
-            [ConsoleCommand(Command = "ct_list", Description = "ContentTool: what is IN the game - the discovery half of extraction. Args: bundles [nameFilter] | assets <bundleFile> [typeFilter] [nameFilter] | videos [nameFilter] | audio [nameFilter] | defs <nameFilter> [typeFilter] | bones <bundleFile> <meshName> [nameFilter] (the skeleton a shipped Mesh is skinned to, in m_BindPose order - the names a replacement rig must spell) | props <bundleFile> <materialName> (the property names a \"material\": \"_Prop=value\" row takes) | clip <bundleFile> <clipName> (one named AnimationClip's fields).")]
+            [ConsoleCommand(Command = "ct_list", Description = "ContentTool: what is IN the game - the discovery half of extraction. Args: bundles [nameFilter] | assets <bundleFile> [typeFilter] [nameFilter] | videos [nameFilter] | audio [filter] (every shipped sound BY NAME, read from the game's own SoundbanksInfo.xml: '<id>  <name>  <bank>  loose|in-bank'. The filter is a case-insensitive substring of the NAME, the id or the bank, and in-bank media are listed too - they cannot be extracted, but this is where their id is found. Uncapped: what the pane cannot take is spilled to a file.) | defs <nameFilter> [typeFilter] | bones <bundleFile> <meshName> [nameFilter] (the skeleton a shipped Mesh is skinned to, in m_BindPose order - the names a replacement rig must spell) | props <bundleFile> <materialName> (the property names a \"material\": \"_Prop=value\" row takes) | clip <bundleFile> <clipName> (one named AnimationClip's fields).")]
             public static void CtList(IConsole console, params string[] args)
             {
                 try { Out(console, Dev.Extract.List(args)); }
                 catch (Exception ex) { Out(console, "ct_list THREW " + ex); }
             }
 
-            [ConsoleCommand(Command = "ct_extract", Description = "ContentTool: pull a shipped asset out as an editable file. Args: tex <bundleFile> <assetName> | gate (X1/X2/X3).")]
+            [ConsoleCommand(Command = "ct_extract", Description = "ContentTool: pull a shipped asset out as an editable file. Args: tex <bundleFile> <assetName> | mesh <bundleFile> <assetName> | video <name> | audio <mediaId> (the .wem byte for byte plus a .wav named after the sound) | audio --all [filter] (decodes EVERY loose media the filter matches to <ShortName>__<id>.wav, plus an index.csv of all 7692 media incl. the in-bank ones; a failing decode is counted and named, never fatal) | gate (X1/X2/X3).")]
             public static void CtExtract(IConsole console, params string[] args)
             {
                 try { Out(console, Dev.Extract.Run(args)); }
