@@ -67,6 +67,44 @@ namespace Morgott.ContentTool.Dev
             return shown;
         }
 
+        /// <summary>
+        /// WHAT ONE Debug.Log CALL MAY CARRY. A second, independent mesh limit, and the one that
+        /// actually blanked the pane on 2026-09-10 - bounding the pane could never have closed it.
+        ///
+        /// The game ships LlockhamIndustries.Misc.DebugManager, which subscribes to
+        /// Application.logMessageReceived (DebugManager.cs:37) and pushes EVERY log message, WHOLE,
+        /// into ONE UnityEngine.UI.Text (DebugManager.Log :45-65 -> DebugEntry.Update, DebugEntry.cs:39
+        /// `text.text = title + " : " + log`). That Text is plain - DebugEntry.cs:16-31 adds a
+        /// RectTransform and a Text and nothing else, so no Shadow (x2) or Outline (x5) multiplies it -
+        /// which puts it at 4 vertices per character, and VertexHelper.FillMesh throws at 65000: 16250
+        /// characters. A Graphic that throws in UpdateGeometry takes the WHOLE
+        /// CanvasUpdateRegistry.PerformUpdate batch with it, so every other dirty Text in that frame -
+        /// the console pane's own lines included - is left with no geometry. Hence the bench's exact
+        /// signature: ONE throw per ct_list run (one giant Debug.Log), not one per line, and a pane
+        /// that was handed nothing but short legal lines and still rendered nothing.
+        ///
+        /// Halved from 16250 for margin: the overlay prefixes "Log : " and the mod loader prefixes
+        /// "[Mods] [com.morgott.ContentTool] " before the string is ever measured.
+        ///
+        /// The pane's own bound above needs no change for this: <see cref="MaxLineChars"/> keeps every
+        /// line object at 400 characters = 1600 vertices (3200 with the Default style's Shadow), and
+        /// GameConsoleWindow instantiates one Text per line (GameConsoleWindow.cs:259) and keeps 200
+        /// of them, so no amount of scrollback ever concentrates in a single mesh.
+        /// </summary>
+        internal const int MaxLogChars = 8000;
+
+        /// <summary>The message in pieces no Debug.Log-driven UI.Text can choke on. Split by count,
+        /// not by line: Player.log is read by machines and the pane already has the readable copy.</summary>
+        internal static List<string> LogChunks(string msg)
+        {
+            string s = msg ?? "";
+            var parts = new List<string>();
+            if (s.Length == 0) { parts.Add(s); return parts; }
+            for (int i = 0; i < s.Length; i += MaxLogChars)
+                parts.Add(s.Substring(i, Math.Min(MaxLogChars, s.Length - i)));
+            return parts;
+        }
+
         /// <summary>Did any single line have to be cut to <see cref="MaxLineChars"/>? A run that drops
         /// no line can still have lost the tail of one.</summary>
         internal static bool Clipped(string msg)

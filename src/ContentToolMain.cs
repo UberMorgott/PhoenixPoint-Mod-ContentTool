@@ -259,10 +259,16 @@ namespace Morgott.ContentTool
         /// The log sink for work that finishes AFTER its console command returned - gate V1 waits on
         /// a video decoder, so by the time its arms have an answer there is no IConsole left to write
         /// to. Player.log is where autogate reads the arms from anyway.
+        ///
+        /// THE ONLY PLACE A WHOLE REPORT MAY REACH Debug.Log, because one log call is not free: the
+        /// game's own LlockhamIndustries.Misc.DebugManager puts every message, whole, into a single
+        /// unbounded UnityEngine.UI.Text, and a Text over 65000 vertices kills the entire canvas
+        /// rebuild for that frame - console pane included. Dev.ConsoleText.MaxLogChars owns the
+        /// arithmetic; nothing here may call log.LogInfo with a report directly.
         /// </summary>
         internal static void Say(string msg)
         {
-            log?.LogInfo(msg);
+            foreach (string part in Dev.ConsoleText.LogChunks(msg)) log?.LogInfo(part);
         }
 
         /// <summary>
@@ -388,7 +394,7 @@ namespace Morgott.ContentTool
                     if (console != null) { console.WriteLine("{0}", msg ?? ""); return; }
                 }
                 catch (Exception) { }
-                log?.LogInfo(msg);
+                Say(msg);
             }
 
             /// <summary>
@@ -405,6 +411,12 @@ namespace Morgott.ContentTool
             /// total too - Dev.ConsoleText owns that arithmetic - and the whole text goes to a file the
             /// last line names. There is no `clear` command to recover with (`cls` exists but only
             /// GameConsoleWindow's own dispatcher reaches it), so the pane must not be filled at all.
+            ///
+            /// And that was still not enough, because the pane was never the only mesh in the frame:
+            /// the SPILL branch below used to hand Player.log the whole report in one Debug.Log, which
+            /// the game's own log overlay concentrates into a single UI.Text (Dev.ConsoleText.MaxLogChars
+            /// carries the proof). One throw there aborts the canvas rebuild for everything, so the
+            /// short legal lines written just above rendered as nothing. Say() bounds that call now.
             /// </summary>
             private static void WriteLines(IConsole console, string msg)
             {
@@ -419,7 +431,7 @@ namespace Morgott.ContentTool
                 console.WriteLine("{0}", spilled != null
                     ? "... the whole output is in " + spilled
                     : "... the whole output is in Player.log");
-                log?.LogInfo(msg);
+                Say(msg);
             }
 
             /// <summary>

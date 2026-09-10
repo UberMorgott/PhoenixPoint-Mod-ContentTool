@@ -3216,6 +3216,7 @@ internal static class Program
         BenchSavedArm();
         BenchRecoveryArm();
         ConsoleBoundArm();
+        ConsoleLogArm();
     }
 
     /// <summary>
@@ -3266,6 +3267,56 @@ internal static class Program
         List<string> tight = ConsoleText.Bound(many.ToString(), out dropped);
         Check("S42-short", dropped == 0 && tight[tight.Count - 1] == "end",
               "and " + ConsoleText.MaxLines + " tiny lines all fit: " + dropped + " dropped");
+    }
+
+    /// <summary>
+    /// ============ S43: WHAT ONE Debug.Log CALL MAY CARRY ============
+    /// The SECOND mesh limit, and the one S42 could not reach. The bench of 2026-09-10 bounded the
+    /// pane to 61 short lines and the pane STILL rendered blank, with exactly one
+    /// "Mesh can not have more than 65000 vertices" per `ct_list audio taunt` - one per run, not one
+    /// per line. The cause is not the pane: LlockhamIndustries.Misc.DebugManager subscribes to
+    /// Application.logMessageReceived (DebugManager.cs:37) and writes every message WHOLE into one
+    /// UnityEngine.UI.Text (DebugEntry.cs:39), a plain Text at 4 vertices per character, and the
+    /// spill branch handed it the entire ~26000-character report in a single call. A Graphic that
+    /// throws in UpdateGeometry aborts the whole CanvasUpdateRegistry batch, so the console's own
+    /// lines - queued in the same frame - never got geometry either. Arithmetic over a string again,
+    /// so it is decidable here; in game it is an empty rectangle and a stack trace with no author.
+    /// </summary>
+    private static void ConsoleLogArm()
+    {
+        // 65000 vertices / 4 per character = 16250. The budget is that, halved, so the overlay's
+        // "Log : " and the loader's "[Mods] [com.morgott.ContentTool] " prefixes cannot eat the margin.
+        Check("S43-budget", ConsoleText.MaxLogChars * 4 <= 65000 / 2,
+              "one log call costs at most " + (ConsoleText.MaxLogChars * 4) +
+              " vertices, half of the 65000 UI.Text dies at");
+
+        var b = new System.Text.StringBuilder();
+        // The bench's own rows, to the column: two spaces, id padded to 10, name padded to 34,
+        // bank padded to 26, then the loose/in-bank mark - 78 characters, 263 of them.
+        b.AppendLine("263 of 7696 media match 'taunt' - 258 loose (extractable), 5 in-bank (not extractable)");
+        for (int i = 0; i < 263; i++)
+            b.AppendLine("  " + (100000000 + i).ToString().PadRight(10) + " " +
+                         ("1CBMN_Taunt" + i).PadRight(34) + "Barks".PadRight(26) + "loose");
+        string report = b.ToString();
+        Check("S43-repro", report.Length * 4 > 65000,
+              "the bench's own ct_list report is " + report.Length +
+              " characters = " + (report.Length * 4) + " vertices in one Text, over the limit");
+
+        List<string> parts = ConsoleText.LogChunks(report);
+        int longest = 0;
+        var joined = new System.Text.StringBuilder();
+        foreach (string part in parts) { if (part.Length > longest) longest = part.Length; joined.Append(part); }
+        Check("S43-split", parts.Count > 1 && longest <= ConsoleText.MaxLogChars,
+              "it reaches Player.log as " + parts.Count + " calls, longest " + longest +
+              " characters = " + (longest * 4) + " vertices");
+        Check("S43-whole", joined.ToString() == report,
+              "and nothing is lost: the pieces concatenate back to the report byte for byte");
+
+        List<string> one = ConsoleText.LogChunks("ct_version 1.2.0.0");
+        Check("S43-short", one.Count == 1 && one[0] == "ct_version 1.2.0.0",
+              "a one-line verdict is still ONE log call, unaltered");
+        Check("S43-null", ConsoleText.LogChunks(null).Count == 1 && ConsoleText.LogChunks(null)[0] == "",
+              "and a null message logs one empty string rather than throwing in the log sink");
     }
 
     /// <summary>
