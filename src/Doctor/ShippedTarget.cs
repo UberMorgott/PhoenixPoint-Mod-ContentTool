@@ -74,7 +74,7 @@ namespace Morgott.ContentTool.Doctor
                 // later patch line prove only that the CHOSEN pair works, never that no second holder
                 // existed. Every deduplicated candidate is named here, with what WhyNot said about it -
                 // "holds it" for the one that answered null included.
-                Debug.Log("[ContentTool] ShippedTarget: '" + asset + "' candidates (" + files.Count + "): " +
+                Dev.ChunkedLog.Say("[ContentTool] ShippedTarget: '" + asset + "' candidates (" + files.Count + "): " +
                           Spell(files));
 
                 string last = null, unproven = null;
@@ -85,7 +85,7 @@ namespace Morgott.ContentTool.Doctor
                     string shipped = BakeSelfCheck.ShippedBundlePath(file);
                     if (!File.Exists(shipped))
                     {
-                        Debug.Log("[ContentTool] ShippedTarget:   " + file + ": not shipped by this install");
+                        Dev.ChunkedLog.Say("[ContentTool] ShippedTarget:   " + file + ": not shipped by this install");
                         continue;
                     }
                     present++;
@@ -103,7 +103,7 @@ namespace Morgott.ContentTool.Doctor
                         if (baker == null)
                         {
                             last = file + ": refused to open earlier in this pass";
-                            Debug.Log("[ContentTool] ShippedTarget:   " + last);
+                            Dev.ChunkedLog.Say("[ContentTool] ShippedTarget:   " + last);
                             if (unproven == null)
                                 unproven = Unproven(file, asset, "refused to open earlier in this pass");
                             continue;
@@ -111,7 +111,7 @@ namespace Morgott.ContentTool.Doctor
                         opened++;             // the archive IS open, whatever WhyNot then answers or throws
                         Addressable how;
                         string gone = baker.WhyNot(AssetClassID.Mesh, asset, out how);
-                        Debug.Log("[ContentTool] ShippedTarget:   " + file + ": " +
+                        Dev.ChunkedLog.Say("[ContentTool] ShippedTarget:   " + file + ": " +
                                   (gone == null ? "HOLDS IT (WhyNot == null)" : gone));
                         if (how == Addressable.Yes) holders.Add(file);
                         else if (how == Addressable.Absent) last = gone;
@@ -120,7 +120,7 @@ namespace Morgott.ContentTool.Doctor
                     catch (Exception ex)
                     {
                         last = file + ": " + ex.GetType().Name + " - " + ex.Message;
-                        Debug.Log("[ContentTool] ShippedTarget:   " + last);
+                        Dev.ChunkedLog.Say("[ContentTool] ShippedTarget:   " + last);
                         if (unproven == null)
                             unproven = Unproven(file, asset, ex.GetType().Name + ": " + ex.Message);
                     }
@@ -141,7 +141,7 @@ namespace Morgott.ContentTool.Doctor
                 {
                     target.ShippedBundle = holders[0];
                     target.ShippedAsset = asset;
-                    Debug.Log("[ContentTool] ShippedTarget: resolved '" + asset + "' -> " + holders[0] +
+                    Dev.ChunkedLog.Say("[ContentTool] ShippedTarget: resolved '" + asset + "' -> " + holders[0] +
                             " (1 of " + present + " present candidate(s) answered WhyNot == null)");
                     return null;
                 }
@@ -154,7 +154,7 @@ namespace Morgott.ContentTool.Doctor
             {
                 // R22. The panel gets a sentence, the log gets the stack - the same split
                 // ModelDoctor.Tick:391 makes.
-                Debug.LogError("[ContentTool] ShippedTarget: " + ex);
+                Dev.ChunkedLog.Fail("[ContentTool] ShippedTarget: " + ex);
                 return Refuse(target, "TARGET REFUSED: the addon's dependency graph could not be walked (" +
                                       ex.GetType().Name + ": " + ex.Message + ") - see Player.log for the stack");
             }

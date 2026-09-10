@@ -93,15 +93,45 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal const int MaxLogChars = 8000;
 
-        /// <summary>The message in pieces no Debug.Log-driven UI.Text can choke on. Split by count,
-        /// not by line: Player.log is read by machines and the pane already has the readable copy.</summary>
+        /// <summary>Room reserved for the "(part i/n)\n" header: 32 covers four-digit counts, and a
+        /// message big enough to need five is not a log line, it is the spill file's job.</summary>
+        private const int PartHeader = 32;
+
+        /// <summary>
+        /// The message in pieces no Debug.Log-driven UI.Text can choke on - the ONE place the
+        /// arithmetic lives, so a caller cannot get it wrong by not knowing about it.
+        ///
+        /// A message that already fits is returned UNCHANGED and alone: the common case is a one-line
+        /// verdict and it must stay one line, unadorned. Only a split message is annotated, because a
+        /// reader who finds "ct_project: 1 FAILURE(S)" three log calls after its report needs to be
+        /// told the two belong together. Chunks end at a line break where one is in reach, so a row
+        /// is never cut in half; a single line longer than the budget is cut anyway - there is nowhere
+        /// else to cut it.
+        ///
+        /// Lossless: strip each chunk's first line and the payloads concatenate back to the original.
+        /// </summary>
         internal static List<string> LogChunks(string msg)
         {
             string s = msg ?? "";
             var parts = new List<string>();
-            if (s.Length == 0) { parts.Add(s); return parts; }
-            for (int i = 0; i < s.Length; i += MaxLogChars)
-                parts.Add(s.Substring(i, Math.Min(MaxLogChars, s.Length - i)));
+            if (s.Length <= MaxLogChars) { parts.Add(s); return parts; }
+
+            int budget = MaxLogChars - PartHeader;
+            var payloads = new List<string>();
+            int at = 0;
+            while (at < s.Length)
+            {
+                int take = Math.Min(budget, s.Length - at);
+                if (at + take < s.Length)
+                {
+                    int nl = s.LastIndexOf('\n', at + take - 1, take);
+                    if (nl >= at) take = nl - at + 1;
+                }
+                payloads.Add(s.Substring(at, take));
+                at += take;
+            }
+            for (int i = 0; i < payloads.Count; i++)
+                parts.Add("(part " + (i + 1) + "/" + payloads.Count + ")\n" + payloads[i]);
             return parts;
         }
 

@@ -448,10 +448,10 @@ namespace Morgott.ContentTool.Dev
                 // user-file refusal look like a crash in the tool. One warning line, no stack. Anything
                 // else really is unexpected and keeps both.
                 if (Ready.Failure is ImportRefusedException)
-                    Debug.LogWarning("[ContentTool] Model Doctor: '" + Path + "' refused - " +
+                    Dev.ChunkedLog.Warn("[ContentTool] Model Doctor: '" + Path + "' refused - " +
                                      Ready.Failure.Message);
                 else if (Ready.Failure != null)
-                    Debug.LogError("[ContentTool] Model Doctor: '" + Path + "' - " +
+                    Dev.ChunkedLog.Fail("[ContentTool] Model Doctor: '" + Path + "' - " +
                                    Ready.Failure.GetType().Name + ": " + Ready.Failure.Message + "\n" +
                                    Ready.Failure.StackTrace);
                 Seed();
@@ -834,7 +834,7 @@ namespace Morgott.ContentTool.Dev
                              (there
                               ? "'" + where + "' is on disk and the files already written there were retained"
                               : "no project folder was created") + "; see Player.log for the stack";
-                Debug.LogError("[ContentTool] Model Doctor Ship: " + ex);
+                Dev.ChunkedLog.Fail("[ContentTool] Model Doctor Ship: " + ex);
             }
         }
 
@@ -873,7 +873,7 @@ namespace Morgott.ContentTool.Dev
             try
             {
                 File.Delete(sidecar);
-                Debug.Log("[ContentTool] Model Doctor: removed the bone map '" + sidecar + "'");
+                Dev.ChunkedLog.Say("[ContentTool] Model Doctor: removed the bone map '" + sidecar + "'");
                 seeded.Clear();
                 Rethink();
                 // No row: Restart throws this report away. Message carries the sentence, and the next

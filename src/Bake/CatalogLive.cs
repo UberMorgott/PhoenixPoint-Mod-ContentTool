@@ -125,7 +125,7 @@ namespace Morgott.ContentTool.Bake
         public static void Reinject()
         {
             string why = Inject();
-            if (why != null) Debug.LogError("CatalogLive: " + why);
+            if (why != null) Dev.ChunkedLog.Fail("CatalogLive: " + why);
         }
 
         /// <summary>

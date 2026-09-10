@@ -16,7 +16,10 @@ namespace Morgott.ContentTool
     /// </summary>
     public class ContentToolMain : ModMain
     {
-        private static ModLogger log;
+        /// <summary>The mod logger, WRAPPED - every message is chunked to what one UI.Text can draw
+        /// before it reaches a sink (Dev.ChunkedLog). Never null, so a message logged before
+        /// OnModEnabled still lands (in Player.log) instead of being swallowed by a `?.`.</summary>
+        private static Dev.ChunkedLog log = new Dev.ChunkedLog(null);
 
         /// <summary>
         /// The mod's own folder, where streamed media is materialized (FINAL-PLAN 4.3, ARM1).
@@ -99,7 +102,7 @@ namespace Morgott.ContentTool
 
         public override void OnModEnabled()
         {
-            log = Logger;
+            log = new Dev.ChunkedLog(Logger);
             ModDir = Instance?.Entry?.Directory;
             ConsoleBridge.Register();
             log?.LogInfo(Version());
@@ -260,15 +263,15 @@ namespace Morgott.ContentTool
         /// a video decoder, so by the time its arms have an answer there is no IConsole left to write
         /// to. Player.log is where autogate reads the arms from anyway.
         ///
-        /// THE ONLY PLACE A WHOLE REPORT MAY REACH Debug.Log, because one log call is not free: the
-        /// game's own LlockhamIndustries.Misc.DebugManager puts every message, whole, into a single
-        /// unbounded UnityEngine.UI.Text, and a Text over 65000 vertices kills the entire canvas
-        /// rebuild for that frame - console pane included. Dev.ConsoleText.MaxLogChars owns the
-        /// arithmetic; nothing here may call log.LogInfo with a report directly.
+        /// One log call is not free: the game's own LlockhamIndustries.Misc.DebugManager puts every
+        /// message, whole, into a single unbounded UnityEngine.UI.Text, and a Text over 65000 vertices
+        /// kills the entire canvas rebuild for that frame - console pane included. That is not this
+        /// method's problem to solve any more: `log` is a Dev.ChunkedLog and NO message reaches a sink
+        /// unchunked, from here or from anywhere else in the assembly.
         /// </summary>
         internal static void Say(string msg)
         {
-            foreach (string part in Dev.ConsoleText.LogChunks(msg)) log?.LogInfo(part);
+            log.LogInfo(msg);
         }
 
         /// <summary>

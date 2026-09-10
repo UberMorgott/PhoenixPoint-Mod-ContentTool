@@ -3303,18 +3303,34 @@ internal static class Program
               " characters = " + (report.Length * 4) + " vertices in one Text, over the limit");
 
         List<string> parts = ConsoleText.LogChunks(report);
-        int longest = 0;
+        int longest = 0, mid = 0;
         var joined = new System.Text.StringBuilder();
-        foreach (string part in parts) { if (part.Length > longest) longest = part.Length; joined.Append(part); }
+        foreach (string part in parts)
+        {
+            if (part.Length > longest) longest = part.Length;
+            int head = part.IndexOf('\n');
+            // Every piece announces itself, so a verdict found three calls after its report can be
+            // put back with the rest by a reader who never saw this code.
+            if (!part.StartsWith("(part " + (++mid) + "/" + parts.Count + ")\n")) head = -2;
+            joined.Append(head >= 0 ? part.Substring(head + 1) : "<UNMARKED>");
+        }
         Check("S43-split", parts.Count > 1 && longest <= ConsoleText.MaxLogChars,
               "it reaches Player.log as " + parts.Count + " calls, longest " + longest +
               " characters = " + (longest * 4) + " vertices");
         Check("S43-whole", joined.ToString() == report,
-              "and nothing is lost: the pieces concatenate back to the report byte for byte");
+              "and nothing is lost: strip the (part i/n) headers and the pieces concatenate back to " +
+              "the report byte for byte");
+        bool onLines = true;
+        for (int i = 0; i + 1 < parts.Count; i++) if (!parts[i].EndsWith("\n")) onLines = false;
+        Check("S43-lines", onLines, "and every cut but the last lands on a line break, so no row of " +
+              "the report is served in halves");
 
         List<string> one = ConsoleText.LogChunks("ct_version 1.2.0.0");
         Check("S43-short", one.Count == 1 && one[0] == "ct_version 1.2.0.0",
-              "a one-line verdict is still ONE log call, unaltered");
+              "a one-line verdict is still ONE log call, unaltered - no header on what already fits");
+        Check("S43-edge", ConsoleText.LogChunks(new string('e', ConsoleText.MaxLogChars)).Count == 1 &&
+              ConsoleText.LogChunks(new string('e', ConsoleText.MaxLogChars + 1)).Count == 2,
+              "the budget itself is the last unsplit size, one character more is two calls");
         Check("S43-null", ConsoleText.LogChunks(null).Count == 1 && ConsoleText.LogChunks(null)[0] == "",
               "and a null message logs one empty string rather than throwing in the log sink");
     }

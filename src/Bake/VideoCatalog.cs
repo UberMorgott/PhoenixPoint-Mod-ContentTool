@@ -390,7 +390,7 @@ namespace Morgott.ContentTool.Bake
                 }
                 finally
                 {
-                    Debug.Log(log.ToString());
+                    Dev.ChunkedLog.Say(log.ToString());
                     Dev.AsyncGate.Pending--;
                     UnityEngine.Object.Destroy(gameObject);
                 }

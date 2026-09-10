@@ -393,7 +393,7 @@ namespace Morgott.ContentTool.Dev
                 if (why == null) { done++; if (id != 0) wavByMedia[id] = Path.GetFileName(wav); }
                 else failures.Add(stem + " (" + (names.Name(id) == "" ? "unnamed" : names.Name(id)) + ") - " + why);
                 if (matched % 200 == 0)
-                    Debug.Log("[ContentTool] ct_extract audio --all: " + done + " of " + matched + " so far");
+                    Dev.ChunkedLog.Say("[ContentTool] ct_extract audio --all: " + done + " of " + matched + " so far");
             }
 
             int inBank = names.InBankMatches(stems, filter);

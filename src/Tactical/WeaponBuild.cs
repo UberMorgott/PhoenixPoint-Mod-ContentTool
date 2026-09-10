@@ -645,7 +645,7 @@ namespace Morgott.ContentTool.Tactical
             {
                 if (op.Status != AsyncOperationStatus.Succeeded || op.Result == null)
                 {
-                    Debug.LogError("[ContentTool] ct_weapon FAIL key '" + e.model + "' did not load (" +
+                    Dev.ChunkedLog.Fail("[ContentTool] ct_weapon FAIL key '" + e.model + "' did not load (" +
                                    op.Status + ") - '" + e.id + "' exists but has no model. Keys are " +
                                    "published live when the mod is enabled, so there is nothing to " +
                                    "apply and nothing to restart: either the key is not declared in " +
@@ -682,7 +682,7 @@ namespace Morgott.ContentTool.Tactical
                     if (donorSkin == null || donorSkin.DefaultPrefab == null ||
                         !donorSkin.DefaultPrefab.RuntimeKeyIsValid())
                     {
-                        Debug.Log("[ContentTool] ct_weapon fit '" + e.id + "' keeps its own box: " +
+                        Dev.ChunkedLog.Say("[ContentTool] ct_weapon fit '" + e.id + "' keeps its own box: " +
                                   e.clone + " publishes no prefab to measure");
                         return;
                     }
@@ -702,7 +702,7 @@ namespace Morgott.ContentTool.Tactical
                     Place(op.Result, e, s1, a1, h1,
                           fitted ? "derived from " + e.clone + "'s own box" : "derived from its own box");
                 }
-                catch (Exception ex) { Debug.LogError("[ContentTool] ct_weapon socket fit threw " + ex); }
+                catch (Exception ex) { Dev.ChunkedLog.Fail("[ContentTool] ct_weapon socket fit threw " + ex); }
             };
             return "load started for key " + e.model;
         }
@@ -731,7 +731,7 @@ namespace Morgott.ContentTool.Tactical
             MeshFilter mine = prefab.GetComponentInChildren<MeshFilter>();
             if (mine == null || mine.sharedMesh == null)
             {
-                Debug.Log("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': the baked prefab has no mesh");
+                Dev.ChunkedLog.Say("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': the baked prefab has no mesh");
                 return false;
             }
 
@@ -749,7 +749,7 @@ namespace Morgott.ContentTool.Tactical
                 // "declared", which is the silent-wrong-value case a socket check exists to catch.
                 // Deriving from the model's OWN box is at least the right end of the right gun.
                 Sockets(mine.sharedMesh.bounds, out shoot, out aim, out shell);
-                Debug.Log("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': " + e.clone +
+                Dev.ChunkedLog.Say("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': " + e.clone +
                           "'s own prefab could not be measured. The model keeps the size its .glb " +
                           "carries, and the sockets are derived from its own box instead: shoot=" + shoot);
                 return false;
@@ -793,7 +793,7 @@ namespace Morgott.ContentTool.Tactical
                               new[] { dst.extents.x, dst.extents.y, dst.extents.z }, rot,
                               out scale, out offset, out why))
             {
-                Debug.Log("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': " + why);
+                Dev.ChunkedLog.Say("[ContentTool] ct_weapon fit SKIPPED '" + e.id + "': " + why);
                 node.localRotation = Quaternion.identity;
                 return false;
             }
@@ -817,7 +817,7 @@ namespace Morgott.ContentTool.Tactical
             offset[0] += e.offset.x; offset[1] += e.offset.y; offset[2] += e.offset.z;
             node.localScale = new Vector3(scale, scale, scale);
             node.localPosition = new Vector3(offset[0], offset[1], offset[2]);
-            Debug.Log("[ContentTool] ct_weapon fit '" + e.id + "' into " + e.clone + "'s own box: long axis " +
+            Dev.ChunkedLog.Say("[ContentTool] ct_weapon fit '" + e.id + "' into " + e.clone + "'s own box: long axis " +
                       "XYZ"[longAxis] + " -> +Z (rotate " + euler[1] +
                       (e.declaresRotate ? " DECLARED " + e.rotate : e.flip ? " incl. flip" : "") +
                       "), scale " + (e.scale > 0f ? "DECLARED " : "") +
@@ -1426,7 +1426,7 @@ namespace Morgott.ContentTool.Tactical
             Socket(prefab, "EXT_AimPoint", aim);
             Socket(prefab, "EXT_AimIKPoint", aim);
             Socket(prefab, "EXT_ShellPoint", shell);
-            Debug.Log("[ContentTool] ct_weapon PASS '" + prefab.name + "' loaded from key " + e.model +
+            Dev.ChunkedLog.Say("[ContentTool] ct_weapon PASS '" + prefab.name + "' loaded from key " + e.model +
                       " for '" + e.id + "'; four EXT_ sockets " + how + " shoot=" + shoot + " aim=" + aim);
         }
 

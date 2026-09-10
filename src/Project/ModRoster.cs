@@ -81,7 +81,7 @@ namespace Morgott.ContentTool.Project
                 harmony.Patch(disable, prefix: new HarmonyMethod(
                     AccessTools.Method(typeof(ModRoster), nameof(BeforeDisable))));
             else
-                UnityEngine.Debug.LogError("ct_content: ModManager.TryDisableMod(ModEntry) NOT FOUND " +
+                Dev.ChunkedLog.Fail("ct_content: ModManager.TryDisableMod(ModEntry) NOT FOUND " +
                                            "- a player who only subscribed to a content mod gets it " +
                                            "switched back off at startup unless he ticks ContentTool himself");
 
@@ -94,7 +94,7 @@ namespace Morgott.ContentTool.Project
             // mod could be published to the Workshop and then never switch on for anybody.
             string missing = Join(PatchLoader("PhoenixPoint.Modding.PPModLoader"),
                                   PatchLoader("Base.Platforms.Steam.SteamWorkshopModLoader"));
-            if (missing != null) UnityEngine.Debug.LogError("ct_content: " + missing);
+            if (missing != null) Dev.ChunkedLog.Fail("ct_content: " + missing);
 
             // THE RUNTIME HALF. ModEntry.SetEnabled is the ONE seam both the startup pass and the
             // mod menu's checkbox go through (ModEntry.cs:190-215), for a code-less mod and for one
@@ -112,7 +112,7 @@ namespace Morgott.ContentTool.Project
                 // AccessTools.Method matches parameter types EXACTLY and returns null on a miss, and a
                 // null target makes Harmony do nothing at all - which here means every dependent mod
                 // silently starts with no content. Loud, not a returned line nobody greps for.
-                UnityEngine.Debug.LogError("ct_content: ModEntry.SetEnabled(bool, ModSDKContext) NOT " +
+                Dev.ChunkedLog.Fail("ct_content: ModEntry.SetEnabled(bool, ModSDKContext) NOT " +
                                            "FOUND - a content mod's keys are published only by the " +
                                            "startup reconcile, i.e. AFTER any dependent mod's own init");
 
@@ -177,7 +177,7 @@ namespace Morgott.ContentTool.Project
                 }
                 if (!ContentMods.KeepAlive(mod.ID, Activated(), dependents)) return true;
 
-                UnityEngine.Debug.Log("ct_content: '" + mod.ID + "' is not in the player's activated " +
+                Dev.ChunkedLog.Say("ct_content: '" + mod.ID + "' is not in the player's activated " +
                                       "list, but a mod that IS still needs it - keeping it enabled " +
                                       "so the content he subscribed to does not revert. Ticking " +
                                       "either mod off in the mod manager still turns it off.");
@@ -188,7 +188,7 @@ namespace Morgott.ContentTool.Project
             {
                 // A throwing prefix would take the manager's whole reconcile with it. Let the game
                 // have its own behaviour back instead.
-                UnityEngine.Debug.LogError("ct_content keep-alive: " + ex);
+                Dev.ChunkedLog.Fail("ct_content keep-alive: " + ex);
                 return true;
             }
         }
@@ -239,9 +239,9 @@ namespace Morgott.ContentTool.Project
                                                            HasContent(__instance.Directory))) return;
                 StringBuilder log = new StringBuilder();
                 Reconciled(log, __instance.ID, __instance.Directory, true);
-                if (log.Length > 0) UnityEngine.Debug.Log(log.ToString().TrimEnd());
+                if (log.Length > 0) Dev.ChunkedLog.Say(log.ToString().TrimEnd());
             }
-            catch (Exception ex) { UnityEngine.Debug.LogError("ct_content pre-enable: " + ex); }
+            catch (Exception ex) { Dev.ChunkedLog.Fail("ct_content pre-enable: " + ex); }
         }
 
         /// <summary>
@@ -284,11 +284,11 @@ namespace Morgott.ContentTool.Project
                 catch (Exception ex) { what = Join(what, "ct_route7 toggle FAILED: " + ex.Message); }
 
                 if (what != null)
-                    UnityEngine.Debug.Log("ct_content: '" + __instance.ID + "' was switched " +
+                    Dev.ChunkedLog.Say("ct_content: '" + __instance.ID + "' was switched " +
                                           (__instance.Enabled ? "ON" : "OFF") + " in the mod manager" +
                                           Environment.NewLine + what);
             }
-            catch (Exception ex) { UnityEngine.Debug.LogError("ct_content toggle: " + ex); }
+            catch (Exception ex) { Dev.ChunkedLog.Fail("ct_content toggle: " + ex); }
         }
 
         /// <summary>
