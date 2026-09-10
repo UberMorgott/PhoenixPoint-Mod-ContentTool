@@ -158,6 +158,20 @@ internal static class SoundbankNamesTests
         for (int i = 0; i < 70; i++) many.Add((900000 + i).ToString());
         Check(Rows(n.Report(many, "9000")) == 70, "70 matching rows all print - there is no 60-row cut any more");
 
+        // ---- ...but the game console PANE gets ten of them and a pointer. Thousands of rows there are
+        //      one UI.Text each and nobody reads past the first screen; the file and the capture keep all.
+        string big = n.Report(many, "9000");
+        string cut = SoundbankNames.PaneCut(big, @"C:\L\ct_list-audio-1.txt");
+        Check(Rows(cut) == 10, "the pane gets ten rows of the 70 (got " + Rows(cut) + ")");
+        Check(cut.Split('\n')[0] == big.Split('\n')[0], "the header line is the report's own, unchanged");
+        Check(cut.EndsWith("\n... 60 more - the whole list is in C:\\L\\ct_list-audio-1.txt"),
+              "the trailer says how many rows were cut and where the whole list is");
+        Check(Rows(big) == 70 && big.IndexOf("the whole list is in", StringComparison.Ordinal) < 0,
+              "the full text is untouched - the file and PPCLI still get every row and no trailer");
+        string few = SoundbankNames.PaneCut(n.Report(loose, "taunt"), @"C:\L\a.txt");
+        Check(Rows(few) == 2 && few.EndsWith("\n... the whole list is in C:\\L\\a.txt"),
+              "a listing under the cut keeps every row and still names the file, without 'more'");
+
         // ---- the .wav's name: what an author has to recognise in a folder, and what no file system takes
         Check(SoundbankNames.WavName(n.Name(201), 201, "201") == "Confirm_ Yes_No, ok__201",
               "':' and '/' become '_' - a name straight from the XML would be an unwritable path");

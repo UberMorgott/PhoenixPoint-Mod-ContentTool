@@ -310,6 +310,31 @@ namespace Morgott.ContentTool.Wwise
             return s.ToString();
         }
 
+        /// <summary>How many rows of a listing the game console pane gets. The file gets all of them.</summary>
+        internal const int PaneRows = 10;
+
+        /// <summary>
+        /// The PANE's share of a <see cref="Report"/>: its header, the first <see cref="PaneRows"/> rows,
+        /// and one line naming the file that holds the whole listing. A bare `ct_list audio` matches
+        /// thousands of media and each pane row costs one UnityEngine.UI.Text, so printing them all is
+        /// both unreadable and the thing that blanks the console.
+        ///
+        /// The file is written unconditionally by the caller, so the trailer ALWAYS names it; the
+        /// "N more" half appears only when rows were actually cut. Pure string work - no I/O here -
+        /// which is what lets the offline arm check the cut without a game.
+        /// </summary>
+        internal static string PaneCut(string full, string file)
+        {
+            string[] lines = (full ?? "").Split('\n');
+            var s = new StringBuilder(lines[0]);
+            int shown = Math.Min(lines.Length - 1, PaneRows);
+            for (int i = 1; i <= shown; i++) s.Append('\n').Append(lines[i]);
+            int more = lines.Length - 1 - shown;
+            s.Append("\n... ");
+            if (more > 0) s.Append(more).Append(" more - ");
+            return s.Append("the whole list is in ").Append(file).ToString();
+        }
+
         /// <summary>How many matching media are inside a .bnk - listed, findable, but not extractable.</summary>
         internal int InBankMatches(IList<string> looseStems, string filter)
         {

@@ -272,6 +272,27 @@ namespace Morgott.ContentTool
         }
 
         /// <summary>
+        /// A whole output on disk, under the folder every other generated file already lives in.
+        /// Named by prefix and timestamp: what the console pane cannot take is "console", and a
+        /// command that knows its own name (ct_list audio) passes it so the file can be found later.
+        /// Failure to write one is not a failure of the command - the caller gets null and says so.
+        /// </summary>
+        internal static string Spill(string prefix, string msg)
+        {
+            try
+            {
+                string dir = Path.Combine(Path.Combine(
+                    UnityEngine.Application.persistentDataPath, "ContentTool"), "Logs");
+                Directory.CreateDirectory(dir);
+                string path = Path.Combine(dir, prefix + "-" +
+                    DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".txt");
+                File.WriteAllText(path, msg ?? "");
+                return path;
+            }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>
         /// Runs one "ct_x arg arg" line through the SAME table the console dispatches from, with no
         /// IConsole - so the output goes to Player.log through the command's own Out() fallback.
         /// There is no second dispatcher and no script language: a line is a console command.
@@ -427,32 +448,11 @@ namespace Morgott.ContentTool
                 // Nothing is allowed to disappear: whatever the pane could not take goes to a file
                 // whole, and to Player.log, and the pane is told where. The console writes what it DID
                 // show to Console.log by itself (AppendToLogFile).
-                string spilled = Spill(msg);
+                string spilled = Spill("console", msg);
                 console.WriteLine("{0}", spilled != null
                     ? "... the whole output is in " + spilled
                     : "... the whole output is in Player.log");
                 Say(msg);
-            }
-
-            /// <summary>
-            /// The whole verdict on disk, under the folder every other generated file already lives in.
-            /// Named by timestamp only: the command's own name is not reachable here (the game console
-            /// invokes the method by reflection and hands us nothing but the IConsole), and the file's
-            /// first lines say what it was. Failure to write one is not a failure of the command.
-            /// </summary>
-            private static string Spill(string msg)
-            {
-                try
-                {
-                    string dir = Path.Combine(Path.Combine(
-                        UnityEngine.Application.persistentDataPath, "ContentTool"), "Logs");
-                    Directory.CreateDirectory(dir);
-                    string path = Path.Combine(dir, "console-" +
-                        DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".txt");
-                    File.WriteAllText(path, msg ?? "");
-                    return path;
-                }
-                catch (Exception) { return null; }
             }
 
             [ConsoleCommand(Command = "ct_version", Description = "ContentTool: version, and whether the merged AssetsTools.NET and the embedded classdata.tpk are present.")]
@@ -603,10 +603,13 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_voices THREW " + ex); }
             }
 
-            [ConsoleCommand(Command = "ct_list", Description = "ContentTool: what is IN the game - the discovery half of extraction. Args: bundles [nameFilter] | assets <bundleFile> [typeFilter] [nameFilter] | videos [nameFilter] | audio [filter] (every shipped sound BY NAME, read from the game's own SoundbanksInfo.xml: '<id>  <name>  <bank>  loose|in-bank'. The filter is a case-insensitive substring of the NAME, the id or the bank, and in-bank media are listed too - they cannot be extracted, but this is where their id is found. Uncapped: what the pane cannot take is spilled to a file.) | defs <nameFilter> [typeFilter] | bones <bundleFile> <meshName> [nameFilter] (the skeleton a shipped Mesh is skinned to, in m_BindPose order - the names a replacement rig must spell) | props <bundleFile> <materialName> (the property names a \"material\": \"_Prop=value\" row takes) | clip <bundleFile> <clipName> (one named AnimationClip's fields).")]
+            [ConsoleCommand(Command = "ct_list", Description = "ContentTool: what is IN the game - the discovery half of extraction. Args: bundles [nameFilter] | assets <bundleFile> [typeFilter] [nameFilter] | videos [nameFilter] | audio [filter] (every shipped sound BY NAME, read from the game's own SoundbanksInfo.xml: '<id>  <name>  <bank>  loose|in-bank'. The filter is a case-insensitive substring of the NAME, the id or the bank, and in-bank media are listed too - they cannot be extracted, but this is where their id is found. The pane shows the first 10 rows and then names a file; the WHOLE list is always written to ContentTool\\Logs\\ct_list-audio-<stamp>.txt, and a capture such as PPCLI still receives every row.) | defs <nameFilter> [typeFilter] | bones <bundleFile> <meshName> [nameFilter] (the skeleton a shipped Mesh is skinned to, in m_BindPose order - the names a replacement rig must spell) | props <bundleFile> <materialName> (the property names a \"material\": \"_Prop=value\" row takes) | clip <bundleFile> <clipName> (one named AnimationClip's fields).")]
             public static void CtList(IConsole console, params string[] args)
             {
-                try { Out(console, Dev.Extract.List(args)); }
+                // The pane flag is the ONE thing Extract cannot work out for itself: only here is it
+                // known whether this answer is going to the game console or to a capture that reads
+                // the string back (PPCLI), and the audio listing is cut for the first and never the second.
+                try { Out(console, Dev.Extract.List(args, console is GameConsoleWindow)); }
                 catch (Exception ex) { Out(console, "ct_list THREW " + ex); }
             }
 

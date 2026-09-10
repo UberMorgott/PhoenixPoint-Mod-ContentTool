@@ -45,7 +45,13 @@ namespace Morgott.ContentTool.Dev
 
         // ------------------------------------------------------------------ ct_list
 
-        internal static string List(string[] args)
+        internal static string List(string[] args) { return List(args, false); }
+
+        /// <param name="pane">
+        /// True when the answer is going to the game console pane rather than to a capture - the one
+        /// listing big enough to matter (audio) then shows its first rows and names its file.
+        /// </param>
+        internal static string List(string[] args, bool pane)
         {
             string what = args != null && args.Length > 0 ? args[0].ToLowerInvariant() : "";
             if (what == "bundles")
@@ -57,7 +63,7 @@ namespace Morgott.ContentTool.Dev
             if (what == "videos")
                 return LooseFiles.Report(VideoRoot, ".webm", args.Length > 1 ? args[1] : null, 60);
             if (what == "audio")
-                return AudioList(args.Length > 1 ? args[1] : null);
+                return AudioList(args.Length > 1 ? args[1] : null, pane);
             if (what == "defs")
                 return Defs(args.Length > 1 ? args[1] : null, args.Length > 2 ? args[2] : null);
             // AssetIndex.FindUnique answers a misspelled or an ambiguous name by THROWING, which the
@@ -305,11 +311,21 @@ namespace Morgott.ContentTool.Dev
         /// substring) could not match a word a human would type. The names come off the game's own
         /// SoundbanksInfo.xml, and the in-bank media are listed too - marked, since those cannot be
         /// extracted - because finding the id a NAME belongs to is the whole point.
+        ///
+        /// The PANE gets ten rows and a pointer. A bare `ct_list audio` matches 4700+ media, and even
+        /// bounded (Dev.ConsoleText.Bound) that is a screenful nobody reads followed by a spill file -
+        /// so the listing goes to its own named file ALWAYS, and the pane is told where. A capture
+        /// (PPCLI) is not a pane and still gets every row, which is what makes it machine-readable.
         /// </summary>
-        private static string AudioList(string filter)
+        /// <param name="pane">The caller is the game console, whose rows cost one UI.Text each.</param>
+        private static string AudioList(string filter, bool pane)
         {
             if (!Directory.Exists(AudioRoot)) return "ct_list VOID - no audio folder at " + AudioRoot;
-            return Names.Report(Stems(LooseFiles.Find(AudioRoot, ".wem", null)), filter);
+            string full = Names.Report(Stems(LooseFiles.Find(AudioRoot, ".wem", null)), filter);
+            string file = ContentToolMain.Spill("ct_list-audio", full);
+            // A file that could not be written leaves the old behaviour: the whole text, which the
+            // console bound still trims. Nothing is lost either way.
+            return pane && file != null ? SoundbankNames.PaneCut(full, file) : full;
         }
 
         /// <summary>
