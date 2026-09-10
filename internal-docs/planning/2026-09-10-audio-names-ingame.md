@@ -150,3 +150,101 @@ Instance2 process stopped by path filter (`Path -like 'D:\PP-Instance2\*'`, neve
 `D:\PP-Instance2\Mods\PPBridge\ppcli-enabled` deleted; profile untouched. **3.2 GB of extracted
 `.wav` left behind** at `C:\Users\Morgott\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\Extracted\audio`
 — delete when the evidence is no longer wanted.
+
+---
+
+# Re-check 2026-09-11 — commits `4d3ff46` + `c2ab336`
+
+Same bench `D:\PP-Instance2`, profile `76561197996210592`. ContentTool at HEAD `c2ab336`, built and
+deployed by the repo's own `deploy.ps1`; `D:\PP-Instance2\Mods\ContentTool\ContentTool.dll`
+1 990 144 B, SHA-256 `65A392448C963FEA0F4483494A875C9D260CFAE2CDBD1E44B874E9ACBFC0B50C`,
+byte-identical to `bin\Release\ContentTool\ContentTool.dll`. Banner:
+`ContentTool 1.2.0.0 | build=30fd27e4 | AssetsTools.NET merged: True | classdata.tpk embedded: 289605 B`.
+PPBridge NOT redeployed (`build=69a823ae`, no `stale:true`). Log `D:\PP-Instance2\ct-audio-0911.log`.
+
+## Registration was NOT slow this time
+
+`[Mods] [com.morgott.ContentTool] Console commands: ct_version, …` at **frame 5 (0,412 s)**, i.e.
+before `connect state` answered — yesterday's t≈33 s was not a fixed cost. Gate on the log line
+anyway; it is the only thing that is actually true in both runs.
+
+## How the PANE is reached at all (yesterday's method, written down)
+
+`ppcli connect console` hands ContentTool a **capture** `IConsole`, and `Out()`
+(`src\ContentToolMain.cs:409`) only takes the bounded pane path when
+`console is GameConsoleWindow` — so a PPCLI `console` call never touches the pane and never writes
+a `[CONSOLE]` line. To drive the real pane, reflect into the game's own window:
+
+```powershell
+.\ppcli.ps1 connect call '{"op":"invoke","type":"Base.Utils.GameConsole.GameConsoleWindow","member":"Create","args":[]}'   # -> h:1:1
+.\ppcli.ps1 connect call '{"op":"set","type":"Base.Utils.GameConsole.GameConsoleWindow","member":"DisableConsoleAccess","value":false}'
+.\ppcli.ps1 connect call '{"op":"invoke","target":"h:1:1","member":"ToggleVisibility","args":[]}'
+.\ppcli.ps1 connect call '{"op":"invoke","target":"h:1:1","member":"ExecuteCommandLine","args":["ct_list audio taunt"],"sig":["System.String"]}'
+```
+
+`DisableConsoleAccess` defaults to `true` and `ToggleVisibility` (`GameConsoleWindow.cs:222`) folds
+it into `enabled`, so without the `set` the pane stays invisible.
+
+## (1) `ct_list audio taunt` — PASS, the blank pane is GONE
+
+Pane, verbatim (`[CONSOLE]` lines): header + 10 rows + the trailer
+
+```
+263 of 7696 media match 'taunt' - 258 loose (extractable), 5 in-bank (not extractable)
+  32151022   1CBMN_Taunt1                      Barks                     loose
+  … 9 more rows …
+... 253 more - the whole list is in C:/Users/Morgott/AppData/LocalLow/Snapshot Games Inc/Phoenix Point\ContentTool\Logs\ct_list-audio-20260911-001803-931.txt
+```
+
+The named file exists: **264 lines** = header + all 263 rows, first `  32151022   1CBMN_Taunt1 …`,
+last `  1028140705 SIRN_Taunt4 …`. Screenshot `docs\console-ct_list-audio.png` — the pane RENDERS,
+rows and trailer readable. **Zero `Mesh can not have more than 65000 vertices` in the whole run** up
+to this point (yesterday: one per `ct_list`).
+
+## (2) `ct_list audio`, no filter — PASS
+
+Pane: `7696 of 7696 media match '' - 3105 loose (extractable), 4591 in-bank (not extractable)`,
+10 rows, then `... 7686 more - the whole list is in …\ct_list-audio-20260911-001832-629.txt`.
+That file: **7697 lines**. Still 0 mesh throws.
+
+## (3) `ct_list audio Barks` — PASS
+
+`5635 of 7696 media match 'Barks' - 2305 loose (extractable), 3330 in-bank (not extractable)`,
+10 rows (in-bank rows among them, e.g. `220988377  1CBMN_DeployShield … in-bank`), trailer
+`... 5625 more - the whole list is in …\ct_list-audio-20260911-001838-764.txt`, file **5636 lines**.
+Counts differ from 2026-09-10's `5627 / 2303 / 3324` — same build family, so the small drift is
+worth a look, but it is not what this re-check was about.
+
+## (4) `ct_project` — STILL BLANKS THE PANE (the fix did not reach this path)
+
+`ct_project DashboardValid` does not exist on this bench, and nowhere in the repo — the only
+`ppcontent.json` projects are `demos\*`, `dist-package\*`, `local\PpFit`, `Wizard.ApocDesignation`.
+It printed a clean, handled refusal, no crash:
+`ct_project THREW System.IO.FileNotFoundException: no ppcontent.json in D:\PP-Instance2\Mods\ContentTool\DashboardValid`.
+
+Substituted the deployed `Sample` project, which is the long verdict the step wanted.
+`ct_project Sample` → bounded exactly as designed (60 lines, then `... 21 line(s) not shown`, then
+`... the whole output is in …\ContentTool\Logs\console-20260911-001928-565.txt`, last verdict line
+`ct_project: 1 FAILURE(S)`) — **and the pane went completely blank, with 6
+`ArgumentException: Mesh can not have more than 65000 vertices` at
+`UnityEngine.UI.VertexHelper.FillMesh` → `Graphic.DoMeshGeneration` → `Graphic.UpdateGeometry`.**
+Screenshot `docs\console-ct_project.png`.
+
+The failure is one-shot, not per-frame: the count stopped at 6 and did not grow while idle. A
+`ct_version` run straight afterwards renders normally on the now-empty pane
+(`docs\console-after-project.png`) — so the aborted canvas rebuild permanently loses the lines that
+were already written and the pane recovers only for NEW content.
+
+So `c2ab336` fixed the `ct_list` path only. `ct_project`'s verdict lines are individually much
+longer than a listing row (several carry ContentTool's own `…(clipped)` marker at ~600 chars) and
+its spill still calls `Say(msg)`; something on that path — most likely the game's log overlay
+concentrating the chunked `Debug.Log` into one `UI.Text` — still crosses 65000 vertices.
+`ct_list`'s bounded path does not call `Say` at all, which is exactly why it is now clean.
+
+## Bench state at exit
+
+Process stopped by the path filter (`Path -like 'D:\PP-Instance2\*'`); `ppcli-enabled` deleted;
+profile untouched. **Yesterday's 3105 `.wav` (3.2 GB) deleted** from
+`…\Phoenix Point\ContentTool\Extracted\audio`. `ct_project Sample` baked into
+`…\ContentTool\Patched\d29f58a2\morgott.sample\` (bench-only output of our own demo project) and
+left it there.
