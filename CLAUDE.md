@@ -25,67 +25,41 @@ gh issue create --repo UberMorgott/quality-gate --title "<what broke>" --body "<
 
 ## PPCLI is a SEPARATE project — never mix the two (hard rule)
 
-`ContentTool\` and `PPCLI\` are two different projects in two different folders with two different
-git repos. They must never cross:
+`ContentTool\` and `PPCLI\` = two separate projects, two folders, two git repos. Never cross:
 
-- **Never commit a PPCLI change from a ContentTool session, and never the reverse.** One commit
-  touches one repo. If work in one seems to require an edit in the other, stop — it does not.
-- **Never edit PPCLI source.** We are a CONSUMER of that tool, not its author. We use it to drive the
-  game for diagnostics and to test our own mods, and that is the whole relationship.
-- **If PPCLI itself misbehaves, the only thing we do is write it down** in `PPCLI\ISSUES.md` — the log
-  its own maintainer reads. Then work around it and carry on with the ContentTool task. Do not fix it,
-  do not patch around it in its source, do not "improve" it while we are in there.
+- **Never commit PPCLI change from ContentTool session, never reverse.** One commit = one repo. Work in one seems to need edit in other → stop, it doesn't.
+- **Never edit PPCLI source.** We CONSUMER, not author. Use it to drive game for diagnostics + test own mods. That whole relationship.
+- **PPCLI misbehaves → only write it down** in `PPCLI\ISSUES.md` (log its maintainer reads). Then work around, continue ContentTool task. No fix, no patch in its source, no "improve" while there.
 
 ## Anything that touches the RUNNING GAME goes through PPCLI (standing rule)
 
-Never ask the user how to drive the game, and never hand-roll a way to do it. Whenever a task needs
-the game itself — calling a game function, running a console command, reading a def's real value,
-checking whether a patch actually took effect, spawning something, opening a screen, or confirming a
-model/texture renders — use **PPCLI** (`E:\DEV\PhoenixPoint\PPCLI\`).
+Never ask user how to drive game, never hand-roll way. Task needs game itself — call game function, run console command, read def's real value, check patch took effect, spawn something, open screen, confirm model/texture renders → use **PPCLI** (`E:\DEV\PhoenixPoint\PPCLI\`).
 
-- Read **`PPCLI\PLAYBOOK.md` FIRST** — it maps plain intent to the exact command line. Do not dig
-  PPCLI source. Deep reference: `PPCLI\docs\REFERENCE.md`.
-- Normal mode is `connect` / `plan` against an ALREADY-RUNNING game (17–60 ms). `run` / `batch`
-  cold-launch (~17 s) and are the fallback when nothing is running.
-- Three surfaces: 344 native console commands, ~74 console variables (`var`, NOT `console`), and
-  arbitrary reflection via `call`.
-- Multi-step work = a plan in `PPCLI\plans\*.json`, not a loop of `connect` calls. Plans have waits,
-  timeouts and a mandatory `finally`, so they clean up when they fail.
-- The bridge is opt-in: it arms only when a file named `ppcli-enabled` sits beside PPBridge.dll.
-- `deploy` after EVERY PPBridge edit, or the game silently runs the old DLL (`stale:true` guard).
-- Wait until `connect state` actually answers before sending anything. Querying a still-initialising
-  game hangs for minutes and looks exactly like an engine bug.
+- Read **`PPCLI\PLAYBOOK.md` FIRST** — maps plain intent to exact command line. Don't dig PPCLI source. Deep reference: `PPCLI\docs\REFERENCE.md`.
+- Normal mode: `connect` / `plan` against ALREADY-RUNNING game (17–60 ms). `run` / `batch` cold-launch (~17 s), fallback when nothing running.
+- Three surfaces: 344 native console commands, ~74 console variables (`var`, NOT `console`), arbitrary reflection via `call`.
+- Multi-step work = plan in `PPCLI\plans\*.json`, not loop of `connect` calls. Plans have waits, timeouts, mandatory `finally` → clean up on fail.
+- Bridge opt-in: arms only when file `ppcli-enabled` sits beside PPBridge.dll.
+- `deploy` after EVERY PPBridge edit, else game silently runs old DLL (`stale:true` guard).
+- Wait until `connect state` actually answers before sending anything. Querying still-initialising game hangs minutes, looks exactly like engine bug.
 
 ### Installs
 
-- `D:\PP-Instance2` (profile `...592`) — automated runs and cold launches belong here.
-- `D:\Steam\steamapps\common\Phoenix Point` (profile `...591`) — the USER'S OWN GAME. Reach it with
-  `-PPRoot "D:\Steam\steamapps\common\Phoenix Point"`. Reads are free; anything that WRITES to a real
-  save needs explicit permission each time. Do not kill a process there.
+- `D:\PP-Instance2` (profile `...592`) — automated runs + cold launches go here.
+- `D:\Steam\steamapps\common\Phoenix Point` (profile `...591`) — USER'S OWN GAME. Reach via `-PPRoot "D:\Steam\steamapps\common\Phoenix Point"`. Reads free; anything WRITING to real save needs explicit permission each time. Don't kill process there.
 
 ### When PPCLI itself misbehaves
 
-Log it, and ONLY log it — see the separation rule at the top. Append to
-**`E:\DEV\PhoenixPoint\PPCLI\ISSUES.md`** — the log lives in PPCLI's own repo root so the
-agent working on PPCLI finds it at session start without being told. Record only what an actual run
-showed (attempted → happened → expected → evidence → severity), never a suspicion from reading the
-source. Do not stop the current task to fix PPCLI; note it and work around it.
+Log it, ONLY log it — see separation rule at top. Append to **`E:\DEV\PhoenixPoint\PPCLI\ISSUES.md`** — log in PPCLI's own repo root so PPCLI agent finds it at session start untold. Record only what actual run showed (attempted → happened → expected → evidence → severity), never suspicion from reading source. Don't stop current task to fix PPCLI; note + work around.
 
 ### Checking a model/texture without playing
 
-To look at replaced content there is no need to load a save or start a mission — the game's own
-model viewer / editor screen can be opened directly. Drive it through PPCLI (see `PLAYBOOK.md`); the
-cold-start plans (`plans\start-mission.json`, `start-campaign.json`, `build-mission.json`) exist for
-the cases that genuinely need a live level.
+Viewing replaced content needs no save load or mission start — game's own model viewer / editor screen opens directly. Drive via PPCLI (see `PLAYBOOK.md`); cold-start plans (`plans\start-mission.json`, `start-campaign.json`, `build-mission.json`) exist for cases genuinely needing live level.
 
 ## Repo
 
-`ContentTool\` is its OWN inner git repo (`UberMorgott/PhoenixPoint-Mod-ContentTool`, branch `main`),
-ignored by the outer monorepo — commit ContentTool changes HERE. Push only when explicitly asked.
-`local\` is gitignored and must never be published.
+`ContentTool\` = OWN inner git repo (`UberMorgott/PhoenixPoint-Mod-ContentTool`, branch `main`), ignored by outer monorepo — commit ContentTool changes HERE. Push only on explicit ask. `local\` gitignored, never publish.
 
 ## Code-graph
 
-Code-only graphify graph at `ContentTool\graphify-out\` (auto-refreshed by `.githooks\post-commit`).
-Query from the ContentTool root. Name the symbols in the question — a broad natural-language query
-returns a BFS dump truncated at the token budget and the answer can be in the cut part.
+Code-only graphify graph at `ContentTool\graphify-out\` (auto-refreshed by `.githooks\post-commit`). Query from ContentTool root. Name symbols in question — broad natural-language query returns BFS dump truncated at token budget, answer may be in cut part.
