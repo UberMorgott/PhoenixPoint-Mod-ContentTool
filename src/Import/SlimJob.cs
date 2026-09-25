@@ -38,9 +38,10 @@ namespace Morgott.ContentTool.Import
     /// </summary>
     internal static class SlimJob
     {
-        /// <summary>The five checkpoints. A cancel between any two of them is seen before the next
-        /// one does any work, and the last of them is the only one that touches the destination.</summary>
-        private static readonly string[] Stages = { "Load", "Census", "Guard", "Trim", "Write" };
+        /// <summary>The six checkpoints. A cancel between any two of them is seen before the next
+        /// one does any work, and the last of them is the only one that touches the destination.
+        /// Verify reads the temp back through the game's importer first, as the zip run does.</summary>
+        private static readonly string[] Stages = { "Load", "Census", "Guard", "Trim", "Verify", "Write" };
 
         /// <summary>The zip run's six checkpoints. Verify reads the TEMP back through the game's own
         /// importer before Write swaps it in, because "it still animates" is the only question worth
@@ -87,8 +88,26 @@ namespace Morgott.ContentTool.Import
                 At(cancel, publish, Stages, 3, "Dropping " + drop.Count + " of " + clips + " clip(s)");
                 long delta = GlbSlim.Trim(doc, drop);
 
-                At(cancel, publish, Stages, 4, "Writing " + Path.GetFileName(dst));
                 doc.Write(tmp);
+
+                // The same read-back the zip and skel runs make: a trim renumbers accessors and moves
+                // every bufferView, and a file the game can no longer import must not replace one it
+                // could. A source the reader already refused is not blamed on the trim (Skel's rule).
+                At(cancel, publish, Stages, 4, "Reading " + Path.GetFileName(dst) + " back");
+                string unread = null;
+                try { ReadBack(tmp); }
+                catch (Exception ex)
+                {
+                    if (Imports(src))
+                    {
+                        done = "the trimmed file does not import: " + ex.Message + " - destination left alone";
+                        Publish(publish, new SlimProgress("Done", Stages.Length, Stages.Length, done));
+                        return done;
+                    }
+                    unread = ex.Message;
+                }
+
+                At(cancel, publish, Stages, 5, "Writing " + Path.GetFileName(dst));
                 // The swap, not a write onto the destination: whatever was there is whole until this
                 // line, and whole again after it.
                 if (File.Exists(dst)) File.Replace(tmp, dst, null);
@@ -97,6 +116,9 @@ namespace Morgott.ContentTool.Import
 
                 done = "dropped " + drop.Count + " of " + clips + " clip(s), " +
                        (delta < 0 ? (-delta) + " B freed" : "no bytes freed");
+                if (unread != null)
+                    done += "; the game's own reader still refuses this file (" + unread +
+                            "), exactly as it refused the source";
                 Publish(publish, new SlimProgress("Done", Stages.Length, Stages.Length, done));
                 return done;
             }

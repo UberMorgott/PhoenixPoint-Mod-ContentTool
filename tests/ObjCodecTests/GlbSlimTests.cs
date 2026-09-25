@@ -232,6 +232,22 @@ internal static class GlbSlimTests
             Check(outcome != null && outcome.StartsWith("dropped 2 of 4") &&
                   Same(File.ReadAllBytes(target), want) && noTmp(),
                   "a cancel arriving after the swap reports the write that happened and keeps the file");
+
+            // 24. Verify: a trimmed temp the game's reader refuses never replaces a source it took.
+            //     The seam refuses only the TEMP, so the source still imports and the rule applies.
+            Func<string, int> realReadBack = SlimJob.ReadBack;
+            string broken;
+            File.WriteAllBytes(target, new byte[] { 9, 9, 9 });
+            try
+            {
+                SlimJob.ReadBack = path => path.EndsWith(".ct_tmp", StringComparison.Ordinal)
+                    ? throw new InvalidOperationException("hostile importer") : realReadBack(path);
+                broken = SlimJob.Execute(source, target, new HashSet<int> { 2, 3 }, false, CancellationToken.None, null);
+            }
+            finally { SlimJob.ReadBack = realReadBack; }
+            Check(broken != null && broken.StartsWith("the trimmed file does not import: hostile importer") &&
+                  Same(File.ReadAllBytes(target), new byte[] { 9, 9, 9 }) && noTmp(),
+                  "a trim whose result does not import leaves the destination alone: " + broken);
         }
         finally { Directory.Delete(work, true); }
 
