@@ -128,8 +128,14 @@ namespace Morgott.ContentTool.Project
         {
             ok = false;
             long saved = 0;
-            List<string> unbaked, stale;
-            List<string> dropped = BakedAlready(outDir, manifestText, out unbaked, out stale);
+            List<string> unbaked, stale, newer;
+            List<string> dropped = BakedAlready(outDir, manifestText, out unbaked, out stale, out newer);
+            // NO LEDGER, ONLY DATES: said, never refused - a zip or a sync rewrites every mtime.
+            StringBuilder warn = new StringBuilder();
+            foreach (string rel in newer)
+                warn.Append("\nWARN: ").Append(rel).Append(" is newer than its bank in ").Append(ShippedBanks)
+                    .Append(" and no ").Append(SourceLedger).Append(" entry says which bytes that bank holds. ")
+                    .Append("If you edited it since the last 'ct_sound bake', bake again - the player hears the bank.");
             foreach (string rel in dropped)
             {
                 string staged = Path.Combine(outDir, rel);
@@ -189,7 +195,7 @@ namespace Morgott.ContentTool.Project
                                    "AppData (Route7.ApplyProject) - which is exactly why no release, Workshop " +
                                    "item or zip has to contain one.");
                 foreach (string r in refusals) bad.Append("  REFUSED: ").AppendLine(r);
-                return bad.ToString().TrimEnd();
+                return bad.ToString().TrimEnd() + warn;
             }
 
             long bytes = 0;
@@ -209,7 +215,7 @@ namespace Morgott.ContentTool.Project
                    "\nZip the FOLDER itself, so the archive holds " + Path.GetFileName(outDir.TrimEnd('\\', '/')) +
                    "\\meta.json, and upload it. The player unzips it into Mods\\ (ending up with " +
                    "Mods\\<YourMod>\\meta.json) or subscribes on the Workshop; the mod manager enables " +
-                   "ContentTool for them because meta.json declares it.";
+                   "ContentTool for them because meta.json declares it." + warn;
         }
 
         /// <summary>
@@ -443,14 +449,24 @@ namespace Morgott.ContentTool.Project
         /// STALE IS A FINGERPRINT, not a guess: `ct_sound bake` records each source's SHA-1 in
         /// <see cref="SourceLedger"/> beside the banks, and a source whose bytes no longer match is
         /// stale whatever its timestamps say. A bank with no ledger entry (baked before the ledger
-        /// existed) falls back to the one thing there is: a source written AFTER its bank.
+        /// existed, or a demo that ships none) falls back to the one thing there is - a source written
+        /// AFTER its bank - and lands in <paramref name="newer"/>, a WARNING rather than a refusal:
+        /// unzipping, a git checkout or a sync rewrites mtimes, so a date alone proves nothing.
         /// </summary>
         internal static List<string> BakedAlready(string dir, string manifestText, out List<string> unbaked,
                                                   out List<string> stale)
         {
+            List<string> newer;
+            return BakedAlready(dir, manifestText, out unbaked, out stale, out newer);
+        }
+
+        internal static List<string> BakedAlready(string dir, string manifestText, out List<string> unbaked,
+                                                  out List<string> stale, out List<string> newer)
+        {
             List<string> drop = new List<string>();
             unbaked = new List<string>();
             stale = new List<string>();
+            newer = new List<string>();
             string sources = Path.Combine(dir, ReplaceSources);
             string banks = Path.Combine(dir, ShippedBanks);
             Dictionary<string, string> declared = DeclaredSounds(manifestText);
@@ -498,23 +514,29 @@ namespace Morgott.ContentTool.Project
                     continue;
                 }
                 drop.Add(rel);
-                if (Stale(f, bank, media, ledger)) stale.Add(rel + " (media " + media + ")");
+                bool dated;
+                if (Stale(f, bank, media, ledger, out dated))
+                    (dated ? newer : stale).Add(rel + " (media " + media + ")");
             }
             drop.Sort(StringComparer.OrdinalIgnoreCase);
             unbaked.Sort(StringComparer.OrdinalIgnoreCase);
             stale.Sort(StringComparer.OrdinalIgnoreCase);
+            newer.Sort(StringComparer.OrdinalIgnoreCase);
             return drop;
         }
 
         /// <summary>Does <paramref name="bank"/> hold something other than <paramref name="source"/> as it
         /// is NOW? The ledger's SHA-1 when there is one, else "the source was written after the bank".</summary>
-        private static bool Stale(string source, string bank, string media, Dictionary<uint, string[]> ledger)
+        private static bool Stale(string source, string bank, string media, Dictionary<uint, string[]> ledger,
+                                  out bool dated)
         {
             uint id;
             string[] entry;
+            dated = false;
             if (uint.TryParse(media, NumberStyles.None, CultureInfo.InvariantCulture, out id) &&
                 ledger.TryGetValue(id, out entry))
                 return !string.Equals(entry[0], Sha1Of(source), StringComparison.OrdinalIgnoreCase);
+            dated = true;
             return File.GetLastWriteTimeUtc(source) > File.GetLastWriteTimeUtc(bank);
         }
 

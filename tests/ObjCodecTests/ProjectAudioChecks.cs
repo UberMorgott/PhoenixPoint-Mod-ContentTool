@@ -174,15 +174,20 @@ internal static class ProjectAudioChecks
               said.IndexOf("hit.wav", StringComparison.Ordinal) >= 0,
               "a source changed after its bake is refused by name: " + (said ?? "it PACKAGED"));
 
-        // No ledger (an older bake): the dates decide.
+        // No ledger (an older bake, or a demo that ships none): only the dates speak, and a date is
+        // what every unzip and sync rewrites - so it WARNS, and never refuses.
         p = Sounded(root, "dated", null, "123.wav", true);
         string src = Path.Combine(p, "Content", "Audio", "Replace", "123.wav");
         System.IO.File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-1));
-        Check(Said(p, root, "dated") == null, "with no ledger a source OLDER than its bank packages");
+        bool ok;
+        said = Package.Run(p, Path.Combine(root, "dated-out"), null, out ok);
+        Check(ok && said.IndexOf("WARN", StringComparison.Ordinal) < 0,
+              "with no ledger a source OLDER than its bank packages without a word: " + said);
         System.IO.File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(1));
-        said = Said(p, root, "dated2");
-        Check(said != null && said.IndexOf("CHANGED SINCE IT WAS BAKED", StringComparison.Ordinal) >= 0,
-              "and one written AFTER it is refused: " + (said ?? "it PACKAGED"));
+        said = Package.Run(p, Path.Combine(root, "dated2-out"), null, out ok);
+        Check(ok && said.IndexOf("WARN: " + Path.Combine("Content", "Audio", "Replace", "123.wav"), StringComparison.Ordinal) >= 0 &&
+              said.IndexOf("CHANGED SINCE IT WAS BAKED", StringComparison.Ordinal) < 0,
+              "and one written AFTER it still packages, with a WARN line naming it: " + said);
 
         // A declared row whose file is gone: fine with a bank, dead without one.
         p = Sounded(root, "gone", "{ \"media\": 123, \"file\": \"gone.wav\" }", null, true);
