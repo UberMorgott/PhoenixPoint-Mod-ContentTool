@@ -227,10 +227,35 @@ namespace Morgott.ContentTool.Bake
         /// THE TRAILING EMPTY ELEMENT IS DISCARDED BEFORE THE COUNT. ApplyProject ends in AppendLine, so
         /// Split('\n') always produces one empty element at the end; taking "the last 1" then selected that
         /// empty string and Tail(log, 1) answered "", which is exactly the R11 path - the panel would report
-        /// a failed bake with a BLANK result line. Trim the tail first, then take N.</summary>
+        /// a failed bake with a BLANK result line. Trim the tail first, then take N.
+        ///
+        /// ONLY THE WINDOW IS SPLIT. The Lifecycle panel calls this every OnGUI over a log that reaches ~1.2M
+        /// characters, and a Replace+Split of the whole log per frame is a stutter. The window is found by
+        /// scanning backwards for newlines, and the frozen rule then runs over that substring - it starts on
+        /// a line boundary and holds the same last lines, so the answer is the same by construction.</summary>
         internal static string Tail(string log, int lines)
         {
-            if (string.IsNullOrEmpty(log)) return "";
+            if (string.IsNullOrEmpty(log) || lines <= 0) return "";
+            int stop = log.Length;
+            while (stop > 0 && log[stop - 1] == '\n')                   // trailing empties, CRLF or LF
+            {
+                stop--;
+                if (stop > 0 && log[stop - 1] == '\r') stop--;
+            }
+            if (stop == 0) return "";
+            int start = 0, cut = stop;
+            for (int n = 0; n < lines; n++)
+            {
+                int at = cut > 0 ? log.LastIndexOf('\n', cut - 1) : -1;
+                if (at < 0) { start = 0; break; }
+                start = at + 1;
+                cut = at;
+            }
+            return Window(log.Substring(start, stop - start), lines);
+        }
+
+        private static string Window(string log, int lines)
+        {
             string[] all = log.Replace("\r\n", "\n").Split('\n');
             int end = all.Length;
             while (end > 0 && all[end - 1].Length == 0) end--;      // the AppendLine's own empty tail

@@ -313,6 +313,31 @@ internal static class LifecycleTests
                         "a blank line INSIDE the window is skipped, not printed");
         string wide = new string('x', 5000);
         checks += Check(StageResult.Tail(wide, 1) == wide, "one very long line comes back whole");
+        // THE BACKWARD SCAN IS THE SAME RULE. Tail now splits only its window (the panel called it per
+        // OnGUI over a ~1.2M log); a fuzz over every CR/LF/blank shape proves the answers never moved.
+        var rng = new Random(20260926);
+        bool same = true;
+        string alphabet = "ab\r\n\n ";
+        for (int round = 0; round < 4000 && same; round++)
+        {
+            var sb = new StringBuilder();
+            int len = rng.Next(0, 24);
+            for (int i = 0; i < len; i++) sb.Append(alphabet[rng.Next(alphabet.Length)]);
+            string s = sb.ToString();
+            int n = rng.Next(-1, 6);
+            if (StageResult.Tail(s, n) != TailByFullSplit(s, n))
+            {
+                same = false;
+                Console.WriteLine("  Tail(" + s.Replace("\r", "\\r").Replace("\n", "\\n") + ", " + n + ") = '" +
+                                  StageResult.Tail(s, n) + "', full split = '" + TailByFullSplit(s, n) + "'");
+            }
+        }
+        var big = new StringBuilder();
+        for (int i = 0; i < 60000; i++) big.Append("line ").Append(i).Append(" of a long bake log").Append(nl);
+        string bigLog = big.ToString();
+        checks += Check(same && StageResult.Tail(bigLog, 12) == TailByFullSplit(bigLog, 12) &&
+                        StageResult.Tail(bigLog, 1) == "line 59999 of a long bake log",
+                        "the backward-scanning Tail answers exactly what the whole-log split answered");
 
         checks += OneSwap();
         checks += KeyCapture();
@@ -2049,5 +2074,19 @@ internal static class LifecycleTests
     {
         if (!condition) throw new Exception("LIFECYCLE FAILURE: " + what);
         return 1;
+    }
+
+    /// <summary>StageResult.Tail as it was before the backward scan - the whole log split every call. Kept
+    /// ONLY as the reference the fuzz arm compares against.</summary>
+    private static string TailByFullSplit(string log, int lines)
+    {
+        if (string.IsNullOrEmpty(log)) return "";
+        string[] all = log.Replace("\r\n", "\n").Split('\n');
+        int end = all.Length;
+        while (end > 0 && all[end - 1].Length == 0) end--;
+        var kept = new StringBuilder();
+        for (int i = Math.Max(0, end - lines); i < end; i++)
+            if (all[i].Length != 0) kept.AppendLine(all[i]);
+        return kept.ToString().TrimEnd();
     }
 }
