@@ -347,6 +347,7 @@ internal static class Program
         Console.WriteLine(RoleFill.Run());
         Console.WriteLine(StartRoster.Run());
         Console.WriteLine(PackageGate.Run());
+        Console.WriteLine(ProjectAudioChecks.Run());
         Console.WriteLine(ClipBake.Run());
         Console.WriteLine(ClipPlan.Run());
         Console.WriteLine(Compressed.Run());

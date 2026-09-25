@@ -110,6 +110,7 @@
          of by publishing a mod that installs and does nothing. -->
     <Compile Include="..\..\src\Project\Package.cs" Link="Package.cs" />
     <Compile Include="PackageGate.cs" />
+    <Compile Include="ProjectAudioChecks.cs" />
     <Compile Include="ClipPlan.cs" />
     <Compile Include="Compressed.cs" />
     <Compile Include="DracoTests.cs" />
