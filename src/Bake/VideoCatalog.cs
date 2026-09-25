@@ -481,9 +481,27 @@ namespace Morgott.ContentTool.Bake
             // A claim standing over NOTHING is worse than no claim: it makes the summary count this
             // mod as serving and it makes the next scan or toggle a no-op, so a run that installed no
             // row - or threw halfway - can never be retried. Hand the route back in both cases.
+            // A throw halfway is handed back WHOLE: the rows already registered come out of the
+            // live catalog too, or they would stay served with no claim left to undo them.
             int served = 0;
-            try { return LiveAt(modDir, out served); }
-            finally { if (served == 0) Project.ContentState.Release(modDir, Route); }
+            bool finished = false;
+            try
+            {
+                string line = LiveAt(modDir, out served);
+                finished = true;
+                return line;
+            }
+            finally
+            {
+                if (!finished)
+                {
+                    // The original throw is the one worth reading; a second one out of the rollback
+                    // would replace it. The claim is already released by UndoMod's first line.
+                    try { UndoMod(modDir); }
+                    catch (Exception) { }
+                }
+                else if (served == 0) Project.ContentState.Release(modDir, Route);
+            }
         }
 
         /// <summary>
@@ -559,11 +577,12 @@ namespace Morgott.ContentTool.Bake
                 Project.ContentState.Served(root, Route, key);
                 log.AppendLine("  " + key + "\n    before: " + (before ?? "(no manager)") +
                                "\n    after:  " + (LiveResolve(key) ?? "(no manager)") + "\n    " + note);
-                n++;
+                // Counted AS it lands, not after the loop: a throw on the next row must still leave
+                // the caller knowing this one reached the live catalog.
+                served = ++n;
             }
             // ONE line per mod, first and unconditional, so a modder reads at a glance that enabling
             // the mod was enough - and reads the reason on the same line when it was not.
-            served = n;
             StringBuilder head = new StringBuilder("  " + name + ": " + n +
                 " clip(s) served in memory from " + root +
                 (refused > 0 ? ", " + refused + " refused/skipped" : "") +
@@ -591,12 +610,20 @@ namespace Morgott.ContentTool.Bake
 
             private IEnumerator Run(string key, string url)
             {
+                // In a finally, like DefsArm and PlayArm: a throw out of Open would otherwise leave
+                // AsyncGate.Pending raised for good and every later gated verb waiting on it.
                 Clip c = new Clip();
-                yield return Open(url, c);
-                ContentToolMain.Say("V1-open " + (c.Frames > 0 ? "PASS" : "FAIL") + " " + key +
-                                    " -> " + url + " decodes as " + c);
-                Dev.AsyncGate.Pending--;
-                UnityEngine.Object.Destroy(gameObject);
+                try
+                {
+                    yield return Open(url, c);
+                    ContentToolMain.Say("V1-open " + (c.Frames > 0 ? "PASS" : "FAIL") + " " + key +
+                                        " -> " + url + " decodes as " + c);
+                }
+                finally
+                {
+                    Dev.AsyncGate.Pending--;
+                    UnityEngine.Object.Destroy(gameObject);
+                }
             }
         }
 
