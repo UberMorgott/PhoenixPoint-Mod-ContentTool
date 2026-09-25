@@ -48,7 +48,10 @@ namespace Morgott.ContentTool.Bake
             // between launches. A bank cannot be unloaded once loaded (see UnloadMod), so the loser
             // cannot be evicted the way the bundle and key routes evict theirs; sorting the load order
             // is what makes the per-media refusal below deterministic instead of first-come.
-            enabled.Sort(StringComparer.OrdinalIgnoreCase);
+            // THE SAME ORDER BundleClaims.Keeps judges "lower" by - the project id, ordinal - not the
+            // folder path case-insensitively: "B.mod" and "a.mod" sorted the other way round here, so the
+            // sound route could crown a different winner than the bundle and key routes for one pair.
+            enabled.Sort((a, b) => string.CompareOrdinal(ModId(a), ModId(b)));
             foreach (string mod in enabled) LoadMod(mod, log, ref failed);
             // Counts including 0, always: a loader that found nothing must say so rather than print
             // an empty block that reads like success. The bank count is read from the LEDGER, not
@@ -62,6 +65,19 @@ namespace Morgott.ContentTool.Bake
 
         /// <summary>The route name this file owns in <see cref="Project.ContentState"/>.</summary>
         internal const string Route = "sound";
+
+        /// <summary>The mod's ppcontent.json "id" - what the other routes call its mod id - or its folder
+        /// name when there is no manifest that reads (a folder shipping only Dist\Sounds).</summary>
+        private static string ModId(string modDir)
+        {
+            try
+            {
+                string id = Project.Manifest.Parse(File.ReadAllText(Path.Combine(modDir, Project.ContentMods.Manifest))).Id;
+                if (!string.IsNullOrEmpty(id)) return id;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidDataException) { }
+            return new DirectoryInfo(modDir).Name;
+        }
 
         /// <summary>
         /// ONE mod's shipped banks. The caller has already decided the player wants this mod - the
@@ -93,17 +109,21 @@ namespace Morgott.ContentTool.Bake
                 byte[] bytes;
                 try { bytes = File.ReadAllBytes(path); }
                 catch (IOException ex) { log.AppendLine("  " + path + ": unreadable, " + ex.Message); failed++; continue; }
+                // The same unreadable bank - and it has to be caught here, AFTER the Claim above: escaping
+                // left this mod claimed with the rest of its banks never loaded, and ended LoadAll too.
+                catch (UnauthorizedAccessException ex) { log.AppendLine("  " + path + ": unreadable, " + ex.Message); failed++; continue; }
 
                 uint loaded;
-                // The bank's OWN id, out of the BKHD prologue already in hand (BankPrune reads the
-                // same four bytes off disk). Passing 0 made AudioProbe's pre-unload answer
-                // AK_UnknownBankID every time, so the "never read AK_BankAlreadyLoaded as a failure"
-                // guard it exists for never actually ran: a mod switched off and on again came back
-                // as a FAILED load rather than a reload.
-                uint bankId = bytes.Length >= 16 && Encoding.ASCII.GetString(bytes, 0, 4) == "BKHD"
-                            ? BitConverter.ToUInt32(bytes, 12) : 0;
-                string r = AudioProbe.LoadBank(bytes, bankId, out loaded);
-                if (!r.Contains("AK_Success")) failed++;
+                // The bank's OWN id, out of the BKHD prologue already in hand - BankPrune's reader of
+                // those same bytes, for the log line.
+                uint bankId;
+                BankPrune.StampedId(bytes, out bankId);
+                // NO pre-unload, and AK_BankAlreadyLoaded is success: this runs again when a mod is
+                // switched off and on in one session, and its bank is then STILL loaded (UnloadMod keeps
+                // it, see there). Unloading it first to "reload" killed the media for the rest of the
+                // session - exactly the silence UnloadMod refuses to cause.
+                string r;
+                if (!AudioProbe.LoadBankKeep(bytes, out loaded, out r)) failed++;
                 // The MEDIA, not the bank id: it is what ownership is decided on above, and the
                 // ledger has to be the same list the refusal reads or the two drift apart.
                 else Project.ContentState.Served(modDir, Route, media);

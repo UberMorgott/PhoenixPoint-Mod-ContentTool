@@ -49,8 +49,21 @@ namespace Morgott.ContentTool.Bake
             }
             catch (IOException) { return false; }
             catch (UnauthorizedAccessException) { return false; }
-            return Encoding.ASCII.GetString(head, 0, 4) == "BKHD"
-                   && BitConverter.ToUInt32(head, 12) == BankId(modId, media);
+            uint stamped;
+            return StampedId(head, out stamped) && stamped == BankId(modId, media);
+        }
+
+        /// <summary>
+        /// The bank id a bank's BKHD prologue carries - fourCC, chunk size, bank version, bank id - or
+        /// false when <paramref name="bank"/> does not start with one. ONE reader of those 16 bytes, for
+        /// the sweep above and for SoundLoad, which needs the id to load the bank under.
+        /// </summary>
+        internal static bool StampedId(byte[] bank, out uint bankId)
+        {
+            bankId = 0;
+            if (bank == null || bank.Length < 16 || Encoding.ASCII.GetString(bank, 0, 4) != "BKHD") return false;
+            bankId = BitConverter.ToUInt32(bank, 12);
+            return true;
         }
 
         /// <summary>

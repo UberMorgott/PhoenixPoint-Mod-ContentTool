@@ -60,12 +60,32 @@ namespace Morgott.ContentTool.Wwise
         internal static string LoadBank(byte[] bank, uint bankId, out uint loadedId)
         {
             AKRESULT unload = AkSoundEngine.UnloadBank(bankId, IntPtr.Zero);
+            AKRESULT r = LoadCopy(bank, out loadedId);
+            return "UnloadBank: " + unload + " | LoadBankMemoryCopy: " + r + " bankId=" + loadedId;
+        }
+
+        /// <summary>
+        /// The SHIPPING load (SoundLoad): NO UnloadBank first, and AK_BankAlreadyLoaded answered as the
+        /// success it is. The pre-unload above is for the bake's own re-runs, which want this run's
+        /// bytes; on a replacement bank it is fatal - after UnloadBank the replaced media goes silent for
+        /// the rest of the session instead of falling back (SoundLoad, measured twice), so a mod switched
+        /// off and on again killed the very sound it was re-enabling. Already loaded means still serving.
+        /// </summary>
+        internal static bool LoadBankKeep(byte[] bank, out uint loadedId, out string said)
+        {
+            AKRESULT r = LoadCopy(bank, out loadedId);
+            bool ok = r == AKRESULT.AK_Success || r == AKRESULT.AK_BankAlreadyLoaded;
+            said = "LoadBankMemoryCopy: " + r + " bankId=" + loadedId +
+                   (r == AKRESULT.AK_BankAlreadyLoaded ? " (loaded earlier this session and still serving)" : "");
+            return ok;
+        }
+
+        /// <summary>LoadBankMemoryCopy - never View, whose `addr % uAlignment` is a real division and a
+        /// process-killing #DE at 0 (RECIPES 9). Copy means the pin can be freed immediately.</summary>
+        private static AKRESULT LoadCopy(byte[] bank, out uint loadedId)
+        {
             GCHandle pin = GCHandle.Alloc(bank, GCHandleType.Pinned);
-            try
-            {
-                AKRESULT r = AkSoundEngine.LoadBankMemoryCopy(pin.AddrOfPinnedObject(), (uint)bank.Length, out loadedId);
-                return "UnloadBank: " + unload + " | LoadBankMemoryCopy: " + r + " bankId=" + loadedId;
-            }
+            try { return AkSoundEngine.LoadBankMemoryCopy(pin.AddrOfPinnedObject(), (uint)bank.Length, out loadedId); }
             finally { pin.Free(); }
         }
 
