@@ -243,15 +243,18 @@ namespace Morgott.ContentTool.Tactical
             try
             {
                 Transform rig = __instance.RigRoot;
-                if (rig == null) return;
-                Transform hit = Find(rig, HitName);
-                if (hit == null) return;
+                if (rig == null || rig.Find(HitName) == null) return;
                 CollidersRagdollActivationMode m = __instance.CollidersRagdollMode;
                 // The same two-line rule Addon.cs:1502-1504 applies, minus the Ragdolls layer we do
                 // not author: a Characters collider is live exactly while something is targeting.
                 bool on = m == CollidersRagdollActivationMode.Targeting ||
                           m == CollidersRagdollActivationMode.Unmanaged;
-                foreach (Collider c in hit.GetComponents<Collider>()) c.enabled = on;
+                // EVERY hit shape, not the first one of that name: with "hitBones" the per-bone spheres
+                // share the hull's name and sit EARLIER in the hierarchy, so a first-match lookup toggled
+                // one sphere and left the hull and every other sphere in whatever state they were.
+                foreach (Transform t in rig.GetComponentsInChildren<Transform>(true))
+                    if (t.name == HitName)
+                        foreach (Collider c in t.GetComponents<Collider>()) c.enabled = on;
             }
             catch (Exception) { }
         }
@@ -312,8 +315,11 @@ namespace Morgott.ContentTool.Tactical
             // the content mod on a seam whose order against ours is not defined; a child expressed in
             // the rig's own space moves WITH the mesh whatever happens to that transform afterwards.
             Bounds local = ToLocal(rig, world);
-            GameObject hit = Shape(rig, HitName, UnityLayers.Characters.Index, local, o);
-            GameObject pick = Shape(rig, PickName, UnityLayers.CameraCollider.Index, local, o);
+            // Every object the two shapes add, bone spheres included, so a refusal below can take ALL
+            // of them back - not only the two hulls, which left the spheres on the bones.
+            List<GameObject> made = new List<GameObject>();
+            GameObject hit = Shape(rig, HitName, UnityLayers.Characters.Index, local, o, made);
+            GameObject pick = Shape(rig, PickName, UnityLayers.CameraCollider.Index, local, o, made);
             // The manifest's aim bone becomes a marker with the conventional name, so the GetAimPoint
             // postfix stays a two-line lookup instead of carrying the manifest around with it.
             Transform aimBone = Find(rig, o.Aim);
@@ -327,12 +333,12 @@ namespace Morgott.ContentTool.Tactical
             Bounds got = hit.GetComponent<Collider>().bounds;
             if (!got.Intersects(world))
             {
-                UnityEngine.Object.Destroy(hit);
-                UnityEngine.Object.Destroy(pick);
+                foreach (GameObject g in made) UnityEngine.Object.Destroy(g);
                 Say("ct_creature FAIL '" + actor.name + "' the fitted hit shape " + got.center.ToString("F2") +
                     " " + got.size.ToString("F2") + " does not overlap the rendered model " +
                     world.center.ToString("F2") + " " + world.size.ToString("F2") + " - shots would " +
-                    "pass through the creature and hit a box beside it. REFUSED, both were removed.");
+                    "pass through the creature and hit a box beside it. REFUSED, " + made.Count +
+                    " added shape object(s) were removed.");
                 return false;
             }
 
@@ -360,9 +366,11 @@ namespace Morgott.ContentTool.Tactical
         /// per-bone capsules when the manifest names bones, which is what a modder who wants a shot
         /// to distinguish a leg from a body asks for.
         /// </summary>
-        private static GameObject Shape(Transform rig, string name, int layer, Bounds local, CreatureManifest o)
+        private static GameObject Shape(Transform rig, string name, int layer, Bounds local, CreatureManifest o,
+                                        List<GameObject> made)
         {
             GameObject go = new GameObject(name);
+            made.Add(go);
             go.transform.SetParent(rig, false);
             go.layer = layer;
             Transform[] bones = o.HitBones.Select(b => Find(rig, b)).Where(t => t != null).ToArray();
@@ -381,6 +389,7 @@ namespace Morgott.ContentTool.Tactical
             foreach (Transform b in bones)
             {
                 GameObject c = new GameObject(name);
+                made.Add(c);
                 c.transform.SetParent(b, false);
                 c.layer = layer;
                 SphereCollider s = c.AddComponent<SphereCollider>();
