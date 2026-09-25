@@ -35,8 +35,88 @@ internal static class ClipImport
     {
         string hand = HandBuilt();
         string grids = Grids();
+        string between = Between();
         string real = RealFile();
-        return "CLIP import PASS\n  " + hand + "\n  " + grids + "\n  " + real;
+        return "CLIP import PASS\n  " + hand + "\n  " + grids + "\n  " + between + "\n  " + real;
+    }
+
+    // ------------------------------------------------------------------ objects BETWEEN two bones
+
+    /// <summary>
+    /// Assimp's FBX -> glTF shape: a non-bone node ('head_$AssimpFbx$_PreRotation', +2 up and 90 deg
+    /// about glTF +Z) between hip and head. The rig hangs head off hip, so a head sample - stated in
+    /// the in-between node's space - has to have that node folded in, or head snaps on frame 1.
+    ///
+    ///   head translation keys (1,0,0) (2,0,0) (3,0,0) in the in-between space
+    ///   -> Rz(90) takes x onto y, +2 up: hip-space (0,3,0) (0,4,0) (0,5,0), Unity x negated = same
+    ///   unfolded, it would read (-1,0,0) (-2,0,0) (-3,0,0).
+    /// </summary>
+    private static string Between()
+    {
+        var clips = new List<SampledClip>();
+        SkinnedModel model = GlbReader.Read(Assimp(false), clips);
+        BakedSkin skin = ModelBuild.From(model, "assimp");
+        SampledClip clip = clips[0];
+        SampledTrack head = Track(clip, skin, "head");
+        Assert(skin.BonePath(head.Node) == "hip/head", "the in-between node is skipped in the rig: " + skin.BonePath(head.Node));
+        string ladder = "";
+        for (int f = 0; f < head.Translations.Length; f++)
+            ladder += (f == 0 ? "" : " ") + "(" + F(head.Translations[f].X) + "," + F(head.Translations[f].Y) + "," +
+                      F(head.Translations[f].Z) + ")";
+        Assert(head.Translations.Length == 3 && Near(head.Translations[0].X, 0f) && Near(head.Translations[0].Y, 3f) &&
+               Near(head.Translations[1].Y, 4f) && Near(head.Translations[2].Y, 5f) && Near(head.Translations[2].Z, 0f),
+               "the in-between node is FOLDED into head's samples: " + ladder);
+        Assert(head.Rotations != null && Math.Abs(Math.Abs(head.Rotations[0].W) - 1f) < 1e-4f,
+               "and head's unkeyed rotation comes back as its rest, the fold taken off and put back: w=" +
+               F(head.Rotations[0].W));
+
+        string refusal = Refusal(Assimp(true));
+        Assert(refusal.Contains("'head_$AssimpFbx$_PreRotation'") &&
+               refusal.Contains("between the bone 'hip' and its child 'head'") && refusal.Contains("Blender"),
+               "an ANIMATED in-between node is refused by name: " + refusal);
+
+        return "in-between node folded: head " + ladder + " | animated " +
+               "in-between node refused by name";
+    }
+
+    /// <summary>The Assimp-shaped rig of <see cref="Between"/>; <paramref name="animateHelper"/> adds a
+    /// curve on the in-between node itself.</summary>
+    private static byte[] Assimp(bool animateHelper)
+    {
+        var b = new Bin();
+        int position = b.Vec(3, "VEC3", 0f, 0f, 0f, 1f, 0f, 0f, 0f, 2f, 0f);
+        int normal = b.Vec(3, "VEC3", 0f, 0f, -1f, 0f, 0f, -1f, 0f, 0f, -1f);
+        int joints = b.Joints(0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0);
+        int weights = b.Vec(3, "VEC4", 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f);
+        int indices = b.Indices(0, 1, 2);
+        int bind = b.Vec(2, "MAT4",
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1, 0, 1,
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -4, 0, 1);
+        int times = b.Vec(3, "SCALAR", 0f, 0.5f, 1f);
+        int move = b.Vec(3, "VEC3", 1f, 0f, 0f, 2f, 0f, 0f, 3f, 0f, 0f);
+        int turn = b.Vec(3, "VEC4", 0f, 0f, 0f, 1f, 0f, -0.3826834f, 0f, -0.9238795f, 0f, 0.7071068f, 0f, 0.7071068f);
+
+        string json =
+            "{\"asset\":{\"version\":\"2.0\"}," +
+            "\"scenes\":[{\"nodes\":[0,4]}],\"scene\":0," +
+            "\"nodes\":[" +
+              "{\"name\":\"rig\",\"children\":[1]}," +
+              "{\"name\":\"hip\",\"children\":[2],\"translation\":[0,1,0]}," +
+              "{\"name\":\"head_$AssimpFbx$_PreRotation\",\"children\":[3],\"translation\":[0,2,0]," +
+                "\"rotation\":[0,0,0.7071068,0.7071068]}," +
+              "{\"name\":\"head\",\"translation\":[1,0,0]}," +
+              "{\"name\":\"body\",\"mesh\":0,\"skin\":0}]," +
+            "\"skins\":[{\"joints\":[1,3],\"inverseBindMatrices\":" + bind + "}]," +
+            "\"meshes\":[{\"name\":\"assimp\",\"primitives\":[{\"attributes\":{\"POSITION\":" + position +
+              ",\"NORMAL\":" + normal + ",\"JOINTS_0\":" + joints + ",\"WEIGHTS_0\":" + weights +
+              "},\"indices\":" + indices + "}]}]," +
+            "\"animations\":[{\"name\":\"nod\",\"samplers\":[" +
+              Sampler(times, move, "LINEAR") + "," + Sampler(times, turn, "LINEAR") + "]," +
+            "\"channels\":[{\"sampler\":0,\"target\":{\"node\":3,\"path\":\"translation\"}}," +
+              "{\"sampler\":1,\"target\":{\"node\":1,\"path\":\"rotation\"}}" +
+              (animateHelper ? ",{\"sampler\":1,\"target\":{\"node\":2,\"path\":\"rotation\"}}" : "") + "]}]," +
+            b.Json() + "}";
+        return Container(json, b.Bytes());
     }
 
     // ------------------------------------------------------------------ the FALLBACK grid

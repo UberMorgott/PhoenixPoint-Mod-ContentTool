@@ -127,6 +127,16 @@ namespace Morgott.ContentTool.Import
         /// </summary>
         private bool rootsDiffer;
 
+        /// <summary>
+        /// Per joint slot, the glTF-space product of the NON-JOINT nodes between the bone and the
+        /// bone <see cref="Hierarchy"/> made its parent, or null when there are none (or they change
+        /// nothing). <see cref="Animation"/> folds it into that bone's samples.
+        /// </summary>
+        private float[][] between;
+
+        /// <summary>Per glTF node, the joint slot whose <see cref="between"/> chain holds it, or -1.</summary>
+        private int[] foldedInto;
+
         private GlbReader(Dictionary<string, object> root, byte[] bin)
         {
             this.root = root;
@@ -913,29 +923,54 @@ namespace Morgott.ContentTool.Import
         /// inverseBindMatrices disagree still skins undeformed, and the tree contributes exactly one
         /// fact: who carries whom. <see cref="RestLocals"/> derives every local transform from those
         /// same bind poses, once <see cref="ToUnity"/> has converted them.
+        ///
+        /// A NON-JOINT NODE BETWEEN TWO JOINTS is skipped the same way, and that is exact for the rest
+        /// pose (the bind poses already include it) but not for a CURVE: a glTF sample states the bone
+        /// against its DIRECT parent, which is that in-between node. Assimp's FBX import writes exactly
+        /// this shape - '&lt;bone&gt;_$AssimpFbx$_PreRotation' and friends between every two bones - and
+        /// played as-is the bone snaps by the in-between transform on frame 1. So the chain's product
+        /// is kept here per bone, in <see cref="between"/>, and <see cref="Animation"/> folds it into
+        /// every sample; <see cref="foldedInto"/> lets it refuse the one case no fold can carry, an
+        /// in-between node that is itself animated.
         /// </summary>
-        private static void Hierarchy(SkinnedModel model, List<object> nodes, int[] jointNode)
+        private void Hierarchy(SkinnedModel model, List<object> nodes, int[] jointNode)
         {
             int[] parentOfNode = Parents(nodes);
             var slotOfNode = new int[nodes.Count];
             for (int i = 0; i < slotOfNode.Length; i++) slotOfNode[i] = -1;
             for (int j = 0; j < jointNode.Length; j++) slotOfNode[jointNode[j]] = j;
+            between = new float[jointNode.Length][];
+            foldedInto = new int[nodes.Count];
+            for (int i = 0; i < foldedInto.Length; i++) foldedInto[i] = -1;
 
             model.JointNodes = new int[jointNode.Length];
+            var chain = new List<int>();
             for (int j = 0; j < jointNode.Length; j++)
             {
                 int parent = -1, steps = 0;
+                chain.Clear();
                 for (int at = parentOfNode[jointNode[j]]; at >= 0; at = parentOfNode[at])
                 {
                     if (++steps > nodes.Count)
                         throw Bad("the file's object tree loops back on itself above bone '" +
                             model.JointNames[j] + "'; re-export the file rather than editing it by hand");
-                    if (slotOfNode[at] < 0) continue;
+                    if (slotOfNode[at] < 0) { chain.Add(at); continue; }
                     parent = slotOfNode[at];
                     break;
                 }
                 if (parent == j)
                     throw Bad("bone '" + model.JointNames[j] + "' is its own parent; the file is corrupt, so re-export it");
+                // A ROOT bone's chain is the armature object's, which Above already carries.
+                if (parent >= 0 && chain.Count > 0)
+                {
+                    float[] product = Identity();
+                    for (int i = chain.Count - 1; i >= 0; i--)
+                    {
+                        product = Multiply(product, Local(Obj(nodes[chain[i]], "nodes")));
+                        foldedInto[chain[i]] = j;
+                    }
+                    if (!IsIdentity(product)) between[j] = product;
+                }
                 model.Nodes.Add(new SkinNode { Name = model.JointNames[j], Parent = parent });
                 model.JointNodes[j] = j;
             }
@@ -1106,6 +1141,20 @@ namespace Morgott.ContentTool.Import
                 if (path != "translation" && path != "rotation" && path != "scale")
                     throw Bad("the file's animation " + index.ToString(CultureInfo.InvariantCulture) + " drives '" +
                         path + "', which glTF 2.0 does not define; re-export the file rather than editing it by hand");
+                // An object BETWEEN two bones that moves on its own: its rest is folded into the bone
+                // below it (Hierarchy), but a curve on it has no bone to land on, and dropping it
+                // would freeze that part of the skeleton while the file shows it moving.
+                if (slotOfNode[node] < 0 && foldedInto != null && foldedInto[node] >= 0)
+                {
+                    int below = foldedInto[node], upper = model.Nodes[below].Parent;
+                    throw Bad("the file's animation '" + ClipName(animation, index) + "' moves '" +
+                        NodeName(node) + "', an object that sits between the bone '" +
+                        model.Nodes[upper].Name + "' and its child '" + model.Nodes[below].Name +
+                        "' but is not a bone itself, so the game's skeleton has nothing to play that curve " +
+                        "on. FBX files converted to glTF by Assimp carry such helper objects " +
+                        "('_$AssimpFbx$_'); import the FBX into Blender and export it from there as glTF " +
+                        "Binary (.glb), which writes every bone directly under its parent bone");
+                }
                 if (slotOfNode[node] < 0) { droppedNodes++; continue; }
                 int sampler = Int(Get(channel, "sampler"), at + ".sampler");
                 if (sampler < 0 || sampler >= samplers.Count)
@@ -1198,6 +1247,25 @@ namespace Morgott.ContentTool.Import
                             "Export the animated rig on its own, with every root bone under ONE armature " +
                             "object; a mesh with no clips in it imports as it is");
 
+            // The in-between objects Hierarchy skipped, folded into the bone below them by the same
+            // compose-multiply-decompose Root() does for the armature object - the fold is just a
+            // different matrix. Only a chain that is not TRS-shaped (a skew) cannot be carried.
+            if (between != null)
+                for (int slot = 0; slot < byslot.Length; slot++)
+                {
+                    if (byslot[slot] == null || between[slot] == null) continue;
+                    try { Root(model, slot, byslot[slot], GlbCodec.ConvertMatrix(between[slot]), frames); }
+                    catch (Exception e) when (e is InvalidOperationException || e is System.IO.InvalidDataException)
+                    {
+                        throw Bad("the file's animation '" + clip.Name + "' drives the bone '" +
+                            model.Nodes[slot].Name + "', which hangs under its parent bone '" +
+                            model.Nodes[model.Nodes[slot].Parent].Name + "' through objects that are not " +
+                            "bones and whose combined transform is skewed or flattened, so no bone transform can stand " +
+                            "in for them; import the file into Blender and export it again as glTF Binary " +
+                            "(.glb), which writes every bone directly under its parent bone");
+                    }
+                }
+
             if (above != null && !IsIdentity(above))
             {
                 float[] over = GlbCodec.ConvertMatrix(above);
@@ -1228,6 +1296,13 @@ namespace Morgott.ContentTool.Import
                 (droppedShapes > 0 ? "; " + droppedShapes.ToString(CultureInfo.InvariantCulture) +
                     " blend-shape channel(s) were dropped" : "");
             return clip;
+        }
+
+        private string NodeName(int node)
+        {
+            List<object> nodes = Array_(Opt(root, "nodes"), "nodes");
+            string name = Opt(Obj(nodes[node], "nodes[" + node + "]"), "name") as string;
+            return string.IsNullOrEmpty(name) ? "object " + node.ToString(CultureInfo.InvariantCulture) : name;
         }
 
         private static string ClipName(Dictionary<string, object> animation, int index)
@@ -1429,6 +1504,10 @@ namespace Morgott.ContentTool.Import
         /// A channel the file left out keeps the bone's OWN rest value for every frame, which is the
         /// stored rest with the same fold taken back off - so a clip that drives only the root's
         /// rotation still translates and scales where the rest pose says.
+        ///
+        /// The algebra does not care that the bone is a root: a non-root bone whose curves are stated
+        /// against in-between objects (<see cref="between"/>) goes through here with that chain as
+        /// <paramref name="over"/>.
         /// </summary>
         private static void Root(SkinnedModel model, int slot, SampledTrack track, float[] over, int frames)
         {
