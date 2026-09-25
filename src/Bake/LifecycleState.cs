@@ -719,8 +719,9 @@ namespace Morgott.ContentTool.Bake
 
                 case "Apply":
                     // NEVER R28 for a stale or absent bake: ApplyProject bakes on a stale or missing key
-                    // ITSELF (Route7.cs:311-:351) and that bake reports through the same producer, filling
-                    // the Bake row. Refusing here would block the one path that repairs the thing it is
+                    // ITSELF (Route7.Applied). That inner bake's terminal line lands in the APPLY row's
+                    // verdict and the log - the Bake row is not touched, it keeps whatever the last Bake
+                    // press said. Refusing here would block the one path that repairs the thing it is
                     // refusing over.
                     if (ctx.LegacyDiskActive) return StageText.R36();
                     if (ctx.WriteOutsideRoots) return StageText.R34();
