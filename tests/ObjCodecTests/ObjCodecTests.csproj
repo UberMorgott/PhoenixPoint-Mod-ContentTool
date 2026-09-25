@@ -127,6 +127,9 @@
     <Compile Include="..\..\src\Bake\CatalogOwners.cs" Link="CatalogOwners.cs" />
     <Compile Include="..\..\src\Bake\BundleClaims.cs" Link="BundleClaims.cs" />
     <Compile Include="CatalogOwnersTests.cs" />
+    <!-- The hand-typed manifest strings the bake parses: the "tint" colour and the clip glob. -->
+    <Compile Include="..\..\src\Bake\HexColor.cs" Link="HexColor.cs" />
+    <Compile Include="BakeParseTests.cs" />
     <Compile Include="AudioExtractTests.cs" />
     <!-- WHAT a shipped sound is called. The name map is the game's own SoundbanksInfo.xml and the
          parse touches no UnityEngine type, so the whole map - names, banks, loose vs in-bank, the

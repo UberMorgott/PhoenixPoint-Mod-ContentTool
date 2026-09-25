@@ -37,7 +37,9 @@ namespace Morgott.ContentTool.Bake
             for (int i = 0; i < 3; i++)
             {
                 int v;
-                if (!int.TryParse(s.Substring(i * 2, 2), NumberStyles.HexNumber,
+                // AllowHexSpecifier ALONE: HexNumber also allows leading/trailing white space, which
+                // read "#00FF 0" as the byte " 0" - a typo turned into a colour, the one thing refused.
+                if (!int.TryParse(s.Substring(i * 2, 2), NumberStyles.AllowHexSpecifier,
                                   CultureInfo.InvariantCulture, out v))
                 {
                     why = "'" + s.Substring(i * 2, 2) + "' in '" + text + "' is not a hex byte";

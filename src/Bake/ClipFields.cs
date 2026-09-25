@@ -601,13 +601,18 @@ namespace Morgott.ContentTool.Bake
             for (int i = 0; i < parts.Length; i++)
             {
                 if (parts[i].Length == 0) continue;
+                // An anchored end: the last part must FINISH the name, so it is matched as a suffix
+                // past everything before it. Its leftmost hit is the wrong one - "*_Loop" found the
+                // first "_Loop" in "MV_Loop_Run_Loop" and refused a name it plainly matches.
+                if (i == parts.Length - 1)
+                    return clip.Length - parts[i].Length >= at &&
+                           clip.EndsWith(parts[i], StringComparison.OrdinalIgnoreCase);
                 int found = clip.IndexOf(parts[i], at, StringComparison.OrdinalIgnoreCase);
-                // An anchored end: the first part must sit at 0, the last must finish the name.
+                // An anchored start: the first part must sit at 0.
                 if (found < 0 || (i == 0 && found != 0)) return false;
                 at = found + parts[i].Length;
             }
-            string tail = parts[parts.Length - 1];
-            return tail.Length == 0 || at == clip.Length;
+            return true;
         }
 
         /// <summary>Does ANY entry claim it? The set the bake asks per clip.</summary>
