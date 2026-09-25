@@ -1850,6 +1850,17 @@ internal static class LifecycleTests
         checks += Check((string)small["verdict"] == "ct_project: ALL PASS - D:\\out" &&
                         !(bool)small["truncated"],
                         "a verdict that fits arrives VERBATIM, backslashes and all");
+        // THE TERMINAL LINE SURVIVES THE CLIP. A Bake verdict is the whole bake log and its answer is the
+        // LAST line, so the head clip above always cut it: the row carries it apart, budgeted first.
+        view.Of("Bake").Verdict = huge + "\r\nct_project: 2 FAILURE(S)\r\n";
+        Dictionary<string, object> bakeLogRow = Obj(view.Section("Bake"));
+        checks += Check(view.Section("Bake").Length < 2000 && (bool)bakeLogRow["truncated"] &&
+                        (string)bakeLogRow["summary"] == "ct_project: 2 FAILURE(S)",
+                        "an over-long bake verdict still carries its terminal line as 'summary'");
+        view.Of("Bake").Verdict = null;
+        checks += Check(Obj(view.Section("Bake"))["summary"] == null,
+                        "no verdict, no summary - null, not an empty line");
+        view.Of("Bake").Verdict = "ct_project: ALL PASS - D:\\out";
 
         // ---- The other two sections, and the refusal.
         Dictionary<string, object> log = Obj(view.Section("log"));
@@ -1859,6 +1870,12 @@ internal static class LifecycleTests
         Dictionary<string, object> big = Obj(view.Section("log"));
         checks += Check(view.Section("log").Length < 2000 && (bool)big["truncated"],
                         "an over-long tail is clipped to fit rather than clipped by PPCLI into broken JSON");
+        view.Log = "project 'x' banner\n" + huge + "\nct_project: ALL PASS - D:\\out";
+        Dictionary<string, object> tailKept = Obj(view.Section("log"));
+        checks += Check(((string)tailKept["log"]).EndsWith("\nct_project: ALL PASS - D:\\out") &&
+                        !((string)tailKept["log"]).Contains("banner") && (bool)tailKept["truncated"],
+                        "the log is cut from the HEAD - its terminal line is the one kept");
+        view.Log = huge;
         Dictionary<string, object> s = Obj(view.Section("s1s2"));
         checks += Check((string)s["s1"] == "applied - restart the game" && s["s2"] == null,
                         "S1/S2 have their own section, and an absent S2 is null - not an empty string");

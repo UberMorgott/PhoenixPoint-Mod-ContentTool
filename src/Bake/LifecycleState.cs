@@ -286,10 +286,12 @@ namespace Morgott.ContentTool.Bake
         {
             if (name == null) name = "";
             if (name == "") return Header();
+            // CUT FROM THE HEAD, KEPT FROM THE TAIL. The log is the bake's whole report and its verdict is
+            // the LAST line - a head clip served the project banner and dropped exactly the line asked for.
             if (name == "log") return Bounded(Len(Log), delegate (int room, bool cut)
             {
                 Import.JsonWriter w = Open("log");
-                return w.Key("log").Val(Clip(Log, room) ?? "").Key("bytes").Val(Len(Log))
+                return w.Key("log").Val(ClipTail(Log, room) ?? "").Key("bytes").Val(Len(Log))
                         .Key("truncated").Val(cut).EndObj().ToString();
             });
             // TWO variable fields, ONE budget, and they shrink TOGETHER: Apply's S1 and S2 are producer
@@ -313,6 +315,10 @@ namespace Morgott.ContentTool.Bake
             // `installation` shrinks with the verdict: it is Apply's own line, as unbounded as the verdict
             // beside it, and leaving it outside the loop let a long one overrun a payload that measured as
             // fitting.
+            // THE SUMMARY IS BUDGETED FIRST, OUTSIDE THE SHRINK. A Bake verdict is the whole bake log and its
+            // terminal line - `ct_project: ALL PASS` / `N FAILURE(S)` - is the LAST one, so the head clip
+            // below always cut it off: a poll could read every row's first 1900 chars and never the answer.
+            string summary = row.Verdict == null ? null : Clip(StageResult.Tail(row.Verdict, 1), FieldRoom);
             return Bounded(Math.Max(Len(row.Verdict), Len(row.Installation)), delegate (int room, bool cut)
             {
                 Import.JsonWriter w = Open(name);
@@ -320,6 +326,7 @@ namespace Morgott.ContentTool.Bake
                  .Key("freshness").Val(Word(row.Freshness))
                  .Key("outcome").Val(Word(row.Outcome))
                  .Key("starts").Val(row.Starts);
+                w.Key("summary"); Text(w, summary);
                 w.Key("installation"); Text(w, Clip(row.Installation, room));
                 w.Key("verdict"); if (row.Verdict == null) w.Null(); else w.Val(Clip(row.Verdict, room));
                 return w.Key("bytes").Val(Len(row.Verdict) + Len(row.Installation))
@@ -465,6 +472,16 @@ namespace Morgott.ContentTool.Bake
             if (s == null || s.Length <= room) return s;
             if (room > 0 && char.IsHighSurrogate(s[room - 1])) room--;
             return s.Substring(0, room);
+        }
+
+        /// <summary><see cref="Clip"/> from the other end: the LAST <paramref name="room"/> characters,
+        /// never starting on the low half of a surrogate pair.</summary>
+        private static string ClipTail(string s, int room)
+        {
+            if (s == null || s.Length <= room) return s;
+            int start = s.Length - Math.Max(0, room);
+            if (start < s.Length && char.IsLowSurrogate(s[start])) start++;
+            return s.Substring(start);
         }
     }
 
