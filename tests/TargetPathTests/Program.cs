@@ -2809,6 +2809,16 @@ internal static class Program
             Check("DG-refusal", refused.IndexOf("REFUSED", StringComparison.Ordinal) >= 0 &&
                                 refused.IndexOf("ct_mission", StringComparison.Ordinal) >= 0,
                 "autorun's refusal carries REFUSED (autogate's report filter) and the command: " + refused);
+
+            // A PUBLIC command with a dev SUBVERB: ct_mission list is for everyone, ct_mission gate is not.
+            string sub = DevGate.SubverbRefusal("ct_mission", new[] { "GATE", "x" }, false, "gate");
+            Check("DG-subverb",
+                sub != null && sub.IndexOf("'ct_mission gate' is a dev command - REFUSED", StringComparison.Ordinal) >= 0 &&
+                sub.IndexOf(DevGate.Marker, StringComparison.Ordinal) >= 0 &&
+                DevGate.SubverbRefusal("ct_mission", new[] { "gate", "x" }, true, "gate") == null &&
+                DevGate.SubverbRefusal("ct_mission", new[] { "list" }, false, "gate") == null &&
+                DevGate.SubverbRefusal("ct_mission", new string[0], false, "gate") == null,
+                "a dev subverb is refused unarmed (case-blind), runs armed; the public subverb and the bare command always run: " + sub);
         }
         finally { try { Directory.Delete(root, true); } catch (Exception) { } }
     }

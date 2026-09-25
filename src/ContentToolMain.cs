@@ -630,8 +630,9 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_sound THREW " + ex); }
             }
 
-            [DevOnly]
-            [ConsoleCommand(Command = "ct_voices", Description = "ContentTool: DEV instrument - counts what the GAME posts. 'watch [seconds]' patches AkSoundEngine.PostEvent, prints a timeline plus live voice counts at t=2/6/12/20s. Answers whether a sound is being re-posted (accumulation) or re-entered (one voice), which no S1 arm can see.")]
+            // PUBLIC: the sound demos' READMEs send authors here, and it only READS (a prefix that
+            // changes nothing, MusicWatch.Seen).
+            [ConsoleCommand(Command = "ct_voices", Description = "ContentTool: counts what the GAME posts. 'watch [seconds]' patches AkSoundEngine.PostEvent, prints a timeline plus live voice counts at t=2/6/12/20s. Answers whether a sound is being re-posted (accumulation) or re-entered (one voice), which no S1 arm can see.")]
             public static void CtVoices(IConsole console, params string[] args)
             {
                 try { Out(console, Dev.MusicWatch.Run(args)); }
@@ -733,10 +734,13 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_scan THREW " + ex); }
             }
 
-            [DevOnly]
-            [ConsoleCommand(Command = "ct_mission", Description = "ContentTool (dev workbench): gate M1 - the seam measured INSIDE a loaded tactical mission instead of on the roster. Loads a savegame that declares IsTacticalSave, waits for the mission to be live, then reports coverage and runs R2/R3 there. Args: list | gate <savename>.")]
+            // PUBLIC for 'list' only - ct_creature gate's usage points players at it for the save names.
+            // 'gate' loads a save with no confirmation, so it stays behind the ct-dev marker.
+            [ConsoleCommand(Command = "ct_mission", Description = "ContentTool: 'list' prints the tactical savegame names (what ct_creature gate takes). Dev workbench (needs the ct-dev marker): 'gate <savename>' - gate M1, the seam measured INSIDE a loaded tactical mission; loads that save, waits for the mission to be live, then reports coverage and runs R2/R3 there. Args: list | gate <savename>.")]
             public static void CtMission(IConsole console, params string[] args)
             {
+                string refused = Dev.DevGate.SubverbRefusal("ct_mission", args, devArmed, "gate");
+                if (refused != null) { Out(console, refused); return; }
                 try { Out(console, Dev.MissionGate.Run(args)); }
                 catch (Exception ex) { Out(console, "ct_mission THREW " + ex); }
             }

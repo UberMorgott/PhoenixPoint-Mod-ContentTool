@@ -47,5 +47,21 @@ namespace Morgott.ContentTool.Dev
             return "ct_autorun: '" + command + "' is a dev command - REFUSED, no '" + Marker +
                    "' marker beside ContentTool.dll";
         }
+
+        /// <summary>
+        /// A command that is PUBLIC as a whole but carries dev SUBVERBS (ct_mission: 'list' is for
+        /// everyone, 'gate' loads a save). Registration is per command, so the subverb is refused at
+        /// call time, through the console and autorun alike. Null when the call may run.
+        /// </summary>
+        internal static string SubverbRefusal(string command, string[] args, bool armed, params string[] devSubverbs)
+        {
+            if (armed || args == null || args.Length == 0 || devSubverbs == null) return null;
+            string sub = (args[0] ?? "").ToLowerInvariant();
+            foreach (string dev in devSubverbs)
+                if (sub == dev)
+                    return "'" + command + " " + sub + "' is a dev command - REFUSED, no '" + Marker +
+                           "' marker beside ContentTool.dll (an empty file '" + Marker + "' there arms it at the next launch)";
+            return null;
+        }
     }
 }
