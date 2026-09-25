@@ -330,6 +330,7 @@ internal static class Program
         Console.WriteLine(SourceSkip.Run());
         Console.WriteLine(RefusalCount.Run());
         Console.WriteLine(SpillTests.Run());
+        Console.WriteLine(BundleLockTests.Run());
         Console.WriteLine(BoneNames.Run());
         Console.WriteLine(OrbitTests.Run());
         Console.WriteLine(BinderFrozen.Run());

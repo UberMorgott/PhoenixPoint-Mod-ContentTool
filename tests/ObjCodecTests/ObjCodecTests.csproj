@@ -39,6 +39,7 @@
          here rather than by losing a report in a game session. -->
     <Compile Include="..\..\src\Dev\SpillFile.cs" Link="SpillFile.cs" />
     <Compile Include="SpillTests.cs" />
+    <Compile Include="BundleLockTests.cs" />
     <Compile Include="..\..\src\IO\AtomicFile.cs" Link="AtomicFile.cs" />
     <Compile Include="..\..\src\Project\Manifest.cs" Link="Manifest.cs" />
     <Compile Include="ManifestTests.cs" />

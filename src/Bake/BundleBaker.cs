@@ -25,6 +25,8 @@ namespace Morgott.ContentTool.Bake
     {
         private readonly AssetsManager man = new AssetsManager();
         private readonly Stream classData;
+        /// <summary>The shipped bundle's file, opened here and closed here - see the ctor.</summary>
+        private readonly FileStream source;
         private readonly BundleFileInstance bunInst;
         private readonly AssetsFileInstance afileInst;
         private readonly string modId;
@@ -58,7 +60,10 @@ namespace Morgott.ContentTool.Bake
                     throw new InvalidOperationException("classdata.tpk is missing from ContentTool.dll");
                 man.LoadClassPackage(classData);
 
-                bunInst = man.LoadBundleFile(sourceBundlePath, true);
+                // OUR stream, not the path overload's: that one opens the file and, when the header does
+                // not parse, throws with the stream registered nowhere - UnloadAll then closes nothing.
+                source = File.OpenRead(sourceBundlePath);
+                bunInst = man.LoadBundleFile(source, true);
                 afileInst = man.LoadAssetsFileFromBundle(bunInst, 0, false);
                 AssetsFile afile = afileInst.file;
                 man.LoadClassDatabaseFromPackage(afile.Metadata.UnityVersion);
@@ -74,6 +79,7 @@ namespace Morgott.ContentTool.Bake
             catch
             {
                 man.UnloadAll();
+                source?.Dispose();
                 classData?.Dispose();
                 throw;
             }
@@ -519,14 +525,32 @@ namespace Morgott.ContentTool.Bake
         /// <summary>Open a written bundle off disk, ask it one question, close it.</summary>
         private static T Read<T>(string bundlePath, Func<AssetsManager, AssetsFileInstance, T> ask)
         {
+            return Read(bundlePath, (m, bun, afile) => ask(m, afile));
+        }
+
+        /// <summary>The same, for a question that needs the bundle itself (its .resS entries).
+        ///
+        /// THE LOADS ARE INSIDE THE TRY, AND THE FILE IS OURS. They sat before it, so a bundle that failed
+        /// to parse left the stream open and nothing reached UnloadAll - and even UnloadAll cannot close
+        /// it: the path overload of LoadBundleFile opens the file and, when the header throws, registers
+        /// the stream nowhere (measured with AssetsTools.NET on a 200-byte garbage file: still locked
+        /// after UnloadAll, released once the caller disposes its own stream). A locked copy is one the
+        /// next bake cannot replace. Every reader here goes through this one helper.</summary>
+        private static T Read<T>(string bundlePath,
+                                 Func<AssetsManager, BundleFileInstance, AssetsFileInstance, T> ask)
+        {
             AssetsManager m = new AssetsManager();
             using (Stream cldb = ContentToolMain.ClassData())
+            using (FileStream file = File.OpenRead(bundlePath))
             {
                 m.LoadClassPackage(cldb);
-                BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
-                AssetsFileInstance afile = m.LoadAssetsFileFromBundle(bun, 0, false);
-                m.LoadClassDatabaseFromPackage(afile.file.Metadata.UnityVersion);
-                try { return ask(m, afile); }
+                try
+                {
+                    BundleFileInstance bun = m.LoadBundleFile(file, true);
+                    AssetsFileInstance afile = m.LoadAssetsFileFromBundle(bun, 0, false);
+                    m.LoadClassDatabaseFromPackage(afile.file.Metadata.UnityVersion);
+                    return ask(m, bun, afile);
+                }
                 finally { m.UnloadAll(); }
             }
         }
@@ -599,22 +623,13 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static SkinnedModel ReadMesh(string bundlePath, string assetName)
         {
-            AssetsManager m = new AssetsManager();
-            using (Stream cldb = ContentToolMain.ClassData())
+            return Read(bundlePath, (m, bun, afile) =>
             {
-                m.LoadClassPackage(cldb);
-                BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
-                AssetsFileInstance afile = m.LoadAssetsFileFromBundle(bun, 0, false);
-                m.LoadClassDatabaseFromPackage(afile.file.Metadata.UnityVersion);
-                try
-                {
-                    AssetFileInfo info = AssetIndex.FindUnique(m, afile, AssetClassID.Mesh, assetName, bundlePath);
-                    return MeshRead.Read(m.GetBaseField(afile, info),
-                                         entry => BundleHelper.LoadAssetDataFromBundle(bun.file, entry),
-                                         SkinFields.BoneNames(m, afile, info.PathId));
-                }
-                finally { m.UnloadAll(); }
-            }
+                AssetFileInfo info = AssetIndex.FindUnique(m, afile, AssetClassID.Mesh, assetName, bundlePath);
+                return MeshRead.Read(m.GetBaseField(afile, info),
+                                     entry => BundleHelper.LoadAssetDataFromBundle(bun.file, entry),
+                                     SkinFields.BoneNames(m, afile, info.PathId));
+            });
         }
 
         /// <summary>The serialized pixels of one Texture2D, with its .resS already resolved.</summary>
@@ -646,62 +661,53 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static RawTexture ReadTexture(string bundlePath, string assetName)
         {
-            AssetsManager m = new AssetsManager();
-            using (Stream cldb = ContentToolMain.ClassData())
+            return Read(bundlePath, (m, bun, afile) =>
             {
-                m.LoadClassPackage(cldb);
-                BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
-                AssetsFileInstance afile = m.LoadAssetsFileFromBundle(bun, 0, false);
-                m.LoadClassDatabaseFromPackage(afile.file.Metadata.UnityVersion);
-                try
+                AssetFileInfo info = AssetIndex.FindUnique(m, afile, AssetClassID.Texture2D, assetName, bundlePath);
+                AssetTypeValueField bf = m.GetBaseField(afile, info);
+                RawTexture t = new RawTexture
                 {
-                    AssetFileInfo info = AssetIndex.FindUnique(m, afile, AssetClassID.Texture2D, assetName, bundlePath);
-                    AssetTypeValueField bf = m.GetBaseField(afile, info);
-                    RawTexture t = new RawTexture
-                    {
-                        Width = bf["m_Width"].AsInt,
-                        Height = bf["m_Height"].AsInt,
-                        Format = bf["m_TextureFormat"].AsInt,
-                        MipCount = Math.Max(1, bf["m_MipCount"].AsInt),
-                    };
+                    Width = bf["m_Width"].AsInt,
+                    Height = bf["m_Height"].AsInt,
+                    Format = bf["m_TextureFormat"].AsInt,
+                    MipCount = Math.Max(1, bf["m_MipCount"].AsInt),
+                };
 
-                    byte[] inline = bf["image data"].AsByteArray;
-                    AssetTypeValueField sd = bf["m_StreamData"];
-                    string streamPath = sd == null || sd.IsDummy ? "" : (sd["path"].AsString ?? "");
+                byte[] inline = bf["image data"].AsByteArray;
+                AssetTypeValueField sd = bf["m_StreamData"];
+                string streamPath = sd == null || sd.IsDummy ? "" : (sd["path"].AsString ?? "");
 
-                    if (inline != null && inline.Length > 0)
-                    {
-                        t.Data = inline;
-                        t.Origin = "inline";
-                    }
-                    else if (streamPath.Length > 0)
-                    {
-                        ulong offset = sd["offset"].AsULong;
-                        uint size = sd["size"].AsUInt;
-                        // "archive:/CAB-xxxx/CAB-xxxx.resS" - only the last segment names an entry.
-                        string entry = streamPath.Substring(streamPath.LastIndexOf('/') + 1);
-                        byte[] res = BundleHelper.LoadAssetDataFromBundle(bun.file, entry);
-                        if (res == null)
-                            throw new InvalidOperationException(
-                                "'" + assetName + "' streams its pixels from '" + entry + "', which " +
-                                Path.GetFileName(bundlePath) + " does not contain");
-                        if (offset + size > (ulong)res.LongLength)
-                            throw new InvalidOperationException(
-                                "'" + assetName + "' claims " + size + " B at " + offset + " of '" + entry +
-                                "', which is only " + res.Length + " B");
-                        t.Data = new byte[size];
-                        Array.Copy(res, (long)offset, t.Data, 0, size);
-                        t.Origin = entry + "@" + offset + "+" + size;
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException(
-                            "'" + assetName + "' carries no pixels: no inline image data and no m_StreamData path");
-                    }
-                    return t;
+                if (inline != null && inline.Length > 0)
+                {
+                    t.Data = inline;
+                    t.Origin = "inline";
                 }
-                finally { m.UnloadAll(); }
-            }
+                else if (streamPath.Length > 0)
+                {
+                    ulong offset = sd["offset"].AsULong;
+                    uint size = sd["size"].AsUInt;
+                    // "archive:/CAB-xxxx/CAB-xxxx.resS" - only the last segment names an entry.
+                    string entry = streamPath.Substring(streamPath.LastIndexOf('/') + 1);
+                    byte[] res = BundleHelper.LoadAssetDataFromBundle(bun.file, entry);
+                    if (res == null)
+                        throw new InvalidOperationException(
+                            "'" + assetName + "' streams its pixels from '" + entry + "', which " +
+                            Path.GetFileName(bundlePath) + " does not contain");
+                    if (offset + size > (ulong)res.LongLength)
+                        throw new InvalidOperationException(
+                            "'" + assetName + "' claims " + size + " B at " + offset + " of '" + entry +
+                            "', which is only " + res.Length + " B");
+                    t.Data = new byte[size];
+                    Array.Copy(res, (long)offset, t.Data, 0, size);
+                    t.Origin = entry + "@" + offset + "+" + size;
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        "'" + assetName + "' carries no pixels: no inline image data and no m_StreamData path");
+                }
+                return t;
+            });
         }
 
         /// <summary>
@@ -930,33 +936,26 @@ namespace Morgott.ContentTool.Bake
         internal static string ReadMeshSummary(string bundlePath, string meshName, bool skin,
                                                out string buffers)
         {
-            buffers = null;
-            AssetsManager m = new AssetsManager();
-            using (Stream cldb = ContentToolMain.ClassData())
+            string read = null;
+            string summary = Read(bundlePath, (m, afile) =>
             {
-                m.LoadClassPackage(cldb);
-                BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
-                AssetsFileInstance afile = m.LoadAssetsFileFromBundle(bun, 0, false);
-                m.LoadClassDatabaseFromPackage(afile.file.Metadata.UnityVersion);
-                try
+                foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Mesh))
                 {
-                    foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Mesh))
-                    {
-                        AssetTypeValueField mesh = m.GetBaseField(afile, i);
-                        if (mesh["m_Name"].AsString != meshName) continue;
-                        buffers = MeshFields.Buffers(mesh);
-                        // A tree with NO vertex data, NO index buffer and NO stream path is not a Mesh
-                        // this build can read - and Summary/SkinSummary index exactly those absent
-                        // fields, where a dummy THROWS. Buffers already answers null (= VOID) for it;
-                        // the summary has to say so too rather than take the gate down with an NRE.
-                        if (buffers == null)
-                            return "unreadable Mesh " + meshName + " in " + bundlePath;
-                        return skin ? SkinFields.SkinSummary(mesh) : MeshFields.Summary(mesh);
-                    }
-                    return "no Mesh named " + meshName + " in " + bundlePath;
+                    AssetTypeValueField mesh = m.GetBaseField(afile, i);
+                    if (mesh["m_Name"].AsString != meshName) continue;
+                    read = MeshFields.Buffers(mesh);
+                    // A tree with NO vertex data, NO index buffer and NO stream path is not a Mesh
+                    // this build can read - and Summary/SkinSummary index exactly those absent
+                    // fields, where a dummy THROWS. Buffers already answers null (= VOID) for it;
+                    // the summary has to say so too rather than take the gate down with an NRE.
+                    if (read == null)
+                        return "unreadable Mesh " + meshName + " in " + bundlePath;
+                    return skin ? SkinFields.SkinSummary(mesh) : MeshFields.Summary(mesh);
                 }
-                finally { m.UnloadAll(); }
-            }
+                return "no Mesh named " + meshName + " in " + bundlePath;
+            });
+            buffers = read;
+            return summary;
         }
 
         /// <summary>
@@ -1041,29 +1040,20 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static bool HasTexturePixels(string bundlePath, int width, int height, byte[] rgba32)
         {
-            AssetsManager m = new AssetsManager();
-            using (Stream cldb = ContentToolMain.ClassData())
+            return Read(bundlePath, (m, afile) =>
             {
-                m.LoadClassPackage(cldb);
-                BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
-                AssetsFileInstance afile = m.LoadAssetsFileFromBundle(bun, 0, false);
-                m.LoadClassDatabaseFromPackage(afile.file.Metadata.UnityVersion);
-                try
+                foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Texture2D))
                 {
-                    foreach (AssetFileInfo i in afile.file.Metadata.GetAssetsOfType(AssetClassID.Texture2D))
-                    {
-                        AssetTypeValueField bf = m.GetBaseField(afile, i);
-                        if (bf["m_Width"].AsInt != width || bf["m_Height"].AsInt != height) continue;
-                        byte[] got = bf["image data"].AsByteArray;
-                        if (got == null || got.Length != rgba32.Length) continue;
-                        bool same = true;
-                        for (int k = 0; k < got.Length; k++) if (got[k] != rgba32[k]) { same = false; break; }
-                        if (same) return true;
-                    }
-                    return false;
+                    AssetTypeValueField bf = m.GetBaseField(afile, i);
+                    if (bf["m_Width"].AsInt != width || bf["m_Height"].AsInt != height) continue;
+                    byte[] got = bf["image data"].AsByteArray;
+                    if (got == null || got.Length != rgba32.Length) continue;
+                    bool same = true;
+                    for (int k = 0; k < got.Length; k++) if (got[k] != rgba32[k]) { same = false; break; }
+                    if (same) return true;
                 }
-                finally { m.UnloadAll(); }
-            }
+                return false;
+            });
         }
 
         /// <summary>
@@ -1138,6 +1128,7 @@ namespace Morgott.ContentTool.Bake
         public void Dispose()
         {
             man.UnloadAll();
+            source?.Dispose();
             classData?.Dispose();
         }
 
