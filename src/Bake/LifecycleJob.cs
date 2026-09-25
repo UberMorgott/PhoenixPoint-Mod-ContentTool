@@ -598,7 +598,12 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static class Barrier
         {
-            private static volatile ManualResetEvent gate;
+            /// <summary>A MONITOR, NOT A WAIT HANDLE. A ManualResetEvent per armed scenario was a kernel handle
+            /// nobody disposed - and disposing it would race a Release against a worker still inside WaitOne
+            /// (ObjectDisposedException). A plain object owns no handle, so there is nothing to leak.</summary>
+            private sealed class Gate { internal bool Open; }
+
+            private static volatile Gate gate;
             /// <summary>A worker is sitting in <see cref="Wait"/> right now, and this is its run.</summary>
             internal static volatile bool Parked;
             internal static long ParkedRunId;
@@ -606,27 +611,25 @@ namespace Morgott.ContentTool.Bake
             internal static void Arm()
             {
                 Release();
-                gate = new ManualResetEvent(false);
+                gate = new Gate();
             }
 
             /// <summary>WORKER ONLY. Returns at once unless a scenario armed the barrier.</summary>
             internal static void Wait(long runId)
             {
-                ManualResetEvent g = gate;
+                Gate g = gate;
                 if (g == null) return;
                 ParkedRunId = runId;
                 Parked = true;
-                // Never disposed, so this cannot race a Release into ObjectDisposedException; one event per
-                // armed scenario is a handle a test session can afford.
-                try { g.WaitOne(); }
+                try { lock (g) { while (!g.Open) Monitor.Wait(g); } }
                 finally { Parked = false; ParkedRunId = 0; }
             }
 
             internal static void Release()
             {
-                ManualResetEvent g = gate;
+                Gate g = gate;
                 gate = null;
-                if (g != null) g.Set();
+                if (g != null) lock (g) { g.Open = true; Monitor.PulseAll(g); }
             }
         }
     }
