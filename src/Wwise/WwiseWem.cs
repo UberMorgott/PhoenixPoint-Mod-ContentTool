@@ -157,35 +157,46 @@ namespace Morgott.ContentTool.Wwise
             if (i == null) return "not a RIFF/WAVE .wem";
             if (i.Truncated) return "truncated: the data chunk claims " + i.DataSize + " bytes but only "
                                     + (wem.Length - i.DataOffset) + " are there";
+            if (!i.IsPcm16 && !i.IsVorbis)
+                return "unsupported codec 0x" + i.Codec.ToString("X4") + " (fmt body " + i.FmtSize + ")";
 
-            if (i.IsPcm16)
-            {
-                // Already PCM (the 8 loose fmt=0xFFFE files). Rewrap, never re-encode.
-                using (var fs = File.Create(outPath))
-                {
-                    WriteWavHeader(fs, i.Channels, i.SampleRate, i.DataSize);
-                    fs.Write(wem, i.DataOffset, i.DataSize);
-                }
-                return null;
-            }
-            if (!i.IsVorbis) return "unsupported codec 0x" + i.Codec.ToString("X4") + " (fmt body " + i.FmtSize + ")";
-
-            byte[] setup;
-            if (!WwiseSetupHeaders.ByHash.TryGetValue(i.HashCodebook, out setup))
+            byte[] setup = null;
+            if (i.IsVorbis && !WwiseSetupHeaders.ByHash.TryGetValue(i.HashCodebook, out setup))
                 return "no baked setup header for codebook hash " + i.HashCodebook;
 
-            using (var fs = File.Create(outPath))
+            // Streamed into a SIBLING temp and swapped in whole: a decode that threw or produced nothing
+            // used to leave a half-written .wav under the real name, where it reads as a finished extract.
+            string tmp = outPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
             {
-                WriteWavHeader(fs, i.Channels, i.SampleRate, 0); // sizes patched at the end
-                long dataStart = fs.Position;
-                long written = Decode(wem, i, setup, fs);
-                if (written <= 0) return "vorbis decode produced no samples";
-                long bytes = fs.Position - dataStart;
-                if (bytes % 2 != 0) { fs.WriteByte(0); bytes++; }
-                fs.Position = 4; WriteU32(fs, (uint)(36 + bytes));
-                fs.Position = 40; WriteU32(fs, (uint)bytes);
+                using (var fs = File.Create(tmp))
+                {
+                    if (i.IsPcm16)
+                    {
+                        // Already PCM (the 8 loose fmt=0xFFFE files). Rewrap, never re-encode.
+                        WriteWavHeader(fs, i.Channels, i.SampleRate, i.DataSize);
+                        fs.Write(wem, i.DataOffset, i.DataSize);
+                    }
+                    else
+                    {
+                        WriteWavHeader(fs, i.Channels, i.SampleRate, 0); // sizes patched at the end
+                        long dataStart = fs.Position;
+                        long written = Decode(wem, i, setup, fs);
+                        if (written <= 0) return "vorbis decode produced no samples";
+                        long bytes = fs.Position - dataStart;
+                        if (bytes % 2 != 0) { fs.WriteByte(0); bytes++; }
+                        fs.Position = 4; WriteU32(fs, (uint)(36 + bytes));
+                        fs.Position = 40; WriteU32(fs, (uint)bytes);
+                    }
+                }
+                Morgott.ContentTool.IO.AtomicFile.Publish(tmp, outPath);
+                return null;
             }
-            return null;
+            finally
+            {
+                // Best effort: a swap that worked moved the temp away already.
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch (Exception) { }
+            }
         }
 
         /// <summary>Runs NVorbis over the reconstructed packets, clipped to the declared sample count.</summary>
