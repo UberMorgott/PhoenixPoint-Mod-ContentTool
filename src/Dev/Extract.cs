@@ -268,21 +268,25 @@ namespace Morgott.ContentTool.Dev
             // reached the console as "ct_extract THREW" plus a stack trace, a crash for a typo. Same
             // unwrapping as ct_list's (List above), plus the listing that shows the names there are.
             // Any other exception still reaches ct_extract's own THREW arm with its stack intact.
+            // The loose-file verbs take the same unwrapping: LooseFiles.CopyOut refuses no match and more
+            // than one match by THROWING, so a mistyped media id or clip name was a THREW too.
             try
             {
                 if (verb == "tex" && args.Length > 2) return Texture(args[1], args[2]);
                 if (verb == "mesh" && args.Length > 2) return Mesh(args[1], args[2]);
+                if (verb == "video" && args.Length > 1) return Video(args[1]);
+                if (verb == "audio" && args.Length > 1)
+                    return string.Equals(args[1], "--all", StringComparison.OrdinalIgnoreCase)
+                        ? AudioAll(args.Length > 2 ? args[2] : null)
+                        : Audio(args[1]);
             }
             catch (InvalidOperationException ex)
             {
-                return "ct_extract REFUSED - " + ex.Message + ". The names it holds: 'ct_list assets " +
-                       args[1] + " " + (verb == "tex" ? "Texture2D" : "Mesh") + " <nameFilter>'";
+                return "ct_extract REFUSED - " + ex.Message + ". The names it holds: " +
+                       (verb == "video" ? "'ct_list videos <nameFilter>'"
+                        : verb == "audio" ? "'ct_list audio <filter>' (the id is the first column)"
+                        : "'ct_list assets " + args[1] + " " + (verb == "tex" ? "Texture2D" : "Mesh") + " <nameFilter>'");
             }
-            if (verb == "video" && args.Length > 1) return Video(args[1]);
-            if (verb == "audio" && args.Length > 1)
-                return string.Equals(args[1], "--all", StringComparison.OrdinalIgnoreCase)
-                    ? AudioAll(args.Length > 2 ? args[2] : null)
-                    : Audio(args[1]);
             return "usage: ct_extract tex <bundleFile> <assetName> | ct_extract mesh <bundleFile> <assetName>" +
                    " | ct_extract video <name> | ct_extract audio <mediaId> | ct_extract audio --all [filter]" +
                    " | ct_extract gate";
