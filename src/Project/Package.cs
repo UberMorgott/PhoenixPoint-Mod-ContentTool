@@ -658,16 +658,19 @@ namespace Morgott.ContentTool.Project
         }
 
         /// <summary>
-        /// meta.json read STRICTLY: null with the tree, or the sentence saying why it does not read. Json's
-        /// own sentence ends in advice meant for a glTF ("re-export it rather than editing it by hand",
-        /// Json.cs:142-145), which is wrong for a file the author fixes by hand - only the POSITION and the
-        /// CAUSE carry over. ONE copy, shared with ProjectScaffold's R13.
+        /// meta.json read AS THE GAME READS IT: null with the tree, or the sentence saying why it does not
+        /// read. Json's own sentence ends in advice meant for a glTF ("re-export it rather than editing it
+        /// by hand", Json.cs:142-145), which is wrong for a file the author fixes by hand - only the
+        /// POSITION and the CAUSE carry over. ONE copy, shared with ProjectScaffold's R13.
+        ///
+        /// The game's reader is JsonConvert (ModMeta.FromDir, ModMeta.cs:55), which takes // and /* */
+        /// comments and a trailing comma; a strict parse refused meta.json files the game loads fine.
         /// </summary>
         internal static string MetaTree(string metaText, out Dictionary<string, object> tree)
         {
             tree = null;
             object parsed;
-            try { parsed = Json.Parse(metaText, Manifest.MaxDepth); }
+            try { parsed = Json.Parse(AsJsonConvertReads(metaText), Manifest.MaxDepth); }
             catch (FormatException bad)
             {
                 string why = bad.Message;
@@ -678,6 +681,46 @@ namespace Morgott.ContentTool.Project
             }
             tree = parsed as Dictionary<string, object>;
             return tree == null ? "meta.json is not a JSON object." : null;
+        }
+
+        /// <summary>
+        /// The two things JsonConvert tolerates that a strict parse does not - comments and a trailing
+        /// comma before ] or } - blanked to SPACES, so every "at character N" still points at the
+        /// author's own text. Strings are skipped whole; an unclosed /* is left for the parser to refuse.
+        /// </summary>
+        internal static string AsJsonConvertReads(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            char[] c = text.ToCharArray();
+            int comma = -1;
+            for (int i = 0; i < c.Length; i++)
+            {
+                char ch = c[i];
+                if (ch == '"')
+                {
+                    comma = -1;
+                    for (i++; i < c.Length && c[i] != '"'; i++) if (c[i] == '\\') i++;
+                    continue;
+                }
+                if (ch == '/' && i + 1 < c.Length && c[i + 1] == '/')
+                {
+                    for (; i < c.Length && c[i] != '\n' && c[i] != '\r'; i++) c[i] = ' ';
+                    i--;
+                    continue;
+                }
+                if (ch == '/' && i + 1 < c.Length && c[i + 1] == '*')
+                {
+                    int end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                    if (end < 0) break;
+                    for (; i < end + 2; i++) if (c[i] != '\n' && c[i] != '\r') c[i] = ' ';
+                    i--;
+                    continue;
+                }
+                if (ch == ',') { comma = i; continue; }
+                if ((ch == ']' || ch == '}') && comma >= 0) c[comma] = ' ';
+                if (!char.IsWhiteSpace(ch)) comma = -1;
+            }
+            return new string(c);
         }
 
         /// <summary>A meta.json STRING member, matched the way the game's reader matches it: JsonConvert

@@ -69,6 +69,23 @@ internal static class PackageGate
                 "a thrown bake's '<name>.bundle.<guid>.tmp' is not staged either - the GUID is the " +
                 "signature wherever it sits in the name");
 
+            // meta.json IS READ BY JsonConvert IN THE GAME (ModMeta.cs:55): comments and a trailing comma
+            // load there, so the packager must not refuse them - while a real syntax error still refuses.
+            const string commented =
+                "{ // the mod\n \"ID\": \"com.test.Mod\", /* engine */ \"Dependencies\": [ \"com.morgott.ContentTool\", ],\n" +
+                " \"Description\": \"a // b /* c */\", \"AssemblyName\": \"\", }";
+            checks += Check(Package.MetaRefusal(commented, new List<string>()) == null,
+                "a meta.json with comments and trailing commas is accepted, as the game accepts it: " +
+                Package.MetaRefusal(commented, new List<string>()));
+            Dictionary<string, object> tree;
+            Package.MetaTree(commented, out tree);
+            checks += Check(tree != null && (string)tree["Description"] == "a // b /* c */",
+                "comment markers INSIDE a string are text, not comments");
+            checks += Check(Package.MetaRefusal("{ \"ID\": \"x\" \"Dependencies\": [] }", new List<string>()) != null &&
+                            Package.MetaRefusal("{ \"ID\": \"x\", /* never closed }", new List<string>()) != null &&
+                            Package.MetaRefusal("{ \"ID\": [ \"x\",, ] }", new List<string>()) != null,
+                "a missing comma, an unclosed comment and a doubled comma still refuse");
+
             return "PACKAGE-GATE PASS, " + checks + " check(s)";
         }
         finally
