@@ -105,17 +105,20 @@ namespace Morgott.ContentTool.Import
                         switch (parts[0])
                         {
                             case "v":
-                                RequireCount(parts, 4, "vertex requires three finite values");
+                                // x y z, then an optional w (the OBJ spec) or r g b (the vertex-colour
+                                // extension Blender, MeshLab and ZBrush write) - read, not refused.
+                                RequireCount(parts, 4, 7, "vertex requires three finite values");
                                 document.Positions.Add(new ObjVector3(Number(parts[1]), Number(parts[2]), Number(parts[3])));
                                 Cap(document.Positions.Count, MaxVertices, "vertices");
                                 break;
                             case "vt":
-                                RequireCount(parts, 3, "texture coordinate requires two finite values");
+                                // u v and the spec's optional w, which 3ds Max and Maya always write.
+                                RequireCount(parts, 3, 4, "texture coordinate requires two finite values");
                                 document.TextureCoordinates.Add(new ObjVector2(Number(parts[1]), Number(parts[2])));
                                 Cap(document.TextureCoordinates.Count, MaxVertices, "texture coordinates");
                                 break;
                             case "vn":
-                                RequireCount(parts, 4, "normal requires three finite values");
+                                RequireCount(parts, 4, 4, "normal requires three finite values");
                                 document.Normals.Add(new ObjVector3(Number(parts[1]), Number(parts[2]), Number(parts[3])));
                                 Cap(document.Normals.Count, MaxVertices, "normals");
                                 break;
@@ -252,9 +255,9 @@ namespace Morgott.ContentTool.Import
                     ", past the limit this mod will read; decimate the mesh and export it again");
         }
 
-        private static void RequireCount(string[] parts, int count, string cause)
+        private static void RequireCount(string[] parts, int min, int max, string cause)
         {
-            if (parts.Length != count)
+            if (parts.Length < min || parts.Length > max)
                 throw new FormatException(cause);
         }
 

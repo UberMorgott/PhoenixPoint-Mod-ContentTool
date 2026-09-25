@@ -279,6 +279,13 @@ internal static class Program
         ExpectFailure("v NaN 0 0\nf 1 1 1\n", "finite");
         ExpectFailure("v 0 0 0\nf 1 2 3\n", "range");
         ExpectFailure("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3//\n", "malformed face vertex");
+        // The OPTIONAL trailing values real exporters write - v's w or r g b, vt's w - are read past,
+        // not refused; too few is still a refusal.
+        ObjDocument extra = ObjCodec.Parse("v 0 0 0 1\nv 1 0 0 0.5 0.5 0.5\nv 0 1 0\nvt 0 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n");
+        Check(extra.Positions.Count == 3 && extra.Positions[1].X == 1f && extra.TextureCoordinates.Count == 3,
+              "v with w or r g b and vt with w are accepted");
+        ExpectFailure("v 0 0\nf 1 1 1\n", "three finite values");
+        ExpectFailure("v 0 0 0\nvt 0 0 0 0\nf 1 1 1\n", "two finite values");
         // A .obj comes out of a folder the player controls, so it must hit a ceiling rather than
         // let a hostile file grow a List<> until the game dies.
         var huge = new System.Text.StringBuilder(9 * 1024 * 1024);
