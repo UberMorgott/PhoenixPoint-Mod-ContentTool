@@ -354,9 +354,9 @@ namespace Morgott.ContentTool.Project
         /// working mod, so the wizard and the packager cannot disagree. stagedFiles is null on purpose -
         /// nothing is staged yet, and that null is what switches off MetaRefusal's AssemblyName arm
         /// (Package.cs:324).
-        /// MetaRefusal is REGEX-based, so an unclosed object that happens to hold a matching "ID" and
-        /// "Dependencies" sails through it while the game's own reader refuses the file. The strict reader
-        /// this codebase already has runs first; no second parser is grown for it.</summary>
+        /// MetaRefusal reads the file STRICTLY itself now (Package.MetaTree), so an unclosed object that
+        /// happens to hold a matching "ID" and "Dependencies" is refused there - for the packager too, which
+        /// used to regex straight past it.</summary>
         /// <param name="tail">REPLACES the default advice, it does not follow it: the race-loser arm used to
         /// APPEND its sentence, so the author read "or ship into another project" and then "the mesh and its
         /// row are already in this project" - the first half sending them off to do exactly what the second
@@ -364,25 +364,7 @@ namespace Morgott.ContentTool.Project
         private static void MetaMustBeShippable(string metaPath, string tail = "or ship into another project")
         {
             if (!File.Exists(metaPath)) return;
-            string text = File.ReadAllText(metaPath);
-            string said;
-            try
-            {
-                said = Json.Parse(text, 64) is Dictionary<string, object>
-                           ? Package.MetaRefusal(text, null)
-                           : "meta.json is not a JSON object.";
-            }
-            // Json's own sentence ends in advice meant for a glTF ("re-export it rather than editing
-            // it by hand", Json.cs:142-145), which is wrong for a file the author is expected to fix
-            // by hand; only the POSITION and the CAUSE it names carry over to a meta.json.
-            catch (FormatException bad)
-            {
-                string why = bad.Message;
-                int glb = why.LastIndexOf("; re-export", StringComparison.Ordinal);
-                if (glb > 0) why = why.Substring(0, glb);
-                int at = why.IndexOf("at character ", StringComparison.Ordinal);
-                said = "meta.json did not read as JSON " + (at > 0 ? why.Substring(at) : why) + ".";
-            }
+            string said = Package.MetaRefusal(File.ReadAllText(metaPath), null);
             if (said != null)
                 throw new InvalidDataException("'" + metaPath + "' already exists but is not a " +
                                                "mod this project can ship: " + said + " - fix that file, " +

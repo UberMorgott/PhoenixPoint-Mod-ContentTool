@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
+using Morgott.ContentTool.Import;
+using Morgott.ContentTool.IO;
 
 namespace Morgott.ContentTool.Project
 {
@@ -79,16 +82,13 @@ namespace Morgott.ContentTool.Project
 
             string manifestText = File.ReadAllText(manifest);
             // A MANIFEST NOBODY CAN READ IS A MOD THAT DOES NOTHING. A zero-byte or half-typed file
-            // declares no rung, matches no regex and parses into no bundle, so without this gate it
-            // sails through as a package that installs and sits there. The runtime reader is the one
-            // that would refuse it - on the player's machine, hours later. Balanced braces are all
-            // this check asks: it runs BEFORE OwnBundle/ReplaceTargets parse, and those two answer
-            // "nothing declared" for a manifest that is merely balanced rather than valid.
-            if (manifestText.Trim().Length == 0 || Depth(manifestText, manifestText.Length) != 0)
-                return "REFUSED: " + manifest + " is EMPTY OR NOT VALID JSON - its braces and brackets " +
-                       "do not close. ContentTool reads that file to learn what this mod replaces, " +
-                       "publishes or adds, so a package built from it would install and do nothing. " +
-                       "Fix the file, then package again.";
+            // declares no rung and parses into no bundle, so without this gate it sails through as a
+            // package that installs and sits there. The runtime reader is the one that would refuse it -
+            // on the player's machine, hours later. READ BY THAT READER (Manifest, the same Json.Parse the
+            // bake uses): a balanced-brace count used to pass a trailing comma, a bare word or an
+            // unquoted key, all of which the runtime refuses.
+            string unreadable = ManifestRefusal(manifest, manifestText);
+            if (unreadable != null) return unreadable;
 
             try
             {
@@ -101,22 +101,35 @@ namespace Morgott.ContentTool.Project
                 }
                 if (!string.IsNullOrEmpty(assembly) && File.Exists(assembly))
                     File.Copy(assembly, Path.Combine(outDir, Path.GetFileName(assembly)), true);
+                // EVERY STEP THAT TOUCHES THE STAGED FOLDER sits inside this try, not only the copy: a
+                // source that could not be deleted or read below used to escape with outDir half-pruned,
+                // and the "already holds files" check above then refused every later run.
+                return Staged(outDir, meta, manifestText, out ok);
             }
             catch (Exception copy)
             {
-                // HALF A PACKAGE POISONS EVERY LATER RUN. The refusal path below deletes outDir for
-                // exactly this reason; an IO error mid-copy used to escape instead, leaving a folder
-                // that the "already holds files" check above then refuses forever.
-                try { if (Directory.Exists(outDir)) Directory.Delete(outDir, true); } catch { }
-                return "REFUSED: STAGING FAILED while copying into " + outDir + " - " + copy.Message +
-                       " The half-written folder has been deleted rather than left behind, so this " +
-                       "command still works once the file is free (close whatever holds it open) and " +
-                       "no leftover of a broken run can be shipped by accident.";
+                // HALF A PACKAGE POISONS EVERY LATER RUN. The refusal path deletes outDir for exactly this
+                // reason; an IO error mid-copy used to escape instead, leaving a folder that the "already
+                // holds files" check above then refuses forever.
+                ok = false;
+                string kept = Discard(outDir);
+                return "REFUSED: STAGING FAILED while copying into " + outDir + " - " + copy.Message + " " +
+                       (kept == null
+                           ? "The half-written folder has been deleted rather than left behind, so this " +
+                             "command still works once the file is free (close whatever holds it open) and " +
+                             "no leftover of a broken run can be shipped by accident."
+                           : StillThere(outDir, kept));
             }
+        }
 
+        /// <summary>The checks over a folder <see cref="Run"/> has finished copying. Throws on an IO
+        /// failure, which Run turns into its STAGING FAILED refusal.</summary>
+        private static string Staged(string outDir, string meta, string manifestText, out bool ok)
+        {
+            ok = false;
             long saved = 0;
-            List<string> unbaked;
-            List<string> dropped = BakedAlready(outDir, manifestText, out unbaked);
+            List<string> unbaked, stale;
+            List<string> dropped = BakedAlready(outDir, manifestText, out unbaked, out stale);
             foreach (string rel in dropped)
             {
                 string staged = Path.Combine(outDir, rel);
@@ -136,8 +149,8 @@ namespace Morgott.ContentTool.Project
                              "\"creature\" or \"weapons\" row. Either the bake has not been run " +
                              "('ct_project <YourMod>', 'ct_sound bake <YourMod>'), or the manifest " +
                              "never declared what this mod does.");
-            // Everything above is a "you are shipping the game's data" refusal; the sound one below is
-            // not, and the preamble that explains redistribution would be a lie in front of it alone.
+            // Everything above is a "you are shipping the game's data" refusal; the sound ones below are
+            // not, and the preamble that explains redistribution would be a lie in front of them alone.
             bool redistribution = refusals.Count > 0;
 
             // A SOUND REPLACEMENT THAT WAS NEVER BAKED SHIPS DEAD, AND SILENTLY.
@@ -155,13 +168,20 @@ namespace Morgott.ContentTool.Project
                              ReplaceSources + ". Without that bank this mod installs, enables and " +
                              "plays the shipped sound, with nothing anywhere saying why. Run " +
                              "'ct_sound bake <YourMod>' in game, then package again.");
+            // ...AND ONE BAKED BEFORE ITS SOURCE CHANGED SHIPS THE OLD SOUND, just as silently: the bank is
+            // there, so the rule above is satisfied, and it holds whatever the source was at the last bake.
+            foreach (string rel in stale)
+                refusals.Add(rel + " - CHANGED SINCE IT WAS BAKED. " + ShippedBanks + " still holds the " +
+                             "audio from the last 'ct_sound bake', and that bank - not this file - is what the " +
+                             "player hears. Run 'ct_sound bake <YourMod>' in game, then package again.");
 
             if (refusals.Count > 0)
             {
-                Directory.Delete(outDir, true);
+                string kept = Discard(outDir);
                 StringBuilder bad = new StringBuilder();
                 bad.Append("REFUSED - this package is NOT publishable, and ").Append(outDir)
-                   .AppendLine(" has been deleted rather than half-written.");
+                   .AppendLine(kept == null ? " has been deleted rather than half-written."
+                                            : " could NOT be deleted: " + StillThere(outDir, kept));
                 if (redistribution)
                     bad.AppendLine("Phoenix Point's own data must never be redistributed. A patched bundle is " +
                                    "the game's own file with a few of your bytes in it: ContentTool builds those " +
@@ -199,8 +219,13 @@ namespace Morgott.ContentTool.Project
         /// IT PICKS ONE UP, IT DOES NOT BUILD ONE. Compiling is the author's own business: a modder
         /// writing C# already has Visual Studio or Rider open and a built DLL on disk, and a
         /// content-only mod has no code at all. So this looks for exactly the file meta.json names -
-        /// newest copy, anywhere under the project, which finds both bin\Release\net472\&lt;name&gt;.dll
-        /// and a DLL simply dropped in the project root - and answers null for everything else.
+        /// newest copy under the project, which finds both bin\Release\net472\&lt;name&gt;.dll and a DLL
+        /// simply dropped in the project root - and answers null for everything else.
+        ///
+        /// NEVER OUT OF obj\, and bin\Release\ FIRST. obj\ holds the compiler's intermediate copy and
+        /// obj\...\ref\ a REFERENCE assembly - metadata only, no method bodies - which is routinely the
+        /// newest file of that name and loads in the game as a mod that throws on its first call. A
+        /// Debug build is only picked when there is no Release one at all.
         ///
         /// A DECLARED ASSEMBLY THAT IS NOWHERE IS DELIBERATELY NOT HANDLED HERE. Run's MetaRefusal
         /// already refuses that package BY NAME and says to build it; a second opinion here would
@@ -211,14 +236,48 @@ namespace Morgott.ContentTool.Project
             if (string.IsNullOrEmpty(authorDir) || !Directory.Exists(authorDir)) return null;
             string meta = Path.Combine(authorDir, "meta.json");
             if (!File.Exists(meta)) return null;
-            string dll = Json(File.ReadAllText(meta), "AssemblyName");
-            if (string.IsNullOrEmpty(dll)) return null;
+            Dictionary<string, object> tree;
+            if (MetaTree(File.ReadAllText(meta), out tree) != null) return null;
+            string dll = MetaStr(tree, "AssemblyName");
+            // A NAME, never a path: Directory.GetFiles takes it as a search pattern, and "..\x.dll" or
+            // "*.dll" would pick up a file this project does not own.
+            if (string.IsNullOrEmpty(dll) || dll != Path.GetFileName(dll) || dll.IndexOfAny(new[] { '*', '?' }) >= 0)
+                return null;
 
             string newest = null;
+            int newestRank = int.MaxValue;
             foreach (string f in Directory.GetFiles(authorDir, dll, SearchOption.AllDirectories))
-                if (newest == null || File.GetLastWriteTimeUtc(f) > File.GetLastWriteTimeUtc(newest))
+            {
+                // Exact name only: NTFS also matches a pattern against the 8.3 SHORT name.
+                if (!string.Equals(Path.GetFileName(f), dll, StringComparison.OrdinalIgnoreCase)) continue;
+                int rank = BuildRank(authorDir, f);
+                if (rank < 0) continue;
+                if (newest == null || rank < newestRank ||
+                    (rank == newestRank && File.GetLastWriteTimeUtc(f) > File.GetLastWriteTimeUtc(newest)))
+                {
                     newest = f;
+                    newestRank = rank;
+                }
+            }
             return newest;
+        }
+
+        /// <summary>How good a candidate for the SHIPPED assembly <paramref name="file"/> is: 0 under
+        /// bin\Release, 1 anywhere else, 2 under bin\Debug, -1 never (anything under obj\, the compiler's
+        /// intermediate and reference copies).</summary>
+        private static int BuildRank(string authorDir, string file)
+        {
+            string rel = file.Substring(authorDir.TrimEnd('\\', '/').Length).Replace('/', '\\').TrimStart('\\');
+            string[] parts = rel.Split('\\');
+            for (int i = 0; i < parts.Length - 1; i++)
+                if (string.Equals(parts[i], "obj", StringComparison.OrdinalIgnoreCase)) return -1;
+            for (int i = 0; i + 1 < parts.Length - 1; i++)
+                if (string.Equals(parts[i], "bin", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (string.Equals(parts[i + 1], "Release", StringComparison.OrdinalIgnoreCase)) return 0;
+                    if (string.Equals(parts[i + 1], "Debug", StringComparison.OrdinalIgnoreCase)) return 2;
+                }
+            return 1;
         }
 
         /// <summary>
@@ -279,18 +338,27 @@ namespace Morgott.ContentTool.Project
         /// meta.json is a folder a player installs for no effect.
         ///
         /// A DECLARED RUNG IS ONLY A PAYLOAD WHEN IT HAS AN ENTRY IN IT. "weapons": [] and
-        /// "replace": {} declare nothing and do nothing, so the collection must be seen to hold at
-        /// least one non-space character before its closing bracket - otherwise the empty rung
-        /// escapes a refusal whose own text says a row is required.
+        /// "replace": {} declare nothing and do nothing, so the collection must hold at least one
+        /// member - otherwise the empty rung escapes a refusal whose own text says a row is required.
+        /// Read off the ROOT of the parsed tree: the regex this replaced also counted a "weapons" key
+        /// nested inside some other block, or spelled inside a string.
         /// </summary>
         internal static bool Ships(IList<string> stagedFiles, string manifestText)
         {
             if (stagedFiles != null)
                 foreach (string rel in stagedFiles)
                     if (!IsPaperwork(Path.GetFileName(rel))) return true;
-            return Regex.IsMatch(manifestText ?? "",
-                                 "\"(replace|publish|sounds|creature|weapons)\"\\s*:\\s*" +
-                                 "(\\[\\s*[^\\s\\]]|\\{\\s*[^\\s}])");
+            Dictionary<string, object> tree;
+            try { tree = Manifest.Tree(manifestText ?? "", "ppcontent.json"); }
+            catch (InvalidDataException) { return false; }
+            foreach (string rung in new[] { "replace", "publish", "sounds", "creature", "weapons" })
+            {
+                object value;
+                if (!tree.TryGetValue(rung, out value)) continue;
+                if (value is List<object> rows && rows.Count > 0) return true;
+                if (value is Dictionary<string, object> block && block.Count > 0) return true;
+            }
+            return false;
         }
 
         /// <summary>The staged files that are ABOUT the mod rather than part of it. Everything else -
@@ -311,14 +379,20 @@ namespace Morgott.ContentTool.Project
         internal static string MetaRefusal(string metaText, IList<string> stagedFiles)
         {
             if (string.IsNullOrEmpty(metaText)) return "meta.json is empty.";
-            string id = Json(metaText, "ID");
+            // PARSED, not matched: the regex read passed an unclosed object that happened to hold the
+            // right two substrings, and the game's own reader (ModMeta.FromDir -> JsonConvert) then
+            // refused the file on the player's machine - a package that installs as nothing.
+            Dictionary<string, object> tree;
+            string unreadable = MetaTree(metaText, out tree);
+            if (unreadable != null) return unreadable;
+            string id = MetaStr(tree, "ID");
             if (string.IsNullOrEmpty(id))
                 return "meta.json declares no \"ID\" - the mod manager keys every mod on it.";
-            if (!Regex.IsMatch(metaText, "\"Dependencies\"\\s*:\\s*\\[[^\\]]*\"" + Regex.Escape(EngineId) + "\""))
+            if (!DependsOnEngine(tree))
                 return "meta.json does not declare \"Dependencies\": [ \"" + EngineId + "\" ] - without it " +
                        "the player can install this mod with the engine switched off and it will silently " +
                        "do nothing. With it, Phoenix Point enables ContentTool for them.";
-            string dll = Json(metaText, "AssemblyName");
+            string dll = MetaStr(tree, "AssemblyName");
             if (!string.IsNullOrEmpty(dll) && stagedFiles != null && !stagedFiles.Contains(dll))
                 return "meta.json declares \"AssemblyName\": \"" + dll + "\" but the package does not " +
                        "contain that file - the game refuses to load the mod. Build it, or set " +
@@ -356,12 +430,44 @@ namespace Morgott.ContentTool.Project
         /// </summary>
         internal static List<string> BakedAlready(string dir, string manifestText, out List<string> unbaked)
         {
+            List<string> stale;
+            return BakedAlready(dir, manifestText, out unbaked, out stale);
+        }
+
+        /// <summary>
+        /// The same walk, also reporting the sources whose bank is OLDER than the source - see
+        /// <see cref="Run"/> - and every "sounds" row whose file is not in the project at all and has no
+        /// bank either (a declared replacement that can only ship dead; it used to go unmentioned
+        /// because the walk only visited files that exist).
+        ///
+        /// STALE IS A FINGERPRINT, not a guess: `ct_sound bake` records each source's SHA-1 in
+        /// <see cref="SourceLedger"/> beside the banks, and a source whose bytes no longer match is
+        /// stale whatever its timestamps say. A bank with no ledger entry (baked before the ledger
+        /// existed) falls back to the one thing there is: a source written AFTER its bank.
+        /// </summary>
+        internal static List<string> BakedAlready(string dir, string manifestText, out List<string> unbaked,
+                                                  out List<string> stale)
+        {
             List<string> drop = new List<string>();
             unbaked = new List<string>();
+            stale = new List<string>();
             string sources = Path.Combine(dir, ReplaceSources);
-            if (!Directory.Exists(sources)) return drop;
-
+            string banks = Path.Combine(dir, ShippedBanks);
             Dictionary<string, string> declared = DeclaredSounds(manifestText);
+            Dictionary<uint, string[]> ledger = ReadLedger(banks);
+
+            foreach (KeyValuePair<string, string> row in declared)
+                if (row.Key.IndexOfAny(Path.GetInvalidPathChars()) < 0 &&
+                    !File.Exists(Path.Combine(sources, row.Key)) &&
+                    !File.Exists(Path.Combine(banks, row.Value + ".bnk")))
+                    unbaked.Add(Path.Combine(ReplaceSources, row.Key) + " (media " + row.Value +
+                                ", declared in \"sounds\" - and the file itself is not in the project either)");
+            if (!Directory.Exists(sources))
+            {
+                unbaked.Sort(StringComparer.OrdinalIgnoreCase);
+                return drop;
+            }
+
             foreach (string f in Directory.GetFiles(sources))
             {
                 string name = Path.GetFileName(f);
@@ -384,34 +490,99 @@ namespace Morgott.ContentTool.Project
                     if (!uint.TryParse(Path.GetFileNameWithoutExtension(name), out id)) continue;
                     media = id.ToString();
                 }
-                if (File.Exists(Path.Combine(Path.Combine(dir, ShippedBanks), media + ".bnk")))
-                    drop.Add(Path.Combine(ReplaceSources, name));
-                else
-                    unbaked.Add(Path.Combine(ReplaceSources, name) + " (media " + media + ")");
+                string bank = Path.Combine(banks, media + ".bnk");
+                string rel = Path.Combine(ReplaceSources, name);
+                if (!File.Exists(bank))
+                {
+                    unbaked.Add(rel + " (media " + media + ")");
+                    continue;
+                }
+                drop.Add(rel);
+                if (Stale(f, bank, media, ledger)) stale.Add(rel + " (media " + media + ")");
             }
             drop.Sort(StringComparer.OrdinalIgnoreCase);
             unbaked.Sort(StringComparer.OrdinalIgnoreCase);
+            stale.Sort(StringComparer.OrdinalIgnoreCase);
             return drop;
         }
 
+        /// <summary>Does <paramref name="bank"/> hold something other than <paramref name="source"/> as it
+        /// is NOW? The ledger's SHA-1 when there is one, else "the source was written after the bank".</summary>
+        private static bool Stale(string source, string bank, string media, Dictionary<uint, string[]> ledger)
+        {
+            uint id;
+            string[] entry;
+            if (uint.TryParse(media, NumberStyles.None, CultureInfo.InvariantCulture, out id) &&
+                ledger.TryGetValue(id, out entry))
+                return !string.Equals(entry[0], Sha1Of(source), StringComparison.OrdinalIgnoreCase);
+            return File.GetLastWriteTimeUtc(source) > File.GetLastWriteTimeUtc(bank);
+        }
+
         /// <summary>
-        /// The "sounds" array as file name -> media ID. Read the way ContentProject.ParseSounds reads
-        /// it, and deliberately SILENT on a malformed entry: the runtime reader refuses one by name at
-        /// bake time, and a packager that threw here would turn a typo into a crash instead of a
+        /// The "sounds" array as file name -> media ID, through the ONE reader the bake uses
+        /// (<see cref="Manifest.Sounds"/>). Deliberately SILENT on a malformed entry: the bake refuses
+        /// one by name, and a packager that threw here would turn a typo into a crash instead of a
         /// release that merely carries one extra file.
         /// </summary>
         private static Dictionary<string, string> DeclaredSounds(string manifestText)
         {
             Dictionary<string, string> byFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            Match arr = Regex.Match(manifestText ?? "", "\"sounds\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
-            if (!arr.Success) return byFile;
-            foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
-            {
-                Match media = Regex.Match(o.Value, "\"media\"\\s*:\\s*\"?(\\d+)\"?");
-                string file = Json(o.Value, "file");
-                if (media.Success && !string.IsNullOrEmpty(file)) byFile[file] = media.Groups[1].Value;
-            }
+            Dictionary<string, object> tree;
+            try { tree = Manifest.Tree(manifestText ?? "", "ppcontent.json"); }
+            catch (InvalidDataException) { return byFile; }
+            foreach (KeyValuePair<uint, string> s in Manifest.Sounds(tree, new List<string>()))
+                byFile[s.Value] = s.Key.ToString(CultureInfo.InvariantCulture);
             return byFile;
+        }
+
+        /// <summary>
+        /// `ct_sound bake`'s record of WHICH BYTES each bank in <see cref="ShippedBanks"/> was baked from:
+        /// one line per bank, "&lt;mediaId&gt;\t&lt;source SHA-1&gt;\t&lt;source file name&gt;". Written by the
+        /// bake (SoundReplace), read here, so a bank whose source changed afterwards is refused instead of
+        /// shipping the old sound. It lives beside the banks and ships with them; SoundLoad loads *.bnk only.
+        /// </summary>
+        internal const string SourceLedger = "sources.ledger";
+
+        /// <summary>The ledger in <paramref name="banksDir"/> as media -> { sha1, file }; empty when there is
+        /// none or a line does not read (a hand-edited line is ignored, never trusted).</summary>
+        internal static Dictionary<uint, string[]> ReadLedger(string banksDir)
+        {
+            Dictionary<uint, string[]> ledger = new Dictionary<uint, string[]>();
+            string path = Path.Combine(banksDir ?? "", SourceLedger);
+            if (!File.Exists(path)) return ledger;
+            foreach (string line in File.ReadAllLines(path))
+            {
+                string[] f = line.Split('\t');
+                uint media;
+                if (f.Length == 3 && f[1].Length == 40 &&
+                    uint.TryParse(f[0], NumberStyles.None, CultureInfo.InvariantCulture, out media))
+                    ledger[media] = new[] { f[1], f[2] };
+            }
+            return ledger;
+        }
+
+        /// <summary>Writes the whole ledger in one atomic swap, sorted by media so it diffs cleanly.</summary>
+        internal static void WriteLedger(string banksDir, IDictionary<uint, string[]> ledger)
+        {
+            List<uint> order = new List<uint>(ledger.Keys);
+            order.Sort();
+            StringBuilder text = new StringBuilder();
+            foreach (uint media in order)
+                text.Append(media.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(ledger[media][0]).Append('\t').Append(ledger[media][1]).Append('\n');
+            AtomicFile.WriteText(Path.Combine(banksDir, SourceLedger), text.ToString(), new UTF8Encoding(false));
+        }
+
+        /// <summary>SHA-1 of a file's bytes, lowercase hex - the ledger's fingerprint.</summary>
+        internal static string Sha1Of(string path)
+        {
+            using (SHA1 sha = SHA1.Create())
+            using (FileStream f = File.OpenRead(path))
+            {
+                StringBuilder hex = new StringBuilder(40);
+                foreach (byte b in sha.ComputeHash(f)) hex.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+                return hex.ToString();
+            }
         }
 
         /// <summary>Deletes <paramref name="leaf"/> and its parents, up to but never including
@@ -442,8 +613,8 @@ namespace Morgott.ContentTool.Project
 
         /// <summary>The SHIPPED bundles the project declares as replacement targets - named in the refusal,
         /// so an author who dropped one in sees why that file is the problem. A manifest that will not
-        /// PARSE declares no target here; Package.cs:87 is a coarser gate that refuses only a manifest
-        /// whose braces and brackets do not close, not one that fails to parse.</summary>
+        /// PARSE declares no target here - Run's ManifestRefusal has already refused that package before
+        /// anything reads this.</summary>
         internal static List<string> ReplaceTargets(string manifestText)
         {
             List<string> targets = new List<string>();
@@ -458,30 +629,100 @@ namespace Morgott.ContentTool.Project
         }
 
         /// <summary>
-        /// How deeply nested the text at <paramref name="at"/> sits: 0 at the end of a balanced text.
-        ///
-        /// The ONE remaining caller is <see cref="Run"/>'s balanced-brace gate (`:87`), which runs before
-        /// anything parses and refuses a manifest whose braces and brackets do not close. The bundle
-        /// readers no longer use it: they read the parsed tree, where nesting is structure rather than a
-        /// count of characters.
+        /// The ONE gate on ppcontent.json before anything is staged: null when the runtime can read it,
+        /// else the whole REFUSED sentence. Read by the runtime's own reader (<see cref="Manifest.Parse"/>),
+        /// so what packages is what loads - and "id"/"bundle", when present, pass the same path-safety rule
+        /// ContentProject.Load applies, since a manifest that fails it loads as nothing on the player's side.
         /// </summary>
-        private static int Depth(string text, int at)
+        private static string ManifestRefusal(string manifest, string manifestText)
         {
-            int depth = 0;
-            bool inString = false;
-            for (int i = 0; i < at; i++)
+            const string Does = " ContentTool reads that file to learn what this mod replaces, publishes or " +
+                                "adds, so a package built from it would install and do nothing. Fix the file, " +
+                                "then package again.";
+            if (manifestText.Trim().Length == 0)
+                return "REFUSED: " + manifest + " is EMPTY OR NOT VALID JSON - it holds nothing." + Does;
+            Manifest parsed;
+            try { parsed = Manifest.Parse(manifestText); }
+            catch (InvalidDataException bad)
             {
-                char c = text[i];
-                if (inString)
-                {
-                    if (c == '\\') i++;
-                    else if (c == '"') inString = false;
-                }
-                else if (c == '"') inString = true;
-                else if (c == '{' || c == '[') depth++;
-                else if (c == '}' || c == ']') depth--;
+                return Manifest.IsNotAnArray(bad)
+                    ? "REFUSED: " + manifest + " - " + bad.Message + "." + Does
+                    : "REFUSED: " + manifest + " is EMPTY OR NOT VALID JSON - " + bad.Message + Does;
             }
-            return depth;
+            string unsafeName = string.IsNullOrEmpty(parsed.Id) ? null : Manifest.UnsafeName("id", parsed.Id);
+            if (unsafeName == null && !string.IsNullOrEmpty(parsed.Bundle))
+                unsafeName = Manifest.UnsafeName("bundle", parsed.Bundle);
+            return unsafeName == null ? null
+                : "REFUSED: " + manifest + " - " + unsafeName + ". ContentTool refuses to load such a project " +
+                  "on the player's machine, so a package built from it would install and do nothing.";
+        }
+
+        /// <summary>
+        /// meta.json read STRICTLY: null with the tree, or the sentence saying why it does not read. Json's
+        /// own sentence ends in advice meant for a glTF ("re-export it rather than editing it by hand",
+        /// Json.cs:142-145), which is wrong for a file the author fixes by hand - only the POSITION and the
+        /// CAUSE carry over. ONE copy, shared with ProjectScaffold's R13.
+        /// </summary>
+        internal static string MetaTree(string metaText, out Dictionary<string, object> tree)
+        {
+            tree = null;
+            object parsed;
+            try { parsed = Json.Parse(metaText, Manifest.MaxDepth); }
+            catch (FormatException bad)
+            {
+                string why = bad.Message;
+                int glb = why.LastIndexOf("; re-export", StringComparison.Ordinal);
+                if (glb > 0) why = why.Substring(0, glb);
+                int at = why.IndexOf("at character ", StringComparison.Ordinal);
+                return "meta.json did not read as JSON " + (at > 0 ? why.Substring(at) : why) + ".";
+            }
+            tree = parsed as Dictionary<string, object>;
+            return tree == null ? "meta.json is not a JSON object." : null;
+        }
+
+        /// <summary>A meta.json STRING member, matched the way the game's reader matches it: JsonConvert
+        /// binds "ID" to "id" too, so the exact spelling wins and any casing is the fallback.</summary>
+        private static string MetaStr(Dictionary<string, object> tree, string key)
+        {
+            object value;
+            if (tree.TryGetValue(key, out value)) return value as string;
+            foreach (KeyValuePair<string, object> member in tree)
+                if (string.Equals(member.Key, key, StringComparison.OrdinalIgnoreCase)) return member.Value as string;
+            return null;
+        }
+
+        /// <summary>Does meta.json's "Dependencies" ARRAY name the engine mod?</summary>
+        private static bool DependsOnEngine(Dictionary<string, object> tree)
+        {
+            object value = null;
+            if (!tree.TryGetValue("Dependencies", out value))
+                foreach (KeyValuePair<string, object> member in tree)
+                    if (string.Equals(member.Key, "Dependencies", StringComparison.OrdinalIgnoreCase)) value = member.Value;
+            List<object> deps = value as List<object>;
+            if (deps == null) return false;
+            foreach (object dep in deps)
+                if (string.Equals(dep as string, EngineId, StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        /// <summary>Deletes the staged folder. Null when it is gone; otherwise why it is NOT, so no message
+        /// claims a deletion that did not happen (the old catch swallowed that failure and said "deleted").</summary>
+        private static string Discard(string outDir)
+        {
+            try
+            {
+                if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
+                return null;
+            }
+            catch (Exception ex) { return ex.Message; }
+        }
+
+        /// <summary>The sentence for a staged folder <see cref="Discard"/> could not remove.</summary>
+        private static string StillThere(string outDir, string why)
+        {
+            return "The half-written folder could NOT be deleted (" + why + ") and is still there - delete " +
+                   outDir + " yourself before packaging again: this command refuses a folder that already " +
+                   "holds files, and NOTHING in it may be shipped.";
         }
 
         private static bool Names(IList<string> targets, string file)
@@ -497,11 +738,6 @@ namespace Morgott.ContentTool.Project
             foreach (string part in rel.Replace('\\', '/').Split('/'))
                 if (string.Equals(part, segment, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
-        }
-
-        private static string Json(string text, string field)
-        {
-            return Regex.Match(text, "\"" + field + "\"\\s*:\\s*\"([^\"]*)\"").Groups[1].Value;
         }
 
         /// <summary>Every file under <paramref name="dir"/>, relative and sorted, so the refusals read
