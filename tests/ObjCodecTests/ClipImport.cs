@@ -420,6 +420,15 @@ internal static class ClipImport
             return Add(at, values.Length, "SCALAR", 5123);
         }
 
+        /// <summary>A bare bufferView with no accessor over it - an embedded image, a compressed block.</summary>
+        internal int View(byte[] data)
+        {
+            int at = Start();
+            bytes.AddRange(data);
+            views.Add("{\"buffer\":0,\"byteOffset\":" + at + ",\"byteLength\":" + data.Length + "}");
+            return views.Count - 1;
+        }
+
         /// <summary>Every blob starts 4-byte aligned, which is what the reader's alignment check wants.</summary>
         private int Start()
         {

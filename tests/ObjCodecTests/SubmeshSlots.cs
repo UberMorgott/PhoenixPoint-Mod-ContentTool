@@ -1,6 +1,7 @@
 using System;
 using AssetsTools.NET.Extra;
 using Morgott.ContentTool.Bake;
+using Morgott.ContentTool.Import;
 
 /// <summary>
 /// A replacement's PARTS land on the target's MATERIALS by order, and until this gate existed the
@@ -100,9 +101,48 @@ internal static class SubmeshSlots
             Ok(MeshFields.Fold(new string[0][]) == null && MeshFields.Fold(null) == null,
                "a mesh nothing draws stays null");
 
+            Embedded();
             return Variants();
         }
         catch (Exception ex) { return "SUBMESH-SLOTS FAIL " + ex.Message; }
+    }
+
+    /// <summary>
+    /// The READER's half of the slot contract: Materials, MaterialImages and MaterialEmissive are
+    /// index-parallel to the submeshes, and ProjectBake reads image s for submesh s. A slot-less
+    /// primitive in front used to add a name but no image, so every later part took the texture of
+    /// the part after it.
+    /// </summary>
+    private static void Embedded()
+    {
+        SkinnedModel model = GlbReader.Read(Painted(""));
+        Ok(model.Submeshes.Count == 2 && model.Materials.Count == 2 &&
+           model.MaterialImages.Count == 2 && model.MaterialEmissive.Count == 2,
+           "a slot-less primitive keeps all three material lists parallel to the submeshes: " +
+           model.Materials.Count + "/" + model.MaterialImages.Count + "/" + model.MaterialEmissive.Count);
+        Ok(model.MaterialImages[0] == null && model.MaterialImages[1] != null && model.MaterialImages[1][0] == 0x89,
+           "the image lands on the part whose material names it, not on the part before");
+    }
+
+    /// <summary>One static triangle, two primitives over it: #0 with no material, #1 painted by
+    /// 'Hull', whose base-colour texture is a 4-byte stand-in image. <paramref name="info"/> is
+    /// spliced into that textureInfo.</summary>
+    private static byte[] Painted(string info)
+    {
+        var b = new ClipImport.Bin();
+        int position = b.Vec(3, "VEC3", 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f);
+        int uv = b.Vec(3, "VEC2", 0f, 0f, 1f, 0f, 0f, 1f);
+        int indices = b.Indices(0, 1, 2);
+        int image = b.View(new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+        string attributes = "\"attributes\":{\"POSITION\":" + position + ",\"TEXCOORD_0\":" + uv + "},\"indices\":" + indices;
+        string json =
+            "{\"asset\":{\"version\":\"2.0\"},\"scenes\":[{\"nodes\":[0]}],\"scene\":0," +
+            "\"nodes\":[{\"name\":\"hull\",\"mesh\":0}]," +
+            "\"meshes\":[{\"name\":\"hull\",\"primitives\":[{" + attributes + "},{" + attributes + ",\"material\":0}]}]," +
+            "\"materials\":[{\"name\":\"Hull\",\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0" + info + "}}}]," +
+            "\"textures\":[{\"source\":0}],\"images\":[{\"bufferView\":" + image + ",\"mimeType\":\"image/png\"}]," +
+            b.Json() + "}";
+        return ClipImport.Container(json, b.Bytes());
     }
 
     /// <summary>

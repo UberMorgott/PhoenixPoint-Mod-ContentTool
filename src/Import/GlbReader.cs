@@ -405,7 +405,15 @@ namespace Morgott.ContentTool.Import
             foreach (object p in primitives)
             {
                 object slot = Opt(Obj(p, "primitives[]"), "material");
-                if (slot == null) { part.Materials.Add("material"); continue; }
+                // All three lists stay index-parallel to the submeshes: a slot-less primitive that
+                // skipped the image/emission adds shifted every later primitive's texture one up.
+                if (slot == null)
+                {
+                    part.Materials.Add("material");
+                    part.MaterialImages.Add(null);
+                    part.MaterialEmissive.Add(null);
+                    continue;
+                }
                 int index = Int(slot, "primitives[].material");
                 string named = materials != null && index >= 0 && index < materials.Count
                     ? Opt(Obj(materials[index], "materials[" + index + "]"), "name") as string
