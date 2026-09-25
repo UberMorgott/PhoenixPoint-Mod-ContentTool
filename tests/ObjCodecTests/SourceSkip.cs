@@ -51,6 +51,23 @@ internal static class SourceSkip
                         refusals[0].Length > "broken.glb: - SKIPPED".Length + 20,
             "and its CAUSE is carried with it, not just its name: " + refusals[0]);
 
+        // Content\Videos\ takes the SAME sink now (ContentProject.ImportVideos): two clips sharing a stem
+        // are one counted, named refusal and both skipped - the clip beside them still imports.
+        string project = Path.Combine(Path.GetTempPath(), "ct-sourceskip-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string videos = Directory.CreateDirectory(Path.Combine(project, "Content", "Videos")).FullName;
+            foreach (string n in new[] { "intro.webm", "intro.mp4", "outro.webm" })
+                File.WriteAllText(Path.Combine(videos, n), "x");
+            var said = new List<string>();
+            string[] kept = ContentMods.Sources(project, "Videos", said, "*.webm", "*.mp4", "*.mov");
+            checks += Check(kept.Length == 1 && Path.GetFileName(kept[0]) == "outro.webm" && said.Count == 1 &&
+                            said[0].IndexOf("intro.mp4 and intro.webm", StringComparison.Ordinal) >= 0 &&
+                            said[0].IndexOf("SKIPPED", StringComparison.Ordinal) >= 0,
+                "a video stem collision is one counted SKIPPED line, not a throw: " + string.Join(" | ", said.ToArray()));
+        }
+        finally { try { Directory.Delete(project, true); } catch (Exception) { } }
+
         return "SOURCE-SKIP PASS, " + checks + " check(s) - " + refusals[0];
     }
 

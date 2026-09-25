@@ -357,7 +357,7 @@ namespace Morgott.ContentTool.Project
             // named no shipped bundle, Route7.Observe's named them all, and every ApplyProject re-baked.
             d.Publish.AddRange(ParsePublish(text, refusals));
             d.Replace.AddRange(ParseReplace(text, refusals));
-            d.Videos.AddRange(ImportVideos(root));
+            d.Videos.AddRange(ImportVideos(root, refusals));
             return d;
         }
 
@@ -408,7 +408,7 @@ namespace Morgott.ContentTool.Project
             SourceImport.Each(Sources(root, "Models", p.SourceRefusals, "*.glb"),
                               p.Models, p.SourceRefusals, ImportModel);
             if (pump != null) pump.At("videos", 4, phases);
-            p.Videos.AddRange(ImportVideos(root));
+            p.Videos.AddRange(ImportVideos(root, p.SourceRefusals));
             // A manifest NOTHING can read is a SOURCE refusal, never a patch failure: it is refused
             // before ParseReplace can tell whether "replace" is even declared, so a project with no
             // "replace" key at all used to leave ReplaceRefusals=1 and ProjectBake:110 announced
@@ -481,12 +481,13 @@ namespace Morgott.ContentTool.Project
 
         /// <summary>Content\Videos\, verbatim: a video is copied, never decoded, so the whole
         /// "import" is what the file system already says. Shared by both loads.</summary>
-        private static List<ImportedVideo> ImportVideos(string root)
+        private static List<ImportedVideo> ImportVideos(string root, List<string> refusals)
         {
             List<ImportedVideo> list = new List<ImportedVideo>();
-            // null: shared with LoadDeclared, which carries no refusal list at all - a video stem
-            // collision keeps the throw it has always had rather than being dropped silently.
-            foreach (string f in Sources(root, "Videos", null, "*.webm", "*.mp4", "*.mov"))
+            // THE SAME SINK AS THE OTHER FOLDERS: Load passes its SourceRefusals, so two clips sharing a
+            // stem are a counted SOURCE SKIPPED line, not a throw that ended the whole bake. A caller of
+            // LoadDeclared that passes no list keeps the throw rather than dropping the pair silently.
+            foreach (string f in Sources(root, "Videos", refusals, "*.webm", "*.mp4", "*.mov"))
                 list.Add(new ImportedVideo
                 {
                     Name = Path.GetFileNameWithoutExtension(f).ToLowerInvariant(),
