@@ -135,15 +135,35 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         public static string UnregisterFor(string modId, string key)
         {
-            string owner = modId ?? Anonymous;
+            return Unwant(modId ?? Anonymous, key, null);
+        }
+
+        /// <summary>
+        /// <see cref="UnregisterFor"/> for a mod being switched off: also drops an ANONYMOUS want
+        /// whose file lies under <paramref name="modDir"/> - the mod's own DLL calling
+        /// <see cref="Register"/> for a key its ppcontent.json declares. Left alone, that "" want
+        /// outranks every id and the unticked mod's clip kept playing (and came back on every scene
+        /// load through <see cref="Reinject"/>).
+        /// </summary>
+        internal static string UnregisterMod(string modId, string key, string modDir)
+        {
+            return Unwant(modId ?? Anonymous, key, modDir);
+        }
+
+        private static string Unwant(string owner, string key, string modDir)
+        {
             if (string.IsNullOrEmpty(key)) return null;
-            bool served = string.Equals(owners.Serving(key), owner, StringComparison.Ordinal);
-            if (!owners.Drop(key, owner)) return null;
+            string pathBefore = owners.PathOf(key);
+            bool dropped = owners.Drop(key, owner);
+            if (modDir != null &&
+                owners.AnonymousUnder(key, Relative(modDir.TrimEnd('\\', '/') + "/")))
+                dropped |= owners.Drop(key, Anonymous);
+            if (!dropped) return null;
             if (owners.Wanted(key))
             {
                 // Someone else still wants it: a held mod was dropped (nothing to do), or the server
                 // was, and the next-lowest id takes the row over through the ordinary injection.
-                if (served)
+                if (!string.Equals(owners.PathOf(key), pathBefore, StringComparison.Ordinal))
                 {
                     string why = Inject();
                     if (why != null) return why;

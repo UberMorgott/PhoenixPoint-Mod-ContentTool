@@ -85,6 +85,19 @@ namespace Morgott.ContentTool.Bake
             return owner == null ? null : wants[key][owner];
         }
 
+        /// <summary>
+        /// Does the ANONYMOUS owner want <paramref name="key"/> from a file under
+        /// <paramref name="folder"/>? That is a mod's own DLL calling the owner-less Register for a
+        /// key its ppcontent.json also declares - the anonymous want belongs to that mod, and has to
+        /// go with it when the mod is switched off, or "" (which outranks every id) keeps serving it.
+        /// </summary>
+        internal bool AnonymousUnder(string key, string folder)
+        {
+            string path = PathFor(key, "");
+            return path != null && !string.IsNullOrEmpty(folder) &&
+                   path.StartsWith(folder, StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Every wanted key with the path its serving owner wants - what goes into the catalog.</summary>
         internal Dictionary<string, string> Served()
         {

@@ -48,6 +48,19 @@ internal static class CatalogOwnersTests
         Check(r.Serving(key) == "" && r.PathOf(key) == "anon.webm",
               "the anonymous owner outranks every mod id - what a direct Register always did");
 
+        // ---- a mod's DLL calling the anonymous Register for its own key: the "" want is THAT mod's
+        //      (its file lies in the mod folder), so switching the mod off drops it too - and only it.
+        CatalogOwners q = new CatalogOwners();
+        q.Want(key, "quit_mod", "../../Mods/QuitCutscene/Content/Videos/q.webm");
+        q.Want(key, "", "../../Mods/QuitCutscene/Content/Videos/q.webm");
+        Check(q.AnonymousUnder(key, "../../mods/quitcutscene/") && !q.AnonymousUnder(key, "../../Mods/Other/"),
+              "an anonymous want is attributed to the mod folder its file lies under, case-blind");
+        Check(!q.AnonymousUnder(key, "../../Mods/QuitCut/"),
+              "never to a folder that merely shares a name prefix (the caller passes a trailing slash)");
+        q.Drop(key, "quit_mod");
+        Check(q.Serving(key) == "", "dropping only the mod id leaves the anonymous row serving - the bug");
+        Check(q.Drop(key, "") && !q.Wanted(key), "dropping the attributed anonymous want too frees the key");
+
         // ---- ORDINAL, like BundleClaims.Keeps: 'Z' (0x5A) sorts before 'a' (0x61).
         CatalogOwners c = new CatalogOwners();
         c.Want(key, "a_mod", "lower.webm");

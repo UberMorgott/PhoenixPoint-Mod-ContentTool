@@ -520,7 +520,9 @@ namespace Morgott.ContentTool.Bake
             {
                 string before = LiveResolve(key);
                 // OWNED: only this mod's want goes - a key another mod also serves stays that mod's.
-                string was = CatalogLive.UnregisterFor(owner, key);
+                // Plus an anonymous Register of the same key pointing into THIS mod's folder (its
+                // DLL serving the clip too, as the QuitCutscene demo does): "" outranks every id.
+                string was = CatalogLive.UnregisterMod(owner, key, modDir);
                 log.AppendLine("  " + key + "\n    before: " + (before ?? "(no manager)") +
                                "\n    after:  " + (LiveResolve(key) ?? "(no manager)") +
                                "\n    restored to " + (was ?? "(nothing to restore)"));
