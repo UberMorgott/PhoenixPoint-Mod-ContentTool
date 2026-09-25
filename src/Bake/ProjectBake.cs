@@ -565,7 +565,11 @@ namespace Morgott.ContentTool.Bake
                     if (audio.StreamCount > 0)
                     {
                         int written;
-                        log.AppendLine("extract: " + StreamCache.Extract(bundle, audio.ManifestAsset, out written));
+                        // THIS MOD's stream folder, never ContentTool's: a content mod's streams live and
+                        // die with its own folder (StreamCache.TargetDirFor).
+                        log.AppendLine("extract: " + StreamCache.Extract(bundle, audio.ManifestAsset,
+                                                                         StreamCache.TargetDirFor(p.Root),
+                                                                         out written));
                     }
                     TextAsset bank = bundle.LoadAsset<TextAsset>(audio.BankAsset);
                     uint loadedId;
