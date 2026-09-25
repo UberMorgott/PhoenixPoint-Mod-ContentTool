@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using Morgott.ContentTool.IO;
 using Morgott.ContentTool.Project;
 using Morgott.ContentTool.Wwise;
 using UnityEngine;
@@ -96,12 +97,15 @@ namespace Morgott.ContentTool.Bake
             get { return Path.Combine(AudioRoot, "sounds.ct-edits"); }
         }
 
-        /// <summary>The project's "id" out of ppcontent.json, and nothing else out of it.</summary>
+        /// <summary>The project's "id" out of ppcontent.json, and nothing else out of it - the ROOT "id" of
+        /// the parsed tree (a regex took the first "id" anywhere, a weapon row's included), path-safe
+        /// because it names the bank ids this project stamps.</summary>
         private static string ProjectId(string root)
         {
-            string id = System.Text.RegularExpressions.Regex.Match(
-                File.ReadAllText(Path.Combine(root, "ppcontent.json")), "\"id\"\\s*:\\s*\"([^\"]+)\"").Groups[1].Value;
-            if (id.Length == 0) throw new InvalidDataException("ppcontent.json in " + root + " has no \"id\"");
+            string id = Manifest.Parse(File.ReadAllText(Path.Combine(root, "ppcontent.json"))).Id;
+            if (string.IsNullOrEmpty(id)) throw new InvalidDataException("ppcontent.json in " + root + " has no \"id\"");
+            string unsafeName = Manifest.UnsafeName("id", id);
+            if (unsafeName != null) throw new InvalidDataException(unsafeName);
             return id;
         }
 
@@ -280,17 +284,32 @@ namespace Morgott.ContentTool.Bake
             StringBuilder log = new StringBuilder();
             string root = ContentToolMain.ProjectDir(projectName);
             if (!File.Exists(Path.Combine(root, "ppcontent.json"))) return "REFUSED: no ppcontent.json in " + root;
-            string modId = ProjectId(root);
+            // A manifest that does not read, an unusable id, a "sounds" row naming a missing file or two
+            // files aimed at one media: each is a REFUSAL of the whole bake, said as one - not an exception
+            // escaping to the console as "THREW" with a stack trace instead of a sentence.
+            string modId;
+            List<Rep> reps;
+            try
+            {
+                modId = ProjectId(root);
+                reps = Replacements(root, log);
+            }
+            catch (InvalidDataException bad)
+            {
+                return log.Append("ct_sound bake REFUSED: " + bad.Message + " - nothing was baked").ToString();
+            }
             string outDir = Path.Combine(root, ShippedBanks);
             Directory.CreateDirectory(outDir);
-
-            List<Rep> reps = Replacements(root, log);
             if (reps.Count == 0) return log.Append("ct_sound bake: nothing declared").ToString();
 
             // ONE BAD ROW IS NOT THE END OF THE BAKE. Returning here left every later replacement
             // unbaked AND skipped the sweep below, so banks already written stayed beside stale ones
             // the project no longer declares - and the next startup loaded both.
             List<uint> baked = new List<uint>();
+            // What each bank was baked FROM, so Package can refuse one whose source changed afterwards.
+            // Read first: a row refused THIS run keeps its previous bank (see the sweep below), and that
+            // bank keeps the fingerprint of the bytes it was really built from.
+            Dictionary<uint, string[]> ledger = Package.ReadLedger(outDir);
             int failures = 0;
             foreach (Rep r in reps)
             {
@@ -310,19 +329,41 @@ namespace Morgott.ContentTool.Bake
                     failures++; continue;
                 }
 
-                // The target's own loop declaration, read from the SHIPPED file when there is one.
-                string ignored;
-                string wem = WemPath(r.Media, out ignored);
-                WwiseWem.Info target = wem == null ? null : WwiseWem.Parse(File.ReadAllBytes(wem));
-                long frames = pcm16.Length / (2L * Math.Max(1, channels));
-                bool loops = target != null && target.HasLoop;
-                byte[] media = WwisePcm.BuildWem(pcm16, channels, rate, loops ? frames : 0,
-                                                 loops ? target.LoopPlayCount : 0u);
-
-                uint bankId = WwiseId.Hash(modId.ToLowerInvariant() + "_" + r.Media);
-                byte[] bank = BankGen.BuildMediaOnly(bankId, r.Media, media);
+                // ONE FILE, ONE REFUSAL. BuildWem refuses a layout it cannot name (a 5.1 .wav) with an
+                // ArgumentException, and that - like an unreadable shipped .wem or a bank the self-check
+                // rejects - used to escape the whole verb as "THREW", leaving every later row unbaked and
+                // the sweep below never run. The Add path has always skipped such a file (ContentProject).
                 string path = Path.Combine(outDir, r.Media + ".bnk");
-                File.WriteAllBytes(path, bank);
+                uint bankId = BankPrune.BankId(modId, r.Media);
+                byte[] bank, media;
+                bool loops;
+                long frames = pcm16.Length / (2L * Math.Max(1, channels));
+                WwiseWem.Info target;
+                try
+                {
+                    // The target's own loop declaration, read from the SHIPPED file when there is one.
+                    string ignored;
+                    string wem = WemPath(r.Media, out ignored);
+                    target = wem == null ? null : WwiseWem.Parse(File.ReadAllBytes(wem));
+                    loops = target != null && target.HasLoop;
+                    media = WwisePcm.BuildWem(pcm16, channels, rate, loops ? frames : 0,
+                                              loops ? target.LoopPlayCount : 0u);
+                    bank = BankGen.BuildMediaOnly(bankId, r.Media, media);
+                    // The walk AudioBake runs on every bank it builds, run here too: a malformed bank
+                    // otherwise surfaces only on the player's machine, as an AKRESULT nothing explains.
+                    string flaw = BankGen.SelfCheck(bank);
+                    if (flaw != null) throw new InvalidDataException("the generated bank is malformed: " + flaw);
+                    AtomicFile.Write(path, bank);
+                    ledger[r.Media] = new[] { Package.Sha1Of(r.File), Path.GetFileName(r.File) };
+                }
+                catch (Exception ex) when (ex is ArgumentException || ex is InvalidDataException ||
+                                           ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    log.AppendLine("bake REFUSED " + Path.GetFileName(r.File) + " " + ex.Message +
+                                   (channels > 2 ? " - replacements are mono or stereo only; export a stereo mix" : "") +
+                                   " - this project's other sounds are unaffected");
+                    failures++; continue;
+                }
                 baked.Add(r.Media);
                 log.AppendLine("baked " + path + ": " + bank.Length + " B, bankId=" + bankId + ", media " + r.Media +
                                " = " + Ms(WwiseWem.Parse(media)) + "ms " + channels + "ch " + rate + "Hz" +
@@ -333,8 +374,21 @@ namespace Morgott.ContentTool.Bake
             // every .bnk in this folder, so a replacement removed from ppcontent.json would keep
             // playing here and would ship inside the package. Only banks THIS bake stamped are
             // removed (BankPrune's name-and-BKHD rule) - never a file the modder put there.
-            string swept = BankPrune.Sweep(outDir, modId, baked);
+            // THE KEEP-SET IS WHAT THE PROJECT DECLARES, not what this run managed to bake: a declared
+            // row refused this time (a file mid-export, a decode hiccup) used to lose its GOOD bank from
+            // the previous bake, turning one skipped row into a replacement that silently stopped playing.
+            List<uint> declared = new List<uint>();
+            foreach (Rep r in reps) declared.Add(r.Media);
+            string swept = BankPrune.Sweep(outDir, modId, declared);
             if (swept != null) log.AppendLine(swept);
+            foreach (uint media in new List<uint>(ledger.Keys))
+                if (!declared.Contains(media)) ledger.Remove(media);
+            try { Package.WriteLedger(outDir, ledger); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                log.AppendLine("could not record which sources these banks were baked from (" + ex.Message +
+                               ") - ct_package will judge them by file date instead");
+            }
             log.Append("ct_sound bake: " + baked.Count + "/" + reps.Count + " bank(s) in " + outDir +
                        ", " + failures + " refused - NO game file was opened for writing. " +
                        "ContentTool loads these at init.");
