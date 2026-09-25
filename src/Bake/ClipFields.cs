@@ -1065,7 +1065,7 @@ namespace Morgott.ContentTool.Bake
             AssetTypeValueField children = tf["m_Children"]["Array"];
             if (children.Children.Count != 1)
                 return "root '" + rootName + "' has " + children.Children.Count + " children, expected 1";
-            AssetTypeValueField boneTf = PrefabFields.Get(m, af, children.Children[0]["m_PathID"].AsLong);
+            AssetTypeValueField boneTf = PrefabFields.Get(m, af, children.Children[0]);
             if (boneTf == null) return "root '" + rootName + "' m_Children[0] resolves to nothing";
 
             return "root '" + rootName + "' animator controller=" +

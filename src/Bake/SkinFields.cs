@@ -549,7 +549,7 @@ namespace Morgott.ContentTool.Bake
             if (r == null) return "'" + SkinName(rootName) + "' has no SkinnedMeshRenderer";
 
             AssetTypeValueField bones = r["m_Bones"]["Array"];
-            AssetTypeValueField mesh = PrefabFields.Get(m, af, r["m_Mesh"]["m_PathID"].AsLong);
+            AssetTypeValueField mesh = PrefabFields.Get(m, af, r["m_Mesh"]);
             if (mesh == null) return "the SkinnedMeshRenderer's m_Mesh resolves to nothing";
 
             AssetTypeValueField vd = mesh["m_VertexData"];
@@ -595,7 +595,7 @@ namespace Morgott.ContentTool.Bake
             string s = "";
             for (int b = 0; b < bones.Children.Count; b++)
             {
-                AssetTypeValueField tf = PrefabFields.Get(m, af, bones.Children[b]["m_PathID"].AsLong);
+                AssetTypeValueField tf = PrefabFields.Get(m, af, bones.Children[b]);
                 if (tf == null) { s += (b == 0 ? "" : ",") + "(unresolved)"; continue; }
                 s += (b == 0 ? "" : ",") + BoneName(m, af, bones, b) +
                      "<" + TransformName(m, af, tf["m_Father"]["m_PathID"].AsLong) +
@@ -1216,7 +1216,7 @@ namespace Morgott.ContentTool.Bake
             {
                 AssetTypeValueField tf = PrefabFields.Get(m, af, at);
                 AssetTypeValueField go = tf == null ? null
-                    : PrefabFields.Get(m, af, tf["m_GameObject"]["m_PathID"].AsLong);
+                    : PrefabFields.Get(m, af, tf["m_GameObject"]);
                 if (go == null || go["m_Name"].IsDummy) return null;
                 string name = go["m_Name"].AsString;
                 if (string.IsNullOrEmpty(name)) return null;

@@ -153,9 +153,9 @@ namespace Morgott.ContentTool.Bake
                        " children=" + children.Children.Count;
             if (children.Children.Count == 0) return s;
 
-            AssetTypeValueField childTf = Get(m, af, children.Children[0]["m_PathID"].AsLong);
+            AssetTypeValueField childTf = Get(m, af, children.Children[0]);
             if (childTf == null) return s + " | m_Children[0] resolves to nothing";
-            AssetTypeValueField childGo = Get(m, af, childTf["m_GameObject"]["m_PathID"].AsLong);
+            AssetTypeValueField childGo = Get(m, af, childTf["m_GameObject"]);
             if (childGo == null) return s + " | the child Transform owns no GameObject";
 
             AssetTypeValueField mf = Component(m, af, childGo, AssetClassID.MeshFilter);
@@ -268,6 +268,19 @@ namespace Morgott.ContentTool.Bake
         {
             AssetFileInfo i = pathId == 0 ? null : af.file.Metadata.GetAssetInfo(pathId);
             return i == null ? null : m.GetBaseField(af, i);
+        }
+
+        /// <summary>
+        /// What a PPtr field points at IN THIS FILE, or null. A non-zero m_FileID names one of the
+        /// file's externals, where that m_PathID means something else entirely - looked up here it
+        /// would resolve to whatever local object happens to share the number.
+        /// </summary>
+        internal static AssetTypeValueField Get(AssetsManager m, AssetsFileInstance af, AssetTypeValueField pptr)
+        {
+            if (pptr == null || pptr.IsDummy) return null;
+            AssetTypeValueField file = pptr["m_FileID"];
+            if (!file.IsDummy && file.AsInt != 0) return null;
+            return Get(m, af, pptr["m_PathID"].AsLong);
         }
 
         internal static string Name(AssetsManager m, AssetsFileInstance af, long pathId)

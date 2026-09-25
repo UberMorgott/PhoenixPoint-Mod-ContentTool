@@ -220,7 +220,7 @@ namespace Morgott.ContentTool.Bake
                     var names = new List<string>();
                     foreach (AssetTypeValueField p in r["m_Materials"]["Array"].Children)
                     {
-                        AssetTypeValueField mat = PrefabFields.Get(m, af, p["m_PathID"].AsLong);
+                        AssetTypeValueField mat = PrefabFields.Get(m, af, p);
                         names.Add(mat == null || mat["m_Name"].IsDummy || string.IsNullOrEmpty(mat["m_Name"].AsString)
                                   ? "slot " + names.Count.ToString(CultureInfo.InvariantCulture)
                                   : mat["m_Name"].AsString);

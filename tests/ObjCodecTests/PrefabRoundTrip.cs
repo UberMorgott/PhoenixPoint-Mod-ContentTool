@@ -41,8 +41,42 @@ internal static class PrefabRoundTrip
                "the shipped bundle never had a '" + Root + "': " + before);
         Assert(lone == "root '" + Lone + "' comps=1 children=0",
                "CONTROL a root baked with no child reports no children: " + lone);
+        string external = ExternalPptr(classData, shipped);
         return "PREFAB round trip PASS on " + Bundle + " (MeshFilter -> pathId " + meshPathId + ")\n  " + after +
-               "\n  control " + lone;
+               "\n  control " + lone + "\n  " + external;
+    }
+
+    /// <summary>
+    /// A PPtr whose m_FileID names ANOTHER file must not resolve here: its m_PathID is a number in
+    /// that other file, and the same number in this one is some unrelated object. Measured on a
+    /// real shipped component PPtr, flipped to m_FileID 1 in memory; the bare pathId lookup is the
+    /// control that shows what the old call site returned for it.
+    /// </summary>
+    private static string ExternalPptr(string classData, string bundlePath)
+    {
+        AssetsManager m = new AssetsManager();
+        m.LoadClassPackage(classData);
+        BundleFileInstance bun = m.LoadBundleFile(bundlePath, true);
+        AssetsFileInstance af = m.LoadAssetsFileFromBundle(bun, 0, false);
+        m.LoadClassDatabaseFromPackage(af.file.Metadata.UnityVersion);
+        try
+        {
+            foreach (AssetFileInfo i in af.file.Metadata.GetAssetsOfType(AssetClassID.GameObject))
+            {
+                AssetTypeValueField go = m.GetBaseField(af, i);
+                if (go["m_Component"]["Array"].Children.Count == 0) continue;
+                AssetTypeValueField pptr = go["m_Component"]["Array"].Children[0]["component"];
+                Assert(PrefabFields.Get(m, af, pptr) != null, "a local component PPtr resolves");
+                pptr["m_FileID"].AsInt = 1;
+                Assert(PrefabFields.Get(m, af, pptr) == null,
+                       "the same PPtr pointing into external file 1 resolves to NOTHING here");
+                Assert(PrefabFields.Get(m, af, pptr["m_PathID"].AsLong) != null,
+                       "CONTROL the bare pathId lookup still finds the unrelated local object");
+                return "external PPtr (m_FileID 1, pathId " + pptr["m_PathID"].AsLong + ") -> null";
+            }
+            throw new InvalidOperationException("no GameObject with a component in " + af.name);
+        }
+        finally { m.UnloadAll(); }
     }
 
     /// <summary>The BundleBaker write path, minus everything a hierarchy does not use.</summary>
