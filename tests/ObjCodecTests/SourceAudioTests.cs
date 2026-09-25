@@ -40,6 +40,23 @@ internal static class SourceAudioTests
                    "the .mp3 declares 1ch 44100Hz whole MPEG frames covering 0,5 s, got " + mp3.Describe(),
                    ref checks, bad);
 
+        // Only the FIRST frame can be the Xing/Info header. Three hand-built 128 kbit/s mono frames:
+        // the first carries "Info" (skipped), the third's audio bytes spell "Info" by chance - it is
+        // still audio, so two frames count, not one.
+        byte[] frames = new byte[3 * 417];
+        for (int f = 0; f < 3; f++)
+        {
+            frames[f * 417] = 0xFF; frames[f * 417 + 1] = 0xFB; frames[f * 417 + 2] = 0x90; frames[f * 417 + 3] = 0xC0;
+        }
+        foreach (int at in new[] { 21, 2 * 417 + 40 })
+        {
+            frames[at] = (byte)'I'; frames[at + 1] = (byte)'n'; frames[at + 2] = (byte)'f'; frames[at + 3] = (byte)'o';
+        }
+        SourceAudio.Info tagged = SourceAudio.Declare(frames, ".mp3", out why);
+        Assert(tagged != null && tagged.Frames == 2 * 1152,
+               "a later frame whose bytes spell 'Info' is audio, not a Xing header: expected 2304 frames, got " +
+               (tagged == null ? why : tagged.Describe()), ref checks, bad);
+
         // Refusals name the cause: a reader that returned a plausible Info for junk would make the
         // in-game arm compare a decode against noise.
         byte[] junk = new byte[4096];

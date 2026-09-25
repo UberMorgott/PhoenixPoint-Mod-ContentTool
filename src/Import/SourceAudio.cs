@@ -117,11 +117,14 @@ namespace Morgott.ContentTool.Import
                 if (length <= 4 || o + length > b.Length) break;
 
                 // LAME/ffmpeg put a Xing (CBR: "Info") header in a SILENT first frame that carries no
-                // samples. Counting it would overstate the length by exactly 1152.
+                // samples. Counting it would overstate the length by exactly 1152. Only the FIRST
+                // frame can be that header: any later frame is audio, and its compressed bytes are
+                // free to spell "Info" or "Xing" by chance - skipping one understated the length.
                 bool tag = false;
-                for (int i = o + 4; i + 4 <= o + length && i < o + 64; i++)
-                    if ((b[i] == 'X' && b[i + 1] == 'i' && b[i + 2] == 'n' && b[i + 3] == 'g') ||
-                        (b[i] == 'I' && b[i + 1] == 'n' && b[i + 2] == 'f' && b[i + 3] == 'o')) { tag = true; break; }
+                if (info == null)
+                    for (int i = o + 4; i + 4 <= o + length && i < o + 64; i++)
+                        if ((b[i] == 'X' && b[i + 1] == 'i' && b[i + 2] == 'n' && b[i + 3] == 'g') ||
+                            (b[i] == 'I' && b[i + 1] == 'n' && b[i + 2] == 'f' && b[i + 3] == 'o')) { tag = true; break; }
 
                 if (info == null)
                     info = new Info { Channels = ((b[o + 3] >> 6) & 3) == 3 ? 1 : 2, SampleRate = rate };
