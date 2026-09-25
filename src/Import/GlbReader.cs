@@ -62,8 +62,10 @@ namespace Morgott.ContentTool.Import
         ///    <see cref="ModelBuild.Invert"/> already treats as the authority for where a bone sits,
         ///    so the vertices legitimately stay in quantized space and the bind poses carry the scale;
         ///  - a TEXCOORD would state it through KHR_texture_transform, the one case with nowhere to go
-        ///    (this mod paints from Meshes\materials\ and reads no glTF material), refused by name in
-        ///    <see cref="Unreadable"/>.
+        ///    (the bake binds a texture straight onto UV0 with no transform), refused by name: in
+        ///    <see cref="Unreadable"/> when the file REQUIRES it, and in <see cref="BaseColorImage"/>
+        ///    when it is only USED - there a non-identity transform on the base-colour texture that
+        ///    would actually be baked is what is refused.
         /// </summary>
         private const string Quantization = "KHR_mesh_quantization";
         /// <summary>The one texture-side extension that also changes how a TEXCOORD is read.</summary>
@@ -518,6 +520,7 @@ namespace Morgott.ContentTool.Import
             Dictionary<string, object> image = Obj(images[im], "images[" + im + "]");
             object view = Opt(image, "bufferView");
             if (view == null) return null;                 // a data: URI or an external file
+            UvRoute(Obj(baseTex, "baseColorTexture"), material, materials);
 
             int viewIndex = Int(view, "images[" + im + "].bufferView");
             List<object> views = Array_(Opt(root, "bufferViews"), "bufferViews");
@@ -532,6 +535,48 @@ namespace Morgott.ContentTool.Import
             byte[] bytes = new byte[length];
             Array.Copy(data, start, bytes, 0, length);
             return bytes;
+        }
+
+        /// <summary>
+        /// Refuses a base-colour texture the bake would put on the WRONG PART of the model. The bake
+        /// binds the image onto UV0 exactly as stored (ModelBuild writes UV0 and nothing else), so two
+        /// things a textureInfo may say are silently dropped otherwise: a <c>texCoord</c> naming
+        /// another UV set, and a KHR_texture_transform offset/scale/rotation - which a file lists in
+        /// extensionsUSED only, so the required-extension gate never sees it. An identity transform
+        /// changes nothing and passes.
+        /// </summary>
+        private static void UvRoute(Dictionary<string, object> info, int material, List<object> materials)
+        {
+            string name = Opt(Obj(materials[material], "materials[]"), "name") as string;
+            string who = "material '" + (string.IsNullOrEmpty(name)
+                ? "materials[" + material.ToString(CultureInfo.InvariantCulture) + "]" : name) + "'";
+            int set = Opt(info, "texCoord") == null ? 0 : Int(Opt(info, "texCoord"), "baseColorTexture.texCoord");
+            if (Opt(info, "extensions") is Dictionary<string, object> ext &&
+                Opt(ext, TextureTransform) is Dictionary<string, object> transform)
+            {
+                if (!Default(transform, "offset", 0f) || !Default(transform, "scale", 1f) ||
+                    (Opt(transform, "rotation") != null && Single(Opt(transform, "rotation"), TextureTransform + ".rotation") != 0f))
+                    throw Bad(ImportCode.UnsupportedGlb, who + " moves, scales or turns its base-colour texture with '" +
+                        TextureTransform + "', which this mod does not apply, so the texture would land on the " +
+                        "wrong part of the model; in Blender delete the Mapping node in front of the image, " +
+                        "scale or move the UVs themselves in the UV Editor instead, and re-export");
+                if (Opt(transform, "texCoord") != null) set = Int(Opt(transform, "texCoord"), TextureTransform + ".texCoord");
+            }
+            if (set != 0)
+                throw Bad(ImportCode.UnsupportedGlb, who + " paints its base-colour texture through UV map " +
+                    (set + 1).ToString(CultureInfo.InvariantCulture) + " (TEXCOORD_" + set.ToString(CultureInfo.InvariantCulture) +
+                    "), and this mod draws every texture through the FIRST UV map, so it would land on the wrong " +
+                    "part of the model; in Blender make that UV map the first one in Object Data > UV Maps " +
+                    "(or feed the image from the first map) and re-export");
+        }
+
+        /// <summary>True when a KHR_texture_transform vector field is absent or all <paramref name="value"/>.</summary>
+        private static bool Default(Dictionary<string, object> transform, string key, float value)
+        {
+            if (!(Opt(transform, key) is List<object> pair)) return true;
+            foreach (object v in pair)
+                if (Single(v, TextureTransform + "." + key) != value) return false;
+            return true;
         }
 
         /// <summary>

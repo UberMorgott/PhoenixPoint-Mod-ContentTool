@@ -111,7 +111,8 @@ internal static class SubmeshSlots
     /// The READER's half of the slot contract: Materials, MaterialImages and MaterialEmissive are
     /// index-parallel to the submeshes, and ProjectBake reads image s for submesh s. A slot-less
     /// primitive in front used to add a name but no image, so every later part took the texture of
-    /// the part after it.
+    /// the part after it. Plus the two ways a base-colour texture would land on the wrong UVs, which
+    /// are refused by name rather than baked crooked.
     /// </summary>
     private static void Embedded()
     {
@@ -122,6 +123,16 @@ internal static class SubmeshSlots
            model.Materials.Count + "/" + model.MaterialImages.Count + "/" + model.MaterialEmissive.Count);
         Ok(model.MaterialImages[0] == null && model.MaterialImages[1] != null && model.MaterialImages[1][0] == 0x89,
            "the image lands on the part whose material names it, not on the part before");
+
+        Ok(GlbReader.Read(Painted(",\"extensions\":{\"KHR_texture_transform\":{\"offset\":[0,0],\"scale\":[1,1]}}"))
+               .MaterialImages[1] != null,
+           "an identity KHR_texture_transform changes nothing and is read");
+        string moved = Refusal(Painted(",\"extensions\":{\"KHR_texture_transform\":{\"scale\":[4,4]}}"));
+        Ok(moved.Contains("material 'Hull'") && moved.Contains("KHR_texture_transform") && moved.Contains("Mapping node"),
+           "a scaled base-colour texture is refused by material name, with the Blender fix: " + moved);
+        string second = Refusal(Painted(",\"texCoord\":1"));
+        Ok(second.Contains("material 'Hull'") && second.Contains("TEXCOORD_1") && second.Contains("FIRST UV map"),
+           "a base-colour texture on the second UV map is refused by name: " + second);
     }
 
     /// <summary>One static triangle, two primitives over it: #0 with no material, #1 painted by
@@ -143,6 +154,12 @@ internal static class SubmeshSlots
             "\"textures\":[{\"source\":0}],\"images\":[{\"bufferView\":" + image + ",\"mimeType\":\"image/png\"}]," +
             b.Json() + "}";
         return ClipImport.Container(json, b.Bytes());
+    }
+
+    private static string Refusal(byte[] file)
+    {
+        try { GlbReader.Read(file); return "(no refusal at all)"; }
+        catch (FormatException exception) { return exception.Message; }
     }
 
     /// <summary>
