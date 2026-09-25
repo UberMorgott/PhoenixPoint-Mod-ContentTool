@@ -189,8 +189,9 @@ namespace Morgott.ContentTool
         public override void OnModDisabled()
         {
             // The probe patches a call every character resolve goes through, and it writes one
-            // prefab; neither may outlive the mod.
-            if (Dev.SeamSwap.Active) log?.LogInfo(Dev.SeamSwap.Run(new[] { "off" }));
+            // prefab; neither may outlive the mod. Nor may a swap: ct_replace through the dev scan
+            // (name:) leaves marks with the probe OFF, and 'off' is what restores them too.
+            if (Dev.SeamSwap.Active || Dev.SeamSwap.MarkCount > 0) log?.LogInfo(Dev.SeamSwap.Run(new[] { "off" }));
             // A watcher thread and a coroutine must not outlive the mod that made them.
             if (Dev.DevLoop.Enabled) log?.LogInfo(Dev.DevRunner.Run(new[] { "off" }));
             // Closes the workbench first if it is open, so a mod switched off mid-fit does not leave

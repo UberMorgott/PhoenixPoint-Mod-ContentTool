@@ -345,6 +345,10 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal static string TexSwapGate()
         {
+            // The gate ends in Restore(), which reverts EVERY swap - the same guard as MeshSwapGate,
+            // so running it over a live swap refuses instead of silently taking that swap down too.
+            if (Marks.Count > 0) return "ct_texswap: REFUSED - " + Marks.Count + " swap(s) already active, ct_revert first";
+
             Renderer rend = null;
             Texture2D subject = null, control = null;
             int slot = 0;

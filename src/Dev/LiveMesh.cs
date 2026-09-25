@@ -313,6 +313,11 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal static string Gate()
         {
+            // BEFORE the try: its finally reverts EVERY swap, so a refusal taken inside it used to
+            // wipe the very swaps it refused to run over. Past this line every mark is the gate's own.
+            if (SeamSwap.MarkCount > 0)
+                return "R5 VOID - " + SeamSwap.MarkCount + " swap(s) are already live, ct_revert first";
+
             bool scan = DevScan.Enabled;
             try { return RunGate(); }
             finally { DevScan.Enabled = scan; SeamSwap.Revert(); }
@@ -320,9 +325,6 @@ namespace Morgott.ContentTool.Dev
 
         private static string RunGate()
         {
-            if (SeamSwap.MarkCount > 0)
-                return "R5 VOID - " + SeamSwap.MarkCount + " swap(s) are already live, ct_revert first";
-
             System.Collections.Generic.Dictionary<string, int> counts =
                 new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
             foreach (GameObject go in Resources.FindObjectsOfTypeAll<GameObject>())

@@ -100,8 +100,14 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         private static string Gate()
         {
+            // The gate reverts through ct_revert, which takes down EVERY swap - so it does not run
+            // over one it did not make (the guard LiveMesh.Gate and MeshSwapGate keep).
+            if (SeamSwap.MarkCount > 0)
+                return "R4 VOID - " + SeamSwap.MarkCount + " swap(s) are already live, ct_revert first";
+
+            bool was = Enabled;
             try { return RunGate(); }
-            finally { Enabled = false; }   // the toggle goes back to its default, always
+            finally { Enabled = was; }   // the toggle goes back to what the user had, always
         }
 
         private static string RunGate()
