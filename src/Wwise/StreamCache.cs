@@ -38,9 +38,11 @@ namespace Morgott.ContentTool.Wwise
         /// <summary>Same folder name the donor's proven ARM1 used.</summary>
         private const string AudioFolder = "WwiseAudio";
 
-        private static bool basePathAdded;
+        /// <summary>Every folder already handed to AddBasePath this session. A SET, not one flag: each
+        /// content mod streams out of its own folder, and one registration must not stand in for another.</summary>
+        private static readonly HashSet<string> basePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>The one place the on-disk shape is decided: &lt;modDir&gt;\WwiseAudio.</summary>
+        /// <summary>ContentTool's OWN &lt;modDir&gt;\WwiseAudio - where its self-check's streams go.</summary>
         internal static string TargetDir
         {
             get
@@ -48,8 +50,19 @@ namespace Morgott.ContentTool.Wwise
                 string mod = ContentToolMain.ModDir;
                 if (string.IsNullOrEmpty(mod))
                     throw new InvalidOperationException("ModEntry.Directory is empty; there is no mod folder to stream from");
-                return Path.Combine(mod, AudioFolder);
+                return TargetDirFor(mod);
             }
+        }
+
+        /// <summary>The one place the on-disk shape is decided: &lt;modDir&gt;\WwiseAudio, for the mod that
+        /// SHIPS the streams. A content mod's streams belong in the content mod's folder - the "deleting
+        /// its folder removes its media" rule above - not in ContentTool's, where every mod's
+        /// &lt;mediaId&gt;.wem used to land side by side.</summary>
+        internal static string TargetDirFor(string modDir)
+        {
+            if (string.IsNullOrEmpty(modDir))
+                throw new InvalidOperationException("no mod folder to stream from");
+            return Path.Combine(modDir, AudioFolder);
         }
 
         internal sealed class Entry
@@ -115,23 +128,29 @@ namespace Morgott.ContentTool.Wwise
         /// </summary>
         internal static string Extract(AssetBundle bundle, string manifestAsset, out int written)
         {
+            return Extract(bundle, manifestAsset, TargetDir, out written);
+        }
+
+        /// <summary>The same, into <paramref name="targetDir"/> - <see cref="TargetDirFor"/> of the mod
+        /// that ships <paramref name="bundle"/>.</summary>
+        internal static string Extract(AssetBundle bundle, string manifestAsset, string targetDir, out int written)
+        {
             written = 0;
             TextAsset m = bundle.LoadAsset<TextAsset>(manifestAsset);
             if (m == null) throw new InvalidDataException("stream manifest '" + manifestAsset + "' is not in the bundle");
 
             List<Entry> entries = ParseManifest(m.bytes);
-            string targetDir = TargetDir;
             Directory.CreateDirectory(targetDir);
             StringBuilder log = new StringBuilder();
 
-            // The one AddBasePath call, made here so no caller can extract without it or load a bank
-            // before it. Wwise keeps base paths for the session, so it only has to happen once; the
-            // trailing separator is the form the proven ARM1 used.
+            // The one AddBasePath call per folder, made here so no caller can extract without it or load
+            // a bank before it. Wwise keeps base paths for the session, so each folder only has to be
+            // added once; the trailing separator is the form the proven ARM1 used.
             string basePath = "AddBasePath: already registered";
-            if (!basePathAdded)
+            if (!basePaths.Contains(targetDir))
             {
                 AKRESULT r = AkSoundEngine.AddBasePath(targetDir + Path.DirectorySeparatorChar);
-                basePathAdded = r == AKRESULT.AK_Success;
+                if (r == AKRESULT.AK_Success) basePaths.Add(targetDir);
                 basePath = "AddBasePath(" + targetDir + Path.DirectorySeparatorChar + "): " + r;
             }
 
@@ -156,11 +175,10 @@ namespace Morgott.ContentTool.Wwise
                                                    " B, the manifest says " + e.Length + " B with a different hash");
 
                 // Write through a temp file so a half-written .wem can never be picked up as the
-                // real one; replacing is the last step and it is a single filesystem operation.
-                string tmp = path + ".tmp";
-                File.WriteAllBytes(tmp, wem);
-                if (File.Exists(path)) File.Delete(path);
-                File.Move(tmp, path);
+                // real one; replacing is the last step and it is a single filesystem operation. The
+                // shared writer: a fixed "<path>.tmp" collided with a leftover, and delete-then-move left
+                // a window with NO file under the name Wwise resolves.
+                Morgott.ContentTool.IO.AtomicFile.Write(path, wem);
 
                 byte[] back = File.ReadAllBytes(path);
                 if (back.Length != e.Length || Sha1(back) != e.Hash)

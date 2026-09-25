@@ -1,5 +1,4 @@
 using System;
-using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -225,8 +224,18 @@ namespace Morgott.ContentTool.Project
     /// </summary>
     internal sealed class ContentProject
     {
-        /// <summary>First ID of the tool's allocation range; ids are checked for collisions anyway.</summary>
-        private const uint MediaIdBase = 0xC7000100;
+        /// <summary>
+        /// First media ID THIS project allocates from. It used to be one constant (0xC7000100) for every
+        /// project, so the first added sound of any two content mods got the SAME media ID - one Wwise
+        /// media registered twice, and one &lt;mediaId&gt;.wem stream file answering for both. Seeded from
+        /// the project id instead (FNV-1, domain-separated so it is not also the id's own bank/event
+        /// hash), which keeps it stable across bakes of one project and apart across projects;
+        /// <see cref="Allocate"/> still skips anything Phoenix Point owns.
+        /// </summary>
+        internal static uint MediaIdBase(string projectId)
+        {
+            return WwiseId.Hash("contenttool.media." + (projectId ?? ""));
+        }
 
         [Serializable]
         private sealed class Meta
@@ -290,10 +299,6 @@ namespace Morgott.ContentTool.Project
         internal readonly List<ShippedReplacement> Replace = new List<ShippedReplacement>();
         /// <summary>ppcontent.json "publish" entries - catalog keys served from this mod's own bundle (route iii).</summary>
         internal readonly List<PublishedKey> Publish = new List<PublishedKey>();
-        /// <summary>replacements.json, already validated; empty for an add-only project (FINAL-PLAN 39.2).</summary>
-        internal readonly List<ReplacementRule> Replacements = new List<ReplacementRule>();
-        /// <summary>One sentence per record that did NOT load. Never empty silently.</summary>
-        internal readonly List<string> ReplacementRefusals = new List<string>();
         /// <summary>
         /// One sentence per SOURCE FILE that could not be imported. It is a list and not an exception
         /// for the reason the clip path learned first (9a3747b): one unreadable sound used to abort
@@ -343,9 +348,7 @@ namespace Morgott.ContentTool.Project
             string metaPath = Path.Combine(root, "ppcontent.json");
             if (!File.Exists(metaPath)) throw new FileNotFoundException("no ppcontent.json in " + root, metaPath);
             string text = File.ReadAllText(metaPath);
-            Meta m = JsonUtility.FromJson<Meta>(text);
-            if (m == null || string.IsNullOrEmpty(m.id) || string.IsNullOrEmpty(m.bundle))
-                throw new InvalidDataException("ppcontent.json needs both \"id\" and \"bundle\"");
+            Meta m = MetaOrRefuse(JsonUtility.FromJson<Meta>(text));
             Declared d = new Declared { Id = m.id, BundleName = m.bundle };
             // THE SINK REACHES BOTH ARRAYS, or the census B1 takes is not the one Load keeps: "publish" is
             // parsed FIRST, so one half-typed row threw before a single "replace" row was read and
@@ -376,9 +379,7 @@ namespace Morgott.ContentTool.Project
             string metaPath = Path.Combine(root, "ppcontent.json");
             if (!File.Exists(metaPath)) throw new FileNotFoundException("no ppcontent.json in " + root, metaPath);
             // JsonUtility: Unity's own reader, so no JSON dependency enters the tool.
-            Meta m = JsonUtility.FromJson<Meta>(File.ReadAllText(metaPath));
-            if (m == null || string.IsNullOrEmpty(m.id) || string.IsNullOrEmpty(m.bundle))
-                throw new InvalidDataException("ppcontent.json needs both \"id\" and \"bundle\"");
+            Meta m = MetaOrRefuse(JsonUtility.FromJson<Meta>(File.ReadAllText(metaPath)));
 
             ContentProject p = new ContentProject
             {
@@ -443,7 +444,7 @@ namespace Morgott.ContentTool.Project
             // order and a cancel inside it would leave a project whose sounds are numbered from a run that
             // never finished. It is short, it writes nothing, and it is not worth a torn count.
             if (pump != null) pump.At("audio", 6, phases);
-            uint next = MediaIdBase;
+            uint next = MediaIdBase(p.Id);
             foreach (string f in Sources(root, "Audio", p.SourceRefusals, "*.wav", "*.ogg", "*.mp3"))
             {
                 string why;
@@ -453,7 +454,6 @@ namespace Morgott.ContentTool.Project
                 else p.Audio.Add(a);
             }
 
-            p.Replacements.AddRange(ReplacementFile.Load(root, p.ReplacementRefusals));
             // EVERY REFUSAL IS A FAILURE OF THIS RUN, not only the ones an importer THREW. An
             // unreadable .ogg, a .flac the tool never accepts, two files sharing a stem, a half-typed
             // "replace" row and a negative "scale" are all declared work that did not happen, and each
@@ -462,6 +462,21 @@ namespace Morgott.ContentTool.Project
             // a line can never forget to add its count.
             p.ImportFailures = p.SourceRefusals.Count;
             return p;
+        }
+
+        /// <summary>
+        /// "id" and "bundle", present AND each usable as one path component - both loads, before either
+        /// reads a source or anything downstream joins them into a path (Dist\&lt;bundle&gt;,
+        /// Patched\&lt;tag&gt;\&lt;id&gt;\). A THROW, like the missing-key case beside it: a project whose
+        /// identity is unusable has no row to skip.
+        /// </summary>
+        private static Meta MetaOrRefuse(Meta m)
+        {
+            if (m == null || string.IsNullOrEmpty(m.id) || string.IsNullOrEmpty(m.bundle))
+                throw new InvalidDataException("ppcontent.json needs both \"id\" and \"bundle\"");
+            string unsafeName = Manifest.UnsafeName("id", m.id) ?? Manifest.UnsafeName("bundle", m.bundle);
+            if (unsafeName != null) throw new InvalidDataException(unsafeName);
+            return m;
         }
 
         /// <summary>Content\Videos\, verbatim: a video is copied, never decoded, so the whole
@@ -566,8 +581,8 @@ namespace Morgott.ContentTool.Project
         /// track is. Declared entries keep both.
         ///
         /// Read the way "replace" and "publish" are, for the same measured reason (JsonUtility returns
-        /// null for an array of custom classes here). "media" is a NUMBER, so it is read with its own
-        /// pattern rather than through <see cref="Field"/>, and a quoted number is accepted too.
+        /// null for an array of custom classes here), through the ONE reader the packager shares
+        /// (<see cref="Manifest.Sounds"/>). "media" is a whole NUMBER, and a quoted one is accepted too.
         /// </summary>
         /// <param name="refusals">Where an INCOMPLETE entry goes instead of ending the run - one
         /// half-typed row must not stop the project's other sounds from being replaced. Null keeps the
@@ -575,24 +590,17 @@ namespace Morgott.ContentTool.Project
         internal static List<SoundEntry> ParseSounds(string json, List<string> refusals = null)
         {
             List<SoundEntry> list = new List<SoundEntry>();
-            Match arr = Regex.Match(json, "\"sounds\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
-            if (!arr.Success) return list;
+            Dictionary<string, object> tree = TreeOrNothing(json, refusals);
+            if (tree == null || !tree.ContainsKey("sounds") || tree["sounds"] == null) return list;
             int marked = refusals == null ? 0 : refusals.Count;
 
-            foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
+            List<string> refused = new List<string>();
+            foreach (KeyValuePair<uint, string> s in Manifest.Sounds(tree, refused))
+                list.Add(new SoundEntry { Media = s.Key, File = s.Value });
+            foreach (string why in refused)
             {
-                Match media = Regex.Match(o.Value, "\"media\"\\s*:\\s*\"?(\\d+)\"?");
-                string file = Field(o.Value, "file");
-                if (!media.Success || string.IsNullOrEmpty(file))
-                {
-                    string why =
-                        "\"sounds\" row REFUSED: every entry needs \"media\" (the shipped media ID it " +
-                        "replaces) and \"file\" (the name of your own file in Content\\Audio\\Replace\\); " +
-                        "got " + o.Value + " - SKIPPED, this project's other sounds are unaffected";
-                    if (refusals == null) throw new InvalidDataException(why);
-                    refusals.Add(why); continue;
-                }
-                list.Add(new SoundEntry { Media = uint.Parse(media.Groups[1].Value), File = file });
+                if (refusals == null) throw new InvalidDataException(why);
+                refusals.Add(why);
             }
             if (list.Count == 0 && (refusals == null || refusals.Count == marked))
             {
@@ -613,24 +621,31 @@ namespace Morgott.ContentTool.Project
         private static List<PublishedKey> ParsePublish(string json, List<string> refusals = null)
         {
             List<PublishedKey> list = new List<PublishedKey>();
-            Match arr = Regex.Match(json, "\"publish\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
-            if (!arr.Success) return list;
+            Dictionary<string, object> tree = TreeOrNothing(json, refusals);
+            if (tree == null || !tree.ContainsKey("publish") || tree["publish"] == null) return list;
             int marked = refusals == null ? 0 : refusals.Count;
 
-            foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
+            List<object> junk = new List<object>();
+            List<object> rows = new List<object>();
+            foreach (Dictionary<string, object> row in Manifest.Rows(tree, "publish", junk)) rows.Add(row);
+            rows.AddRange(junk);
+            foreach (object element in rows)
             {
+                Dictionary<string, object> row = element as Dictionary<string, object>;
                 PublishedKey k = new PublishedKey
                 {
-                    key = Field(o.Value, "key"),
-                    asset = Field(o.Value, "asset"),
-                    type = Field(o.Value, "type"),
-                    deps = Field(o.Value, "deps")
+                    key = Manifest.Str(row, "key"),
+                    asset = Manifest.Str(row, "asset"),
+                    // "" for an absent one, exactly what the regex read handed every consumer.
+                    type = Manifest.Str(row, "type") ?? "",
+                    deps = Manifest.Str(row, "deps") ?? ""
                 };
                 if (string.IsNullOrEmpty(k.key) || string.IsNullOrEmpty(k.asset))
                 {
                     string why =
                         "\"publish\" row REFUSED: every entry needs \"key\" (the address the game will " +
-                        "ask for) and \"asset\" (the path inside this mod's own bundle); got " + o.Value +
+                        "ask for) and \"asset\" (the path inside this mod's own bundle); got " +
+                        new JsonWriter().Val(element).ToString() +
                         " - SKIPPED, this project's other keys and its sources still bake";
                     if (refusals == null) throw new InvalidDataException(why);
                     refusals.Add(why); continue;
@@ -647,14 +662,20 @@ namespace Morgott.ContentTool.Project
         }
 
         /// <summary>
-        /// ponytail: the value is taken VERBATIM, so a JSON <c>\uXXXX</c> escape arrives as those six
-        /// characters rather than the character it denotes. Authors write ppcontent.json in UTF-8 and
-        /// type the name itself ("Ублюдок, мать твою.mp3" works, spaces and commas and all); add a
-        /// decoder here if an editor that emits escapes ever shows up.
+        /// The parsed root for the "publish" and "sounds" readers - Manifest's tree, so an escape
+        /// (<c>é</c>, <c>\"</c>) arrives as the character it denotes and a ']' inside a file name no
+        /// longer ends the array. A manifest nothing can read still THROWS for a caller with no refusal
+        /// channel; with one it reads as nothing declared, because Load records that refusal exactly once,
+        /// at the "replace" seam - a second line here would count one broken file as two failures.
         /// </summary>
-        private static string Field(string obj, string name)
+        private static Dictionary<string, object> TreeOrNothing(string json, List<string> refusals)
         {
-            return Regex.Match(obj, "\"" + name + "\"\\s*:\\s*\"([^\"]*)\"").Groups[1].Value;
+            try { return Manifest.Tree(json, "ppcontent.json"); }
+            catch (InvalidDataException)
+            {
+                if (refusals == null) throw;
+                return null;
+            }
         }
 
         /// <summary>
@@ -875,7 +896,8 @@ namespace Morgott.ContentTool.Project
             while (true)
             {
                 uint id = next++;
-                if (IdIndex.IsPpMedia(id)) continue;
+                // 0 is no media at all to Wwise; a base near uint.MaxValue wraps through it.
+                if (id == 0 || IdIndex.IsPpMedia(id)) continue;
                 bool mine = false;
                 foreach (ImportedAudio a in Audio) if (a.MediaId == id) { mine = true; break; }
                 if (!mine) return id;

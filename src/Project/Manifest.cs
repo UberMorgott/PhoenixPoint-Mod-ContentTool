@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -132,6 +133,16 @@ namespace Morgott.ContentTool.Project
         /// <param name="what">"ppcontent.json", or "'&lt;path&gt;'" from ManifestFile.Load.</param>
         internal static Manifest ParseFor(string text, string what)
         {
+            return new Manifest(Tree(text, what));
+        }
+
+        /// <summary>The parsed ROOT OBJECT and nothing more - no "replace" shape check. The readers of the
+        /// other arrays ("publish", "sounds") and of meta.json need the tree without V3 standing between
+        /// them and it: a wrong-shaped "replace" is refused where "replace" is read, not by silently
+        /// dropping every "publish" row beside it.</summary>
+        /// <exception cref="InvalidDataException">E1 - not JSON, or a root that is not an object.</exception>
+        internal static Dictionary<string, object> Tree(string text, string what)
+        {
             object parsed;
             try { parsed = Json.Parse(text, MaxDepth); }
             catch (FormatException bad)
@@ -141,7 +152,116 @@ namespace Morgott.ContentTool.Project
             Dictionary<string, object> tree = parsed as Dictionary<string, object>;
             if (tree == null)
                 throw new InvalidDataException(what + " is not valid JSON: its root is not an object");
-            return new Manifest(tree);
+            return tree;
+        }
+
+        /// <summary>
+        /// The OBJECT elements of the root array <paramref name="key"/>, in file order - the tree read
+        /// "replace" already has, for "publish" and "sounds". Their regex read took the array up to the
+        /// FIRST ']' and each row up to the first '}', so a ']' inside a file name, an escaped quote or a
+        /// nested member cut a row short or dropped it without a word.
+        /// Every element that is NOT an object lands in <paramref name="junk"/>, and so does a value that
+        /// is not an array at all (one entry: the value itself) - each is one refused row for the caller.
+        /// Absent or JSON null: no rows, nothing refused, exactly as the "replace" constructor treats it.
+        /// </summary>
+        internal static List<Dictionary<string, object>> Rows(IDictionary<string, object> tree, string key,
+                                                             List<object> junk)
+        {
+            var rows = new List<Dictionary<string, object>>();
+            object value;
+            if (tree == null || !tree.TryGetValue(key, out value) || value == null) return rows;
+            List<object> array = value as List<object>;
+            if (array == null) { junk.Add(value); return rows; }
+            foreach (object item in array)
+            {
+                Dictionary<string, object> members = item as Dictionary<string, object>;
+                if (members == null) junk.Add(item);
+                else rows.Add(members);
+            }
+            return rows;
+        }
+
+        /// <summary>A member's value when it is a STRING, else null - the rule ReplaceRow.Str applies: a
+        /// field of another type reads as absent and the row's own refusal says so.</summary>
+        internal static string Str(IDictionary<string, object> row, string key)
+        {
+            object value;
+            return row != null && row.TryGetValue(key, out value) ? value as string : null;
+        }
+
+        /// <summary>A shipped media ID, written as a JSON number or as a quoted one ("media": "18839791"
+        /// has always been accepted). A fraction, a negative number or one past uint.MaxValue is NOT a
+        /// media ID - the regex read handed that last one to uint.Parse, which threw OverflowException out
+        /// of the whole reader.</summary>
+        internal static bool TryMedia(object value, out uint media)
+        {
+            media = 0;
+            if (value is double number)
+            {
+                if (number < 0 || number > uint.MaxValue || number != Math.Floor(number)) return false;
+                media = (uint)number;
+                return true;
+            }
+            string text = value as string;
+            return text != null && uint.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out media);
+        }
+
+        /// <summary>
+        /// The complete "sounds" rows as (media, file), in file order; one refusal sentence per element
+        /// that is not one. ONE reader for the bake (ContentProject.ParseSounds, SoundReplace) and the
+        /// packager (Package.DeclaredSounds), which used to carry a second regex copy of the first.
+        /// </summary>
+        internal static List<KeyValuePair<uint, string>> Sounds(IDictionary<string, object> tree,
+                                                                List<string> refused)
+        {
+            var sounds = new List<KeyValuePair<uint, string>>();
+            var junk = new List<object>();
+            foreach (Dictionary<string, object> row in Rows(tree, "sounds", junk))
+            {
+                object raw;
+                uint media;
+                string file = Str(row, "file");
+                if (!row.TryGetValue("media", out raw) || !TryMedia(raw, out media) || string.IsNullOrEmpty(file))
+                {
+                    refused.Add(SoundRowRefusal(row));
+                    continue;
+                }
+                sounds.Add(new KeyValuePair<uint, string>(media, file));
+            }
+            foreach (object element in junk) refused.Add(SoundRowRefusal(element));
+            return sounds;
+        }
+
+        /// <summary>The "sounds" row sentence, the row spelled by the same writer RowRefusal uses.</summary>
+        internal static string SoundRowRefusal(object element)
+        {
+            return "\"sounds\" row REFUSED: every entry needs \"media\" (the shipped media ID it replaces, " +
+                   "a whole number) and \"file\" (the name of your own file in Content\\Audio\\Replace\\); " +
+                   "got " + new JsonWriter().Val(element).ToString() +
+                   " - SKIPPED, this project's other sounds are unaffected";
+        }
+
+        /// <summary>
+        /// Why <paramref name="value"/> - ppcontent.json's "id" or "bundle" - cannot be used as ONE path
+        /// component, or null when it can. Both are joined straight into paths: "bundle" names
+        /// Dist\&lt;bundle&gt; and "id" names Patched\&lt;tag&gt;\&lt;id&gt;\, so "..\..\x", "C:\x" or "a/b" wrote
+        /// outside the project and outside ContentTool's own folder. Checked before anything is written.
+        /// </summary>
+        internal static string UnsafeName(string key, string value)
+        {
+            string why = null;
+            if (string.IsNullOrEmpty(value)) why = "is empty";
+            else if (value == "." || value == "..") why = "is a relative folder, not a name";
+            else if (value.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || value.IndexOf(':') >= 0)
+                why = "holds a path separator or a character a file name cannot carry";
+            // Windows drops a trailing dot or space from a name, so "x." would land on "x" - a second
+            // spelling of someone else's folder.
+            else if (value.Trim() != value || value.EndsWith(".", StringComparison.Ordinal))
+                why = "starts or ends with a space, or ends with a dot";
+            if (why == null) return null;
+            return "ppcontent.json \"" + key + "\": \"" + value + "\" " + why + " - it is used as ONE folder or " +
+                   "file name, so it must be a plain name such as \"author.mymod\" / \"MyMod.bundle\"; nothing " +
+                   "was read or written";
         }
 
         internal string Id => Str("id");

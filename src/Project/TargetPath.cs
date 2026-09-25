@@ -33,9 +33,9 @@ namespace Morgott.ContentTool.Project
     /// (gate R0) instead of only in a game session.
     ///
     /// PROVISIONAL until gate R1 has a number: the anchor set is what the seam is EXPECTED to hand
-    /// us, and R-U1/R-U2 may change it. Nothing reads ContentProject.Replacements yet and no bake
-    /// path touches replacements.json, so the format is still free to move - do not treat it as
-    /// frozen, and do not build a migration for it.
+    /// us, and R-U1/R-U2 may change it. No file carries these paths any more (replacements.json and
+    /// its unread loader were removed) and no bake path reads one, so the format is still free to
+    /// move - do not treat it as frozen, and do not build a migration for it.
     /// </summary>
     internal sealed class TargetPath
     {
@@ -257,13 +257,15 @@ namespace Morgott.ContentTool.Project
     /// it was picked. <see cref="Sha1"/> is checked at apply time and NEVER used to look anything up -
     /// that is the whole departure from ResourceReplacer's name_checksum identity (FINAL-PLAN 39.2).
     /// </summary>
+    // No reader in the tool builds one any more (replacements.json was removed, see Replacements.cs); the
+    // set rules below stay, proven offline by gate R0, hence the explicit initializers.
     internal sealed class ReplacementRule
     {
-        internal string Target;
+        internal string Target = null;
         /// <summary>Name of the baked asset in MyMod.bundle that replaces the target.</summary>
-        internal string Content;
+        internal string Content = null;
         /// <summary>40 hex, or null/"" when the target could not be hashed when it was picked.</summary>
-        internal string Sha1;
+        internal string Sha1 = null;
         /// <summary>Filled by <see cref="ReplacementSet.Validate"/>; null for a refused record.</summary>
         internal TargetPath Path;
     }
