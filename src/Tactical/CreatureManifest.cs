@@ -438,9 +438,75 @@ namespace Morgott.ContentTool.Tactical
             return sb.ToString();
         }
 
+        /// <summary>
+        /// One scalar: a QUOTED value is read to its closing quote, a bare one to the next
+        /// <c>,</c>/<c>}</c>/whitespace. The two arms are the whole fix for the first version, whose
+        /// single <c>[^",}]*</c> stopped a quoted value at its first COMMA - so the documented
+        /// <c>"up": "0,0,1"</c> read as "0" and was silently dropped as malformed, <c>"hitBones": "a,b"</c>
+        /// kept only "a", and a name with a comma in it was cut short.
+        /// </summary>
         private static string Field(string obj, string name)
         {
-            return Regex.Match(obj, "\"" + name + "\"\\s*:\\s*\"?([^\",}]*)\"?").Groups[1].Value.Trim();
+            Match m = Regex.Match(obj, "\"" + name + "\"\\s*:\\s*(?:\"([^\"]*)\"|([^\",}\\s]*))");
+            if (!m.Success) return "";
+            return (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).Trim();
+        }
+
+        /// <summary>
+        /// A key of the file's OUTERMOST object - never the first spelling of it anywhere. The mod's
+        /// "id" and the bake's "scale" are top-level keys, and a regex over the whole file found the
+        /// first <c>"id"</c> or <c>"scale"</c> in it, which in a manifest with a "weapons" row above
+        /// them is that row's. A quoted value comes back unquoted (escapes left as written), a bare
+        /// one as spelled; absent, or an object/array, is "".
+        /// </summary>
+        internal static string TopLevel(string json, string key)
+        {
+            if (json == null) return "";
+            int depth = 0;
+            for (int i = 0; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (c == '{' || c == '[') { depth++; continue; }
+                if (c == '}' || c == ']') { depth--; continue; }
+                if (c != '"') continue;
+                int end = StringEnd(json, i);
+                if (end < 0) return "";
+                int j = Skip(json, end + 1);
+                if (depth == 1 && j < json.Length && json[j] == ':' &&
+                    end - i - 1 == key.Length && string.CompareOrdinal(json, i + 1, key, 0, key.Length) == 0)
+                {
+                    j = Skip(json, j + 1);
+                    if (j >= json.Length || json[j] == '{' || json[j] == '[') return "";
+                    if (json[j] == '"')
+                    {
+                        int close = StringEnd(json, j);
+                        return close < 0 ? "" : json.Substring(j + 1, close - j - 1);
+                    }
+                    int k = j;
+                    while (k < json.Length && json[k] != ',' && json[k] != '}' && !char.IsWhiteSpace(json[k])) k++;
+                    return json.Substring(j, k - j);
+                }
+                i = end;
+            }
+            return "";
+        }
+
+        /// <summary>The index of the quote closing the string that opens at <paramref name="open"/>,
+        /// or -1 when it never closes.</summary>
+        private static int StringEnd(string json, int open)
+        {
+            for (int i = open + 1; i < json.Length; i++)
+            {
+                if (json[i] == '\\') { i++; continue; }
+                if (json[i] == '"') return i;
+            }
+            return -1;
+        }
+
+        private static int Skip(string json, int i)
+        {
+            while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+            return i;
         }
 
         private static float Number(string obj, string name)

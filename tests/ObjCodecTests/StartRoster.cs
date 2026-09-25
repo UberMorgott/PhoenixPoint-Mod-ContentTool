@@ -52,6 +52,28 @@ internal static class StartRoster
               "a \"startingRoster\" spelled inside \"clips\" is a clip name, not the opt-in - " +
               "CreatureManifest.Flat() is what keeps the two apart");
 
+        // ---- A QUOTED SCALAR IS READ TO ITS CLOSING QUOTE, commas and all. The documented syntax
+        // ("up": "0,0,1", "hitBones": "a,b") used to stop at the first comma: the vector read as "0"
+        // and was dropped as malformed, the bone list kept one bone, and nothing said so.
+        CreatureManifest commas = Parsed("\"up\": \"0,0,1\", \"hitBones\": \"leg_L, leg_R\", " +
+                                         "\"name\": \"Spider, Queen\", \"lift\": 2.5, \"health\": \"40\"");
+        Check(commas.Up.Length == 3 && commas.Up[0] == 0f && commas.Up[1] == 0f && commas.Up[2] == 1f,
+              "\"up\": \"0,0,1\" is three numbers, not a '0' dropped as malformed");
+        Check(commas.HitBones.Length == 2 && commas.HitBones[0] == "leg_L" && commas.HitBones[1] == "leg_R",
+              "\"hitBones\": \"leg_L, leg_R\" names both bones, not the first");
+        Check(commas.Name == "Spider, Queen", "a name with a comma in it is not cut short");
+        Check(commas.Lift == 2.5f && commas.Health == 40f,
+              "bare and quoted numbers beside them still read - the bare arm stops at the comma");
+
+        // ---- TOP-LEVEL keys are the file's own, never the first spelling of them anywhere: a
+        // "weapons" row carrying its own "id"/"scale" above the mod's must not win.
+        const string nested = "{ \"weapons\": [ { \"id\": \"rifle\", \"scale\": 0.5 } ], " +
+                              "\"id\": \"mymod\", \"scale\": 0.01, \"note\": \"\\\"id\\\": \\\"fake\\\"\" }";
+        Check(CreatureManifest.TopLevel(nested, "id") == "mymod", "the mod's own top-level \"id\"");
+        Check(CreatureManifest.TopLevel(nested, "scale") == "0.01", "the mod's own top-level \"scale\"");
+        Check(CreatureManifest.TopLevel(nested, "bundle") == "", "an absent key reads empty");
+        Check(CreatureManifest.TopLevel(nested, "weapons") == "", "an array value is not a scalar");
+
         // ---- THE ONE MOD THAT ASKS FOR IT, read off the file the game reads
         string ppfit = Path.Combine(Root(), "local\\PpFit\\ppcontent.json");
         if (File.Exists(ppfit))
