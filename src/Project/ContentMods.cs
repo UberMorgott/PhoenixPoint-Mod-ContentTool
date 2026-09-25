@@ -54,21 +54,28 @@ namespace Morgott.ContentTool.Project
         {
             List<string> files = Listed(root, folder, patterns);
             files.Sort(StringComparer.OrdinalIgnoreCase);
-            List<string> kept = new List<string>();
-            // Sorted, so a stem's files are ADJACENT: '.' is lower than any character a stem may continue
-            // with, which is the same assumption the pairwise walk this replaced already made.
-            for (int i = 0; i < files.Count;)
+            // GROUPED BY STEM, not walked pairwise: sorting does NOT make a stem's files adjacent -
+            // swatch.jpg, swatch.old.png, swatch.png sorts the ".old" file between the two that collide,
+            // and the adjacent-pair walk let both "swatch" files through. Group order is first-seen, so
+            // the kept files and the refusals still come out in the sorted order.
+            Dictionary<string, List<string>> byStem =
+                new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            List<string> stems = new List<string>();
+            foreach (string f in files)
             {
-                int j = i + 1;
-                while (j < files.Count && SameStem(files[j], files[i])) j++;
-                if (j - i == 1) kept.Add(files[i]);
-                else
-                {
-                    string why = Collision(folder, files[i], files[i + 1]);
-                    if (refusals == null) throw new InvalidDataException(why);
-                    refusals.Add(why);
-                }
-                i = j;
+                string stem = Path.GetFileNameWithoutExtension(f);
+                List<string> group;
+                if (!byStem.TryGetValue(stem, out group)) { byStem[stem] = group = new List<string>(); stems.Add(stem); }
+                group.Add(f);
+            }
+            List<string> kept = new List<string>();
+            foreach (string stem in stems)
+            {
+                List<string> group = byStem[stem];
+                if (group.Count == 1) { kept.Add(group[0]); continue; }
+                string why = Collision(folder, group[0], group[1]);
+                if (refusals == null) throw new InvalidDataException(why);
+                refusals.Add(why);
             }
             return kept.ToArray();
         }
@@ -120,12 +127,6 @@ namespace Morgott.ContentTool.Project
                                       StringComparison.OrdinalIgnoreCase))
                         files.Add(f);
             return files;
-        }
-
-        private static bool SameStem(string a, string b)
-        {
-            return string.Equals(Path.GetFileNameWithoutExtension(a), Path.GetFileNameWithoutExtension(b),
-                                 StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
