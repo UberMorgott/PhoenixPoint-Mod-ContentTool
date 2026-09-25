@@ -2380,6 +2380,15 @@ internal static class Program
             WeaponManifest.Field(trickyRows[1].Text, "shoot") == "" &&
             WeaponManifest.Field(trickyRows[0].Text, "blurb") == "slot [2] rifle",
             "a bare true/false reads as spelled, a bare null as absent, a quoted value to its closing quote");
+        // Only LITERALS and NUMBERS are bare: an array read as its first fragment "[0" turned an
+        // array "rotate" into a declared-but-garbage rotate and an array "shoot" past its refusal.
+        const string arrays = "{ \"id\": \"c\", \"rotate\": [0,90,0], \"shoot\": { \"x\": 1 }, \"scale\": 1.5e0, \"n\": -2 }";
+        Check("S25-bare-not-arrays",
+            WeaponManifest.Field(arrays, "rotate") == "" && WeaponManifest.Field(arrays, "shoot") == "" &&
+            WeaponManifest.Field(arrays, "scale") == "1.5e0" && WeaponManifest.Field(arrays, "n") == "-2" &&
+            WeaponManifest.Field("{ \"flip\": truex }", "flip") == "",
+            "an array or object value reads as \"\" (not \"[0\"), a bare number reads whole, a non-literal word reads as nothing: rotate='" +
+            WeaponManifest.Field(arrays, "rotate") + "'");
 
         // The file half: a real write, with a BOM, atomically replaced.
         string dir = Path.Combine(Path.GetTempPath(), "ct_s25_" + Guid.NewGuid().ToString("N"));

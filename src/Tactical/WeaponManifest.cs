@@ -67,10 +67,13 @@ namespace Morgott.ContentTool.Tactical
 
         /// <summary>One value of a flat row: quoted, to its closing quote; or BARE, to the next
         /// <c>,</c>/<c>}</c>/whitespace. The bare arm is what makes <c>"flip": true</c> mean true - read
-        /// quoted-only it came back "" and the flip was silently off. A bare <c>null</c> is absent.</summary>
+        /// quoted-only it came back "" and the flip was silently off. A bare <c>null</c> is absent.
+        /// ONLY a JSON literal or number is a bare value: an array or object ("rotate": [0,90,0]) reads
+        /// as "" exactly as it did before the bare arm, instead of as its first fragment "[0".</summary>
         internal static string Field(string obj, string name)
         {
-            Match m = Regex.Match(obj, "\"" + name + "\"\\s*:\\s*(?:\"([^\"]*)\"|([^\",}\\s]+))");
+            Match m = Regex.Match(obj, "\"" + name + "\"\\s*:\\s*(?:\"([^\"]*)\"|" +
+                                       "(true|false|null|-?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)(?=[\\s,}\\]]|$))");
             if (!m.Success) return "";
             if (m.Groups[1].Success) return m.Groups[1].Value;
             return m.Groups[2].Value == "null" ? "" : m.Groups[2].Value;
