@@ -279,14 +279,21 @@ namespace Morgott.ContentTool.Tactical
                 aspect.Accuracy = c.Man.Accuracy;
                 ranged.BodyPartAspectDef = aspect;
             }
-            c.Say("ct_creature PASS ranged accuracy " +
-                  (c.Man.Accuracy > 0f
-                      ? c.Man.Accuracy.ToString("F0") + "% on '" + ranged.BodyPartAspectDef.name +
-                        "' - this NARROWS the spread cone (Weapon.GetWeaponSpread:322-325); it is not " +
-                        "a to-hit roll and the shot lands without it"
-                      : "not set, so the cone stays at the donor's own WeaponDef.SpreadDegrees. " +
-                        "Accuracy 0 skips the narrowing branch entirely - it does NOT widen anything, " +
-                        "and the spit lands on target at 0 (measured). Set \"accuracy\" only to tighten."));
+            // A weapon with NO aspect cannot carry the number at all - said as a FAIL by name, where the
+            // PASS line below used to dereference the null aspect and take the whole ranged build down.
+            if (c.Man.Accuracy > 0f && ranged.BodyPartAspectDef == null)
+                c.Say("ct_creature FAIL ranged accuracy " + c.Man.Accuracy.ToString("F0") + "% NOT applied: '" +
+                      ranged.name + "' carries no BodyPartAspectDef to write it onto, so the cone stays at " +
+                      "its WeaponDef.SpreadDegrees. Clone a \"ranged\" weapon that has one.");
+            else
+                c.Say("ct_creature PASS ranged accuracy " +
+                      (c.Man.Accuracy > 0f
+                          ? c.Man.Accuracy.ToString("F0") + "% on '" + ranged.BodyPartAspectDef.name +
+                            "' - this NARROWS the spread cone (Weapon.GetWeaponSpread:322-325); it is not " +
+                            "a to-hit roll and the shot lands without it"
+                          : "not set, so the cone stays at the donor's own WeaponDef.SpreadDegrees. " +
+                            "Accuracy 0 skips the narrowing branch entirely - it does NOT widen anything, " +
+                            "and the spit lands on target at 0 (measured). Set \"accuracy\" only to tighten."));
             ranged.SubAddons = new AddonDef.SubaddonBind[0];
             ranged.Tags = CreatureBuild.Purge(donorWeapon.Tags, donorTag, shared.VehicleTag);
             ranged.RequiredSlotBinds = new[] { new AddonDef.RequiredSlotBind
