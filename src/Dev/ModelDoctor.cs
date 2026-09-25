@@ -655,7 +655,7 @@ namespace Morgott.ContentTool.Dev
         internal string ShipResult { get { return shipResult; } }
 
         /// <summary>The Doctor's generation NOW. A press belongs to the generation it was enqueued on, and
-        /// `DoShip` abandons one whose generation moved (:683), so the acceptance seam hands this back with
+        /// `DoShip` abandons one whose generation moved (its first check), so the acceptance seam hands this back with
         /// an accepted press: a poll that sees it move knows the press was abandoned rather than lost.
         /// </summary>
         internal int Generation { get { return gen; } }
@@ -1123,12 +1123,23 @@ namespace Morgott.ContentTool.Dev
                 if (press) Press(e, panelWidth, stripTopGui);
                 else Paint(panelWidth, stripTopGui);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // SWALLOWED on purpose: this runs from OnGUI, and an exception there closes the whole
-                // bench (FitBench's own catch). A skeleton nobody can see is better than that.
+                // KEPT OUT OF OnGUI on purpose: an exception there closes the whole bench (FitBench's own
+                // catch), and a skeleton nobody can see is better than that. But not SILENT - the first
+                // failure of this Doctor goes to the log, once, since it would otherwise repeat every
+                // frame and a vanished overlay would have no trace at all.
+                if (!overlayFailed)
+                {
+                    overlayFailed = true;
+                    ChunkedLog.Fail("[ContentTool] Model Doctor skeleton overlay threw (said once, then " +
+                                    "skipped each frame): " + ex);
+                }
             }
         }
+
+        /// <summary>The overlay's first failure has been logged - see its catch.</summary>
+        private bool overlayFailed;
 
         /// <summary>This pass's screen position per joint, into the arrays <see cref="Recache"/> sized.
         /// Allocation-free on purpose - it runs every Repaint and again on every press.</summary>
@@ -2134,6 +2145,19 @@ namespace Morgott.ContentTool.Dev
             shipRenderer = null;
             projectName = seededName = "";
             shipPhase = shipResult = shipPath = shipTail = "";
+            shipLanded = false;
+            // THE PANEL'S OWN STATE goes with the rig it described: the next bench used to open on the
+            // last one's message, an open bone map and an ARMED row naming a bone of a rig that is gone,
+            // and a joint cache keyed on a report that no longer exists.
+            Message = "";
+            mapOpen = false;
+            boneOpen = shownArmed = null;
+            picked = shownBone = null;
+            pickedAt = -1;
+            joints = null;
+            jointsFor = null;
+            jointsGen = -1;
+            overlayFailed = false;
         }
     }
 }
