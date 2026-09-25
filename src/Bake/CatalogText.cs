@@ -78,18 +78,24 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>
-        /// The RuntimeKey of the single row whose StreamingPath (or its file name) the author named.
-        /// Ambiguity is REFUSED with the offenders printed, never guessed.
+        /// The RuntimeKey of the single row whose StreamingPath the author named - whole, or any TAIL of it
+        /// that starts on a '/' (so the bare file name still works). Ambiguity is REFUSED with the
+        /// offenders printed, never guessed.
+        ///
+        /// A TAIL, because `ct_list videos` prints each clip relative to StreamableCopiedAssets\
+        /// ("Videos/Tutorials/X.webm") while the catalog stores "StreamableCopiedAssets/Videos/...": the
+        /// path the author was shown and pasted matched neither the whole path nor the file name, so only
+        /// the bare name ever worked.
         /// </summary>
         internal static string FindKey(string json, string asset, out string why)
         {
             why = null;
             if (string.IsNullOrEmpty(asset)) { why = "\"asset\" is empty"; return null; }
-            string want = asset.Replace('\\', '/');
+            string want = asset.Replace('\\', '/').TrimStart('/');
             List<Row> hit = new List<Row>();
             foreach (Row r in Rows(json))
                 if (string.Equals(r.Path, want, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(Path.GetFileName(r.Path), want, StringComparison.OrdinalIgnoreCase))
+                    r.Path.EndsWith("/" + want, StringComparison.OrdinalIgnoreCase))
                     hit.Add(r);
 
             if (hit.Count == 1) return hit[0].Key;

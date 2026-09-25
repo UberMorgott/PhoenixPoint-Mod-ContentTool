@@ -22,6 +22,7 @@ internal static class VideoCatalogTests
 
     internal static string Run()
     {
+        FindKeyArms();
         string root = Environment.GetEnvironmentVariable("PPRoot") ?? @"D:\Steam\steamapps\common\Phoenix Point";
         string path = Path.Combine(root, @"PhoenixPointWin64_Data\StreamingAssets\StreamableCopiedAssets\Catalog.json");
         if (!File.Exists(path)) return "VIDEO catalog VOID - no " + path + " (set PPRoot to the game folder)";
@@ -86,6 +87,32 @@ internal static class VideoCatalogTests
 
         return "VIDEO catalog PASS, " + checks + " check(s) - " + rows.Count + " shipped rows, add -> " +
                (rows.Count + 1) + ", duplicate key refused by name";
+    }
+
+    /// <summary>
+    /// THE PATH `ct_list videos` PRINTS IS ONE A ROW ACCEPTS. The listing is relative to
+    /// StreamableCopiedAssets\ ("Videos/Tutorials/Intro.webm"); the catalog stores
+    /// "StreamableCopiedAssets/Videos/...". The printed form matched neither the whole path nor the file
+    /// name, so pasting what the tool showed was refused. Synthetic rows - no install needed.
+    /// </summary>
+    private static void FindKeyArms()
+    {
+        string json = "{ \"m_Locations\": [ " +
+            "{ \"RuntimeKey\": \"k1\", \"StreamingPath\": \"StreamableCopiedAssets/Videos/Tutorials/Intro.webm\" }, " +
+            "{ \"RuntimeKey\": \"k2\", \"StreamingPath\": \"StreamableCopiedAssets/Videos/Cutscenes/Intro.webm\" }, " +
+            "{ \"RuntimeKey\": \"k3\", \"StreamingPath\": \"StreamableCopiedAssets/Videos/Cutscenes/Outro.webm\" } ] }";
+        string why;
+        Check(CatalogText.FindKey(json, "Videos/Tutorials/Intro.webm", out why) == "k1" &&
+              CatalogText.FindKey(json, "Videos\\Tutorials\\Intro.webm", out why) == "k1",
+              "the path ct_list videos prints (relative to StreamableCopiedAssets) resolves its row");
+        Check(CatalogText.FindKey(json, "StreamableCopiedAssets/Videos/Cutscenes/Outro.webm", out why) == "k3" &&
+              CatalogText.FindKey(json, "outro.webm", out why) == "k3",
+              "the whole catalog path and the bare file name still resolve, case-blind");
+        Check(CatalogText.FindKey(json, "Intro.webm", out why) == null && why.Contains("ambiguous") &&
+              why.Contains("k1") && why.Contains("k2"),
+              "a tail two rows share is REFUSED with both named, never guessed");
+        Check(CatalogText.FindKey(json, "ro.webm", out why) == null && why.StartsWith("no catalog row"),
+              "a tail that is not a whole path segment matches nothing - 'ro.webm' is not 'Outro.webm'");
     }
 
     /// <summary>The game's own line, StreamableAssetsCatalog.cs:22, over a parsed catalog.</summary>
