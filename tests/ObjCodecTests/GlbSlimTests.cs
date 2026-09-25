@@ -145,6 +145,20 @@ internal static class GlbSlimTests
               GlbSlim.Guard(rigDoc, new HashSet<int> { 0 }, true) == null,
               "a skinned file with 31 clips is refused without force and allowed with it");
 
+        // 17b. Trim keeps what the CORE slots name, so an accessor only an extension names would be
+        //      dropped or renumbered under it. An extension that CAN name one refuses every trim -
+        //      a dropping one and the zip's drop-nothing cleanup alike - force or not; one that only
+        //      carries material parameters does not.
+        GlbDocument instanced = GlbDocument.Load(u9bytes);
+        instanced.Json["extensionsUsed"] = new List<object> { "KHR_materials_emissive_strength", "EXT_mesh_gpu_instancing" };
+        string renumber = GlbSlim.Guard(instanced, new HashSet<int> { 2, 3 }, true);
+        Check(renumber != null && renumber.Contains("'EXT_mesh_gpu_instancing'") &&
+              GlbSlim.Guard(instanced, new HashSet<int>(), true) == renumber,
+              "an accessor-naming extension is refused by name, force or not: " + renumber);
+        instanced.Json["extensionsUsed"] = new List<object> { "KHR_materials_emissive_strength", "KHR_texture_transform" };
+        Check(GlbSlim.Guard(instanced, new HashSet<int> { 2, 3 }, true) == null,
+              "material/texture extensions name no accessor and pass");
+
         // 18. The real export: a trim that drops nothing must touch nothing - the 4 MB image and the
         //     skin come out of it byte for byte, or the tool is not safe to point at a shipped asset.
         string ts = Apocd + "CHR_PX_HVY_TS_M_V01_7c71cfba6f4e08f7.glb";

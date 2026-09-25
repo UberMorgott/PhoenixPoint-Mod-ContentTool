@@ -129,6 +129,15 @@ namespace Morgott.ContentTool.Import
                     return "this .glb keeps a bufferView in a buffer other than the BIN chunk, and a " +
                            "trim only knows how to compact BIN. Refusing.";
             }
+            // Trim keeps only the accessors the CORE slots name (AccessorSlots) and renumbers the rest
+            // - the zip's cleanup pass too. An extension that names an accessor of its own
+            // (EXT_mesh_gpu_instancing's per-node attributes is the ratified one) would lose it or be
+            // left pointing at the wrong data. Only extensions known to name none pass.
+            foreach (object used in Arr(doc.Json, "extensionsUsed") ?? Empty)
+                if (used is string name && !NamesNoAccessor(name))
+                    return "this .glb uses the extension '" + name + "', which can point at accessors the " +
+                           "trim neither keeps nor renumbers, so the rewrite would leave it reading the wrong " +
+                           "data. Refusing.";
             if (force) return null;
 
             List<object> animations = Arr(doc.Json, "animations") ?? Empty;
@@ -147,6 +156,15 @@ namespace Morgott.ContentTool.Import
             return null;
         }
 
+        /// <summary>The extensions whose whole content is material, texture, light or metadata
+        /// parameters - they never name an accessor, so a renumbering cannot misdirect them.
+        /// Quantization changes component types only.</summary>
+        private static bool NamesNoAccessor(string name) =>
+            name.StartsWith("KHR_materials_", StringComparison.Ordinal) ||
+            name.StartsWith("KHR_texture_", StringComparison.Ordinal) ||
+            name.StartsWith("EXT_texture_", StringComparison.Ordinal) ||
+            name == "KHR_lights_punctual" || name == "KHR_mesh_quantization" || name == "KHR_xmp_json_ld";
+
         /// <summary>
         /// Drop the clips at dropIndices, remove the accessors and bufferViews nothing needs any
         /// more, compact BIN and remap every index that moved. Sets Dirty - unless there was nothing
@@ -164,6 +182,8 @@ namespace Morgott.ContentTool.Import
             for (int i = 0; i < animations.Count; i++)
                 if (!dropIndices.Contains(i)) survivors.Add(animations[i]);
 
+            // Only what the core slots name is kept - so an accessor only an EXTENSION names would go
+            // too. Guard refuses every extension that could name one (NamesNoAccessor) before a trim.
             var keepAccessor = new HashSet<int>();
             AccessorSlots(doc.Json, survivors, index => { keepAccessor.Add(index); return index; });
             var keepView = new HashSet<int>();
