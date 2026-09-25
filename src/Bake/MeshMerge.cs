@@ -111,63 +111,75 @@ namespace Morgott.ContentTool.Bake
                 allUv1 &= parts[i].Uv1 != null && parts[i].Uv1.Length > 0;
             }
 
-            // --- group the parts by material, first-seen order preserved.
+            // --- group the parts' SUBMESHES by material, first-seen order preserved. The unit is the
+            // submesh, not the part: one glTF mesh with two materials arrives as ONE part holding two
+            // primitives, and grouping by its first material painted both with it.
             List<string> materials = new List<string>();
             List<byte[]> images = new List<byte[]>();
             List<float[]> emissive = new List<float[]>();
-            List<List<int>> groups = new List<List<int>>();
+            List<List<int[]>> groups = new List<List<int[]>>();   // { part, submesh }
             for (int i = 0; i < parts.Count; i++)
             {
-                string mat = MaterialOf(parts[i], i);
-                int at = materials.IndexOf(mat);
-                if (at < 0)
+                int subs = parts[i].Submeshes.Count;
+                for (int s = 0; s < subs; s++)
                 {
-                    materials.Add(mat);
-                    images.Add(null);
-                    emissive.Add(null);
-                    groups.Add(new List<int>());
-                    at = materials.Count - 1;
+                    string mat = MaterialOf(parts[i], i, s);
+                    int at = materials.IndexOf(mat);
+                    if (at < 0)
+                    {
+                        materials.Add(mat);
+                        images.Add(null);
+                        emissive.Add(null);
+                        groups.Add(new List<int[]>());
+                        at = materials.Count - 1;
+                    }
+                    // The first piece in a group that actually carries an image supplies it. Pieces
+                    // sharing a material name share its texture by definition, so a later null - a
+                    // piece whose primitive named the material but no texture - must not erase it.
+                    if (images[at] == null && s < parts[i].MaterialImages.Count)
+                        images[at] = parts[i].MaterialImages[s];
+                    if (emissive[at] == null && s < parts[i].MaterialEmissive.Count)
+                        emissive[at] = parts[i].MaterialEmissive[s];
+                    groups[at].Add(new[] { i, s });
                 }
-                // The first piece in a group that actually carries an image supplies it. Pieces
-                // sharing a material name share its texture by definition, so a later null - a piece
-                // whose primitive named the material but no texture - must not erase it.
-                if (images[at] == null && parts[i].MaterialImages.Count > 0)
-                    images[at] = parts[i].MaterialImages[0];
-                if (emissive[at] == null && parts[i].MaterialEmissive.Count > 0)
-                    emissive[at] = parts[i].MaterialEmissive[0];
-                groups[at].Add(i);
             }
 
-            // --- concatenate, group by group, so a submesh's triangles are contiguous.
+            // --- concatenate, group by group, so a submesh's triangles are contiguous. A part's
+            // vertices go in ONCE, the first time any of its submeshes is reached - its primitives
+            // share one vertex block, and a second copy would only be unreferenced weight.
             SkinnedModel merged = new SkinnedModel { Name = name };
             List<ObjVector3> positions = new List<ObjVector3>();
             List<ObjVector3> normals = new List<ObjVector3>();
             List<ObjVector2> uv0 = new List<ObjVector2>();
             List<ObjVector2> uv1 = new List<ObjVector2>();
             List<float> tangents = new List<float>();
+            int[] baseOf = new int[parts.Count];
+            for (int i = 0; i < baseOf.Length; i++) baseOf[i] = -1;
 
             for (int g = 0; g < groups.Count; g++)
             {
                 List<int> triangles = new List<int>();
-                foreach (int p in groups[g])
+                foreach (int[] ps in groups[g])
                 {
-                    SkinnedModel part = parts[p];
-                    int baseVertex = positions.Count;
+                    SkinnedModel part = parts[ps[0]];
+                    if (baseOf[ps[0]] < 0)
+                    {
+                        baseOf[ps[0]] = positions.Count;
+                        positions.AddRange(part.Positions ?? new ObjVector3[0]);
+                        // A missing normal array is not a refusal - it is a flat-shaded export. Zero
+                        // normals would light the piece black, so fall back to +Y, which at least lights.
+                        int count = part.Positions == null ? 0 : part.Positions.Length;
+                        if (part.Normals != null && part.Normals.Length == count) normals.AddRange(part.Normals);
+                        else for (int v = 0; v < count; v++) normals.Add(new ObjVector3(0f, 1f, 0f));
 
-                    positions.AddRange(part.Positions ?? new ObjVector3[0]);
-                    // A missing normal array is not a refusal - it is a flat-shaded export. Zero
-                    // normals would light the piece black, so fall back to +Y, which at least lights.
-                    int count = part.Positions == null ? 0 : part.Positions.Length;
-                    if (part.Normals != null && part.Normals.Length == count) normals.AddRange(part.Normals);
-                    else for (int v = 0; v < count; v++) normals.Add(new ObjVector3(0f, 1f, 0f));
+                        if (allUv) uv0.AddRange(part.Uv0);
+                        if (allUv1) uv1.AddRange(part.Uv1);
+                        if (allTangents) tangents.AddRange(part.Tangents);
+                    }
 
-                    if (allUv) uv0.AddRange(part.Uv0);
-                    if (allUv1) uv1.AddRange(part.Uv1);
-                    if (allTangents) tangents.AddRange(part.Tangents);
-
-                    foreach (int[] sub in Triangles(part))
-                        for (int t = 0; t < sub.Length; t++)
-                            triangles.Add(sub[t] + baseVertex);
+                    int[] sub = part.Submeshes[ps[1]];
+                    for (int t = 0; t < sub.Length; t++)
+                        triangles.Add(sub[t] + baseOf[ps[0]]);
                 }
                 merged.Submeshes.Add(triangles.ToArray());
                 merged.Materials.Add(materials[g]);
@@ -242,24 +254,14 @@ namespace Morgott.ContentTool.Bake
         }
 
         /// <summary>
-        /// A part's triangles. A primitive read out of a glTF arrives as one submesh; a part that
-        /// somehow carries several contributes all of them to the same group, which is right because
-        /// they already shared its material slot.
+        /// Which material slot one submesh of a part belongs to. The glTF material name is the truth
+        /// when there is one; without it every unnamed part would collapse into a single slot, which
+        /// is why the index is the fallback rather than a shared constant.
         /// </summary>
-        private static IEnumerable<int[]> Triangles(SkinnedModel part)
+        private static string MaterialOf(SkinnedModel part, int index, int submesh)
         {
-            if (part.Submeshes.Count > 0) return part.Submeshes;
-            return new List<int[]>();
-        }
-
-        /// <summary>
-        /// Which material slot a part belongs to. The glTF material name is the truth when there is
-        /// one; without it every unnamed part would collapse into a single slot, which is why the
-        /// index is the fallback rather than a shared constant.
-        /// </summary>
-        private static string MaterialOf(SkinnedModel part, int index)
-        {
-            if (part.Materials.Count > 0 && !string.IsNullOrEmpty(part.Materials[0])) return part.Materials[0];
+            if (submesh < part.Materials.Count && !string.IsNullOrEmpty(part.Materials[submesh]))
+                return part.Materials[submesh];
             if (!string.IsNullOrEmpty(part.Name)) return part.Name;
             return "material" + index.ToString(CultureInfo.InvariantCulture);
         }

@@ -28,6 +28,7 @@ internal static class MeshMergeTests
         {
             Merges(log);
             Groups(log);
+            SplitsParts(log);
             RefusesSkinned(log);
             RefusesMixedUv(log);
             CarriesImages(log);
@@ -112,6 +113,36 @@ internal static class MeshMergeTests
         Ok(note != null && note.Contains("3 piece(s)") && note.Contains("2 submesh(es)"),
            "the note must say what was done, got: " + note);
         log.AppendLine("  merge   " + note);
+    }
+
+    /// <summary>
+    /// ONE piece carrying TWO materials - a glTF mesh with two primitives, which is how every
+    /// exporter writes a multi-material object. Grouping by the piece's first material painted its
+    /// glass with steel; the unit is the submesh, and its vertices still go in once.
+    /// </summary>
+    private static void SplitsParts(StringBuilder log)
+    {
+        SkinnedModel body = Part("body", "Steel", 0f);
+        body.Submeshes.Add(new[] { 2, 1, 0 });
+        body.Materials.Add("Glass");
+        body.MaterialImages.Add(new byte[] { 1 });
+        body.MaterialImages.Add(new byte[] { 2 });
+        SkinnedModel grip = Part("grip", "Glass", 10f);
+        string refusal, note;
+        SkinnedModel m = MeshMerge.Static(new List<SkinnedModel> { body, grip }, "gun", out refusal, out note);
+        Ok(refusal == null, "a two-material piece was refused: " + refusal);
+        Ok(m.Materials.Count == 2 && m.Materials[0] == "Steel" && m.Materials[1] == "Glass",
+           "each submesh lands on its OWN material: " + string.Join(",", m.Materials.ToArray()));
+        Ok(m.Submeshes[0].Length == 3 && m.Submeshes[1].Length == 6,
+           "Steel holds the body's first primitive, Glass its second plus the grip: " +
+           m.Submeshes[0].Length / 3 + " / " + m.Submeshes[1].Length / 3);
+        Ok(m.Submeshes[1][0] == 2 && m.Submeshes[1][2] == 0 && m.Submeshes[1][3] == 3,
+           "the second primitive keeps the body's vertices, the grip is rebased past them: " +
+           string.Join(",", Array.ConvertAll(m.Submeshes[1], i => i.ToString())));
+        Ok(m.Positions.Length == 6, "the body's shared vertex block went in once: " + m.Positions.Length);
+        Ok(m.MaterialImages[0][0] == 1 && m.MaterialImages[1][0] == 2,
+           "and each material keeps its own image, index-parallel");
+        log.AppendLine("  split   " + note);
     }
 
     /// <summary>The two real downloads' shapes: 14 pieces/3 materials and 9 pieces/1.</summary>
