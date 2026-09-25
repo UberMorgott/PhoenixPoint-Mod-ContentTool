@@ -145,10 +145,16 @@ internal static class GlbSkelTests
         IList<string> hoisted = GlbSkel.Validate(u9doc, Collapse("rig", "head", "rig"), null);
         IList<string> shifted = GlbSkel.Validate(u9doc,
             Insert("rig", "hip", "hip_roll", "head", new[] { 0.1, -0.2, 0.3 }), null);
-        Check(Says(hoisted, "is animated by") && hoisted[0].Contains("Walk") &&
+        Check(hoisted.Count == 2 && hoisted[0].StartsWith("'head' is animated by", StringComparison.Ordinal) &&
+              hoisted[0].Contains("Walk") &&
               Says(shifted, "is animated by") && shifted[0].Contains("Walk") && !u9doc.Dirty,
               "a collapse and a non-identity insert on an animated bone are refused BY CLIP NAME, not '" +
               Printed(hoisted) + "' / '" + Printed(shifted) + "'");
+        // 18a. The collapse's OTHER node: 'hip' is the parent that collapse skips, and its own clip
+        //      channels would drive a childless leaf afterwards - head would freeze at rest.
+        Check(hoisted.Count == 2 && hoisted[1].StartsWith("'hip' is animated by", StringComparison.Ordinal) &&
+              hoisted[1].Contains("collapse skips that node"),
+              "the animated node a collapse SKIPS is refused by name too, not '" + Printed(hoisted) + "'");
 
         // 18b. The other half of that refusal, found reviewing Task 3: a non-identity insert is
         //      COMPENSATED on the child (L_child' = L_child * inverse(L_new)), so a mirroring local

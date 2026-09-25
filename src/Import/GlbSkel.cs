@@ -565,6 +565,8 @@ namespace Morgott.ContentTool.Import
 
             // COLLAPSE, against the post-rename table.
             var hoisted = new List<int>();
+            var skipped = new List<int>();
+            var skippedName = new List<string>();
             foreach (SkelCollapse step in plan.Collapses)
             {
                 int node = Named(names, step.Node, "the collapse onto '" + step.Into + "'", refusals);
@@ -600,6 +602,8 @@ namespace Morgott.ContentTool.Import
                     continue;
                 }
                 hoisted.Add(node);
+                skipped.Add(parent);
+                skippedName.Add(names[parent]);
                 owner[node] = grand;
                 names[parent] = names[parent] + "_unused";     // ppskel.py:297
             }
@@ -734,6 +738,15 @@ namespace Morgott.ContentTool.Import
                                      "collapse rewrites that bone's own local transform - the clip would " +
                                      "overwrite it on its first frame and the model would jump; drop that " +
                                      "channel, or leave this bone where it is");
+                // The SKIPPED node too: the collapse bakes its REST local into the kept bone and
+                // unlinks it, so a clip moving it afterwards moves a childless leaf - the kept bone
+                // freezes at rest where the file shows it swinging.
+                for (int i = 0; i < skipped.Count; i++)
+                    if (animated.TryGetValue(skipped[i], out string clip))
+                        refusals.Add("'" + skippedName[i] + "' is animated by the clip '" + clip + "', and a " +
+                                     "collapse skips that node by baking its rest transform into its child - " +
+                                     "the clip would no longer move the child and the model would freeze where " +
+                                     "the file shows it moving; drop that channel, or leave this bone where it is");
                 foreach (int child in compensated)
                     if (animated.TryGetValue(child, out string clip))
                         refusals.Add("'" + names[child] + "' is animated by the clip '" + clip + "', and a " +
