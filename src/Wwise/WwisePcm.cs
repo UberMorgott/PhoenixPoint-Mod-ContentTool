@@ -41,6 +41,9 @@ namespace Morgott.ContentTool.Wwise
                 case ".wav":
                     try { return ReadWav(File.ReadAllBytes(path), out why); }
                     catch (IOException ex) { why = "could not be read (" + ex.Message + ")"; return null; }
+                    // A file the OS will not hand over (read-only share, ACL) is the same unreadable
+                    // source, and escaping here aborted Load for every other sound in the project.
+                    catch (UnauthorizedAccessException ex) { why = "could not be read (" + ex.Message + ")"; return null; }
                 case ".ogg": return ReadVorbis(path, out why);
                 case ".mp3": return ReadMp3(path, out why);
                 default:
