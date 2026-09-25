@@ -259,6 +259,7 @@ namespace Morgott.ContentTool.Bake
                     return new BakeResult(0, 0, log.Append(StageText.BakeCancelled(p.Id)).ToString(),
                                           BakeDisposition.Cancelled);
                 patchFailed += refused; failures += refused;
+                failures += VideoRows(p, log);
             }
             // WHAT WAS PATCHED, not how many rows were declared. A "video" row is a replacement that
             // needs no patched bundle at all - Bundles(p) skips it, because the clip is a loose file
@@ -1967,16 +1968,58 @@ namespace Morgott.ContentTool.Bake
                 log.AppendLine("copies ready in " + outDir + " - nothing to install: ticking '" + name +
                                "' on in the mod manager redirects them (dev-only shortcut: ct_route7 apply " +
                                name + ")");
+            // The video rows are announced - and CHECKED - by VideoRows, which the caller runs next.
+            return failures;
+        }
+
+        /// <summary>
+        /// Every "video" row, CHECKED before the run may say ALL PASS - what `ct_video live` will do with
+        /// it (VideoCatalog.LiveAt): the clip has to be under Content\Videos\ and a REPLACEMENT's "asset"
+        /// has to resolve to exactly one row of the game's streamable catalog. Both were only announced
+        /// ("serve it with: ct_video live"), so a bake PASSed, the package shipped, and the row was
+        /// skipped at play time. Counted into the run's failures and NOT into patchFailed: a video is
+        /// served live, never patched, so it must not hold back the bundle copies route vii installs.
+        /// </summary>
+        private static int VideoRows(ContentProject p, StringBuilder log)
+        {
+            int failures = 0;
+            string json = null;
+            string name = Path.GetFileName(p.Root.TrimEnd('\\'));
             foreach (ShippedReplacement r in p.Replace)
-                if (!string.IsNullOrEmpty(r.video))
+            {
+                if (string.IsNullOrEmpty(r.video)) continue;
+                ImportedVideo v = p.Videos.Find(x => string.Equals(x.Name, r.video, StringComparison.OrdinalIgnoreCase));
+                if (v == null || !File.Exists(v.Path))
                 {
-                    // Nothing to bake for a video: there is no serialized asset to lay out, only one
-                    // in-memory catalog row pointed at the mod's own file, which is ct_video's job.
-                    log.AppendLine((string.IsNullOrEmpty(r.asset)
-                                       ? "video ADD '" + r.video + "' (its RuntimeKey is printed by the command)"
-                                       : "video '" + r.asset + "' <- " + r.video) +
-                                   " - serve it with: ct_video live " + name);
+                    log.AppendLine("VIDEO FAIL '" + r.video + "' is not a .webm/.mp4/.mov under Content\\Videos\\ - " +
+                                   "ct_video would skip this row");
+                    failures++;
+                    continue;
                 }
+                if (!string.IsNullOrEmpty(r.asset))
+                {
+                    if (json == null)
+                    {
+                        string catalog = Application.streamingAssetsPath + "/" +
+                                         Base.Assets.StreamableSystem.StreamableAssetsCatalog.CatalogPath;
+                        json = File.Exists(catalog) ? File.ReadAllText(catalog) : "";
+                    }
+                    string why;
+                    if (CatalogText.FindKey(json, r.asset, out why) == null)
+                    {
+                        log.AppendLine("VIDEO FAIL '" + r.asset + "' <- " + r.video + ": " + why +
+                                       " - ct_video would skip this row");
+                        failures++;
+                        continue;
+                    }
+                }
+                // Nothing to bake for a video: there is no serialized asset to lay out, only one
+                // in-memory catalog row pointed at the mod's own file, which is ct_video's job.
+                log.AppendLine((string.IsNullOrEmpty(r.asset)
+                                   ? "video ADD '" + r.video + "' (its RuntimeKey is printed by the command)"
+                                   : "video '" + r.asset + "' <- " + r.video) +
+                               " - serve it with: ct_video live " + name);
+            }
             return failures;
         }
 
