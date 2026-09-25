@@ -348,7 +348,7 @@ namespace Morgott.ContentTool.Project
             string metaPath = Path.Combine(root, "ppcontent.json");
             if (!File.Exists(metaPath)) throw new FileNotFoundException("no ppcontent.json in " + root, metaPath);
             string text = File.ReadAllText(metaPath);
-            Meta m = MetaOrRefuse(JsonUtility.FromJson<Meta>(text));
+            Meta m = MetaOrRefuse(FromJson(text));
             Declared d = new Declared { Id = m.id, BundleName = m.bundle };
             // THE SINK REACHES BOTH ARRAYS, or the census B1 takes is not the one Load keeps: "publish" is
             // parsed FIRST, so one half-typed row threw before a single "replace" row was read and
@@ -379,7 +379,7 @@ namespace Morgott.ContentTool.Project
             string metaPath = Path.Combine(root, "ppcontent.json");
             if (!File.Exists(metaPath)) throw new FileNotFoundException("no ppcontent.json in " + root, metaPath);
             // JsonUtility: Unity's own reader, so no JSON dependency enters the tool.
-            Meta m = MetaOrRefuse(JsonUtility.FromJson<Meta>(File.ReadAllText(metaPath)));
+            Meta m = MetaOrRefuse(FromJson(File.ReadAllText(metaPath)));
 
             ContentProject p = new ContentProject
             {
@@ -470,6 +470,18 @@ namespace Morgott.ContentTool.Project
         /// Patched\&lt;tag&gt;\&lt;id&gt;\). A THROW, like the missing-key case beside it: a project whose
         /// identity is unusable has no row to skip.
         /// </summary>
+        /// <summary>
+        /// JsonUtility, AFTER the manifest reader has said the text is JSON at all. JsonUtility throws a
+        /// bare ArgumentException ("JSON parse error") on broken text, which escaped every caller that
+        /// catches the manifest's own InvalidDataException - ct_project answered "THREW" with a stack
+        /// trace over a missing comma. Manifest.Tree refuses the same text by name, with the position.
+        /// </summary>
+        private static Meta FromJson(string text)
+        {
+            Manifest.Tree(text, "ppcontent.json");
+            return JsonUtility.FromJson<Meta>(text);
+        }
+
         private static Meta MetaOrRefuse(Meta m)
         {
             if (m == null || string.IsNullOrEmpty(m.id) || string.IsNullOrEmpty(m.bundle))

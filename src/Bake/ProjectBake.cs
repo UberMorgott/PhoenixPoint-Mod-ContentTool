@@ -128,6 +128,15 @@ namespace Morgott.ContentTool.Bake
                 return new BakeResult(0, 0, StageText.BakeCancelled(
                     Path.GetFileName((projectRoot ?? "").TrimEnd('\\', '/'))), BakeDisposition.Cancelled);
             }
+            // A MANIFEST THAT DOES NOT READ IS A REFUSAL OF THIS RUN, not a crash of the tool: broken JSON,
+            // a missing "id"/"bundle", an unsafe name. Counted and named, the same words the dashboard's
+            // capture uses (LifecycleJob), instead of "ct_project THREW" and a stack trace.
+            catch (Exception ex) when (ex is InvalidDataException || ex is ArgumentException || ex is IOException)
+            {
+                return new BakeResult(1, 0, "ct_project: " + projectRoot + " could not be read - " + ex.Message +
+                                            " - fix ppcontent.json and run it again.\n" + StageText.S5(1),
+                                      BakeDisposition.Refused);
+            }
             // AFTER Load, because p.Id is what names the patched directory - and Load writes nothing, so
             // every byte this run produces is still covered. A project that fails to load never took a
             // claim and needs no release.
