@@ -88,13 +88,21 @@ namespace Morgott.ContentTool.Dev
             private IEnumerator List()
             {
                 StringBuilder log = new StringBuilder();
-                GameUtl.GameComponent<TimeSource>().Timing.Start(Enumerate(log));
-                float start = Time.realtimeSinceStartup;
-                while (!listed && Time.realtimeSinceStartup - start < 60f) yield return null;
-                if (!listed) log.AppendLine("ct_mission list VOID - the savegame enumeration never returned");
-                ContentToolMain.Say(log.ToString().TrimEnd());
-                AsyncGate.Pending--;
-                Destroy(gameObject);
+                // try/finally like Gate(): a throw before the answer must still release AsyncGate, or
+                // ct_autorun waits out its whole async budget and calls the run VOID.
+                try
+                {
+                    GameUtl.GameComponent<TimeSource>().Timing.Start(Enumerate(log));
+                    float start = Time.realtimeSinceStartup;
+                    while (!listed && Time.realtimeSinceStartup - start < 60f) yield return null;
+                    if (!listed) log.AppendLine("ct_mission list VOID - the savegame enumeration never returned");
+                }
+                finally
+                {
+                    ContentToolMain.Say(log.ToString().TrimEnd());
+                    AsyncGate.Pending--;
+                    Destroy(gameObject);
+                }
             }
 
             private IEnumerator<NextUpdate> Enumerate(StringBuilder log)
@@ -127,6 +135,10 @@ namespace Morgott.ContentTool.Dev
                     rosterInScene = InSceneRigged();
                     log.AppendLine("M1-baseline roster scale before the load: inSceneRiggedRenderers=" + rosterInScene);
 
+                    // The level we are LEAVING (MusicProbe.SaveGate's guard). Run from inside a mission,
+                    // the loop below used to accept THAT mission on its first pass - before the save it
+                    // was told to load had even started - and measure the wrong scene.
+                    Base.Levels.Level before = GameUtl.CurrentLevel();
                     GameUtl.GameComponent<TimeSource>().Timing.Start(Load(saveName));
 
                     float start = Time.realtimeSinceStartup;
@@ -135,7 +147,7 @@ namespace Morgott.ContentTool.Dev
                     while (Time.realtimeSinceStartup - start < LoadBudgetSeconds)
                     {
                         if (refusal != null) break;
-                        tac = CurrentTactical();
+                        tac = CurrentTactical(before);
                         actors = tac == null ? 0 : CountActors(tac);
                         if (tac != null && tac.TacMission != null && actors > 0) break;
                         yield return new WaitForSeconds(1f);
@@ -251,13 +263,14 @@ namespace Morgott.ContentTool.Dev
             }
 
             /// <summary>
-            /// The live tactical brain, or null. `Level` is the scene wrapper (Base.Levels\Level.cs:17)
-            /// and the controller is a component ON it, so this is a GetComponent, not a cast.
+            /// The live tactical brain of a level OTHER than <paramref name="before"/>, or null. `Level`
+            /// is the scene wrapper (Base.Levels\Level.cs:17) and the controller is a component ON it,
+            /// so this is a GetComponent, not a cast.
             /// </summary>
-            private static TacticalLevelController CurrentTactical()
+            private static TacticalLevelController CurrentTactical(Base.Levels.Level before)
             {
                 Base.Levels.Level lvl = GameUtl.CurrentLevel();
-                return lvl == null ? null : lvl.GetComponent<TacticalLevelController>();
+                return lvl == null || lvl == before ? null : lvl.GetComponent<TacticalLevelController>();
             }
 
             private static int CountActors(TacticalLevelController tac)

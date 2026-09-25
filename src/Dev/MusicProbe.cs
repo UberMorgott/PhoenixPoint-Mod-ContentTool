@@ -107,6 +107,31 @@ namespace Morgott.ContentTool.Dev
             }
         }
 
+        /// <summary>
+        /// <paramref name="inner"/>, stepped by hand so a throw in it ENDS this coroutine normally
+        /// with the error in the log. Handed to StartCoroutine directly, a throwing inner coroutine is
+        /// logged by Unity and simply stops - the caller waiting on it never resumes, so its finally
+        /// (the AsyncGate release) never runs.
+        /// </summary>
+        private static System.Collections.IEnumerator Stepped(System.Collections.IEnumerator inner, StringBuilder log)
+        {
+            while (true)
+            {
+                object step;
+                try
+                {
+                    if (!inner.MoveNext()) yield break;
+                    step = inner.Current;
+                }
+                catch (Exception ex)
+                {
+                    log.AppendLine("ct_music probe THREW " + ex.GetType().Name + ": " + ex.Message);
+                    yield break;
+                }
+                yield return step;
+            }
+        }
+
         /// <summary>Console entry: arm the coroutine, print from it. Nothing here can answer
         /// synchronously - see <see cref="Measure"/>.</summary>
         private static string Probe(int waitSeconds)
@@ -124,10 +149,16 @@ namespace Morgott.ContentTool.Dev
             private System.Collections.IEnumerator Go(int waitSeconds)
             {
                 StringBuilder log = new StringBuilder();
-                yield return StartCoroutine(Measure(waitSeconds, log));
-                ContentToolMain.Say(log.ToString().TrimEnd());
-                AsyncGate.Pending--;
-                Destroy(gameObject);
+                // A Measure that throws must still release AsyncGate, or ct_autorun waits out its
+                // whole async budget and calls the run VOID - see Stepped for why a try/finally
+                // around a nested StartCoroutine would not be enough.
+                try { yield return StartCoroutine(Stepped(Measure(waitSeconds, log), log)); }
+                finally
+                {
+                    ContentToolMain.Say(log.ToString().TrimEnd());
+                    AsyncGate.Pending--;
+                    Destroy(gameObject);
+                }
             }
         }
 
@@ -355,7 +386,7 @@ namespace Morgott.ContentTool.Dev
                     }
                     log.AppendLine("ct_music gate: level '" + lvl.name + "' is Playing after loading '" +
                                    saveName + "'");
-                    yield return StartCoroutine(Measure(DefaultWaitSeconds, log));
+                    yield return StartCoroutine(Stepped(Measure(DefaultWaitSeconds, log), log));
                 }
                 finally
                 {
