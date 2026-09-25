@@ -688,6 +688,22 @@ internal static class Program
                 wasResident + ")");
             BundleClaims.Drop("mod.a");
         }
+
+        // A RE-APPLY OF THE COPY THE GAME LOADED THROUGH OUR REDIRECT is current, not Outdated. Install
+        // asks this BEFORE Register and folds it out of `wasResident`; reading residency alone marked the
+        // claim Outdated and demanded a restart that changed nothing (Apoc T4, 2026-09-06).
+        BundleClaim served = BundleClaims.Claim("mod.a", bundle, "C:/Mods/A/a.bundle", out refusal, out evicted);
+        served.Outdated = false;
+        Check("S1-r30-reapply-current",
+            BundleClaims.ServesCurrent("mod.a", bundle, @"c:\mods\a\A.bundle") &&
+            !BundleClaims.ServesCurrent("mod.a", bundle, @"C:\Mods\A\other.bundle") &&
+            !BundleClaims.ServesCurrent("mod.z", bundle, @"C:\Mods\A\a.bundle"),
+            "our standing claim at the same file (any case or separator) serves the current copy; " +
+            "another path or another mod does not");
+        served.Outdated = true;
+        Check("S1-r30-reapply-stale", !BundleClaims.ServesCurrent("mod.a", bundle, @"C:\Mods\A\a.bundle"),
+            "and a claim already Outdated stays a restart - the re-apply cannot launder it");
+        BundleClaims.Drop("mod.a");
     }
 
     /// <summary>

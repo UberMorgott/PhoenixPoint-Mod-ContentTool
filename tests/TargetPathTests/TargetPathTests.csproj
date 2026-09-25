@@ -23,6 +23,7 @@
          free of Unity types (locations travel as object), so gate S1 - the ownership policy and the
          transform-func composition - runs offline instead of only inside a game session. -->
     <Compile Include="..\..\src\Bake\BundleClaims.cs" Link="BundleClaims.cs" />
+    <Compile Include="..\..\src\Bake\OutputClaim.cs" Link="OutputClaim.cs" />
     <!-- And which generated banks a re-bake owns: plain System.IO plus the Wwise name hash, so gate
          S9 measures the delete rule against real files instead of only inside a game session. -->
     <Compile Include="..\..\src\Bake\BankPrune.cs" Link="BankPrune.cs" />

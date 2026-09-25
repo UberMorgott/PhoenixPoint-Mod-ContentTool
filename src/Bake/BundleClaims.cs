@@ -298,6 +298,22 @@ namespace Morgott.ContentTool.Bake
             return c == null || !string.Equals(c.Mod, mod, StringComparison.Ordinal) || c.Outdated;
         }
 
+        /// <summary>
+        /// Is the game serving THIS mod's copy at <paramref name="path"/> through a redirect that was in force
+        /// before it loaded? A standing claim of ours, not <see cref="BundleClaim.Outdated"/>, naming the
+        /// same file. Asked BEFORE a re-apply registers: the resident bundle then IS the current copy (a
+        /// bake cannot have rewritten it - R38 refuses a copy served right now), so the press is a
+        /// redirect that holds, not a restart. Reading residency alone marked the claim Outdated and the
+        /// dashboard demanded a restart that changed nothing (Apoc T4, 2026-09-06).
+        /// </summary>
+        internal static bool ServesCurrent(string mod, string bundleFile, string path)
+        {
+            BundleClaim c = Find(bundleFile);
+            return c != null && string.Equals(c.Mod, mod, StringComparison.Ordinal) && !c.Outdated &&
+                   string.Equals(OutputClaim.Canonical(c.Path), OutputClaim.Canonical(path),
+                                 StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>The patched path for a location we own, if we own it.</summary>
         internal static bool TryPath(object location, out string path)
         {

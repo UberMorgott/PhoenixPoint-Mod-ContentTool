@@ -73,7 +73,10 @@ namespace Morgott.ContentTool.Bake
             List<string> lines = new List<string>();
             foreach (KeyValuePair<string, string> c in bundleToCopy)
             {
-                bool wasResident = ResidentNow(c.Key);
+                // SAMPLED BEFORE Register, like residency: a re-apply of the copy the game already loaded
+                // through our own redirect is resident AND current, and must not read as a restart.
+                bool current = BundleClaims.ServesCurrent(modId, c.Key, c.Value);
+                bool wasResident = ResidentNow(c.Key) && !current;
                 string line = Register(modId, c.Key, c.Value);
                 BundleClaim mine = BundleClaims.Find(c.Key);
                 bool ours = mine != null && string.Equals(mine.Mod, modId, StringComparison.Ordinal);
@@ -111,7 +114,13 @@ namespace Morgott.ContentTool.Bake
             AssetBundleRequestOptions opts = loc.Data as AssetBundleRequestOptions;
 
             string who;
-            if (Resident(opts == null ? null : opts.BundleName, out who))
+            bool resident = Resident(opts == null ? null : opts.BundleName, out who);
+            // RESIDENT THROUGH OUR OWN REDIRECT, AT THIS VERY PATH: the loaded bundle IS this copy, so the
+            // standing claim is kept as it is - not a refusal and not a restart.
+            if (resident && BundleClaims.ServesCurrent(modId, bundleFile, patchedPath))
+                return "kept " + bundleFile + " -> " + patchedPath + " for '" + modId + "' - the game " +
+                       "loaded it through this redirect, so it is already serving this copy";
+            if (resident)
                 return "REFUSED: restart required: " + bundleFile + " is already loaded (as '" + who +
                        "'). Unity rejects a second bundle of the same identity, and unloading the " +
                        "game's copy would pull it out from under live objects. Restart, then enable '" +
