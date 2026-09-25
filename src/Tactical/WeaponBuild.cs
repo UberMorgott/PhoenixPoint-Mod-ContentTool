@@ -107,6 +107,50 @@ namespace Morgott.ContentTool.Tactical
                 return null;
             }
 
+            // EVERYTHING THAT CAN REFUSE IS ASKED BEFORE THE FIRST CreateDef. CreateDef REGISTERS the
+            // clone under its GUID on the spot (DefRepository.cs:266-269), so a cast that failed after
+            // it left a half-built weapon in the repository - and the next Build found it by GUID above
+            // and said "PASS already built" over a weapon with no view or no skin.
+            if (source.ViewElementDef == null)
+            {
+                log("ct_weapon FAIL '" + e.clone + "' carries no ViewElementDef - nothing to name the clone with");
+                return null;
+            }
+            if (!string.IsNullOrEmpty(e.model) && !(source.SkinData is SimpleSkinDataDef))
+            {
+                log("ct_weapon FAIL '" + e.clone + "' has a " +
+                    (source.SkinData == null ? "null SkinData" : source.SkinData.GetType().Name) +
+                    ", not a SimpleSkinDataDef - a \"model\" cannot be hung on it. Clone a shipped gun " +
+                    "of the same class instead. Nothing was minted.");
+                return null;
+            }
+
+            WeaponDef def;
+            string report;
+            try { def = Mint(repo, modDir, e, source, out report); }
+            catch
+            {
+                // ...and what still throws past the checks takes its own defs back out, so a retry
+                // builds from nothing instead of finding a GUID and trusting it.
+                foreach (int k in new[] { 4, 3, 1, 2 })
+                    if (repo.GetDef(e.Guid(k)) is BaseDef made) repo.DestroyDef(made);
+                throw;
+            }
+
+            // Only after every def exists: this names the clone inside SHIPPED anim filters, which a
+            // rollback above could not take back out.
+            string animReport = Animate(repo, def, source);
+
+            log("ct_weapon PASS '" + e.name + "' (" + e.id + ") cloned from " + e.clone + "; " +
+                report + animReport + "; " + Vfx(def));
+            return def;
+        }
+
+        /// <summary>The defs of one weapon, minted and tuned - everything <see cref="One"/> can still
+        /// roll back, and the middle of its PASS line.</summary>
+        private static WeaponDef Mint(DefRepository repo, string modDir, Entry e, WeaponDef source,
+                                      out string report)
+        {
             // --- the view: name, blurb, inventory cell.
             ViewElementDef view = (ViewElementDef)repo.CreateDef(e.Guid(2), source.ViewElementDef, null);
             view.name = "E_View [" + e.id + "]";
@@ -196,12 +240,8 @@ namespace Morgott.ContentTool.Tactical
 
             string shotReport = Shot(repo, def, e);
 
-            string animReport = Animate(repo, def, source);
-
-            log("ct_weapon PASS '" + e.name + "' (" + e.id + ") cloned from " + e.clone +
-                "; icon " + iconWhy + "; prefab " + prefabWhy +
-                "; " + Tuning(def, source, e) + keywordReport + typeReport + shotReport + animReport +
-                "; " + Vfx(def));
+            report = "icon " + iconWhy + "; prefab " + prefabWhy +
+                       "; " + Tuning(def, source, e) + keywordReport + typeReport + shotReport;
             return def;
         }
 
@@ -323,14 +363,23 @@ namespace Morgott.ContentTool.Tactical
             return grown;
         }
 
-        /// <summary>Drops a lazily-built _equipmentIds cache so the appended def is actually seen.</summary>
+        /// <summary>Drops a lazily-built _equipmentIds cache so the appended def is actually seen.
+        ///
+        /// WALKS THE BASE TYPES, because the field is PRIVATE on the class that declares it
+        /// (TacActorAnimActionEquipmentFilteredDef.cs:23, EquipmentListDef.cs:13) and reflection never
+        /// returns an inherited private instance field - FlattenHierarchy is for statics only. Every
+        /// action handed in here is a SUBCLASS (a nav, shoot, reload... def), so asking only its own
+        /// type found nothing, the cache survived, and the appended clone stayed invisible.</summary>
         private static void Forget(object holder)
         {
-            System.Reflection.FieldInfo cache = holder.GetType().GetField(
-                "_equipmentIds",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic |
-                System.Reflection.BindingFlags.FlattenHierarchy);
-            if (cache != null) cache.SetValue(holder, null);
+            for (Type t = holder.GetType(); t != null; t = t.BaseType)
+            {
+                System.Reflection.FieldInfo cache = t.GetField(
+                    "_equipmentIds",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.DeclaredOnly);
+                if (cache != null) { cache.SetValue(holder, null); return; }
+            }
         }
 
         /// <summary>
@@ -584,6 +633,16 @@ namespace Morgott.ContentTool.Tactical
                 what.Clear();
                 for (int i = 0; i < built.Count; i++)
                 {
+                    // ONCE PER WEAPON, not once per Build. A second Build in the same session (ct_weapon
+                    // re-run, or the "already built" path handing the def back) used to append the rows
+                    // again, so every rebuild put another rifle and another stack of clips in the base.
+                    // The weapon's own row is the marker: it is a def only this entry mints, so finding
+                    // it means this storage was already seeded - clips included.
+                    if (Array.Exists(diff.StartingStorage, u => u.ItemDef == built[i]))
+                    {
+                        what.Add(built[i].name + " already seeded");
+                        continue;
+                    }
                     Entry e = Find(entries, built[i].name);
                     grown.Add(new ItemUnit(built[i], e.count));
                     string ammo = "no clip";
@@ -1012,10 +1071,14 @@ namespace Morgott.ContentTool.Tactical
         {
             Dialled f;
             if (!dialled.TryGetValue(key, out f)) return false;
-            return !Dev.BenchList.Same(f.scale, f.euler, new[] { f.offset.x, f.offset.y, f.offset.z },
-                                       f.savedScale, f.savedEuler,
-                                       new[] { f.savedOffset.x, f.savedOffset.y, f.savedOffset.z }, 1e-5f);
+            // Two reused triples, not two new arrays: the bench asks this every frame it draws.
+            nowOffset[0] = f.offset.x; nowOffset[1] = f.offset.y; nowOffset[2] = f.offset.z;
+            savedOffset[0] = f.savedOffset.x; savedOffset[1] = f.savedOffset.y; savedOffset[2] = f.savedOffset.z;
+            return !Dev.BenchList.Same(f.scale, f.euler, nowOffset, f.savedScale, f.savedEuler, savedOffset, 1e-5f);
         }
+
+        /// <summary>Scratch for <see cref="Modified"/> - main thread only, like every caller of it.</summary>
+        private static readonly float[] nowOffset = new float[3], savedOffset = new float[3];
 
         // ---------------------------------------------------------------- the service the UI calls
 
@@ -1186,9 +1249,9 @@ namespace Morgott.ContentTool.Tactical
         /// This ONE entry re-read from its manifest and re-applied, live.
         ///
         /// NOT <see cref="Build"/>, and the reason is two-fold: <see cref="One"/> returns early for a
-        /// def that already exists (:91-95) so nothing would be re-fitted at all, and Build calls
-        /// <see cref="Seed"/>, which appends another weapon and another clip row to EVERY difficulty's
-        /// StartingStorage on every run.
+        /// def that already exists so nothing would be re-fitted at all, and Build calls
+        /// <see cref="Seed"/>, which walks EVERY difficulty's StartingStorage (it skips a weapon already
+        /// seeded, but a live re-fit has no business touching campaign storage at all).
         /// </summary>
         public static string Reload(string key)
         {
