@@ -96,7 +96,8 @@ namespace Morgott.ContentTool.Bake
                 // MaterialGlobalIlluminationFlags. The shipped emissive weapons carry 0 (None): they
                 // glow on screen without contributing to baked GI, which is what a hand-held object
                 // in a game with no per-mission lightmap bake wants.
-                if (mat["m_LightmapFlags"] != null) mat["m_LightmapFlags"].AsUInt = 0u;
+                // IsDummy, not null: a missing field comes back as the shared dummy, never null.
+                if (!mat["m_LightmapFlags"].IsDummy) mat["m_LightmapFlags"].AsUInt = 0u;
             }
             AssetTypeValueField props = mat["m_SavedProperties"];
             if (textures != null)
