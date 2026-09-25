@@ -2333,6 +2333,24 @@ internal static class Program
             "and so is a file with two \"weapons\" arrays, where the row found may not be the row the " +
             "game built from: " + why);
 
+        // The READER's own two holes. A ']' inside a string value used to END the array (a lazy
+        // ".*?\]"), silently dropping every row after it; and a BARE "flip": true read as "" -> false.
+        const string tricky =
+            "{ \"weapons\": [\n" +
+            "  { \"id\": \"a\", \"clone\": \"X\", \"guid\": \"c1\", \"blurb\": \"slot [2] rifle\", \"flip\": true },\n" +
+            "  { \"id\": \"b\", \"clone\": \"Y\", \"guid\": \"c2\", \"flip\": false, \"shoot\": null }\n" +
+            "] }";
+        List<WeaponManifest.Row> trickyRows = WeaponManifest.Rows(tricky);
+        Check("S25-bracket-in-string",
+            trickyRows.Count == 2 && WeaponManifest.Field(trickyRows[1].Text, "id") == "b",
+            "a ']' inside a string does not end the \"weapons\" array: " + trickyRows.Count + " row(s)");
+        Check("S25-bare-values",
+            trickyRows.Count == 2 && WeaponManifest.Field(trickyRows[0].Text, "flip") == "true" &&
+            WeaponManifest.Field(trickyRows[1].Text, "flip") == "false" &&
+            WeaponManifest.Field(trickyRows[1].Text, "shoot") == "" &&
+            WeaponManifest.Field(trickyRows[0].Text, "blurb") == "slot [2] rifle",
+            "a bare true/false reads as spelled, a bare null as absent, a quoted value to its closing quote");
+
         // The file half: a real write, with a BOM, atomically replaced.
         string dir = Path.Combine(Path.GetTempPath(), "ct_s25_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);

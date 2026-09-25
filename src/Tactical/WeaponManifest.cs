@@ -42,17 +42,38 @@ namespace Morgott.ContentTool.Tactical
         internal static List<Row> Rows(string json)
         {
             List<Row> rows = new List<Row>();
-            Match arr = Regex.Match(json, ArrayKey + "(.*?)\\]", RegexOptions.Singleline);
+            Match arr = Regex.Match(json, ArrayKey);
             if (!arr.Success) return rows;
-            int at = arr.Groups[1].Index;
-            foreach (Match o in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
+            // The array ends at its OWN closing bracket, found by depth with strings skipped - not at
+            // the first ']' after it. The lazy ".*?\]" this replaces ended the array at a ']' inside
+            // any string value (a blurb, a path) and silently dropped every row after it.
+            int at = arr.Index + arr.Length, depth = 1, end = -1;
+            for (int i = at; i < json.Length && end < 0; i++)
+            {
+                char c = json[i];
+                if (c == '"')
+                {
+                    for (i++; i < json.Length && json[i] != '"'; i++) if (json[i] == '\\') i++;
+                    continue;
+                }
+                if (c == '[' || c == '{') depth++;
+                else if ((c == ']' || c == '}') && --depth == 0) end = i;
+            }
+            if (end < 0) return rows;
+            foreach (Match o in Regex.Matches(json.Substring(at, end - at), "\\{[^{}]*\\}", RegexOptions.Singleline))
                 rows.Add(new Row { Start = at + o.Index, Text = o.Value });
             return rows;
         }
 
+        /// <summary>One value of a flat row: quoted, to its closing quote; or BARE, to the next
+        /// <c>,</c>/<c>}</c>/whitespace. The bare arm is what makes <c>"flip": true</c> mean true - read
+        /// quoted-only it came back "" and the flip was silently off. A bare <c>null</c> is absent.</summary>
         internal static string Field(string obj, string name)
         {
-            return Regex.Match(obj, "\"" + name + "\"\\s*:\\s*\"([^\"]*)\"").Groups[1].Value;
+            Match m = Regex.Match(obj, "\"" + name + "\"\\s*:\\s*(?:\"([^\"]*)\"|([^\",}\\s]+))");
+            if (!m.Success) return "";
+            if (m.Groups[1].Success) return m.Groups[1].Value;
+            return m.Groups[2].Value == "null" ? "" : m.Groups[2].Value;
         }
 
         /// <summary>A number written either bare or quoted, invariant culture - a comma decimal
