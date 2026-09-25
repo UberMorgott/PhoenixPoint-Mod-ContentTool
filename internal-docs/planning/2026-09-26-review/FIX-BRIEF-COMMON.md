@@ -1,0 +1,12 @@
+# Common rules for all fix tracks (ContentTool review 2026-09-26)
+- Repo: ContentTool (Phoenix Point modding tool, in-game mod). You work in an isolated git worktree of E:\DEV\PhoenixPoint\ContentTool — edit ONLY inside your worktree, commit on your worktree branch (merged into main by LEAD afterwards). No push.
+- Findings list: E:\Temp\claude\E--DEV-PhoenixPoint-ContentTool\2c073930-431c-4faf-8402-5060404a04bb\scratchpad\REVIEW-TASKS.md — do your track's items (listed in your brief). Re-read the cited code first: reviewer line numbers may be off; a finding that turns out wrong -> skip + say why.
+- FILE OWNERSHIP: edit only files your brief owns (+ new test files under tests\). Need a change in someone else's file -> don't; report it.
+- Game NOT launched (owner: "пока без игры"). Do the fix when it's logically clear and low-risk even if final proof is in-game; mark those "needs in-game". Risky behavior changes that only the game can prove -> don't change, report as deferred with reason.
+- Engine truth: decompile E:\DEV\PhoenixPoint\decompiled\AssemblyCSharp (never guess engine API).
+- Style: match surrounding code (naming, comment density, refusal-sentence style). Simplest working change; no speculative refactors.
+- Verify: `dotnet build -c Release` in worktree root; offline test runners tests\ObjCodecTests + tests\TargetPathTests (console exes; exit 1 / "FAILURE" in output = fail) — add regression cases for offline-verifiable fixes in the existing suite style. Then `qgate` from worktree root must exit 0 (it is also the pre-commit hook; on `[FAIL] format` run the printed `dotnet format whitespace <csproj>`). Never --no-verify.
+- Commits: one logical fix = one conventional commit, explicit paths, English messages. Copyright header rule only for NEW files: match existing file headers.
+- Do NOT call cx/Codex (LEAD runs Codex review on the merged result). Do NOT touch docs\ (separate docs track) — but list user-visible message/behavior changes you made so docs can be updated.
+- Stop + report if: build infra broken, finding requires owner decision (product behavior choice).
+- Return ≤25 lines compressed bullets: worktree path + branch, commits (hash + subject), per item done/skipped/deferred(+why), tests+qgate result lines, user-visible string/behavior changes (for docs).
