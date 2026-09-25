@@ -256,13 +256,16 @@ namespace Morgott.ContentTool.Wwise
         {
             if (bank == null || bank.Length < 0x1C)
                 return "bank is " + (bank == null ? 0 : bank.Length) + " bytes, the loader rejects anything under 28";
-            int o = 0;
+            // LONG, not int: a corrupt size field up to 4 GB wrapped `o` negative and the walk read
+            // before the start of the bank instead of reporting the overrun.
+            long o = 0;
             string first = null;
             bool sawData = false;
             while (o + 8 <= bank.Length)
             {
-                string tag = Encoding.ASCII.GetString(bank, o, 4);
-                uint size = (uint)(bank[o + 4] | bank[o + 5] << 8 | bank[o + 6] << 16 | bank[o + 7] << 24);
+                int at = (int)o;
+                string tag = Encoding.ASCII.GetString(bank, at, 4);
+                uint size = (uint)(bank[at + 4] | bank[at + 5] << 8 | bank[at + 6] << 16 | bank[at + 7] << 24);
                 if (first == null) first = tag;
                 if (tag == "DIDX")
                 {
@@ -271,7 +274,7 @@ namespace Morgott.ContentTool.Wwise
                     if (sawData) return "DIDX comes after DATA; LoadMedia would register nothing";
                 }
                 if (tag == "DATA") sawData = true;
-                o += 8 + (int)size;
+                o += 8L + size;
                 if (o > bank.Length) return "chunk '" + tag + "' runs " + (o - bank.Length) + " bytes past the end of the bank";
             }
             if (first != "BKHD") return "first chunk is '" + first + "', not BKHD";
