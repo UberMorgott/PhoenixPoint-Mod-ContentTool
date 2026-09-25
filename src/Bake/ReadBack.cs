@@ -472,7 +472,9 @@ namespace Morgott.ContentTool.Bake
             // The TARGET's own width, read off the shipped file - the same number the bake keeps.
             int inf = Math.Max(BundleBaker.ReadInfluenceCount(shipped, key), 1);
             int[] slots = new int[inf];
-            string want = "";
+            // A builder, not +=: the prediction is one entry per vertex and the string-copy per append
+            // made it quadratic in the vertex count.
+            StringBuilder want = new StringBuilder();
             int moved = 0, split = 0;
             for (int i = 0; i < n; i++)
             {
@@ -483,7 +485,7 @@ namespace Morgott.ContentTool.Bake
                 // the same rule RebindByName writes.
                 bool unweighted = sum <= 0f;
 
-                string w = "", b = "";
+                StringBuilder w = new StringBuilder(), b = new StringBuilder();
                 bool off = false, shared = false;
                 for (int k = 0; k < inf; k++)
                 {
@@ -502,12 +504,12 @@ namespace Morgott.ContentTool.Bake
                                  : slots[k] < 0 ? 0f : f.Weights[i * 4 + slots[k]] / sum;
                     if (live != slot) off = true;
                     if (k > 0 && weight > 0f) shared = true;
-                    w += (k == 0 ? "" : "/") + ModelBuild.F(weight);
-                    b += (k == 0 ? "->bone" : "+bone") + live;
+                    w.Append(k == 0 ? "" : "/").Append(ModelBuild.F(weight));
+                    b.Append(k == 0 ? "->bone" : "+bone").Append(live);
                 }
                 if (off) moved++;
                 if (shared) split++;
-                want += (i == 0 ? "" : " ") + "v" + i + "=" + w + b;
+                want.Append(i == 0 ? "" : " ").Append('v').Append(i).Append('=').Append(w).Append(b);
             }
 
             if (moved == 0)
@@ -519,13 +521,13 @@ namespace Morgott.ContentTool.Bake
                 return;
             }
 
-            string got = BundleBaker.ReadSkinInfluences(copy, key);
-            Gate(log, entries, "P6", key, got == want,
+            string got = BundleBaker.ReadSkinInfluences(copy, key), predicted = want.ToString();
+            Gate(log, entries, "P6", key, got == predicted,
                 "mesh '" + key + "' <- " + im.Name + " carries the FILE's own weights on the bones it " +
                 "NAMES: " + moved + " of " + n + " vertices sit at a file slot that is not the live bone " +
                 "index, and " + split + " are shared between two bones (a fraction nearest-bone cannot " +
                 "produce). The copy reads " + got + "; the file's own weights and a name lookup in the " +
-                "shipped skeleton (" + bones.Length + " bones) predict " + want);
+                "shipped skeleton (" + bones.Length + " bones) predict " + predicted);
         }
 
         /// <summary>The shipped bone a file joint names, read the SAME way SkinBinder.Bind reads it -

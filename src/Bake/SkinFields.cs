@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using Morgott.ContentTool.Import;
@@ -592,16 +593,17 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         private static string Tree(AssetsManager m, AssetsFileInstance af, AssetTypeValueField bones)
         {
-            string s = "";
+            StringBuilder s = new StringBuilder();
             for (int b = 0; b < bones.Children.Count; b++)
             {
                 AssetTypeValueField tf = PrefabFields.Get(m, af, bones.Children[b]);
-                if (tf == null) { s += (b == 0 ? "" : ",") + "(unresolved)"; continue; }
-                s += (b == 0 ? "" : ",") + BoneName(m, af, bones, b) +
-                     "<" + TransformName(m, af, tf["m_Father"]["m_PathID"].AsLong) +
-                     "#" + tf["m_Children"]["Array"].Children.Count;
+                s.Append(b == 0 ? "" : ",");
+                if (tf == null) { s.Append("(unresolved)"); continue; }
+                s.Append(BoneName(m, af, bones, b))
+                 .Append('<').Append(TransformName(m, af, tf["m_Father"]["m_PathID"].AsLong))
+                 .Append('#').Append(tf["m_Children"]["Array"].Children.Count);
             }
-            return s;
+            return s.ToString();
         }
 
         /// <summary>
@@ -1251,17 +1253,19 @@ namespace Morgott.ContentTool.Bake
             byte[] data = vd["m_DataSize"].AsByteArray;
             int at = SkinOffset(verts), stride = SkinStride(inf);
             if (data == null || at + verts * stride > data.Length) return "(skin stream is short)";
-            string s = "";
+            // One builder: a += per vertex re-copied the whole line every time, quadratic on a
+            // 20k-vertex body part.
+            StringBuilder s = new StringBuilder();
             for (int i = 0; i < verts; i++)
             {
                 int v = at + i * stride;
-                s += (i == 0 ? "" : " ") + "v" + i + "=";
+                s.Append(i == 0 ? "" : " ").Append('v').Append(i).Append('=');
                 for (int k = 0; k < inf; k++)
-                    s += (k == 0 ? "" : "/") + F(BitConverter.ToSingle(data, v + k * 4));
+                    s.Append(k == 0 ? "" : "/").Append(F(BitConverter.ToSingle(data, v + k * 4)));
                 for (int k = 0; k < inf; k++)
-                    s += (k == 0 ? "->bone" : "+bone") + BitConverter.ToUInt32(data, v + inf * 4 + k * 4);
+                    s.Append(k == 0 ? "->bone" : "+bone").Append(BitConverter.ToUInt32(data, v + inf * 4 + k * 4));
             }
-            return s;
+            return s.ToString();
         }
 
         /// <summary>The channel layout <see cref="SetSkinStream"/> writes at a given width, as
@@ -1457,9 +1461,9 @@ namespace Morgott.ContentTool.Bake
         private static string Hashes(AssetTypeValueField mesh)
         {
             AssetTypeValueField h = mesh["m_BoneNameHashes"]["Array"];
-            string s = h.Children.Count.ToString(CultureInfo.InvariantCulture);
-            foreach (AssetTypeValueField e in h.Children) s += ":" + e.AsUInt;
-            return s;
+            StringBuilder s = new StringBuilder(h.Children.Count.ToString(CultureInfo.InvariantCulture));
+            foreach (AssetTypeValueField e in h.Children) s.Append(':').Append(e.AsUInt);
+            return s.ToString();
         }
 
         // InvariantCulture: these lines are machine-compared and a ru-RU machine writes 0,5 for 0.5
