@@ -258,6 +258,12 @@ namespace Morgott.ContentTool.Project
             // spelling of someone else's folder.
             else if (value.Trim() != value || value.EndsWith(".", StringComparison.Ordinal))
                 why = "starts or ends with a space, or ends with a dot";
+            // CON, NUL, COM1... name a DEVICE on Windows, with or without an extension ("nul.bundle"),
+            // so the folder or file is never created and a write goes to the device instead.
+            else if (System.Text.RegularExpressions.Regex.IsMatch(value.Split('.')[0],
+                         "^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$",
+                         System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                why = "is a Windows reserved device name";
             if (why == null) return null;
             return "ppcontent.json \"" + key + "\": \"" + value + "\" " + why + " - it is used as ONE folder or " +
                    "file name, so it must be a plain name such as \"author.mymod\" / \"MyMod.bundle\"; nothing " +

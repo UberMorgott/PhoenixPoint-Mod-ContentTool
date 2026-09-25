@@ -101,9 +101,11 @@ internal static class ProjectAudioChecks
     // ---- 2
     private static void Names()
     {
-        foreach (string bad in new[] { "..", ".", "..\\..\\x", "a/b", "C:x", "x.", " x", "a\"b", "" })
+        foreach (string bad in new[] { "..", ".", "..\\..\\x", "a/b", "C:x", "x.", " x", "a\"b", "",
+                                            "CON", "nul", "Aux.bundle", "com1", "LPT9.mod", "prn.x.y" })
             Check(Manifest.UnsafeName("id", bad) != null, "'" + bad + "' is refused as an id");
-        foreach (string good in new[] { "morgott.sample", "Author_Mod-2", "MyMod.bundle", "мод" })
+        foreach (string good in new[] { "morgott.sample", "Author_Mod-2", "MyMod.bundle", "мод",
+                                             "console", "com10", "LPT0", "my.con", "nullmod.bundle" })
             Check(Manifest.UnsafeName("bundle", good) == null, "'" + good + "' is a plain name");
         Check(Manifest.UnsafeName("id", "..\\x").IndexOf("\"id\"", StringComparison.Ordinal) >= 0,
               "and the refusal names the key");
