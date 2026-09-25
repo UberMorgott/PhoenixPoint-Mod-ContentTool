@@ -62,18 +62,20 @@ namespace Morgott.ContentTool.Import
             List<ObjVector3> normals = new List<ObjVector3>();
             List<ObjVector2> uvs = new List<ObjVector2>();
             List<int> indices = new List<int>();
-            bool allNormals = true;
+            // Per vertex: the face named no `vn`. Only THOSE are recomputed - a file whose author
+            // left one stray face without normals keeps every hard edge it states everywhere else.
+            List<bool> missing = new List<bool>();
 
             // ponytail: every group is merged into ONE submesh. The shipped meshes this replaces
             // declare one, and a submesh the renderer has no material for draws nothing - rebuild the
             // m_SubMeshes array per group when a multi-material target actually needs it.
             foreach (ObjTriangle t in document.Triangles)
             {
-                indices.Add(Index(t.A, document, seen, positions, normals, uvs, ref allNormals));
-                indices.Add(Index(t.B, document, seen, positions, normals, uvs, ref allNormals));
-                indices.Add(Index(t.C, document, seen, positions, normals, uvs, ref allNormals));
+                indices.Add(Index(t.A, document, seen, positions, normals, uvs, missing));
+                indices.Add(Index(t.B, document, seen, positions, normals, uvs, missing));
+                indices.Add(Index(t.C, document, seen, positions, normals, uvs, missing));
             }
-            if (!allNormals) Recalculate(positions, indices, normals);
+            if (missing.Contains(true)) Recalculate(positions, indices, normals, missing);
 
             BakedMesh baked = new BakedMesh
             {
@@ -111,7 +113,7 @@ namespace Morgott.ContentTool.Import
 
         private static int Index(ObjVertex v, ObjDocument document, Dictionary<ObjVertex, int> seen,
                                  List<ObjVector3> positions, List<ObjVector3> normals,
-                                 List<ObjVector2> uvs, ref bool allNormals)
+                                 List<ObjVector2> uvs, List<bool> missing)
         {
             int index;
             if (seen.TryGetValue(v, out index)) return index;
@@ -121,15 +123,18 @@ namespace Morgott.ContentTool.Import
             positions.Add(document.Positions[v.Position]);
             uvs.Add(v.Texture >= 0 ? document.TextureCoordinates[v.Texture] : new ObjVector2(0f, 0f));
             if (v.Normal >= 0) normals.Add(document.Normals[v.Normal]);
-            else { normals.Add(new ObjVector3(0f, 0f, 0f)); allNormals = false; }
+            else normals.Add(new ObjVector3(0f, 0f, 0f));
+            missing.Add(v.Normal < 0);
             return index;
         }
 
         /// <summary>
         /// Mesh.RecalculateNormals in buffer form: accumulate each face's cross product on its three
-        /// vertices, then normalize. A .obj with no `vn` is otherwise lit as if it were black.
+        /// vertices, then normalize - written only where <paramref name="missing"/> says the file gave
+        /// none. A .obj with no `vn` is otherwise lit as if it were black.
         /// </summary>
-        private static void Recalculate(List<ObjVector3> positions, List<int> indices, List<ObjVector3> normals)
+        private static void Recalculate(List<ObjVector3> positions, List<int> indices, List<ObjVector3> normals,
+                                        List<bool> missing)
         {
             float[] nx = new float[positions.Count], ny = new float[positions.Count], nz = new float[positions.Count];
             for (int i = 0; i + 2 < indices.Count; i += 3)
@@ -144,6 +149,7 @@ namespace Morgott.ContentTool.Import
             }
             for (int i = 0; i < normals.Count; i++)
             {
+                if (!missing[i]) continue;
                 double len = Math.Sqrt(nx[i] * (double)nx[i] + ny[i] * (double)ny[i] + nz[i] * (double)nz[i]);
                 normals[i] = len > 0.0
                     ? new ObjVector3((float)(nx[i] / len), (float)(ny[i] / len), (float)(nz[i] / len))

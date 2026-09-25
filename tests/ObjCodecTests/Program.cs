@@ -309,6 +309,14 @@ internal static class Program
         BakedMesh noNormals = MeshBuild.From(ObjCodec.Parse("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"));
         Check(Math.Abs(BitConverter.ToSingle(noNormals.VertexData, 20) - 1f) < 1e-6,
               "a .obj with no vn gets computed normals, not zeroes");
+        // ONE face without vn recomputes only ITS vertices: the stated (1,0,0) - deliberately not the
+        // face normal - survives on the face that states it.
+        BakedMesh mixed = MeshBuild.From(ObjCodec.Parse(
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nvn 1 0 0\nf 1//1 2//1 3//1\nf 2 4 3\n"));
+        Check(BitConverter.ToSingle(mixed.VertexData, 12) == 1f,
+              "a stated vn is kept when another face lacks one");
+        Check(Math.Abs(BitConverter.ToSingle(mixed.VertexData, 3 * BakedMesh.Stride + 20) - 1f) < 1e-6,
+              "and the face without vn still gets its computed normal");
 
         Console.WriteLine("OBJ: ALL PASS, " + checks + " check(s)");
         Console.WriteLine(MeshMergeTests.Run());
