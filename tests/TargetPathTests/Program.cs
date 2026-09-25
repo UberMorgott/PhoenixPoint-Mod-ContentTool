@@ -143,6 +143,8 @@ internal static class Program
             "media:18839791#Root@Renderer.mesh",                                    // media takes no subpath
             "media:-1",
             "media:notanumber",
+            "media:05",                                                             // leading zero - same media as media:5
+            "guid:8f3ca1b2c3d4e5f60718293a4b5c6d7e#Root@Renderer.materials[01]",    // leading zero - formats back as [1]
             "name:#Root@Renderer.mesh",                                             // nameless
         };
         foreach (string s in bad)

@@ -96,6 +96,10 @@ namespace Morgott.ContentTool.Project
                     uint ignored;
                     if (!uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out ignored))
                     { error = "media: needs an unsigned decimal media id, got '" + value + "'"; return false; }
+                    // ONE spelling per id: "media:05" and "media:5" name the same media, and the
+                    // duplicate-target check keys on the string, so both used to load and both applied.
+                    if (HasLeadingZero(value))
+                    { error = "media: id '" + value + "' has a leading zero - write it without one"; return false; }
                     if (sub != null) { error = "media: takes no subpath, got '#" + sub + "'"; return false; }
                     break;
                 default:
@@ -155,8 +159,13 @@ namespace Morgott.ContentTool.Project
                 int close = slot.IndexOf(']', i);
                 if (close < 0) { error = "slot '" + slot + "' has no closing ']'"; return false; }
                 int index;
-                if (!int.TryParse(slot.Substring(i + 1, close - i - 1), NumberStyles.None, CultureInfo.InvariantCulture, out index))
+                string digits = slot.Substring(i + 1, close - i - 1);
+                if (!int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out index))
                 { error = "slot index in '" + slot + "' is not a non-negative number"; return false; }
+                // [01] parsed to 1 and formatted back as [1], breaking the byte-identical round trip
+                // Format promises and letting two spellings of one slot dodge the duplicate check.
+                if (HasLeadingZero(digits))
+                { error = "slot index in '" + slot + "' has a leading zero - write it without one"; return false; }
                 p.Index = index;
                 i = close + 1;
             }
@@ -217,6 +226,12 @@ namespace Morgott.ContentTool.Project
             if (s == null || s.Length != 32) return false;
             foreach (char c in s) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
             return true;
+        }
+
+        /// <summary>"05" but not "0" or "5" - the one non-canonical spelling a decimal field accepts.</summary>
+        private static bool HasLeadingZero(string digits)
+        {
+            return digits.Length > 1 && digits[0] == '0';
         }
 
         private static bool IsIdentifier(string s)
