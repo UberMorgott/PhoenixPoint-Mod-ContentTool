@@ -122,11 +122,37 @@ namespace Morgott.ContentTool.Tactical
         public static TacCharacterDef Build(string modDir, Action<string> log)
         {
             Action<string> say = log ?? (m => ContentToolMain.Say(m));
-            try { return BuildOrThrow(modDir, say); }
+            Mount mount = new Mount();
+            TacCharacterDef made = null;
+            try { return made = BuildOrThrow(modDir, say, mount); }
             catch (Exception ex)
             {
                 say("ct_creature VOID nothing was wired and no def was minted: " + ex);
                 return null;
+            }
+            finally
+            {
+                // A build that did not finish gives back what it mounted: the bundle stayed loaded on
+                // every refusal after LoadFromFile, so a retry after fixing the manifest met "already
+                // loaded" and a null bundle, and each attempt left one more hidden rig template behind.
+                if (made == null) mount.Release();
+            }
+        }
+
+        /// <summary>What one build has mounted so far - released only when that build does not finish.</summary>
+        private sealed class Mount
+        {
+            internal AssetBundle Bundle;
+            internal GameObject Holder;
+
+            internal void Release()
+            {
+                // Unload(false): the loaded prefab and clips stay valid for anything a partial build
+                // already pointed at them; only the bundle's own file handle and data go.
+                try { if (Holder != null) UnityEngine.Object.Destroy(Holder); } catch { }
+                try { if (Bundle != null) Bundle.Unload(false); } catch { }
+                Holder = null;
+                Bundle = null;
             }
         }
 
@@ -153,14 +179,14 @@ namespace Morgott.ContentTool.Tactical
                 catch (Exception ex) { log.AppendLine("  " + dir + ": " + ex.Message); continue; }
                 // No "creature" block = not a creature mod. Silent: most content mods are not.
                 if (ReferenceEquals(CreatureManifest.Parse(json), CreatureManifest.None)) continue;
-                string id = Regexy(json, "id");
+                string id = TopKey(json, "id");
                 if (Built.Any(x => string.Equals(x.Id, id, StringComparison.Ordinal))) continue;
                 if (Build(dir, m => ContentToolMain.Say(m)) != null) made++;
             }
             return made == 0 ? null : "ct_creature: built " + made + " creature(s) from enabled content mods";
         }
 
-        private static TacCharacterDef BuildOrThrow(string modDir, Action<string> say)
+        private static TacCharacterDef BuildOrThrow(string modDir, Action<string> say, Mount mount)
         {
             string metaPath = Path.Combine(modDir, Project.ContentMods.Manifest);
             if (!File.Exists(metaPath))
@@ -180,7 +206,25 @@ namespace Morgott.ContentTool.Tactical
             }
 
             // --- the ASSETS: the mod's own bundle, baked by ContentTool ------------------------
-            string id = Regexy(json, "id"), bundleName = Regexy(json, "bundle");
+            string id = TopKey(json, "id"), bundleName = TopKey(json, "bundle");
+            // An EMPTY id is not a spelling, it is every other empty id: Clone derives each def's GUID
+            // from it, so two such mods would mint the same GUIDs and the second would silently get the
+            // first's defs back.
+            if (id.Length == 0)
+            {
+                say("ct_creature VOID '" + metaPath + "' has no top-level \"id\" - the creature's def " +
+                    "identities are derived from it. Nothing was changed.");
+                return null;
+            }
+            // ONCE PER SESSION. A mod whose own C# calls Build twice (or BuildAll after it) got a second
+            // LoadFromFile of a bundle that is already mounted - null, and a FAIL over a creature that
+            // was in fact built and working.
+            Creature done = Built.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.Ordinal));
+            if (done != null)
+            {
+                say("ct_creature PASS '" + done.Def.name + "' already built this session");
+                return done.Def;
+            }
             string path = Path.Combine(Path.Combine(modDir, "Dist"), bundleName);
             if (!File.Exists(path))
             {
@@ -195,7 +239,9 @@ namespace Morgott.ContentTool.Tactical
                 return null;
             }
             // The bundle stays MOUNTED for the rest of the run on purpose: the prefab and the clips are
-            // referenced by live defs from here on, and Unload would take them with it.
+            // referenced by live defs from here on, and Unload would take them with it. Only a build
+            // that does not finish gives it back (Build's finally).
+            mount.Bundle = bundle;
             AnimationClip[] clips = bundle.LoadAllAssets<AnimationClip>();
 
             // BY ADDRESS, NEVER "the first GameObject in the bundle". A baked bundle carries external
@@ -301,7 +347,7 @@ namespace Morgott.ContentTool.Tactical
                 return null;
             }
 
-            GameObject rig = BuildRig(c, model, donorAddons.AddonsManagerDef);
+            GameObject rig = BuildRig(c, model, donorAddons.AddonsManagerDef, mount);
             if (rig == null) return null;
             CharacterLights(c, rig, donorAddons.AddonsManagerDef.Rig, donor);
 
@@ -597,7 +643,7 @@ namespace Morgott.ContentTool.Tactical
             // two anything below writes: Data (whose one meaningful edit is ComponentSetTemplate,
             // re-pointed at the set built above, whose AddonsManagerDef.Rig is this mod's model) and
             // Volume. Her def name, GUID, Name, LocalizeName, class tags, GameTags, base stats, story
-            // role and every event or reward that names her come through TacCharacterData.Clone() -
+            // role and every event or reward that names her come through TacCharacterData's copy constructor -
             // the game's own copy - with the same values she shipped with.
             //
             // NOTHING SHARED IS MUTATED. Every def on the way down is a clone (setClone, addonsClone,
@@ -606,7 +652,11 @@ namespace Morgott.ContentTool.Tactical
             // isolation is the reason this is a def rebind and not a bundle/catalog repoint: PP's human
             // body is assembled from assets EVERY human uses, so repointing one re-bodies all of them.
             TacCharacterDef unit = Clone(repo, c, donor, "CharacterTemplateDef");
-            unit.Data = donor.Data.Clone();          // TacCharacterData.Clone(), the game's own copy
+            // The game's own COPY CONSTRUCTOR (TacCharacterData.cs:72-92), not its Clone(): Clone() is a
+            // bare MemberwiseClone (:190-193), so the Stats/Statuses lists, the *ItemsData lists and the
+            // progression objects stayed SHARED with the donor's def - an edit to either reached both.
+            // The constructor copies every one of them and every scalar Clone() would have.
+            unit.Data = new PhoenixPoint.Tactical.Entities.ActorsInstance.TacCharacterData(donor.Data);
             unit.Data.ComponentSetTemplate = setClone;
             if (man.Name.Length > 0) { unit.Data.Name = man.Name; unit.Data.LocalizeName = false; }
             // The donor's ITEMS were the second half of a doubled model: AddonsCharacterBuilder
@@ -634,8 +684,15 @@ namespace Morgott.ContentTool.Tactical
             // unit - so the filter is skipped and her class and story tags come through untouched. On a
             // human it would be a no-op either way; skipping it says which of the two is intended.
             if (!inPlace)
+            {
                 unit.Data.GameTags = donor.Data.GameTags
                     .Where(t => t != null && t != donorTag && t != shared.VehicleTag).ToArray();
+                // A NEW unit starts with an empty backpack. The donor's inventory is the donor's kit
+                // (a sniper's clips and medkit) for gear this unit was just stripped of; a body swap
+                // keeps hers, because there the character is the game's own.
+                unit.Data.InventoryItems = new ItemDef[0];
+                unit.Data.InventoryItemsData = null;
+            }
             c.Def = unit;
 
             // --- the STATS a bodypart-free unit has to carry itself ----------------------------
@@ -1092,11 +1149,13 @@ namespace Morgott.ContentTool.Tactical
             return null;
         }
 
-        private static GameObject BuildRig(Creature c, GameObject model, AddonsManagerDef donorManager)
+        private static GameObject BuildRig(Creature c, GameObject model, AddonsManagerDef donorManager,
+                                           Mount mount)
         {
             GameObject holder = new GameObject("ct_creature_templates");
             holder.SetActive(false);
             UnityEngine.Object.DontDestroyOnLoad(holder);
+            mount.Holder = holder;                  // destroyed again if this build does not finish
 
             GameObject inner = UnityEngine.Object.Instantiate(model, holder.transform);
             inner.name = model.name;
@@ -1783,8 +1842,12 @@ namespace Morgott.ContentTool.Tactical
                     }
                     catch (Exception ex)
                     {
-                        c.Say("ct_creature FAIL '" + clip.name + "' refused AddEvent(" + e.Name + "): " + ex.Message);
-                        return;
+                        // THIS clip is done, the OTHER roles are not: returning here left every later
+                        // role's clip unstamped and skipped the summary, so one refusing clip turned
+                        // into a 10s stall on every other action with nothing saying so.
+                        c.Say("ct_creature FAIL '" + clip.name + "' refused AddEvent(" + e.Name + "): " + ex.Message +
+                              " - its remaining event(s) skipped, the other roles still stamped");
+                        break;
                     }
                 }
             }
@@ -2090,8 +2153,18 @@ namespace Morgott.ContentTool.Tactical
         private static void Install()
         {
             if (harmony != null) return;
-            harmony = new Harmony(HarmonyId);
-            harmony.PatchAll(typeof(CreatureBuild).Assembly);
+            // ASSIGNED ONLY ONCE EVERY PATCH IS IN. Set first, a PatchAll that threw half way left the
+            // field non-null, so every later build returned above and ran on whichever patches happened
+            // to land. A failure takes back what it did apply, so the retry patches from clean rather
+            // than stacking a second copy of the half that worked.
+            Harmony h = new Harmony(HarmonyId);
+            try { h.PatchAll(typeof(CreatureBuild).Assembly); }
+            catch
+            {
+                try { h.UnpatchAll(HarmonyId); } catch { }
+                throw;
+            }
+            harmony = h;
         }
 
         /// <summary>
@@ -2179,17 +2252,18 @@ namespace Morgott.ContentTool.Tactical
             return null;
         }
 
-        private static string Regexy(string json, string key)
+        /// <summary>A key of the manifest's OUTERMOST object (<see cref="CreatureManifest.TopLevel"/>),
+        /// never the first spelling of it anywhere - a "weapons" row's own "id" or "scale" above the
+        /// mod's used to win.</summary>
+        private static string TopKey(string json, string key)
         {
-            return System.Text.RegularExpressions.Regex
-                .Match(json, "\"" + key + "\"\\s*:\\s*\"([^\"]*)\"").Groups[1].Value;
+            return CreatureManifest.TopLevel(json, key).Trim();
         }
 
         private static float Number(string json, string key)
         {
             float v;
-            float.TryParse(System.Text.RegularExpressions.Regex
-                    .Match(json, "\"" + key + "\"\\s*:\\s*\"?([-0-9.eE+]*)\"?").Groups[1].Value,
+            float.TryParse(CreatureManifest.TopLevel(json, key).Trim(),
                 System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out v);
             return v;
