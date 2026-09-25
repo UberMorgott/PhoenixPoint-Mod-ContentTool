@@ -391,7 +391,7 @@ namespace Morgott.ContentTool.Dev
 
             var indices = new HashSet<int>();
             for (int i = 0; i < census.Length; i++) if (drop[i]) indices.Add(census[i].Index);
-            progress = new SlimProgress("Queued", 0, 5, "waiting for a worker");
+            progress = new SlimProgress("Queued", 0, 6, "waiting for a worker");
             SlimJob.Start(sourcePath, inPlace ? sourcePath : Beside(sourcePath, "slim"), indices, force,
                           cts, onProgress, onComplete);
         }

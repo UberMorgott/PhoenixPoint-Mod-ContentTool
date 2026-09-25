@@ -1569,8 +1569,9 @@ namespace Morgott.ContentTool.Dev
             rowScroll = GUILayout.BeginScrollView(rowScroll, GUILayout.Height(200f));
             Rows(Severity.Blocking, "REFUSED");
             Rows(Severity.Downgrade, "LOSES YOUR WEIGHTS");
-            // "WARNING", not "IGNORED": a sidecar row IS ignored, a suspect part mapping is not - it bakes
-            // and then fails the run (ProjectBake.cs:1828).
+            // "WARNING", not "IGNORED": a sidecar row IS ignored, a suspect part mapping is not - it bakes,
+            // prints as "P4 WARN" and is counted as a warning, never a failure ("N warning(s), baked
+            // anyway", StageText.BakeWarnings).
             Rows(Severity.Warning, "WARNING");
             Rows(Severity.Info, "NOTE");
             GUILayout.EndScrollView();
