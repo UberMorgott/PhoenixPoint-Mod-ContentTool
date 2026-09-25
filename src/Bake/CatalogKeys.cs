@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace Morgott.ContentTool.Bake
 {
@@ -105,6 +106,31 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         internal static int Verify(StringBuilder log, IList<Pub> pubs)
         {
+            // EVERY HANDLE THIS GATE TAKES IS GIVEN BACK, after the last arm has read its object. A load
+            // is a reference count (the game balances its own through AssetReference.ReleaseAsset, in
+            // decompiled Base.Assets\AssetsManager.cs:136), and a verify that never released kept each published bundle - and
+            // the control's SHIPPED one - pinned for the rest of the session, one more count per run.
+            List<AsyncOperationHandle<UnityEngine.Object>> held = new List<AsyncOperationHandle<UnityEngine.Object>>();
+            try { return Measure(log, pubs, held); }
+            finally
+            {
+                foreach (AsyncOperationHandle<UnityEngine.Object> h in held)
+                    if (h.IsValid()) Addressables.Release(h);
+            }
+        }
+
+        /// <summary>One load, remembered for release. The handle is kept even when the wait throws - a
+        /// failed operation is still a reference until it is released.</summary>
+        private static UnityEngine.Object Load(string key, List<AsyncOperationHandle<UnityEngine.Object>> held)
+        {
+            AsyncOperationHandle<UnityEngine.Object> h = Addressables.LoadAssetAsync<UnityEngine.Object>(key);
+            held.Add(h);
+            return h.WaitForCompletion();
+        }
+
+        private static int Measure(StringBuilder log, IList<Pub> pubs,
+                                   List<AsyncOperationHandle<UnityEngine.Object>> held)
+        {
             if (pubs.Count == 0) return 0;
             int fail = 0;
 
@@ -121,7 +147,7 @@ namespace Morgott.ContentTool.Bake
                 string leaf = p.Asset.Substring(p.Asset.LastIndexOf('/') + 1);
                 UnityEngine.Object got = null;
                 string threw = null;
-                try { got = Addressables.LoadAssetAsync<UnityEngine.Object>(p.Key).WaitForCompletion(); }
+                try { got = Load(p.Key, held); }
                 catch (Exception ex) { threw = ex.GetType().Name + ": " + ex.Message; }
 
                 string what = got == null ? (threw == null ? "(null)" : "THREW " + threw)
@@ -194,7 +220,7 @@ namespace Morgott.ContentTool.Bake
             foreach (Pub p in pubs) if (p.Key == SampleControlKey) touched = true;
             if (!touched)
             {
-                string name = NameOf(SampleControlKey, log);
+                string name = NameOf(SampleControlKey, log, held);
                 fail += Check(log, "C1-ctl-sibling", name == SampleControlShipped,
                     "'" + SampleControlKey + "', which nobody published, still resolves to '" + name +
                     "' (shipped is '" + SampleControlShipped + "')");
@@ -210,11 +236,12 @@ namespace Morgott.ContentTool.Bake
             return "(no material)";
         }
 
-        private static string NameOf(string key, StringBuilder log)
+        private static string NameOf(string key, StringBuilder log,
+                                     List<AsyncOperationHandle<UnityEngine.Object>> held)
         {
             try
             {
-                UnityEngine.Object o = Addressables.LoadAssetAsync<UnityEngine.Object>(key).WaitForCompletion();
+                UnityEngine.Object o = Load(key, held);
                 return o == null ? "(null)" : o.name;
             }
             catch (Exception ex) { log.AppendLine("load '" + key + "' THREW " + ex.GetType().Name + ": " + ex.Message); return "(threw)"; }
