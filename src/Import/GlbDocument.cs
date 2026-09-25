@@ -19,9 +19,12 @@ namespace Morgott.ContentTool.Import
 
         // --- stored state ---
         internal uint Version { get; }
-        // ponytail: key order is Dictionary insertion order, which holds because nothing is ever
-        // removed from these objects - only reassigned. Upgrade to OrderedDictionary the day a
-        // mutation has to DELETE a key.
+        // ponytail: key order is Dictionary enumeration order, which is insertion order only until a
+        // key is REMOVED - and mutations do remove them (GlbSlim empties, GlbSkel 'children'/'matrix',
+        // GlbZip 'normalized'/'min'/'max'), after which a key added later may take the freed slot and
+        // come out earlier. Harmless: JSON object keys are unordered to every glTF reader, and a Dirty
+        // document promises semantic equality, never byte equality. Upgrade to an ordered map the day
+        // something needs a mutated file's key order to be stable.
         /// <summary>The parsed JSON chunk (Dictionary from Json.Parse). Mutating it is only written
         /// out once Dirty is set, so whoever mutates it says so.</summary>
         internal Dictionary<string, object> Json { get; }

@@ -2431,14 +2431,7 @@ namespace Morgott.ContentTool.Import
         /// </summary>
         private static FormatException Unreadable(string name)
         {
-            if (name == Draco.Extension)
-                return Bad(ImportCode.UnsupportedGlb, "the file's geometry is packed with Draco compression ('" + Draco.Extension +
-                    "'), a codec this mod does not carry - its decoder is far larger than everything else the " +
-                    "importer does. Open the file in Blender (File > Import > glTF 2.0, which reads Draco) and " +
-                    "export it again with File > Export > glTF 2.0, Format 'glTF Binary (.glb)' and the " +
-                    "Compression box UNTICKED. Meshopt compression (EXT_meshopt_compression) and quantized " +
-                    "attributes (KHR_mesh_quantization), which most model sites ship, are read directly and " +
-                    "need no such step");
+            // No Draco arm: Draco is DECODED (Decompress), so every caller lets it through by name.
             if (name == TextureTransform)
                 return Bad(ImportCode.UnsupportedGlb, "the file needs '" + TextureTransform + "' to make sense of its texture coordinates, " +
                     "which means its UVs are stored as whole numbers that only its own material knows how to " +
