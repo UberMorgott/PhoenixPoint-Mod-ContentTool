@@ -29,6 +29,11 @@ function Write-SourceMarker([string] $Folder, [string] $Source) {
 }
 Write-SourceMarker $dest $PSScriptRoot
 Write-Host "Deployed ContentTool to $dest"
+# The dev-only console commands (probes, gates) are registered only when this marker exists
+# (src\Dev\DevGate.cs). Deploy never creates it - autogate.ps1 arms its own runs - it only says how.
+$devMarker = Join-Path $dest 'ct-dev'
+if (Test-Path -LiteralPath $devMarker) { Write-Host "Dev commands: ARMED ($devMarker present)" }
+else { Write-Host "Dev commands: not armed - to arm them by hand: New-Item -ItemType File '$devMarker'" }
 
 # Every demo is its own MOD, not a folder inside ours: PPModLoader discovers only TOP-LEVEL
 # directories under Mods\ that hold a meta.json (decompiled PPModLoader.cs:29-46), so a demo living

@@ -51,6 +51,7 @@ internal static class Program
         CachePruneArm();
         InstallWriteArm();
         DevLoopArm();
+        DevGateArm();
         VideoOnlyReportArm();
         DeclaredTypeArm();
         StopEventArm();
@@ -2726,6 +2727,42 @@ internal static class Program
             DevLoop.Off();
             try { Directory.Delete(root, true); } catch (Exception) { }
         }
+    }
+
+    /// <summary>
+    /// Gate DG, offline: the dev-only console commands (probes, gates that load a save with no
+    /// confirmation) are armed by the ct-dev FILE beside ContentTool.dll and by nothing else - not a
+    /// missing folder, not a null one, not a DIRECTORY of that name.
+    /// </summary>
+    private static void DevGateArm()
+    {
+        string root = Dir(Path.GetTempPath(), "ct_dg_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Check("DG-null", !DevGate.Armed(null) && !DevGate.Armed(""), "no mod folder is never armed");
+            Check("DG-absent", !DevGate.Armed(root) && !DevGate.Armed(Path.Combine(root, "nope")),
+                "a folder without the marker, or no folder at all, is not armed");
+
+            string asDir = Dir(Dir(root, "d"), DevGate.Marker);
+            Check("DG-directory", !DevGate.Armed(Path.GetDirectoryName(asDir)),
+                "a DIRECTORY named " + DevGate.Marker + " is not the opt-in file");
+
+            File.WriteAllText(Path.Combine(root, DevGate.Marker), "");
+            Check("DG-armed", DevGate.Armed(root), "an empty " + DevGate.Marker + " file arms it");
+
+            string on = DevGate.Line(true, 15), off = DevGate.Line(false, 15);
+            Check("DG-line",
+                on.StartsWith("Dev commands: ARMED", StringComparison.Ordinal) &&
+                off.StartsWith("Dev commands: not armed", StringComparison.Ordinal) &&
+                off.IndexOf(DevGate.Marker, StringComparison.Ordinal) >= 0,
+                "init line names the state and, when off, the marker that arms it: " + off);
+
+            string refused = DevGate.Refusal("ct_mission");
+            Check("DG-refusal", refused.IndexOf("REFUSED", StringComparison.Ordinal) >= 0 &&
+                                refused.IndexOf("ct_mission", StringComparison.Ordinal) >= 0,
+                "autorun's refusal carries REFUSED (autogate's report filter) and the command: " + refused);
+        }
+        finally { try { Directory.Delete(root, true); } catch (Exception) { } }
     }
 
     private static string Dir(string parent, string name)

@@ -325,6 +325,22 @@ namespace Morgott.ContentTool
             private static SortedList<string, ConsoleCommandAttribute> store;
             private static readonly List<string> registered = new List<string>();
 
+            /// <summary>Whether the dev-only commands were armed this session - see Dev.DevGate.</summary>
+            private static bool devArmed;
+
+            /// <summary>
+            /// Marks a probe or gate that only a developer or autogate may reach (Dev.DevGate): it is
+            /// left out of the console table - and refused by autorun - unless the ct-dev marker sits
+            /// beside ContentTool.dll. A command documented for modders never carries it.
+            /// </summary>
+            [AttributeUsage(AttributeTargets.Method)]
+            private sealed class DevOnlyAttribute : Attribute { }
+
+            private static bool IsDevOnly(MethodInfo m)
+            {
+                return Attribute.IsDefined(m, typeof(DevOnlyAttribute));
+            }
+
             internal static void Register()
             {
                 try
@@ -339,10 +355,13 @@ namespace Morgott.ContentTool
                         throw new MissingFieldException("GameConsole internals changed (CommandToInfo/_methodInfo/_variableArguments).");
 
                     Unregister();
+                    devArmed = Dev.DevGate.Armed(ModDir);
+                    int dev = 0;
                     foreach (MethodInfo m in typeof(ConsoleBridge).GetMethods(BindingFlags.Static | BindingFlags.Public))
                     {
                         if (!(Attribute.GetCustomAttribute(m, attr) is ConsoleCommandAttribute info)) continue;
                         if (string.IsNullOrEmpty(info.Command)) continue;
+                        if (IsDevOnly(m)) { dev++; if (!devArmed) continue; }
 
                         // Mirror LoadCommands exactly so the entries are indistinguishable from native ones.
                         ParameterInfo[] ps = m.GetParameters();
@@ -356,6 +375,7 @@ namespace Morgott.ContentTool
                         registered.Add(info.Command);
                     }
                     log?.LogInfo("Console commands: " + string.Join(", ", registered.ToArray()));
+                    log?.LogInfo(Dev.DevGate.Line(devArmed, dev));
                 }
                 catch (Exception ex)
                 {
@@ -380,6 +400,8 @@ namespace Morgott.ContentTool
                     if (a != null && a.Command == parts[0]) { mi = cand; break; }
                 }
                 if (mi == null) return "ct_autorun: '" + parts[0] + "' is not a ct_ command";
+                // The same rule as the console table: a line cannot reach what the console cannot.
+                if (IsDevOnly(mi) && !devArmed) return Dev.DevGate.Refusal(parts[0]);
 
                 string[] args = new string[parts.Length - 1];
                 Array.Copy(parts, 1, args, 0, args.Length);
@@ -477,6 +499,7 @@ namespace Morgott.ContentTool
             /// console counts declared parameters (ConsoleCommandAttribute.Invoke) and rejects a
             /// missing one, so a defaulted parameter would make the bare command unusable.
             /// </summary>
+            [DevOnly]
             [ConsoleCommand(Command = "ct_bake", Description = "ContentTool: bake writer regression - writes a bundle with an authored Texture2D and a binary TextAsset, then loads that file back (U0a/U0b/U1). Optional arg: source bundle file name.")]
             public static void CtBake(IConsole console, params string[] args)
             {
@@ -484,6 +507,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_bake THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_audio", Description = "ContentTool: gates A1/A2/A3 - one generated v140 bank carrying an embedded and a streamed sound, packaged inside a bundle, read back out, materialized and played (with control posts before the bank is loaded). Optional arg: source bundle file name.")]
             public static void CtAudio(IConsole console, params string[] args)
             {
@@ -565,6 +589,7 @@ namespace Morgott.ContentTool
             /// console. Control in the same run: the first line must still be readable AFTER the giant
             /// block, so a console that survived is proven, not assumed.
             /// </summary>
+            [DevOnly]
             [ConsoleCommand(Command = "ct_outtest", Description = "ContentTool: console output sink check - emits 200 lines plus one 5000-character line. Before the per-line fix this blanked the whole console.")]
             public static void CtOutTest(IConsole console)
             {
@@ -604,6 +629,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_sound THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_voices", Description = "ContentTool: DEV instrument - counts what the GAME posts. 'watch [seconds]' patches AkSoundEngine.PostEvent, prints a timeline plus live voice counts at t=2/6/12/20s. Answers whether a sound is being re-posted (accumulation) or re-entered (one voice), which no S1 arm can see.")]
             public static void CtVoices(IConsole console, params string[] args)
             {
@@ -628,6 +654,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_extract THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_fmt", Description = "ContentTool (dev spike): gate F1 - hands every file in <mod>\\FormatProbes\\ to the engine's own image/audio/video decoders and prints which formats this install actually decodes. Write the probes with tools\\make-format-probes.ps1.")]
             public static void CtFmt(IConsole console)
             {
@@ -635,6 +662,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_fmt THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_replace", Description = "ContentTool (dev workbench): write a texture (.png), a model (.glb/.obj) or a material property into a slot a target path names, live, no restart - re-applied whenever Addressables re-acquires the prefab. Args: <targetpath> <file|value>. Needs ct_seamprobe on (guid:) or ct_scan on (name:).")]
             public static void CtReplace(IConsole console, params string[] args)
             {
@@ -656,6 +684,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_bench THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_revert", Description = "ContentTool (dev workbench): put every replaced asset back.")]
             public static void CtRevert(IConsole console)
             {
@@ -663,6 +692,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_revert THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_texswap", Description = "ContentTool: gate R2 - in one run, sha1 a shipped texture, replace it, sha1 (differs), revert, sha1 (equals the first), with an untouched second texture as the control. Needs ct_seamprobe on.")]
             public static void CtTexSwap(IConsole console)
             {
@@ -670,6 +700,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_texswap THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_meshswap", Description = "ContentTool: gate R3 - in one run, swap a skinned renderer's mesh and material, log vert count/bounds/shader, then revert to the exact origin objects, with a sibling renderer as the untouched control. Needs ct_seamprobe on.")]
             public static void CtMeshSwap(IConsole console)
             {
@@ -677,6 +708,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_meshswap THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_liveswap", Description = "ContentTool: gate R5 - drive the real ct_replace with a .glb onto a renderer that is already on screen (vertex/index counts from the file itself), rebind it to the target's own skeleton, change a material property, revert both to the origin OBJECTS, with an untouched second renderer as the control.")]
             public static void CtLiveSwap(IConsole console)
             {
@@ -684,6 +716,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_liveswap THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_dev", Description = "ContentTool (dev workbench): the DEVELOPER LIVE LOOP - edit a .png/.glb on disk and the running game shows it, no restart, and F12 cycles variant sets (<project>\\select\\<Set>\\<same filename>). OFF by default and off for every player: with it off there is no watcher, no coroutine, no hotkey poll and no scan. Args: on [project] | off | status | sets | set <name> | next | reload.")]
             public static void CtDev(IConsole console, params string[] args)
             {
@@ -691,6 +724,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_dev THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_scan", Description = "ContentTool (dev workbench): gate R4 - the scan fallback for targets with no guid: anchor. OFF by default; an ambiguous name is refused, never guessed; a scan-found target can never be baked. Args: on | off | status (default) | gate.")]
             public static void CtScan(IConsole console, params string[] args)
             {
@@ -698,6 +732,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_scan THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_mission", Description = "ContentTool (dev workbench): gate M1 - the seam measured INSIDE a loaded tactical mission instead of on the roster. Loads a savegame that declares IsTacticalSave, waits for the mission to be live, then reports coverage and runs R2/R3 there. Args: list | gate <savename>.")]
             public static void CtMission(IConsole console, params string[] args)
             {
@@ -712,6 +747,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_creature THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_music", Description = "ContentTool (dev instrument): what is AUDIBLE on the screen you are on right now - every live Wwise voice, named off the shipped bank .txt, and whether it is MUSIC. A run in which no voice could be named reads VOID, never SILENT. Args: probe [waitSeconds] | gate <savename> (loads a save, waits for the level to play, then probes).")]
             public static void CtMusic(IConsole console, params string[] args)
             {
@@ -719,6 +755,7 @@ namespace Morgott.ContentTool
                 catch (Exception ex) { Out(console, "ct_music THREW " + ex); }
             }
 
+            [DevOnly]
             [ConsoleCommand(Command = "ct_seamprobe", Description = "ContentTool: gate R1 - postfix AddonSkinDataBase.GetPrefabAsset, log (AssetGUID, prefab, renderer subpath), write ONE prefab to see whether the write survives, and take a scan pass as the control. Args: on | off | report (default).")]
             public static void CtSeamProbe(IConsole console, params string[] args)
             {

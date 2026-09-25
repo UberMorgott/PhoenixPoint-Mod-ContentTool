@@ -57,7 +57,7 @@ function Get-GateLines {
     # Strip the Unity log prefix ONLY - '[INFO] 34 (1,847): '. The old rule cut everything up to the
     # last '| ', which silently ate the GATE NAME off every arm whose summary contains a pipe
     # (U3a-refs, U4-wrote, U5-wrote): a FAIL there would have been printed as an anonymous fragment.
-    $text | Select-String -Pattern 'ct_autorun|PASS|FAIL|VOID|REFUSED|THREW|FAILURE' |
+    $text | Select-String -Pattern 'ct_autorun|Dev commands:|PASS|FAIL|VOID|REFUSED|THREW|FAILURE' |
         ForEach-Object { $_.Line -replace '^\[\w+\] \d+ \([^)]*\): ', '' }
 }
 
@@ -178,6 +178,14 @@ function Invoke-Phase {
 $phases = @(, $Commands)
 if ($Then.Count -gt 0) { $phases += , $Then }
 
+# The gates are DEV commands: the mod registers them only when the ct-dev marker sits beside its DLL
+# (src\Dev\DevGate.cs), so a player's console never offers a probe that drops his campaign. This run
+# arms it for itself and takes it away again - but only if it was this run that put it there, so an
+# author who armed his install by hand keeps it armed.
+$devMarker = Join-Path $modDir 'ct-dev'
+$armedHere = -not (Test-Path -LiteralPath $devMarker)
+if ($armedHere) { New-Item -ItemType File -Path $devMarker -Force | Out-Null }
+
 $results = @()
 try {
     for ($i = 0; $i -lt $phases.Count; $i++) {
@@ -186,6 +194,9 @@ try {
 }
 finally {
     Remove-Item $autorun -Force -ErrorAction SilentlyContinue   # never fire on a later manual launch
+    # -KeepOpen leaves a game running that was armed at launch; the file is read once at init, so
+    # removing it now changes nothing in that session and keeps the NEXT launch a player's launch.
+    if ($armedHere) { Remove-Item -LiteralPath $devMarker -Force -ErrorAction SilentlyContinue }
 }
 
 $ok = $true

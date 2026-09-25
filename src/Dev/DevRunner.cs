@@ -17,7 +17,9 @@ namespace Morgott.ContentTool.Dev
     /// shipped package is a switch a player can end up carrying, and the mod already has the right
     /// place for "run this at launch on MY machine" - <see cref="AutoRun"/>'s autorun.txt, which is
     /// dev-only by construction (no bake writes one, so a released mod has none). A modder who wants
-    /// the loop from the first frame puts the line `ct_dev on &lt;project&gt;` in that file.
+    /// the loop from the first frame puts the line `ct_dev on &lt;project&gt;` in that file. Both need
+    /// the ct-dev marker beside ContentTool.dll: without it ct_dev is not registered at all and an
+    /// autorun line naming it is refused (<see cref="DevGate"/>).
     ///
     /// With dev mode off this class allocates nothing: no GameObject, no coroutine, no watcher, no
     /// Input poll. <see cref="DevLoop.Scheduled"/> is the falsifiable statement of that.
