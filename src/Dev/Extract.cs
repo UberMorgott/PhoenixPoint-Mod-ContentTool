@@ -264,8 +264,20 @@ namespace Morgott.ContentTool.Dev
         {
             string verb = args != null && args.Length > 0 ? args[0].ToLowerInvariant() : "";
             if (verb == "gate") return Gate();
-            if (verb == "tex" && args.Length > 2) return Texture(args[1], args[2]);
-            if (verb == "mesh" && args.Length > 2) return Mesh(args[1], args[2]);
+            // A misspelled or ambiguous asset name is AssetIndex.FindUnique's refusal, THROWN - which
+            // reached the console as "ct_extract THREW" plus a stack trace, a crash for a typo. Same
+            // unwrapping as ct_list's (List above), plus the listing that shows the names there are.
+            // Any other exception still reaches ct_extract's own THREW arm with its stack intact.
+            try
+            {
+                if (verb == "tex" && args.Length > 2) return Texture(args[1], args[2]);
+                if (verb == "mesh" && args.Length > 2) return Mesh(args[1], args[2]);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return "ct_extract REFUSED - " + ex.Message + ". The names it holds: 'ct_list assets " +
+                       args[1] + " " + (verb == "tex" ? "Texture2D" : "Mesh") + " <nameFilter>'";
+            }
             if (verb == "video" && args.Length > 1) return Video(args[1]);
             if (verb == "audio" && args.Length > 1)
                 return string.Equals(args[1], "--all", StringComparison.OrdinalIgnoreCase)
