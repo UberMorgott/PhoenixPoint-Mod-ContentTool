@@ -59,6 +59,10 @@ namespace Morgott.ContentTool.Dev
 
             private IEnumerator Gate()
             {
+                // What Unity's audio device was configured as before this probe reset it, so the game
+                // does not keep a device the probe opened (restored in the finally below).
+                AudioConfiguration original = default(AudioConfiguration);
+                bool reset = false;
                 try
                 {
                     // --- textures. Synchronous: LoadImage decodes on the calling (main) thread.
@@ -78,7 +82,7 @@ namespace Morgott.ContentTool.Dev
                                    " speakerMode=" + AudioSettings.speakerMode +
                                    " driverCapabilities=" + AudioSettings.driverCapabilities);
                     AudioConfiguration cfg = AudioSettings.GetConfiguration();
-                    bool reset = false;
+                    original = cfg;
                     log.AppendLine("F1-audio-config sampleRate=" + cfg.sampleRate + " speakerMode=" + cfg.speakerMode +
                                    " dspBufferSize=" + cfg.dspBufferSize + " realVoices=" + cfg.numRealVoices +
                                    " virtualVoices=" + cfg.numVirtualVoices);
@@ -136,12 +140,32 @@ namespace Morgott.ContentTool.Dev
                 }
                 finally
                 {
+                    if (reset) log.AppendLine(RestoreAudio(original));
                     log.Append(controlsFailed == 0
                         ? "ct_fmt: controls ALL PASS - the instrument measured what it says it measured"
                         : "ct_fmt: " + controlsFailed + " CONTROL FAILURE(S) - treat every row above as VOID");
                     ContentToolMain.Say(log.ToString());
                     AsyncGate.Pending--;
                     Destroy(gameObject);
+                }
+            }
+
+            /// <summary>
+            /// Puts the audio configuration the probe found back. A shut subsystem hands back Raw
+            /// speaker mode, which Reset throws on (measured, see the reset above) - that one cannot be
+            /// restored by this call, so it is said instead of thrown.
+            /// </summary>
+            private static string RestoreAudio(AudioConfiguration original)
+            {
+                try
+                {
+                    return "F1-audio-restore returned " + AudioSettings.Reset(original) + "; outputSampleRate is now " +
+                           AudioSettings.outputSampleRate;
+                }
+                catch (Exception ex)
+                {
+                    return "F1-audio-restore NOT restored (speakerMode=" + original.speakerMode + "): " + ex.Message +
+                           " - Unity's audio device stays as the probe left it until the game restarts";
                 }
             }
 
@@ -219,29 +243,49 @@ namespace Morgott.ContentTool.Dev
             }
         }
 
+        /// <summary>The request and the clip are both freed however the row ends - one of each per
+        /// audio probe used to outlive the run.</summary>
         private static IEnumerator Load(string path, Sound result)
         {
-            UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(new Uri(path).AbsoluteUri, TypeOf(path));
-            yield return www.SendWebRequest();
+            AudioClip clip = null;
+            using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(new Uri(path).AbsoluteUri, TypeOf(path)))
+            {
+                try
+                {
+                    yield return www.SendWebRequest();
+                    clip = Read(www, result);
+                    if (clip == null) yield break;
 
-            if (www.isNetworkError || www.isHttpError) { result.Info = "(request: " + www.error + ")"; yield break; }
+                    // Decoding is asynchronous even off a local file, so a sample count read in the
+                    // same frame reads 0 on a clip that decodes fine one frame later.
+                    float t0 = Time.realtimeSinceStartup;
+                    while (clip.loadState == AudioDataLoadState.Loading && Time.realtimeSinceStartup - t0 < 10f)
+                        yield return null;
+                    ReadSamples(clip, www.downloadedBytes, result);
+                }
+                finally { if (clip != null) UnityEngine.Object.Destroy(clip); }
+            }
+        }
+
+        private static AudioClip Read(UnityWebRequest www, Sound result)
+        {
+            if (www.isNetworkError || www.isHttpError) { result.Info = "(request: " + www.error + ")"; return null; }
 
             AudioClip clip = null;
             string err = null;
             try { clip = DownloadHandlerAudioClip.GetContent(www); }
             catch (Exception ex) { err = ex.GetType().Name + ": " + ex.Message; }
-            if (clip == null) { result.Info = "(no clip: " + (err ?? "GetContent returned null") + ")"; yield break; }
+            if (clip == null) result.Info = "(no clip: " + (err ?? "GetContent returned null") + ")";
+            return clip;
+        }
 
-            // Decoding is asynchronous even off a local file, so a sample count read in the same
-            // frame reads 0 on a clip that decodes fine one frame later.
-            float t0 = Time.realtimeSinceStartup;
-            while (clip.loadState == AudioDataLoadState.Loading && Time.realtimeSinceStartup - t0 < 10f)
-                yield return null;
+        private static void ReadSamples(AudioClip clip, ulong downloaded, Sound result)
+        {
             if (clip.samples <= 0)
             {
                 result.Info = "(loadState=" + clip.loadState + " samples=" + clip.samples +
-                              " len=" + clip.length.ToString("0.000") + "s bytes=" + www.downloadedBytes + ")";
-                yield break;
+                              " len=" + clip.length.ToString("0.000") + "s bytes=" + downloaded + ")";
+                return;
             }
 
             // A clip object is not PCM. The bank writer needs samples, so read them and prove they
