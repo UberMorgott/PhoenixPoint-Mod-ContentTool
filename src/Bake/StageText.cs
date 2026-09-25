@@ -227,11 +227,6 @@ namespace Morgott.ContentTool.Bake
             return "Lifecycle: " + stage + " cancelled; later stages were not run.";
         }
 
-        internal static string R32(string stage)
-        {
-            return "Lifecycle: project changed during " + stage + "; validate again.";
-        }
-
         /// <summary>The accepted tokens are exactly Validate, Bake, Apply, Verify, Package, All.</summary>
         internal static string R33(string stage) { return "Lifecycle: unknown stage '" + stage + "'."; }
 

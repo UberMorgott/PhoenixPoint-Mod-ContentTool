@@ -637,8 +637,13 @@ namespace Morgott.ContentTool.Bake
             }
 
             /// <summary>The report of the stage <see cref="Next"/> just handed out. Records what the later
-            /// stages' admission reads, then applies the four stop rules.</summary>
-            internal void Report(Admission ctx, StageReport r)
+            /// stages' admission reads, then applies the stop rules.</summary>
+            /// <param name="cancelRequested">the run's snapshot says the author pressed Cancel during this
+            /// stage. A producer that finished first keeps its verdict (rule 3 - the request never becomes
+            /// its outcome), but the CHAIN still stops: Validate has no cancellable instant at all and a
+            /// Bake can publish just before it reads the token, and reading only the disposition walked
+            /// `Run all` on into the next stage over a Cancel the author had pressed.</param>
+            internal void Report(Admission ctx, StageReport r, bool cancelRequested = false)
             {
                 if (Stopped || Current == null || r == null) return;
 
@@ -662,6 +667,9 @@ namespace Morgott.ContentTool.Bake
                 else if ((r.How == BakeDisposition.Refused && r.Applicable) ||
                          r.Outcome == GateOutcome.Fail) Stopped = true;
                 else if (r.Outcome == GateOutcome.Void && r.Applicable) Stopped = true;
+                // THE CANCEL THAT LOST THE RACE. Asked last, so a stage that stopped the chain on its own
+                // keeps its own words; the finished stage keeps its PASS and only the continuation ends.
+                else if (cancelRequested) { Stopped = true; Terminal = StageText.CancelledAfter(Current); }
             }
         }
 

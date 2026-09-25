@@ -124,9 +124,10 @@ namespace Morgott.ContentTool.Dev
             // cancel the producer lost the race to looks like, so answering it with no run at all left a
             // caller polling for an acknowledgement that will never come.
             if (!now.Busy) return Cancelled(false, now.RunId, false, "nothing is running.");
-            // The CHAIN is not touched here: it stops when the cancelled stage REPORTS `Cancelled` through
-            // the pump, which is the producer saying so - a cancel the producer lost the race to is a
-            // request, never an outcome (LifecycleRun's rule 3).
+            // The CHAIN is not touched here: it stops when the stage REPORTS through the pump - with R31
+            // when the producer says `Cancelled`, and with CancelledAfter when it finished first. A cancel
+            // the producer lost the race to is a request, never its outcome (LifecycleRun's rule 3), but the
+            // pump hands the request to `Sequence.Report` so no later stage is dispatched over it.
             LifecycleJob.Cancel();
             return Cancelled(true, now.RunId, LifecycleJob.Run.Latest.CancelAcknowledged, null);
         }
@@ -553,7 +554,8 @@ namespace Morgott.ContentTool.Dev
             if (chain == null) return;
             chain.Report(ctx, new LifecycleState.StageReport(
                                   LifecycleState.Outcome(now.Outcome, now.How), now.Result, now.How,
-                                  now.RestartRequired, now.Applicable, now.Eligibility));
+                                  now.RestartRequired, now.Applicable, now.Eligibility),
+                         now.CancelRequested);
             string next = chain.Next(Refresh(true));
             // A CHAIN THAT STOPPED HAS TO SAY SO SOMEWHERE. `Next` returns null both when the five stages
             // are done and when an ADMISSION refused one, and the refusal is only in `chain.Terminal` -

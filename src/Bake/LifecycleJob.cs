@@ -384,6 +384,9 @@ namespace Morgott.ContentTool.Bake
             }
             Worker(delegate
             {
+                // Its ONE cancellable instant: nothing below yields, and a request that arrived before the
+                // pool thread picked this up is answered here rather than lost under a PASS.
+                if (Stopped(id)) return;
                 LifecycleState.StageReport r = StageValidate.Run(on.Root,
                                                                  Path.Combine(on.Root, ContentMods.Manifest),
                                                                  on.Shipped, on.Roster);

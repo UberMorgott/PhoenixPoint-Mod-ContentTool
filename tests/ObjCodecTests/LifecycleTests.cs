@@ -229,8 +229,6 @@ internal static class LifecycleTests
                         "R30 - design:370");
         checks += Check(StageText.R31("Bake") == "Lifecycle: Bake cancelled; later stages were not run.",
                         "R31 - design:371");
-        checks += Check(StageText.R32("Bake") == "Lifecycle: project changed during Bake; validate again.",
-                        "R32 - design:372");
         checks += Check(StageText.R33("Frobnicate") == "Lifecycle: unknown stage 'Frobnicate'.",
                         "R33 - design:373");
         checks += Check(StageText.R34() ==
@@ -1681,6 +1679,9 @@ internal static class LifecycleTests
         // bundles for seconds while the request goes unread. It is the LAST cancellable instant there too.
         checks += Check(CancelBefore(jobText, "internal static string StartVerify(", "ReadBack.Verify("),
                         "and StartVerify answers a pending cancel before it starts reading back -> " + job);
+        checks += Check(CancelBefore(jobText, "internal static string StartValidate(", "StageValidate.Run("),
+                        "and StartValidate answers one before it validates - it had no pre-check at all -> " +
+                        job);
         // The whole path for it, through a real run: the request, the producer's Cancelled, the
         // acknowledgement rule 3 states, and the sequencer that stops on the snapshot those produced.
         ran.Clear();
@@ -1748,6 +1749,34 @@ internal static class LifecycleTests
                                 : Pass("ok");
                         }) == StageText.R31("Bake") && ran.Count == 2,
                         "an acknowledged cancellation stops the chain at that stage, with R31");
+
+        // A CANCEL THE PRODUCER LOST THE RACE TO still ends the CHAIN. Validate has no cancellable instant
+        // once it runs, and a Bake can publish before it reads the token: both finished PASS with
+        // `cancelAcknowledged false`, and `Run all` read only the disposition and dispatched the next stage.
+        foreach (string at in new[] { "Validate", "Bake" })
+        {
+            LifecycleState.Sequence seq = new LifecycleState.Sequence();
+            LifecycleState.Admission c = Fresh();
+            c.InRunAll = true;
+            ran.Clear();
+            for (string s = seq.Next(c); s != null; s = seq.Next(c))
+            {
+                ran.Add(s);
+                seq.Report(c, Pass("ok"), s == at);
+            }
+            checks += Check(seq.Stopped && seq.Terminal == StageText.CancelledAfter(at) &&
+                            ran[ran.Count - 1] == at &&
+                            (at == "Validate" ? c.ValidateOutcome : c.BakeOutcome) == GateOutcome.Pass,
+                            "a Cancel pressed during " + at + " that finished PASS stops Run all after it " +
+                            "with CancelledAfter, and the stage keeps its PASS");
+        }
+        LifecycleState.Sequence failed = new LifecycleState.Sequence();
+        LifecycleState.Admission fc = Fresh();
+        fc.InRunAll = true;
+        failed.Next(fc);
+        failed.Report(fc, Fail("Validate: FAIL - broken"), true);
+        checks += Check(failed.Stopped && failed.Terminal == "Validate: FAIL - broken",
+                        "a stage that stopped the chain on its own keeps its own words over the cancel");
 
         // ADMIT IS ASKED AS THE STAGE IS REACHED, NEVER UP FRONT (design:187): a context whose Verify would
         // be refused at the start still runs Validate, Bake and Apply first.
