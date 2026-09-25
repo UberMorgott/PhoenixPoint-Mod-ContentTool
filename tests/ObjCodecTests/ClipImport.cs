@@ -87,13 +87,21 @@ internal static class ClipImport
                refusal.Contains("between the bone 'hip' and its child 'head'") && refusal.Contains("Blender"),
                "an ANIMATED in-between node is refused by name: " + refusal);
 
+        // Exporters key EVERY node: a curve that only holds the helper's rest moves nothing and drops
+        // like any other non-bone channel, instead of refusing a file that plays fine.
+        var held = new List<SampledClip>();
+        GlbReader.Read(Assimp(false, true), held);
+        Assert(held.Count == 1 && held[0].LossyReason.Contains("1 channel(s) drive something that is not a bone"),
+               "a REST-HOLDING curve on the in-between node is dropped and counted, not refused: " +
+               (held.Count == 1 ? held[0].LossyReason : held.Count + " clip(s)"));
+
         return "in-between node folded: head " + ladder + " | -q key kept in one hemisphere | animated " +
                "in-between node refused by name";
     }
 
     /// <summary>The Assimp-shaped rig of <see cref="Between"/>; <paramref name="animateHelper"/> adds a
     /// curve on the in-between node itself.</summary>
-    private static byte[] Assimp(bool animateHelper)
+    private static byte[] Assimp(bool animateHelper, bool holdHelper = false)
     {
         var b = new Bin();
         int position = b.Vec(3, "VEC3", 0f, 0f, 0f, 1f, 0f, 0f, 0f, 2f, 0f);
@@ -107,6 +115,9 @@ internal static class ClipImport
         int times = b.Vec(3, "SCALAR", 0f, 0.5f, 1f);
         int move = b.Vec(3, "VEC3", 1f, 0f, 0f, 2f, 0f, 0f, 3f, 0f, 0f);
         int turn = b.Vec(3, "VEC4", 0f, 0f, 0f, 1f, 0f, -0.3826834f, 0f, -0.9238795f, 0f, 0.7071068f, 0f, 0.7071068f);
+        // The helper's OWN rest rotation, every key - the middle one written as -q, the same rotation.
+        int hold = b.Vec(3, "VEC4", 0f, 0f, 0.7071068f, 0.7071068f, 0f, 0f, -0.7071068f, -0.7071068f,
+                         0f, 0f, 0.70711f, 0.70711f);
 
         string json =
             "{\"asset\":{\"version\":\"2.0\"}," +
@@ -123,10 +134,12 @@ internal static class ClipImport
               ",\"NORMAL\":" + normal + ",\"JOINTS_0\":" + joints + ",\"WEIGHTS_0\":" + weights +
               "},\"indices\":" + indices + "}]}]," +
             "\"animations\":[{\"name\":\"nod\",\"samplers\":[" +
-              Sampler(times, move, "LINEAR") + "," + Sampler(times, turn, "LINEAR") + "]," +
+              Sampler(times, move, "LINEAR") + "," + Sampler(times, turn, "LINEAR") + "," +
+              Sampler(times, hold, "LINEAR") + "]," +
             "\"channels\":[{\"sampler\":0,\"target\":{\"node\":3,\"path\":\"translation\"}}," +
               "{\"sampler\":1,\"target\":{\"node\":1,\"path\":\"rotation\"}}" +
-              (animateHelper ? ",{\"sampler\":1,\"target\":{\"node\":2,\"path\":\"rotation\"}}" : "") + "]}]," +
+              (animateHelper ? ",{\"sampler\":1,\"target\":{\"node\":2,\"path\":\"rotation\"}}" : "") +
+              (holdHelper ? ",{\"sampler\":2,\"target\":{\"node\":2,\"path\":\"rotation\"}}" : "") + "]}]," +
             b.Json() + "}";
         return Container(json, b.Bytes());
     }

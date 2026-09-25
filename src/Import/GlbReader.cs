@@ -1143,8 +1143,12 @@ namespace Morgott.ContentTool.Import
                         path + "', which glTF 2.0 does not define; re-export the file rather than editing it by hand");
                 // An object BETWEEN two bones that moves on its own: its rest is folded into the bone
                 // below it (Hierarchy), but a curve on it has no bone to land on, and dropping it
-                // would freeze that part of the skeleton while the file shows it moving.
-                if (slotOfNode[node] < 0 && foldedInto != null && foldedInto[node] >= 0)
+                // would freeze that part of the skeleton while the file shows it moving. A curve that
+                // only HOLDS the object's rest value (exporters key every node) moves nothing: it drops
+                // with the other non-bone channels, since the rest is already in the fold.
+                if (slotOfNode[node] < 0 && foldedInto != null && foldedInto[node] >= 0 &&
+                    LeavesRest(Obj(Array_(Opt(root, "nodes"), "nodes")[node], "nodes[" + node + "]"),
+                               channel, samplers, path, at))
                 {
                     int below = foldedInto[node], upper = model.Nodes[below].Parent;
                     throw Bad("the file's animation '" + ClipName(animation, index) + "' moves '" +
@@ -1296,6 +1300,47 @@ namespace Morgott.ContentTool.Import
                 (droppedShapes > 0 ? "; " + droppedShapes.ToString(CultureInfo.InvariantCulture) +
                     " blend-shape channel(s) were dropped" : "");
             return clip;
+        }
+
+        /// <summary>Largest per-component difference that still counts as the rest value.</summary>
+        private const float RestTolerance = 1e-4f;
+
+        /// <summary>
+        /// Does this channel take its object OFF its rest translation/rotation/scale at any key? A
+        /// matrix-shaped rest cannot be compared per component, so it answers yes (the refusal stands).
+        /// </summary>
+        private bool LeavesRest(Dictionary<string, object> node, Dictionary<string, object> channel,
+                                List<object> samplers, string path, string at)
+        {
+            if (Opt(node, "matrix") != null) return true;
+            int sampler = Int(Get(channel, "sampler"), at + ".sampler");
+            if (sampler < 0 || sampler >= samplers.Count) return true;
+            string s = at + ".sampler";
+            Dictionary<string, object> curve = Obj(samplers[sampler], s);
+            bool rotation = path == "rotation";
+            float[] values = Floats(Int(Get(curve, "output"), s + ".output"), s + ".output",
+                                    rotation ? "VEC4" : "VEC3", -1);
+            float[] rest = rotation ? new[] { 0f, 0f, 0f, 1f } : Triple(node, path, path == "scale" ? 1f : 0f);
+            if (rotation && Opt(node, "rotation") is List<object> q && q.Count == 4)
+                for (int i = 0; i < 4; i++) rest[i] = Single(q[i], "nodes.rotation");
+            int width = rest.Length;
+            for (int k = 0; k + width <= values.Length; k += width)
+            {
+                if (rotation)
+                {
+                    // q and -q are the same rotation.
+                    float dot = 0f;
+                    for (int i = 0; i < 4; i++) dot += values[k + i] * rest[i];
+                    // 1 - |dot| ~ angle^2 / 8, so 1e-6 is ~0.16 degrees - a component off by the
+                    // translation tolerance (1e-4) moves the dot by ~1e-8 and still counts as rest.
+                    if (float.IsNaN(dot) || Math.Abs(dot) < 1f - 1e-6f) return true;
+                    continue;
+                }
+                for (int i = 0; i < 3; i++)
+                    if (!(Math.Abs(values[k + i] - rest[i]) <= RestTolerance * Math.Max(1f, Math.Abs(rest[i]))))
+                        return true;
+            }
+            return false;
         }
 
         private string NodeName(int node)
