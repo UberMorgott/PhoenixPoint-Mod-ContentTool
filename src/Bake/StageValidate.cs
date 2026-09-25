@@ -15,7 +15,9 @@ namespace Morgott.ContentTool.Bake
     /// author nothing (2026-09-06 run): a row's source file must be where the bake will look for it
     /// (Content\Textures\, Content\Meshes\ - the misplaced RR_soldier_albedo.png and the `.glb` that is not
     /// there), and a .glb that declares no armature is NOTED, because it can only bind onto a rigged
-    /// target by losing its weights.
+    /// target by losing its weights. The same placement question is asked of every OTHER declared type
+    /// too: a "video" row's clip under Content\Videos\, a "sounds" file under Content\Audio\Replace\, and
+    /// a "publish" asset whose source can be named without an import.
     ///
     /// WHAT STAYS WITH BAKE, deliberately: whether the shipped bundle holds an asset of that name and
     /// type, and whether the target is rigged at all. Both need the bundle open, which is the bake's job
@@ -41,6 +43,8 @@ namespace Morgott.ContentTool.Bake
                 ManifestFile mf = ManifestFile.Load(manifestPath);   // Manifest.cs:290 - E1/E2/E8
                 mf.Manifest.Validate();                              // :200 - E3 row, E4 duplicate target
                 foreach (ReplaceRow row in mf.Manifest.Replace) Sources(projectRoot, row, missing, noted);
+                Sounds(projectRoot, mf.Manifest.Root, missing);
+                Published(projectRoot, mf.Manifest.Root, missing);
                 // :43 - it must be COMPUTABLE, and the verdict SAYS it: a call whose result was thrown away
                 // proved nothing anyone could read, and a key that stopped matching B1's read as a run
                 // nobody could compare.
@@ -83,6 +87,16 @@ namespace Morgott.ContentTool.Bake
             // dropped by the one enumerator (ContentMods.Sources), so the author is looking at a file
             // that IS in the right folder and would be told it is missing.
             string collision;
+            // A VIDEO ROW NAMES A CLIP STEM under Content\Videos\ - the same folder and the same sentence
+            // `ct_video live` skips it with (VideoCatalog.LiveAt), which it did at play time, after a PASS.
+            if (!string.IsNullOrEmpty(row.Video))
+            {
+                if (ContentMods.SourceFile(root, "Videos", row.Video, VideoPatterns, out collision) == null)
+                    missing.Add(collision ??
+                                "'" + row.Video + "' is not a .webm/.mp4/.mov under Content\\Videos\\" +
+                                ContentMods.Elsewhere(root, row.Video, "Videos", VideoPatterns) + ".");
+                return;
+            }
             if (!string.IsNullOrEmpty(row.Texture))
             {
                 if (ContentMods.SourceFile(root, "Textures", row.Texture, ContentMods.TexturePatterns,
@@ -118,6 +132,77 @@ namespace Morgott.ContentTool.Bake
                               "would refuse it and an unrigged one takes it as-is.");
             }
             catch (Exception) { }
+        }
+
+        /// <summary>The video extensions Content\Videos\ is read with (ContentProject.ImportVideos).</summary>
+        private static readonly string[] VideoPatterns = { "*.webm", "*.mp4", "*.mov" };
+
+        /// <summary>
+        /// Every declared "sounds" file, where `ct_sound bake` reads it: Content\Audio\Replace\&lt;file&gt;,
+        /// by its FULL name (SoundReplace.Replacements throws on a missing one). An incomplete row is
+        /// ParseSounds' own refusal and is left to it - this stage answers placement, not shape.
+        /// </summary>
+        private static void Sounds(string root, IDictionary<string, object> tree, List<string> missing)
+        {
+            object value;
+            List<object> rows = tree.TryGetValue("sounds", out value) ? value as List<object> : null;
+            if (rows == null) return;
+            string dir = Path.Combine(Path.Combine(Path.Combine(root, "Content"), "Audio"), "Replace");
+            foreach (object item in rows)
+            {
+                string file = Member(item, "file");
+                if (!string.IsNullOrEmpty(file) && !File.Exists(Path.Combine(dir, file)))
+                    missing.Add("\"sounds\" names '" + file + "', and there is no such file in " +
+                                "Content\\Audio\\Replace\\.");
+            }
+        }
+
+        /// <summary>
+        /// Every "publish" asset whose SOURCE can be named without importing anything: "models/&lt;stem&gt;"
+        /// is Content\Models\&lt;stem&gt;.glb, and "textures/&lt;stem&gt;" is Content\Textures\ - unless the
+        /// project has a model, whose embedded images are baked under "textures/" too (ProjectBake's
+        /// material loop), and only the import can say which. Clips, materials and controllers are named
+        /// from inside a .glb and stay the bake's (and `ct_catalog apply`'s) to refuse.
+        /// </summary>
+        private static void Published(string root, IDictionary<string, object> tree, List<string> missing)
+        {
+            object value;
+            List<object> rows = tree.TryGetValue("publish", out value) ? value as List<object> : null;
+            if (rows == null) return;
+            string collision;
+            foreach (object item in rows)
+            {
+                string asset = Member(item, "asset");
+                if (string.IsNullOrEmpty(asset)) continue;
+                string path = asset.Replace('\\', '/').Trim('/');
+                int slash = path.IndexOf('/');
+                if (slash < 0 || path.IndexOf('/', slash + 1) >= 0) continue;
+                string kind = path.Substring(0, slash).ToLowerInvariant(), stem = path.Substring(slash + 1);
+                if (kind == "models" &&
+                    ContentMods.SourceFile(root, "Models", stem, ModelPatterns, out collision) == null)
+                    missing.Add(collision ??
+                                "\"publish\" asset '" + asset + "' is baked from Content\\Models\\" + stem +
+                                ".glb, and there is no such file" +
+                                ContentMods.Elsewhere(root, stem, "Models", ModelPatterns) + ".");
+                else if (kind == "textures" &&
+                         ContentMods.SourceFile(root, "Textures", stem, ContentMods.TexturePatterns,
+                                                out collision) == null &&
+                         (collision != null ||
+                          ContentMods.Sources(root, "Models", new List<string>(), ModelPatterns).Length == 0))
+                    missing.Add(collision ??
+                                "\"publish\" asset '" + asset + "' is baked from a .png/.jpg under " +
+                                "Content\\Textures\\, and there is none named '" + stem + "'" +
+                                ContentMods.Elsewhere(root, stem, "Textures", ContentMods.TexturePatterns) + ".");
+            }
+        }
+
+        private static readonly string[] ModelPatterns = { "*.glb" };
+
+        private static string Member(object row, string key)
+        {
+            Dictionary<string, object> members = row as Dictionary<string, object>;
+            object value;
+            return members != null && members.TryGetValue(key, out value) ? value as string : null;
         }
     }
 }

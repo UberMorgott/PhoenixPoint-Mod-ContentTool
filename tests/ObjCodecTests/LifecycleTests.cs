@@ -1310,6 +1310,54 @@ internal static class LifecycleTests
                             resolved == null,
                             "and with the collision gone the row PASSes AND resolves - the equivalence " +
                             "the Validate stage rests on, measured both ways on the same files");
+
+            // ---- EVERY DECLARED TYPE, not texture and mesh alone. A video row, a "sounds" file and a
+            // "publish" asset whose source is absent all PASSed Validate and failed later, at play time.
+            string videoRow = Path.Combine(root, "video.json");
+            File.WriteAllText(videoRow,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"replace\": [ { \"video\": \"intro\" } ] }");
+            string videoSaid = StageValidate.Run(root, videoRow, shipped, off).Verdict;
+            checks += Check(StageValidate.Run(root, videoRow, shipped, off).Outcome == GateOutcome.Fail &&
+                            videoSaid.IndexOf("'intro' is not a .webm/.mp4/.mov under Content\\Videos\\",
+                                              StringComparison.Ordinal) > 0,
+                            "a video row with no clip under Content\\Videos\\ FAILS Validate: " + videoSaid);
+            string videos = Path.Combine(Path.Combine(root, "Content"), "Videos");
+            Directory.CreateDirectory(videos);
+            File.WriteAllBytes(Path.Combine(videos, "Intro.webm"), new byte[] { 1 });
+            checks += Check(StageValidate.Run(root, videoRow, shipped, off).Outcome == GateOutcome.Pass,
+                            "and PASSes once the clip is there, stem matched case-blind like ct_video's");
+
+            string soundRow = Path.Combine(root, "sound.json");
+            File.WriteAllText(soundRow,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"sounds\": [ { \"media\": 12, \"file\": \"boom.mp3\" } ] }");
+            string soundSaid = StageValidate.Run(root, soundRow, shipped, off).Verdict;
+            checks += Check(soundSaid.StartsWith("Validate: FAIL - \"sounds\" names 'boom.mp3'",
+                                                 StringComparison.Ordinal),
+                            "a declared sound with no file in Content\\Audio\\Replace\\ FAILS: " + soundSaid);
+            string replaceDir = Path.Combine(Path.Combine(Path.Combine(root, "Content"), "Audio"), "Replace");
+            Directory.CreateDirectory(replaceDir);
+            File.WriteAllBytes(Path.Combine(replaceDir, "boom.mp3"), new byte[] { 1 });
+            checks += Check(StageValidate.Run(root, soundRow, shipped, off).Outcome == GateOutcome.Pass,
+                            "and PASSes with the file where ct_sound bake reads it");
+
+            string pubRow = Path.Combine(root, "pub.json");
+            File.WriteAllText(pubRow,
+                "{ \"id\": \"m\", \"bundle\": \"M.bundle\", \"publish\": [ " +
+                "{ \"key\": \"k1\", \"asset\": \"models/crate\" }, { \"key\": \"k2\", \"asset\": \"textures/decal\" }, " +
+                "{ \"key\": \"k3\", \"asset\": \"clips/walk\" } ] }");
+            string pubSaid = StageValidate.Run(root, pubRow, shipped, off).Verdict;
+            checks += Check(pubSaid.IndexOf("'models/crate' is baked from Content\\Models\\crate.glb",
+                                            StringComparison.Ordinal) > 0 &&
+                            pubSaid.IndexOf("'textures/decal'", StringComparison.Ordinal) > 0 &&
+                            pubSaid.IndexOf("clips/walk", StringComparison.Ordinal) < 0,
+                            "publish: a missing model and a texture with no possible source FAIL; a clip " +
+                            "(named inside a .glb) is the bake's to refuse: " + pubSaid);
+            string models = Path.Combine(Path.Combine(root, "Content"), "Models");
+            Directory.CreateDirectory(models);
+            File.WriteAllBytes(Path.Combine(models, "crate.glb"), rigged);
+            checks += Check(StageValidate.Run(root, pubRow, shipped, off).Outcome == GateOutcome.Pass,
+                            "with a model in the project, 'textures/decal' may be its embedded image - only " +
+                            "the import can say, so Validate does not guess");
         }
         finally { try { Directory.Delete(root, true); } catch (Exception) { } }
         return checks;
