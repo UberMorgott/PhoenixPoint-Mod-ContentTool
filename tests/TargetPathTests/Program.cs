@@ -2654,8 +2654,20 @@ internal static class Program
                 !DevLoop.Enabled && DevLoop.WatcherCount == 0,
                 refused);
 
+            // ---- a watcher error while OFF is not even recorded, like a watcher event.
+            DevLoop.Lost("overflow while off");
+            Check("S2-lost-off", DevLoop.TakeLost() == null,
+                "a dropped-events report with dev mode off must schedule no re-read");
+
             string on = DevLoop.On(root, null);
             Check("S2-on", DevLoop.Enabled && DevLoop.WatcherCount == 1, on);
+
+            // ---- a watcher that dropped events is handed over ONCE, so the re-read runs once.
+            DevLoop.Lost("InternalBufferOverflowException: Too many changes at once");
+            string lost = DevLoop.TakeLost();
+            Check("S2-lost-once",
+                lost != null && lost.IndexOf("Overflow", StringComparison.Ordinal) >= 0 && DevLoop.TakeLost() == null,
+                "first take=" + (lost ?? "(null)") + ", and the second take is empty");
 
             // ---- N rapid writes to ONE file are ONE reload, and only after the writes stop.
             DevLoop.Mark(loose, t0);

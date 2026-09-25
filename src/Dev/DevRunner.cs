@@ -143,6 +143,14 @@ namespace Morgott.ContentTool.Dev
                         string now = SceneManager.GetActiveScene().name;
                         if (now != scene) { scene = now; DevLoop.ForceScan(); }
 
+                        // A watcher that overflowed cannot say WHICH files changed, so every
+                        // file-backed binding is re-read - the same pass 'ct_dev reload' runs.
+                        string lost = DevLoop.TakeLost();
+                        if (lost != null)
+                            ContentToolMain.Say("ct_dev: the file watcher dropped events (" + lost +
+                                                ") - re-reading every binding: " +
+                                                (SeamSwap.ReapplyAll() ?? "no file-backed binding to re-apply"));
+
                         System.Collections.Generic.List<string> changed = DevLoop.Pump(DateTime.UtcNow);
                         if (changed != null)
                         {

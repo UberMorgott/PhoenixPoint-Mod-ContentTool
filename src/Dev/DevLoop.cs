@@ -73,6 +73,10 @@ namespace Morgott.ContentTool.Dev
         private static readonly HashSet<string> Dirty = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static DateTime dirtyAt;
 
+        /// <summary>Why a watcher dropped events (its Error, e.g. an internal buffer overflow), or
+        /// null. Inside <see cref="Gate"/> like the dirty set: a watcher thread writes it.</summary>
+        private static string lostWhy;
+
         private static DateTime nextScan;
         private static string activeSet = DefaultSet;
 
@@ -112,7 +116,7 @@ namespace Morgott.ContentTool.Dev
             Root = root;
             Enabled = true;
             activeSet = DefaultSet;
-            lock (Gate) { Dirty.Clear(); dirtyAt = default(DateTime); }
+            lock (Gate) { Dirty.Clear(); dirtyAt = default(DateTime); lostWhy = null; }
             nextScan = DateTime.MinValue;      // the first tick discovers, rather than waiting a scan
             Watch(root, warn);
             return "ct_dev ON, watching " + root + " (" + Scheduled + "); sets: " +
@@ -131,7 +135,7 @@ namespace Morgott.ContentTool.Dev
             Enabled = false;
             Root = null;
             activeSet = DefaultSet;
-            lock (Gate) { Dirty.Clear(); dirtyAt = default(DateTime); }
+            lock (Gate) { Dirty.Clear(); dirtyAt = default(DateTime); lostWhy = null; }
             return "ct_dev OFF - " + n + " watcher(s) disposed (" + Scheduled + ")";
         }
 
@@ -149,6 +153,13 @@ namespace Morgott.ContentTool.Dev
                 w.Changed += h;
                 w.Created += h;
                 w.Renamed += (s, e) => Mark(e.FullPath, DateTime.UtcNow);
+                // A burst larger than the watcher's buffer raises Error INSTEAD of the events it
+                // dropped, so without this an edited file silently stays the old one on screen.
+                w.Error += (s, e) =>
+                {
+                    Exception ex = e.GetException();
+                    Lost(ex == null ? "unknown watcher error" : ex.GetType().Name + ": " + ex.Message);
+                };
                 w.EnableRaisingEvents = true;
                 Watchers.Add(w);           // RETAINED, so Off() can dispose it
             }
@@ -171,6 +182,27 @@ namespace Morgott.ContentTool.Dev
             {
                 Dirty.Add(path);
                 dirtyAt = now;
+            }
+        }
+
+        /// <summary>
+        /// Called from a WATCHER THREAD when it dropped events: which files changed is unknown, so
+        /// the main thread re-reads every binding instead (<see cref="TakeLost"/>).
+        /// </summary>
+        internal static void Lost(string why)
+        {
+            if (!Enabled) return;
+            lock (Gate) { lostWhy = why ?? "unknown watcher error"; }
+        }
+
+        /// <summary>Called on the MAIN THREAD: the pending watcher error, once, or null.</summary>
+        internal static string TakeLost()
+        {
+            lock (Gate)
+            {
+                string why = lostWhy;
+                lostWhy = null;
+                return why;
             }
         }
 
