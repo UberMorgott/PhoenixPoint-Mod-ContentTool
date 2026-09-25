@@ -142,10 +142,14 @@ namespace Morgott.ContentTool.Bake
 
         // ---- The bake special cases, ProjectBake.cs:126-135. Their OUTCOME comes from the producer; the
         // wording is quoted so the panel can show it, never parsed to classify it.
+        // THE FOLDERS ARE THE IMPORTER'S (ContentProject.Load): Textures, Models (animated .glb) and Audio
+        // feed this project's own bundle. Content\Meshes\ does NOT - a mesh there is only read by a
+        // "replace" row - so a mesh dropped in with no row lands here, and the sentence has to say why.
         internal static string BakeNothingToBake()
         {
             return "nothing to bake - put .png/.jpg under Content\\Textures\\, " +
-                   ".glb under Content\\Models\\ or .wav under Content\\Audio\\";
+                   ".glb under Content\\Models\\ or .wav/.ogg/.mp3 under Content\\Audio\\; a mesh under " +
+                   "Content\\Meshes\\ is only baked through a \"replace\" row in ppcontent.json";
         }
 
         internal static string BakeNoOwnBundle()
