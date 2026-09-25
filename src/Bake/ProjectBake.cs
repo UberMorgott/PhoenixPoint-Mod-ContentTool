@@ -2231,11 +2231,14 @@ namespace Morgott.ContentTool.Bake
             BundleClaim c = BundleClaims.Find(bundleFile);
             if (c == null || !string.Equals(c.Mod, modId, StringComparison.Ordinal)) return null;
             // BundleLive stores the served path with forward slashes (Route7.cs:363); one spelling on
-            // both sides, case-blind like every other path comparison on this route.
-            // OutputClaim's spelling, the one every path comparison on this route shares.
-            return string.Equals(OutputClaim.Canonical(c.Path), OutputClaim.Canonical(copy),
-                                 StringComparison.OrdinalIgnoreCase)
-                ? StageText.R38(copy) : null;
+            // both sides (OutputClaim's), case-blind like every other path comparison on this route.
+            if (!string.Equals(OutputClaim.Canonical(c.Path), OutputClaim.Canonical(copy),
+                               StringComparison.OrdinalIgnoreCase)) return null;
+            // A CLAIM IS A REDIRECT, NOT A READER. Until the game actually loads the bundle nothing holds
+            // the copy open, and the next load takes whatever the file holds then - so a standing claim on
+            // a bundle that is not resident refused a bake (restart and all) for no reader at all. Asked
+            // LAST: it walks the live catalog, and the two cheap answers above settle most calls.
+            return BundleLive.ResidentNow(bundleFile) ? StageText.R38(copy) : null;
         }
 
         /// <summary>Distinct shipped bundles named by the project, in declaration order.
