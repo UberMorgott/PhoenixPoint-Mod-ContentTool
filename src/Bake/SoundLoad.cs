@@ -72,8 +72,12 @@ namespace Morgott.ContentTool.Bake
         {
             try
             {
-                string id = Project.Manifest.Parse(File.ReadAllText(Path.Combine(modDir, Project.ContentMods.Manifest))).Id;
-                if (!string.IsNullOrEmpty(id)) return id;
+                // The ROOT TREE, not Parse: Parse refuses a wrong-shaped "replace" block, and that must
+                // not change which bank wins - the sort key is the id alone.
+                object id;
+                if (Project.Manifest.Tree(File.ReadAllText(Path.Combine(modDir, Project.ContentMods.Manifest)),
+                                          Project.ContentMods.Manifest).TryGetValue("id", out id) &&
+                    id is string s && s.Length > 0) return s;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidDataException) { }
             return new DirectoryInfo(modDir).Name;
