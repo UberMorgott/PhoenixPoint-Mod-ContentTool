@@ -96,16 +96,31 @@ namespace Morgott.ContentTool.Bake
         /// <see cref="BundleClaims.RouteMoves"/> says "move" again for the POSTFIX pass - ModRoster runs
         /// BeforeSetEnabled-&gt;Reconciled AND AfterSetEnabled per press, so one checkbox cost TWO full
         /// blocking <see cref="ProjectBake.Run"/>s, both doomed the same way. Cleared by the bake that
-        /// finally succeeds ('ct_route7 apply', or the next session).
+        /// finally succeeds ('ct_project', the dashboard's Bake, 'ct_route7 apply', or the next session).
+        ///
+        /// ARMED BY THE CHECKBOX ALONE (<see cref="Toggle"/>), which is the double pass it exists for. Every
+        /// failed apply used to arm it - the dashboard's own Apply included - and the dashboard then refused
+        /// Apply with R29 while only a successful Apply could clear it: a dead end with no button out.
         /// </summary>
         private static readonly HashSet<string> Failed = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>READ-ONLY view of that set, for admission (R29). The set itself is never handed out and
-        /// there is no bypass: the only thing that clears an entry is <c>Failed.Remove(modId)</c> after a
-        /// successful Install (:405), exactly as before.</summary>
+        /// there is no bypass: an entry is cleared by a successful Install (<see cref="Applied"/>) or by a
+        /// bake whose patch route came out clean (<see cref="BakeCleared"/>).</summary>
         internal static bool IsFailed(string modId)
         {
             return !string.IsNullOrEmpty(modId) && Failed.Contains(modId);
+        }
+
+        /// <summary>MAIN, from <c>ProjectBake.Bake</c>: a bake that Apply itself would have accepted - not
+        /// refused, not cancelled, no patch failure (the same test <see cref="Applied"/> gates install on) -
+        /// is the fix R29 asks for, so the checkbox may bake again. Without it the only way out of the set
+        /// was an Apply, which R29 is what refuses.</summary>
+        internal static void BakeCleared(string modId, BakeResult r)
+        {
+            if (string.IsNullOrEmpty(modId) || r == null) return;
+            if (r.How != BakeDisposition.Refused && r.How != BakeDisposition.Cancelled && r.PatchFailed == 0)
+                Failed.Remove(modId);
         }
 
         /// <summary>
@@ -199,9 +214,19 @@ namespace Morgott.ContentTool.Bake
             string legacyEdit = project.Replace.Count > 0 ? LegacyDisk(project.Id) : null;
             if (legacyEdit != null) log.AppendLine(legacyEdit);
             else if (wantReplace && BundleClaims.RouteMoves(true, BundleLive.Holds(project.Id), on))
-                log.AppendLine(on && Failed.Contains(project.Id)
-                    ? StageText.R29(project.Id, RetryHint(modDir))   // ONE copy of R29, in StageText
-                    : on ? ApplyProject(name) : BundleLive.Uninstall(project.Id));
+            {
+                if (!on) log.AppendLine(BundleLive.Uninstall(project.Id));
+                else if (Failed.Contains(project.Id))
+                    log.AppendLine(StageText.R29(project.Id, RetryHint(modDir)));   // ONE copy of R29
+                else
+                {
+                    ApplyDisposition how;
+                    log.AppendLine(ApplyProject(name, null, out how));
+                    // THE PATCH ROUTE FAILED - the one outcome worth not repeating on the postfix pass.
+                    // A refusal (R37/R38, a contended claim) is a race, not a broken project.
+                    if (how == ApplyDisposition.BakeFailed) Failed.Add(project.Id);
+                }
+            }
             if (wantPublish)
             {
                 // Same as above, for route iii: an install carrying the OLD on-disk key publication is
@@ -481,8 +506,8 @@ namespace Morgott.ContentTool.Bake
                 // THE DISPOSITION, NOT THE COUNTS. R37 and R38 come back with ZERO failures - nothing was
                 // baked and nothing was wrong - so `patchFailed != 0` alone would fall straight through
                 // and install the STALE copies as if this bake had produced them. Counting a refusal as a
-                // patch failure instead is no better: that reaches Failed.Add below and blocks the mod's
-                // checkbox for the rest of the session over a race nobody caused.
+                // patch failure instead is no better: that reaches the checkbox's Failed.Add (Toggle) and
+                // blocks the mod for the rest of the session over a race nobody caused.
                 BakeResult baked = ProjectBake.Bake(projectRoot, true);   // claimHeld: this apply owns it
                 pre.AppendLine(baked.Terminal);
                 if (baked.How == BakeDisposition.Refused || baked.How == BakeDisposition.Cancelled)
@@ -490,8 +515,8 @@ namespace Morgott.ContentTool.Bake
                 int patchFailed = baked.PatchFailed;
                 if (patchFailed != 0)
                 {
+                    // BakeFailed, and NOT Failed.Add: only the checkbox arms the session block (Toggle).
                     how = ApplyDisposition.BakeFailed;
-                    Failed.Add(modId);
                     // No "press Ship again": this same text is printed by the console verb (Run:49) and by
                     // the mod-manager checkbox (Toggle:109), where there is no Ship button to press. The
                     // failures are NAMED above; a caller that has a next step adds its own.

@@ -138,7 +138,14 @@ namespace Morgott.ContentTool.Bake
             // EVERY path, exception included: an unhandled throw out of the bake is reported by ct_project
             // as "ct_project THREW" and the run ends - with the claim left standing, every later press in
             // that session would be refused for a run that is long over.
-            try { return Baked(p, pump, cacheKey); }
+            try
+            {
+                BakeResult r = Baked(p, pump, cacheKey);
+                // A CLEAN PATCH ROUTE IS THE FIX R29 ASKS FOR, from whichever door baked it - the console
+                // verb, the dashboard's Bake, or Apply's own re-bake.
+                Route7.BakeCleared(p.Id, r);
+                return r;
+            }
             catch (OperationCanceledException)
             {
                 return new BakeResult(0, 0, StageText.BakeCancelled(p.Id), BakeDisposition.Cancelled);

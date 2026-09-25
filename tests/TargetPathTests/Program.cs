@@ -2024,7 +2024,11 @@ internal static class Program
     ///
     /// Route7 needs UnityEngine and Addressables, so it cannot run here: the arm is over the SOURCE, the
     /// arrangement S13-wired, S17, S18 and S20 use. It asserts the SHAPE - the Refused/Cancelled return
-    /// stands between the bake and both `Failed.Add` and the install - not a sentence.
+    /// stands between the bake and both the BakeFailed disposition and the install - not a sentence.
+    ///
+    /// `Failed.Add` itself moved OUT of the apply (2026-09-26): the dashboard's own failed Apply armed the
+    /// session block and then R29 refused the one Apply that could clear it. Only the checkbox's Toggle arms
+    /// it now, and only on `BakeFailed` - which a Refused or Cancelled bake never reaches.
     /// </summary>
     private static void CancelPrecedenceArm()
     {
@@ -2033,16 +2037,21 @@ internal static class Program
         string text = file != null && File.Exists(file) ? File.ReadAllText(file) : null;
 
         int bake = text == null ? -1 : text.IndexOf("ProjectBake.Bake(projectRoot, true)", StringComparison.Ordinal);
-        int stop = text == null ? -1 : text.IndexOf("BakeDisposition.Cancelled", StringComparison.Ordinal);
-        int poison = text == null ? -1 : text.IndexOf("Failed.Add(modId)", StringComparison.Ordinal);
+        int stop = text == null ? -1 : text.IndexOf("BakeDisposition.Cancelled", bake < 0 ? 0 : bake,
+                                                    StringComparison.Ordinal);
+        int poison = text == null || stop < 0 ? -1
+                   : text.IndexOf("how = ApplyDisposition.BakeFailed", stop, StringComparison.Ordinal);
         int install = text == null ? -1 : text.IndexOf("BundleLive.Install(", StringComparison.Ordinal);
+        bool onlyToggleArms = text != null &&
+            text.IndexOf("Failed.Add(modId)", StringComparison.Ordinal) < 0 &&
+            Regex.IsMatch(text, "if\\s*\\(how\\s*==\\s*ApplyDisposition\\.BakeFailed\\)\\s*Failed\\.Add\\(");
 
         Check("S40-cancel-precedence",
-            bake >= 0 && stop > bake && poison > stop && install > stop &&
+            bake >= 0 && stop > bake && poison > stop && install > stop && onlyToggleArms &&
             Regex.IsMatch(text, "How\\s*==\\s*BakeDisposition\\.Refused\\s*\\|\\|\\s*" +
                                 "\\w+\\.How\\s*==\\s*BakeDisposition\\.Cancelled\\)\\s*\\r?\\n\\s*return"),
             "a Refused or Cancelled bake returns before `patchFailed` is read, so a cancelled run reaches " +
-            "neither Failed.Add nor the install -> " + file);
+            "neither BakeFailed (the only thing the checkbox arms Failed on) nor the install -> " + file);
     }
 
     /// <summary>
