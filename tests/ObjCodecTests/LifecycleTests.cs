@@ -1818,6 +1818,23 @@ internal static class LifecycleTests
                             "a Cancel pressed during " + at + " that finished PASS stops Run all after it " +
                             "with CancelledAfter, and the stage keeps its PASS");
         }
+        // ...BUT THE LAST STAGE HAS NO CONTINUATION: a Cancel lost to Package ends nothing, so the chain
+        // must not claim "later stages were not run" over a run that ran every stage.
+        {
+            LifecycleState.Sequence seq = new LifecycleState.Sequence();
+            LifecycleState.Admission c = Fresh();
+            c.InRunAll = true;
+            ran.Clear();
+            for (string s = seq.Next(c); s != null; s = seq.Next(c))
+            {
+                ran.Add(s);
+                seq.Report(c, Pass("ok"), s == "Package");
+            }
+            checks += Check(ran.Count == 5 && ran[4] == "Package" && !seq.Stopped && seq.Done &&
+                            seq.Terminal == "ok",
+                            "a Cancel lost to Package keeps Package's verdict and no 'later stages' line: ran " +
+                            string.Join(",", ran.ToArray()) + ", terminal '" + seq.Terminal + "'");
+        }
         LifecycleState.Sequence failed = new LifecycleState.Sequence();
         LifecycleState.Admission fc = Fresh();
         fc.InRunAll = true;

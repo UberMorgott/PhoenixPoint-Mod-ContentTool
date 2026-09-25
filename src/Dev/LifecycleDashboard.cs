@@ -560,7 +560,15 @@ namespace Morgott.ContentTool.Dev
             // A CHAIN THAT STOPPED HAS TO SAY SO SOMEWHERE. `Next` returns null both when the five stages
             // are done and when an ADMISSION refused one, and the refusal is only in `chain.Terminal` -
             // dropping it left a `Run all` that stopped at Verify's R28 reporting nowhere at all.
-            if (next == null) { if (chain.Stopped) log = chain.Terminal; return; }
+            // APPENDED, not substituted: a finished stage's own gate log (the lost-race cancel keeps its
+            // PASS) is what its row points at, and replacing it with the one-line terminal lost it.
+            if (next == null)
+            {
+                if (chain.Stopped && !string.IsNullOrEmpty(chain.Terminal) &&
+                    (log == null || log.IndexOf(chain.Terminal, StringComparison.Ordinal) < 0))
+                    log = string.IsNullOrEmpty(log) ? chain.Terminal : log + "\n" + chain.Terminal;
+                return;
+            }
             Dispatch(next);
         }
 

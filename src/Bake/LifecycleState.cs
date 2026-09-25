@@ -669,7 +669,10 @@ namespace Morgott.ContentTool.Bake
                 else if (r.Outcome == GateOutcome.Void && r.Applicable) Stopped = true;
                 // THE CANCEL THAT LOST THE RACE. Asked last, so a stage that stopped the chain on its own
                 // keeps its own words; the finished stage keeps its PASS and only the continuation ends.
-                else if (cancelRequested) { Stopped = true; Terminal = StageText.CancelledAfter(Current); }
+                // The LAST stage has no continuation: CancelledAfter would claim later stages were skipped
+                // over a run that ran every one of them.
+                else if (cancelRequested && Current != Stages[Stages.Length - 1])
+                { Stopped = true; Terminal = StageText.CancelledAfter(Current); }
             }
         }
 
