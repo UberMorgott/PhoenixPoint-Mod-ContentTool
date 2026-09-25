@@ -173,7 +173,7 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         private static string CacheKey(string projectRoot)
         {
-            List<string> shipped = new List<string>(), declared = new List<string>();
+            List<string> shipped = new List<string>();
             // THE CENSUS SURVIVES EXACTLY THE ROWS Load's DOES. This runs BEFORE the try that Load sits
             // in, so a throw here kills the whole bake with nothing loaded - and ct_project reports
             // "ct_project THREW" over one half-typed row that Load counts as a refusal and bakes past
@@ -184,13 +184,7 @@ namespace Morgott.ContentTool.Bake
             ContentProject.Declared d;
             try { d = ContentProject.LoadDeclared(projectRoot, new List<string>()); }
             catch (InvalidDataException) { return Project.PatchCache.Key(projectRoot, shipped); }
-            foreach (ShippedReplacement r in d.Replace)
-            {
-                if (!string.IsNullOrEmpty(r.video)) continue;
-                if (declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) continue;
-                declared.Add(r.bundle);
-                shipped.Add(BakeSelfCheck.ShippedBundlePath(r.bundle));
-            }
+            foreach (string b in Targets(d.Replace)) shipped.Add(BakeSelfCheck.ShippedBundlePath(b));
             return Project.PatchCache.Key(projectRoot, shipped);
         }
 
@@ -2230,15 +2224,10 @@ namespace Morgott.ContentTool.Bake
             if (c == null || !string.Equals(c.Mod, modId, StringComparison.Ordinal)) return null;
             // BundleLive stores the served path with forward slashes (Route7.cs:363); one spelling on
             // both sides, case-blind like every other path comparison on this route.
-            return string.Equals(Slashed(c.Path), Slashed(copy), StringComparison.OrdinalIgnoreCase)
+            // OutputClaim's spelling, the one every path comparison on this route shares.
+            return string.Equals(OutputClaim.Canonical(c.Path), OutputClaim.Canonical(copy),
+                                 StringComparison.OrdinalIgnoreCase)
                 ? StageText.R38(copy) : null;
-        }
-
-        private static string Slashed(string path)
-        {
-            if (string.IsNullOrEmpty(path)) return "";
-            try { return Path.GetFullPath(path).Replace('/', '\\').TrimEnd('\\'); }
-            catch (Exception) { return path.Replace('/', '\\').TrimEnd('\\'); }
         }
 
         /// <summary>Distinct shipped bundles named by the project, in declaration order.
@@ -2251,20 +2240,25 @@ namespace Morgott.ContentTool.Bake
         /// <summary>INTERNAL since Verify: `ReadBack.Verify` reads the same census off the imported
         /// project (it constructs no BundleBaker), and a second copy of this dedup is exactly the drift
         /// the note above describes.</summary>
-        internal static List<string> Bundles(ContentProject p)
+        internal static List<string> Bundles(ContentProject p) { return Targets(p.Replace); }
+
+        /// <summary>THE CENSUS, and its only copy: B1's key (<see cref="CacheKey"/>), <c>Route7.Observe</c>,
+        /// <c>LifecycleJob.Capture</c> and the patch itself all name the declared bundles through this, so a
+        /// term that drifts in one of them - a video row counted, an Ordinal dedup - can no longer produce a
+        /// key the other side's observation never matches. It was four hand-copied loops.
+        ///
+        /// Video entries carry no bundle - the cutscenes are loose files behind Catalog.json, registered live
+        /// by ct_video. Without the skip they would enter the list as "" and the baker would be handed an
+        /// empty shipped-bundle path.</summary>
+        internal static List<string> Targets(IEnumerable<ShippedReplacement> rows)
         {
-            List<string> names = new List<string>();
-            foreach (ShippedReplacement r in p.Replace)
+            List<string> declared = new List<string>();
+            foreach (ShippedReplacement r in rows)
             {
-                // Video entries carry no bundle - the cutscenes are loose files behind Catalog.json,
-                // registered live by ct_video. Without this they would enter the list as "" and the baker
-                // would be handed an empty shipped-bundle path.
                 if (!string.IsNullOrEmpty(r.video)) continue;
-                string bundle = r.bundle;
-                if (!names.Exists(n => string.Equals(n, bundle, StringComparison.OrdinalIgnoreCase)))
-                    names.Add(bundle);
+                if (!declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) declared.Add(r.bundle);
             }
-            return names;
+            return declared;
         }
 
         /// <summary>

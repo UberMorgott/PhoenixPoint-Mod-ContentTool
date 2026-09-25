@@ -103,12 +103,8 @@ namespace Morgott.ContentTool.Bake
                                   " - fix ppcontent.json and run it again."
                 };
             }
-            List<string> declared = new List<string>();
-            foreach (ShippedReplacement r in d.Replace)
-            {
-                if (!string.IsNullOrEmpty(r.video)) continue;      // served live by ct_video, never patched
-                if (!declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) declared.Add(r.bundle);
-            }
+            // THE ONE CENSUS - video rows are served live by ct_video and never patched.
+            List<string> declared = ProjectBake.Targets(d.Replace);
 
             Captured on = new Captured
             {

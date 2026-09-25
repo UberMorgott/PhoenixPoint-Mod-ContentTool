@@ -142,12 +142,7 @@ namespace Morgott.ContentTool.Bake
                                                      string projectRoot)
         {
             string patched = ContentToolMain.PatchedDir(project.Id);
-            List<string> declared = new List<string>();
-            foreach (Morgott.ContentTool.Project.ShippedReplacement r in project.Replace)
-            {
-                if (!string.IsNullOrEmpty(r.video)) continue;
-                if (!declared.Contains(r.bundle, StringComparer.OrdinalIgnoreCase)) declared.Add(r.bundle);
-            }
+            List<string> declared = ProjectBake.Targets(project.Replace);     // the ONE census
 
             // FRESHNESS, not existence (S3). "Every declared file is there" said nothing about WHICH
             // version of the game, of this mod or of ContentTool's own bake format produced them, so a game
@@ -261,15 +256,12 @@ namespace Morgott.ContentTool.Bake
             // while modDir arrives as the mod manager spelled it - a trailing '\' or '/', or mixed
             // separators, made a real Mods\<name> project print "restart the game - this mod is not
             // in Mods\", which is the one sentence that is never true for it.
-            return string.Equals(Norm(ContentToolMain.ProjectDir(folder)), Norm(modDir),
-                                 StringComparison.OrdinalIgnoreCase)
+            return string.Equals(OutputClaim.Canonical(ContentToolMain.ProjectDir(folder)),
+                                 OutputClaim.Canonical(modDir), StringComparison.OrdinalIgnoreCase)
                 ? "'ct_route7 apply " + folder + "'."
                 : "restart the game - this mod is not in Mods\\, so no 'ct_route7 apply <name>' " +
                   "argument reaches " + modDir + " and the checkbox will not re-bake it this session.";
         }
-
-        /// <summary>One spelling of a directory path, so two of them can be compared.</summary>
-        private static string Norm(string path) { return Path.GetFullPath(path).TrimEnd('\\', '/'); }
 
         /// <summary>
         /// Route iii's half of <see cref="LegacyDisk"/>: keys an OLDER ContentTool wrote into the

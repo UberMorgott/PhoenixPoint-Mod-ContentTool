@@ -2069,28 +2069,30 @@ internal static class Program
     /// </summary>
     private static void OneCensusArm()
     {
+        // ONE COPY NOW (2026-09-26): the loop lives in ProjectBake.Targets and B1, Observe and Capture
+        // call it, so the arm pins the one body and that nobody grew a second one.
         string src = SrcRoot();
-        string[] files = { "ProjectBake.cs", "Route7.cs", "LifecycleJob.cs" };
-        bool all = src != null;
-        foreach (string f in files)
-        {
-            string path = src == null ? null : Path.Combine(src, "Bake", f);
-            string text = path != null && File.Exists(path) ? File.ReadAllText(path) : null;
-            all = all && text != null && Regex.IsMatch(Strip(text),
-                @"foreach\s*\(\s*[\w\.]*ShippedReplacement\s+r\s+in\s+[^\r\n]*\)\s*\r?\n\s*\{\s*" +
-                @"if\s*\(\s*!\s*string\.IsNullOrEmpty\(r\.video\)\s*\)\s*continue;\s*" +
-                @"if\s*\(\s*!?\s*declared\.Contains\(r\.bundle,\s*StringComparer\.OrdinalIgnoreCase\)\s*\)");
-        }
-
         string bake = src == null ? null : Path.Combine(src, "Bake", "ProjectBake.cs");
         string bakeText = bake != null && File.Exists(bake) ? File.ReadAllText(bake) : null;
+        const string loop =
+            @"foreach\s*\(\s*[\w\.]*ShippedReplacement\s+r\s+in\s+[^\r\n]*\)\s*\r?\n\s*\{\s*" +
+            @"if\s*\(\s*!\s*string\.IsNullOrEmpty\(r\.video\)\s*\)\s*continue;\s*" +
+            @"if\s*\(\s*!?\s*declared\.Contains\(r\.bundle,\s*StringComparer\.OrdinalIgnoreCase\)\s*\)";
+        bool one = bakeText != null && Regex.Matches(Strip(bakeText), loop).Count == 1 &&
+                   Regex.IsMatch(Strip(bakeText), @"Targets\(d\.Replace\)");
+        foreach (string f in new[] { "Route7.cs", "LifecycleJob.cs" })
+        {
+            string path = src == null ? null : Path.Combine(src, "Bake", f);
+            string text = path != null && File.Exists(path) ? Strip(File.ReadAllText(path)) : null;
+            one = one && text != null && text.Contains("ProjectBake.Targets(") &&
+                  !Regex.IsMatch(text, loop);
+        }
 
         Check("S41-one-census",
-            all && bakeText != null &&
-            Regex.IsMatch(Strip(bakeText), @"LoadDeclared\(projectRoot,\s*new List<string>\(\)\)"),
-            "B1, Observe and Capture take the SAME census - video rows skipped, bundles deduped " +
-            "case-blind - and B1 hands LoadDeclared a refusal sink, so the rows Load counts do not " +
-            "kill the key -> " + bake);
+            one && Regex.IsMatch(Strip(bakeText), @"LoadDeclared\(projectRoot,\s*new List<string>\(\)\)"),
+            "B1, Observe and Capture take the SAME census - ProjectBake.Targets, video rows skipped, " +
+            "bundles deduped case-blind - and B1 hands LoadDeclared a refusal sink, so the rows Load " +
+            "counts do not kill the key -> " + bake);
     }
 
     private static void StopEventArm()
