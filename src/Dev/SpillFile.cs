@@ -29,18 +29,31 @@ namespace Morgott.ContentTool.Dev
             for (int n = 1; ; n++)
             {
                 string path = n == 1 ? stem + ".txt" : stem + "-" + n + ".txt";
+                FileStream stream;
                 try
                 {
-                    using (FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write,
-                                                              FileShare.None))
-                    using (StreamWriter writer = new StreamWriter(stream))
-                        writer.Write(msg ?? "");
-                    return path;
+                    stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
                 }
                 // The name was taken, or something else refused the create. Only the first is worth a
                 // retry, and the two are not distinguishable by type - so the counter is bounded and
                 // whatever it was reaches the caller instead of spinning.
-                catch (IOException) when (n < 1000 && File.Exists(path)) { }
+                catch (IOException) when (n < 1000 && File.Exists(path)) { continue; }
+
+                // Only the CREATE retries. A write that fails after it (a full disk) used to land in
+                // the catch above too - the half-written file exists, so it read as "name taken" and
+                // left up to 1000 partial files behind. The file is ours: remove it and say why.
+                try
+                {
+                    using (stream)
+                    using (StreamWriter writer = new StreamWriter(stream))
+                        writer.Write(msg ?? "");
+                    return path;
+                }
+                catch (Exception)
+                {
+                    try { File.Delete(path); } catch (Exception) { }
+                    throw;
+                }
             }
         }
     }
