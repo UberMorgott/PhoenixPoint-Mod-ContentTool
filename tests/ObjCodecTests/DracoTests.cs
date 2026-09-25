@@ -32,7 +32,61 @@ internal static class DracoTests
         string normals = GeometricNormals();
         string rig = Rigged();
         string hostile = Hostile();
-        return "DRACO import PASS\n  " + uv + "\n  " + normals + "\n  " + rig + "\n  " + hostile;
+        string normalized = Normalized();
+        return "DRACO import PASS\n  " + uv + "\n  " + normals + "\n  " + rig + "\n  " + hostile + "\n  " + normalized;
+    }
+
+    // ------------------------------------------------------------------ normalized integers
+
+    /// <summary>
+    /// A Draco attribute stored as whole numbers under a NORMALIZED accessor: the decoder hands back
+    /// the integers it stored, and the accessor says they mean fractions - the bufferView path
+    /// divides (Value()), so the Draco path must too. Built here: a sequential mesh, one triangle,
+    /// POSITION as plain floats and TEXCOORD_0 as UNSIGNED_SHORT normalized, both GENERIC (stored
+    /// verbatim), so the only arithmetic in the loop is the division under test.
+    /// u = 65535 -> 1.0; unfixed it reads 65535 and the texture tiles sixty-five thousand times.
+    /// </summary>
+    private static string Normalized()
+    {
+        var stream = new List<byte>();
+        foreach (char c in "DRACO") stream.Add((byte)c);
+        stream.Add(2); stream.Add(2);                 // bitstream 2.2
+        stream.Add(1); stream.Add(0);                 // MESH, SEQUENTIAL
+        stream.Add(0); stream.Add(0);                 // no metadata
+        Leb(stream, 1); Leb(stream, 3);               // one face, three points
+        stream.Add(1);                                // uncompressed indices, one byte each
+        stream.Add(0); stream.Add(1); stream.Add(2);
+        stream.Add(1);                                // one attribute decoder
+        Leb(stream, 2);                               // holding two attributes
+        stream.Add(0); stream.Add(9); stream.Add(3); stream.Add(0); Leb(stream, 0);   // POSITION float32 x3
+        stream.Add(3); stream.Add(4); stream.Add(2); stream.Add(1); Leb(stream, 1);   // TEX_COORD uint16 x2 normalized
+        stream.Add(0); stream.Add(0);                 // both GENERIC
+        foreach (float v in new[] { 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f }) stream.AddRange(BitConverter.GetBytes(v));
+        foreach (ushort v in new ushort[] { 65535, 0, 0, 65535, 32768, 32768 }) stream.AddRange(BitConverter.GetBytes(v));
+        while (stream.Count % 4 != 0) stream.Add(0);
+        byte[] bin = stream.ToArray();
+
+        string json =
+            "{\"asset\":{\"version\":\"2.0\"},\"extensionsUsed\":[\"" + Draco.Extension + "\"]," +
+            "\"extensionsRequired\":[\"" + Draco.Extension + "\"],\"scenes\":[{\"nodes\":[0]}],\"scene\":0," +
+            "\"nodes\":[{\"name\":\"tri\",\"mesh\":0}]," +
+            "\"meshes\":[{\"name\":\"tri\",\"primitives\":[{\"attributes\":{\"POSITION\":0,\"TEXCOORD_0\":1}," +
+              "\"indices\":2,\"extensions\":{\"" + Draco.Extension + "\":{\"bufferView\":0," +
+              "\"attributes\":{\"POSITION\":0,\"TEXCOORD_0\":1}}}}]}]," +
+            "\"accessors\":[{\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"}," +
+              "{\"componentType\":5123,\"normalized\":true,\"count\":3,\"type\":\"VEC2\"}," +
+              "{\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}]," +
+            "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":" + bin.Length + "}]," +
+            "\"buffers\":[{\"byteLength\":" + bin.Length + "}]}";
+        SkinnedModel model = GlbReader.Read(ClipImport.Container(json, bin));
+
+        // Unity's V is mirrored (GlbCodec.ConvertUv), so glTF (1, 0) arrives as (1, 1).
+        ObjVector2 first = model.Uv0[0], last = model.Uv0[2];
+        Assert(Math.Abs(first.X - 1f) < 1e-6 && Math.Abs(first.Y - 1f) < 1e-6 &&
+               Math.Abs(last.X - 32768f / 65535f) < 1e-6,
+               "a normalized UNSIGNED_SHORT Draco texcoord reads as the fraction it means: (" +
+               F(first.X) + ", " + F(first.Y) + ") ... u=" + F(last.X));
+        return "normalized Draco texcoord: 65535 -> " + F(first.X) + ", 32768 -> " + F(last.X);
     }
 
     // ------------------------------------------------------------------ the trust boundary

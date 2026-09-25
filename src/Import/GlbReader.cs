@@ -2213,7 +2213,13 @@ namespace Morgott.ContentTool.Import
                         components.ToString(CultureInfo.InvariantCulture) + " values but the file's Draco " +
                         "data holds " + fromDraco.Length.ToString(CultureInfo.InvariantCulture) +
                         "; the file is corrupt, so download or export it again");
-                return fromDraco;
+                // Draco hands back an integer attribute as the WHOLE NUMBERS it stored; a normalized
+                // accessor means those are fractions, and Value() would have divided them had they
+                // come off a bufferView. Same divisors, so both routes read one file one way.
+                if (!normalized || component == Gltf.Float) return fromDraco;
+                var scaled = new float[fromDraco.Length];
+                for (int i = 0; i < scaled.Length; i++) scaled[i] = Normalized(fromDraco[i], component);
+                return scaled;
             }
 
             // The buffer is resolved BEFORE the array is allocated, so a file that merely claims six
@@ -2343,17 +2349,33 @@ namespace Morgott.ContentTool.Import
         /// </summary>
         private static float Value(byte[] data, int at, int component, int format, bool normalized, string what)
         {
+            float raw;
             switch (format)
             {
                 case Gltf.Float: return BitConverter.ToSingle(data, at + component * 4);
                 case Gltf.UnsignedInt: return BitConverter.ToUInt32(data, at + component * 4);
-                case Gltf.UnsignedShort: return normalized ? BitConverter.ToUInt16(data, at + component * 2) / 65535f : BitConverter.ToUInt16(data, at + component * 2);
-                case Gltf.Short: return normalized ? Math.Max(BitConverter.ToInt16(data, at + component * 2) / 32767f, -1f) : BitConverter.ToInt16(data, at + component * 2);
-                case Gltf.UnsignedByte: return normalized ? data[at + component] / 255f : data[at + component];
-                case Gltf.Byte: return normalized ? Math.Max((sbyte)data[at + component] / 127f, -1f) : (sbyte)data[at + component];
+                case Gltf.UnsignedShort: raw = BitConverter.ToUInt16(data, at + component * 2); break;
+                case Gltf.Short: raw = BitConverter.ToInt16(data, at + component * 2); break;
+                case Gltf.UnsignedByte: raw = data[at + component]; break;
+                case Gltf.Byte: raw = (sbyte)data[at + component]; break;
                 default:
                     throw Bad(what + " uses number format " + format.ToString(CultureInfo.InvariantCulture) +
                         ", which glTF does not define; the file is corrupt, so re-export it");
+            }
+            return normalized ? Normalized(raw, format) : raw;
+        }
+
+        /// <summary>One normalized integer as the fraction it means - the divisors of
+        /// KHR_mesh_quantization's "Decoding Quantized Data" table, signed forms clamped at -1.</summary>
+        private static float Normalized(float raw, int format)
+        {
+            switch (format)
+            {
+                case Gltf.UnsignedShort: return raw / 65535f;
+                case Gltf.Short: return Math.Max(raw / 32767f, -1f);
+                case Gltf.UnsignedByte: return raw / 255f;
+                case Gltf.Byte: return Math.Max(raw / 127f, -1f);
+                default: return raw;
             }
         }
 
