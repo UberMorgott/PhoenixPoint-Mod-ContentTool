@@ -3089,6 +3089,20 @@ internal static class Program
               Regex.IsMatch(src, @"if \(!entered\) \{ open = false; return ""ct_bench: nothing to close"),
               "cleanup hangs off the lifecycle too, and Close is idempotent");
 
+        // HOLE 3b: after a PARTIAL close `open` is false and `entered` true; the hotkey asked `open` and
+        // called Open, which cleared the restore lists and re-snapshotted the bench's own state.
+        Check("S37-reopen",
+              Regex.IsMatch(src, @"if \(entered\)\s*\{\s*string \w+ = Close\(\);\s*if \(entered\)") &&
+              Regex.IsMatch(src, @"message = entered \? Close\(\) : Open\(\);") &&
+              !Regex.IsMatch(src, @"open \? Close\(\) : Open\(\)"),
+              "Open finishes an unfinished close first (or refuses), and the hotkey toggles on `entered`");
+        // HOLE 3c: one catch around the whole frame read ANY bench bug as "legacy Input is disabled" and
+        // switched off the hotkey and the level watch for the session. Only the input probe may do that.
+        Check("S37-inputprobe",
+              Regex.IsMatch(src, @"try \{ pressed = Chord\(\); \}\s*catch \(Exception ex\)\s*\{[\s\S]{0,300}?inputBroken = true;") &&
+              Regex.Matches(src, @"inputBroken = true;").Count == 1,
+              "inputBroken is set by the input probe's catch and nowhere else");
+
         // HOLE 5: Close forced the Geoscape scene and DefaultLightingSettings unconditionally - which
         // is a CHANGE unless that is what was there. Both are readable, so both are snapshotted.
         Check("S37-snapshot",

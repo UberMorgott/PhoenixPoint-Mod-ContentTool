@@ -1085,6 +1085,10 @@ namespace Morgott.ContentTool.Tactical
         /// <summary>Every weapon whose fit is live this session, as "&lt;id&gt; @ &lt;manifest path&gt;".</summary>
         public static List<string> Fitted() { return new List<string>(dialled.Keys); }
 
+        /// <summary>The same keys, live and uncopied - for a caller that only looks them up, every frame
+        /// (the bench's LateUpdate and panel), where <see cref="Fitted"/> made a new list each time.</summary>
+        internal static IEnumerable<string> FittedKeys { get { return dialled.Keys; } }
+
         /// <summary>What is on screen right now for one key - and it IS what is on screen: position is
         /// the node's own, the rest is the state the manifest would be written from.</summary>
         public static bool State(string key, out Vector3 position, out Vector3 euler, out float scale,

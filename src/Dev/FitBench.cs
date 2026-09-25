@@ -399,6 +399,19 @@ namespace Morgott.ContentTool.Dev
 
         private static string Open()
         {
+            // A CLOSE THAT DID NOT FINISH IS FINISHED FIRST. After a partial close `open` is false but
+            // `entered` is still true and the restore lists still hold what could not be put back; an
+            // Open straight on top cleared those lists and re-snapshotted OUR altered state as "what
+            // was there", so the next close restored the bench instead of the game. Retry the close,
+            // and refuse to open over anything it still cannot undo.
+            if (entered)
+            {
+                string undone = Close();
+                if (entered)
+                    return "ct_bench REFUSED: the last close did not finish, and opening over it would " +
+                           "forget what it still has to put back. " + undone;
+            }
+
             // FIRST, before anything is touched: is there a level, and is it PLAYING? A level that is
             // Loading or Unloading (Level.State, Base\Levels\Level.cs) is a level whose scene objects
             // are being built or destroyed underneath us - posing a soldier in it is at best pointless
@@ -587,39 +600,43 @@ namespace Morgott.ContentTool.Dev
             // them. The transform it multiplies is re-asserted by the next Posed, and by Close either
             // way.
             viewScale = 1f; scaleText = "1.00";
-            try { if (bay != null && bay.SceneRoot != null) bay.SceneRoot.rotation = sceneRotation; }
-            catch (Exception) { }
-            try
+            // Each step still its own try - through Step, so a step that fails is NAMED in the answer
+            // instead of swallowed under a reply that says everything was reset.
+            List<string> failed = new List<string>();
+            Step(failed, "the bay's rotation", () =>
+            {
+                if (bay != null && bay.SceneRoot != null) bay.SceneRoot.rotation = sceneRotation;
+            });
+            Step(failed, "the squad bay scene", () =>
             {
                 if (level != null && level.SceneReferences != null)
                     level.SceneReferences.ActivateScene(GeoSceneReferences.ActiveSceneReference.SquadBay);
-            }
-            catch (Exception) { }
-            try
+            });
+            Step(failed, "the lighting", () =>
             {
                 if (lighting != null && level != null && level.View != null)
                     lighting.SetLighting(level.View.EditSolderLightingSettings, null);
-            }
-            catch (Exception) { }
-            try { Hide(); } catch (Exception) { }
+            });
+            Step(failed, "the canvases", Hide);
             // The transport is a knob like the others: RESET VIEW puts the animator's speed back and
             // stands the unit in the weapon's own idle again, then re-binds against the live rig.
-            try { FitAnim.Release(); } catch (Exception) { }
-            try
+            Step(failed, "the animation transport", FitAnim.Release);
+            Step(failed, "the animation rebind", () =>
             {
                 if (bay != null && bay.CharacterBuilder != null)
                     FitAnim.Bind(bay.CharacterBuilder, animActions, held, Bodyparts(), ModClips(),
                                  PrototypeClips());
-            }
-            catch (Exception) { }
+            });
             // The pose re-asserted through the ordinary path, so the preview scale just put back to 1
             // is actually ON SCREEN rather than waiting for the next rebuild.
-            try { Posed(); } catch (Exception) { }
-            try { TakeCamera(); } catch (Exception) { }
-            try { Reframe(); } catch (Exception) { }
+            Step(failed, "the pose", Posed);
+            Step(failed, "the camera", TakeCamera);
+            Step(failed, "the framing", Reframe);
             return "ct_bench: view RESET - zoom, lift, orbit, the animation transport and the bay's " +
                    "own rotation back to default, scene and lighting re-asserted, camera re-taken " +
                    "and re-measured." +
+                   (failed.Count == 0 ? "" : " BUT " + failed.Count + " step(s) FAILED: " +
+                                             string.Join("; ", failed.ToArray()) + ".") +
                    (framed ? "" : " Still NOT FRAMED: nothing with a renderer is standing there.");
         }
 
@@ -1515,6 +1532,8 @@ namespace Morgott.ContentTool.Dev
         /// The ROOT is skipped deliberately: the root is left at identity by the fit (see FitNode) and
         /// is the frame, not the thing that moves.
         /// </summary>
+        private static readonly List<MeshFilter> meshScratch = new List<MeshFilter>();
+
         private static Transform LiveMesh()
         {
             if (weapon == null || bay == null || bay.CharacterBuilder == null) return null;
@@ -1527,7 +1546,10 @@ namespace Morgott.ContentTool.Dev
                     if (a == null || a.AddonDef != weapon) continue;
                     Transform root = a.VisualRoot;
                     if (root == null) continue;
-                    foreach (MeshFilter mf in root.GetComponentsInChildren<MeshFilter>())
+                    // Into a reused list: this runs every LateUpdate, and the array overload was a fresh
+                    // allocation per frame for as long as the bench is open.
+                    root.GetComponentsInChildren(meshScratch);
+                    foreach (MeshFilter mf in meshScratch)
                         if (mf != null && mf.sharedMesh != null && mf.transform != root)
                             return mf.transform;
                 }
@@ -1553,7 +1575,13 @@ namespace Morgott.ContentTool.Dev
             List<ItemDef> parts = new List<ItemDef>();
             if (d == null) return parts;
             try { foreach (TacticalItemDef p in d.GetTemplateBodyparts()) if (p != null) parts.Add(p); }
-            catch (Exception) { }
+            catch (Exception ex)
+            {
+                // Said, not swallowed: a template whose bodyparts cannot be read stands there as a bare
+                // rig, and without this line that looks like the model itself is missing its parts.
+                message = "ct_bench: bodyparts of '" + d.name + "' could not be read (" + ex.GetType().Name +
+                          ": " + ex.Message + ") - it is shown with " + parts.Count + " of them";
+            }
             return parts;
         }
 
@@ -1623,7 +1651,14 @@ namespace Morgott.ContentTool.Dev
         {
             if (item == null) return false;
             try { return CommonCharacterUtils.CanSwapItem(manager, item, worn, null, null) != null; }
-            catch (Exception) { return false; }
+            catch (Exception ex)
+            {
+                // Counted as refused, but SAID: "the game's slot test threw" is not "it does not fit",
+                // and the refused count alone cannot tell the two apart.
+                message = "ct_bench: the slot test threw for '" + item.name + "' (" + ex.GetType().Name +
+                          ": " + ex.Message + ") - counted as not fitting";
+                return false;
+            }
         }
 
         // ---------------------------------------------------------------- the panel
@@ -1727,7 +1762,7 @@ namespace Morgott.ContentTool.Dev
             // LEAVING is what a lifecycle run forbids, never ARRIVING - a blocking main segment waits for
             // THIS tab to be open and painted, so walking away from it mid-run parks the segment behind a
             // panel that is no longer being drawn. Disabling the Lifecycle toggle TOO closed the only door
-            // back in: `Close` puts the tab back to FIT (:1137) without cancelling anything, and a run
+            // back in: `Close` puts the tab back to FIT (its Model Doctor step) without cancelling anything, and a run
             // started through the static RPC seam begins on whatever tab the author is standing on. Either
             // way `Pump(open && tab == TabLifecycle)` never unparked the segment again and Cancel - which
             // lives on that panel - was unreachable, so the job stayed busy for the rest of the session.
@@ -1735,8 +1770,8 @@ namespace Morgott.ContentTool.Dev
             // THE PRESS IS DEFERRED PAST EndArea, like `leaving` and `resetting` above and for the same
             // reason: assigning `tab` here changed which branch below ran MID-EVENT, so the click pass laid
             // out a different number of controls than the Layout pass had cached - IMGUI's
-            // `ArgumentException`, and OnGUI's catch (:2359) answers that by closing the bench. `Update`'s
-            // SHIP landing (:2189) moves the tab the same way: outside a GUI event.
+            // `ArgumentException`, and OnGUI's own catch answers that by closing the bench. `Update`'s
+            // SHIP landing (Arm.Update, TakeShipLanding) moves the tab the same way: outside a GUI event.
             GUI.enabled = !doctor.ShipPending && !LifecycleDashboard.Busy;
             // ONLY A TOGGLE FOR A TAB WE ARE NOT ON RECORDS A CHANGE. The one for the ACTIVE tab is drawn
             // CHECKED, so it returns true every frame - and being drawn LAST it would overwrite a press on
@@ -1756,7 +1791,7 @@ namespace Morgott.ContentTool.Dev
                 LifecycleDashboard.Draw();
                 GUILayout.EndScrollView();
                 GUILayout.EndArea();
-                // BEFORE the close, never after: `Close` puts the tab back to FIT (:1143), and applying a
+                // BEFORE the close, never after: `Close` puts the tab back to FIT (its Model Doctor step), and applying a
                 // toggle press on top of that would land the reopened bench on a tab nobody asked for.
                 tab = wanted;
                 if (leaving) message = Close();
@@ -1782,7 +1817,7 @@ namespace Morgott.ContentTool.Dev
                 return;
             }
 
-            string fitKey = weapon == null ? null : BenchList.KeyFor(weapon.name, WeaponBuild.Fitted());
+            string fitKey = weapon == null ? null : BenchList.KeyFor(weapon.name, WeaponBuild.FittedKeys);
             GUILayout.Label("unit:   " + BenchList.Elide(unit == null ? "-" : unit.name, BenchList.NameChars));
             GUILayout.Label("weapon: " + BenchList.Elide(weapon == null ? "-" : weapon.name, BenchList.NameChars) +
                             (weapon == null ? "" : fitKey != null ? "  [tunable]" : "  [vanilla]"));
@@ -1957,7 +1992,7 @@ namespace Morgott.ContentTool.Dev
 
         private static void Weapons(string fitKey, float height)
         {
-            List<string> keys = WeaponBuild.Fitted();
+            IEnumerable<string> keys = WeaponBuild.FittedKeys;
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
             if (GUILayout.Button((weaponsOpen ? "v " : "> ") + "weapon (" + offered.Count + ")",
@@ -2183,6 +2218,9 @@ namespace Morgott.ContentTool.Dev
         private sealed class Arm : MonoBehaviour
         {
             private bool inputBroken;
+            /// <summary>The last frame failure said to the console, so a bug that throws every frame is
+            /// said once rather than sixty times a second.</summary>
+            private string lastError;
             private float lastX, lastY;
             /// <summary>Which gesture the drag in progress is, latched at the press. See <see cref="Mouse"/>.</summary>
             private ViewGesture gesture;
@@ -2200,7 +2238,6 @@ namespace Morgott.ContentTool.Dev
 
             private void Update()
             {
-                if (inputBroken) return;
                 // THE LIFECYCLE PUMP, BEFORE BOTH GATES and outside the bench's own try.
                 //
                 // Before the StillThere return at the bottom of this block, not merely before the `if (open)`
@@ -2209,7 +2246,7 @@ namespace Morgott.ContentTool.Dev
                 // reason - a closed bench neither paints nor drains, and the Doctor's arrangement would
                 // abandon a lifecycle run the moment the window closed (design:323-:333).
                 //
-                // Its OWN try, like the Doctor drain's at :2133: a lifecycle bug must not set inputBroken and
+                // Its OWN try, like the Doctor drain's below: a lifecycle bug must not set inputBroken and
                 // take the bench's mouse and hotkey down with it for the rest of the session.
                 try { LifecycleDashboard.Pump(open && tab == TabLifecycle); }
                 catch (Exception ex)
@@ -2220,11 +2257,29 @@ namespace Morgott.ContentTool.Dev
                     message = "ct_bench: lifecycle - " + ex.GetType().Name + ": " + ex.Message;
                     ContentToolMain.Say(message);
                 }
+                // THE INPUT PROBE, in its own try and the ONLY one allowed to switch input off. It used
+                // to share one catch with everything below, so any bench bug - a null in Reframe, a
+                // throw in the Doctor's tick - was read as "legacy Input is disabled" and took the
+                // hotkey, the mouse AND the level watch down for the rest of the session. The chord is
+                // the first Input read of the frame, so if it answers, Input works.
+                bool pressed = false;
+                if (!inputBroken)
+                {
+                    try { pressed = Chord(); }
+                    catch (Exception ex)
+                    {
+                        // A build with legacy Input disabled would otherwise throw once per frame forever -
+                        // the same guard, for the same reason, as DevRunner's hotkey.
+                        inputBroken = true;
+                        ContentToolMain.Say("ct_bench: input is unavailable in this build, use 'ct_bench' " +
+                                            "from the console (" + ex.Message + ")");
+                    }
+                }
                 try
                 {
                     // Let go BEFORE anything else looks at the bay: if the level went away this frame,
                     // every reference below it is a corpse and the panel is a lie on top of a loading
-                    // screen.
+                    // screen. Runs with input broken too - it is how a console-driven bench still lets go.
                     if (open && !StillThere())
                     {
                         message = Close();
@@ -2234,9 +2289,11 @@ namespace Morgott.ContentTool.Dev
                         return;
                     }
 
-                    if (Chord())
+                    // On ENTERED, not on open: after a partial close the panel is gone but the game is
+                    // still altered, and the key has to reach the close path that retries it.
+                    if (pressed)
                     {
-                        message = open ? Close() : Open();
+                        message = entered ? Close() : Open();
                         ContentToolMain.Say(message);
                     }
                     // EVERY FRAME, tab or no tab, and BEFORE the bay guard: the Doctor's queues carry
@@ -2256,8 +2313,11 @@ namespace Morgott.ContentTool.Dev
                         if (doctor.TakeShipLanding()) tab = TabLifecycle;
                     }
                     if (!open || bay == null || bay.SceneRoot == null) return;
-                    Mouse();
-                    Fly();
+                    if (!inputBroken)
+                    {
+                        Mouse();
+                        Fly();
+                    }
                     // THE ONE PLACE THE VIEW IS RECOMPUTED for the mouse: everything above only wrote
                     // targets. ZoomAnchor runs first because it needs the distance the LAST Reframe
                     // computed, and Reframe is about to replace it; and both run only when something
@@ -2267,11 +2327,12 @@ namespace Morgott.ContentTool.Dev
                 }
                 catch (Exception ex)
                 {
-                    // A build with legacy Input disabled would otherwise throw once per frame forever -
-                    // the same guard, for the same reason, as DevRunner's hotkey.
-                    inputBroken = true;
-                    ContentToolMain.Say("ct_bench: input is unavailable in this build, use 'ct_bench' " +
-                                        "from the console (" + ex.Message + ")");
+                    // NOT the input - the probe above answered this frame. A bench bug: shown, said once
+                    // per distinct failure (it may repeat every frame), and the frame skipped. Next frame
+                    // the hotkey and the level watch run again, which is the way out of a broken panel.
+                    string said = "ct_bench: frame - " + ex.GetType().Name + ": " + ex.Message;
+                    message = said;
+                    if (said != lastError) { lastError = said; ContentToolMain.Say(said); }
                 }
             }
 
@@ -2372,7 +2433,7 @@ namespace Morgott.ContentTool.Dev
                 // against the camera's pose, and a frame of lag between the two is a frame in which the
                 // arrows are drawn somewhere the mouse cannot reach them.
                 FitGizmo.Aim(cam, LiveMesh(), Mine(weapon) ? BenchList.KeyFor(
-                                 weapon == null ? null : weapon.name, WeaponBuild.Fitted()) : null);
+                                 weapon == null ? null : weapon.name, WeaponBuild.FittedKeys) : null);
             }
 
             /// <summary>

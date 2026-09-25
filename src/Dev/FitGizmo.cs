@@ -132,6 +132,24 @@ namespace Morgott.ContentTool.Dev
         ///
         /// The pivot, though, is the MESH's own world position - that is where the gun actually is.
         /// </summary>
+        /// <summary>
+        /// SCRATCH, reused by <see cref="Geometry"/>, <see cref="Project"/> and <see cref="ProjectRings"/>:
+        /// those run on every Repaint (the hover pick, then the paint), and fresh arrays there were
+        /// ~160 floats of garbage a frame. Safe because every caller is on the main thread (OnGUI /
+        /// Update) and none keeps an array past its own call - a press copies what it needs (F()).
+        /// </summary>
+        private static readonly Vector3[] axesBuf = new Vector3[3];
+        private static readonly float[] tipXBuf = new float[3], tipYBuf = new float[3], basisBuf = new float[9];
+        private static readonly bool[] validBuf = new bool[3], ringValidBuf = new bool[3];
+        private static readonly float[][] ringXBuf =
+        {
+            new float[BenchList.RingSegments], new float[BenchList.RingSegments], new float[BenchList.RingSegments]
+        };
+        private static readonly float[][] ringYBuf =
+        {
+            new float[BenchList.RingSegments], new float[BenchList.RingSegments], new float[BenchList.RingSegments]
+        };
+
         private static bool Geometry(out Vector3 pivot, out Vector3[] axes, out float size)
         {
             pivot = Vector3.zero; axes = null; size = 0f;
@@ -142,7 +160,8 @@ namespace Morgott.ContentTool.Dev
             Vector3 y = new Vector3(m.m01, m.m11, m.m21);
             Vector3 z = new Vector3(m.m02, m.m12, m.m22);
             if (x.sqrMagnitude < 1e-12f || y.sqrMagnitude < 1e-12f || z.sqrMagnitude < 1e-12f) return false;
-            axes = new[] { x.normalized, y.normalized, z.normalized };
+            axesBuf[0] = x.normalized; axesBuf[1] = y.normalized; axesBuf[2] = z.normalized;
+            axes = axesBuf;
             pivot = mesh.position;
             // CONSTANT ON SCREEN. The camera pulls back a long way to frame a vehicle and comes right
             // in on a pistol; a handle sized in metres would be a speck in one case and fill the screen
@@ -167,7 +186,7 @@ namespace Morgott.ContentTool.Dev
             if (!Geometry(out pivot, out axes, out size)) return false;
             Vector3 p = cam.WorldToScreenPoint(pivot);
             pivotX = p.x; pivotY = p.y;
-            tipX = new float[3]; tipY = new float[3]; valid = new bool[3];
+            tipX = tipXBuf; tipY = tipYBuf; valid = validBuf;
             for (int i = 0; i < 3; i++)
             {
                 Vector3 t = cam.WorldToScreenPoint(pivot + axes[i] * size);
@@ -203,19 +222,20 @@ namespace Morgott.ContentTool.Dev
             radius = size * BenchList.RingFraction;
 
             Matrix4x4 m = mesh.parent.localToWorldMatrix;
-            bool frameOk = BenchList.RingsUsable(
-                new[] { m.m00, m.m10, m.m20, m.m01, m.m11, m.m21, m.m02, m.m12, m.m22 },
-                BenchList.ScaleTolerance, out why);
+            basisBuf[0] = m.m00; basisBuf[1] = m.m10; basisBuf[2] = m.m20;
+            basisBuf[3] = m.m01; basisBuf[4] = m.m11; basisBuf[5] = m.m21;
+            basisBuf[6] = m.m02; basisBuf[7] = m.m12; basisBuf[8] = m.m22;
+            bool frameOk = BenchList.RingsUsable(basisBuf, BenchList.ScaleTolerance, out why);
 
             Vector3 eye = cam.transform.position;
             float depth = Vector3.Dot(pivot - eye, cam.transform.forward);
             bool reachable = depth > cam.nearClipPlane + radius;
 
-            ringX = new float[3][]; ringY = new float[3][]; valid = new bool[3];
+            ringX = ringXBuf; ringY = ringYBuf; valid = ringValidBuf;
             for (int i = 0; i < 3; i++)
             {
                 Vector3 u = axes[(i + 1) % 3], v = axes[(i + 2) % 3];
-                float[] xs = new float[BenchList.RingSegments], ys = new float[BenchList.RingSegments];
+                float[] xs = ringXBuf[i], ys = ringYBuf[i];
                 bool ahead = true;
                 for (int s = 0; s < BenchList.RingSegments; s++)
                 {
