@@ -266,8 +266,17 @@ namespace Morgott.ContentTool.Dev
             GUILayout.Label(p == null
                             ? "idle"
                             : p.Stage + " " + p.Done + "/" + p.Total + " - " + p.Message);
+            Fill(p);
+        }
+
+        internal const float BarWidth = 240f;
+
+        /// <summary>The fill of a progress bar, sized to the fraction done - the ONE bar, shared with the
+        /// Lifecycle dashboard's progress row so the two cannot drift apart.</summary>
+        internal static void Fill(SlimProgress p)
+        {
             float done = p == null || p.Total <= 0 ? 0f : (float)p.Done / p.Total;
-            GUILayout.Box("", GUILayout.Width(Mathf.Max(1f, 240f * done)), GUILayout.Height(6f));
+            GUILayout.Box("", GUILayout.Width(Mathf.Max(1f, BarWidth * done)), GUILayout.Height(6f));
         }
 
         // ------------------------------------------------------------------ the intents

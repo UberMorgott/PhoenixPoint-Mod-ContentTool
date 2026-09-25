@@ -725,11 +725,10 @@ namespace Morgott.ContentTool.Dev
             SlimProgress p = now.Progress;
             GUILayout.BeginHorizontal(); openGroups++;
             GUILayout.Label("Progress", GUILayout.Width(60f));
-            float done = p == null || p.Total <= 0 ? 0f : (float)p.Done / p.Total;
             // A FIXED TRACK with the fill inside it, so the phase label beside it does not walk left and
-            // right as the bar grows. SlimPanel.cs:270's bar, unchanged.
-            GUILayout.BeginHorizontal(GUILayout.Width(240f)); openGroups++;
-            GUILayout.Box("", GUILayout.Width(Mathf.Max(1f, 240f * done)), GUILayout.Height(6f));
+            // right as the bar grows. The fill is the slim panel's own (SlimPanel.Fill), not a copy of it.
+            GUILayout.BeginHorizontal(GUILayout.Width(SlimPanel.BarWidth)); openGroups++;
+            SlimPanel.Fill(p);
             GUILayout.FlexibleSpace();
             openGroups--; GUILayout.EndHorizontal();
             GUILayout.Label(p == null ? "—" : p.Stage + " " + p.Done + "/" + p.Total);
@@ -944,7 +943,7 @@ namespace Morgott.ContentTool.Dev
             // THE TOLERANT HALF, and only here. `wasReady` is last frame's `panelReady`: the press is
             // drained from Update and the panel paints later in the frame, which is exactly the one-frame
             // window `Paintable` allows, so the first press after arriving on the tab is not false-refused.
-            // The pump's parked-work gate is the STRICTER `Repainted` (:511) on purpose - a press this
+            // The pump's parked-work gate is the STRICTER `Repainted` (its `LifecycleJob.Tick` call) on purpose - a press this
             // admits may still park for one frame, which is a wait, not a refusal.
             ctx.PaintUnavailable = LifecycleState.PaintMissing(atPress, wasReady, Paintable);
             return ctx;
