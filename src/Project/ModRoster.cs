@@ -382,7 +382,9 @@ namespace Morgott.ContentTool.Project
                 if (__result != null || modEntry == null || !HasContent(modEntry.Directory)) return;
                 __result = new ModInstance(modEntry) { CanBeUnloaded = true, Main = new ContentMod() };
             }
-            catch (Exception) { }
+            // Never thrown into the loader, but never swallowed silently either: a content mod that
+            // fails here simply does not load, and this line is the only place that says why.
+            catch (Exception ex) { Dev.ChunkedLog.Fail("ct_content load: " + ex); }
         }
 
         /// <summary>
