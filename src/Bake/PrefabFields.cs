@@ -291,11 +291,17 @@ namespace Morgott.ContentTool.Bake
 
         internal static string V(AssetTypeValueField v)
         {
-            // InvariantCulture: this line is machine-compared and a ru-RU machine writes 0,5 for 0.5
-            // (the trap MeshFields.V and ReadMaterialProperties both document).
-            return v["x"].AsFloat.ToString("0.###", CultureInfo.InvariantCulture) + "," +
-                   v["y"].AsFloat.ToString("0.###", CultureInfo.InvariantCulture) + "," +
-                   v["z"].AsFloat.ToString("0.###", CultureInfo.InvariantCulture);
+            return F(v["x"].AsFloat) + "," + F(v["y"].AsFloat) + "," + F(v["z"].AsFloat);
+        }
+
+        /// <summary>
+        /// One number as the Bake read-back lines print it - the ONE copy MeshFields, SkinFields and
+        /// ClipFields use. InvariantCulture: these lines are machine-compared and a ru-RU machine
+        /// writes 0,5 for 0.5 (the trap ReadMaterialProperties documents too).
+        /// </summary>
+        internal static string F(float v)
+        {
+            return v.ToString("0.###", CultureInfo.InvariantCulture);
         }
     }
 }

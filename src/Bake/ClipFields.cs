@@ -1343,8 +1343,6 @@ namespace Morgott.ContentTool.Bake
                    "," + F(samples.Children[at + 2].AsFloat) + ")";
         }
 
-        // InvariantCulture: this line is machine-compared and a ru-RU machine writes 0,5 for 0.5
-        // (the trap MeshFields.V and ReadMaterialProperties both document).
-        private static string F(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string F(float v) => PrefabFields.F(v);
     }
 }

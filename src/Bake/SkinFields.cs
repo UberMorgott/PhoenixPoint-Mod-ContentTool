@@ -282,22 +282,18 @@ namespace Morgott.ContentTool.Bake
                 return new[] { b.CenterX, b.CenterY, b.CenterZ, b.ExtentX, b.ExtentY, b.ExtentZ };
 
             float[] m = rootBindPose;
-            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            Box box = new Box();
             for (int c = 0; c < 8; c++)
             {
                 float x = b.CenterX + ((c & 1) == 0 ? -b.ExtentX : b.ExtentX);
                 float y = b.CenterY + ((c & 2) == 0 ? -b.ExtentY : b.ExtentY);
                 float z = b.CenterZ + ((c & 4) == 0 ? -b.ExtentZ : b.ExtentZ);
-                float tx = m[0] * x + m[4] * y + m[8] * z + m[12];
-                float ty = m[1] * x + m[5] * y + m[9] * z + m[13];
-                float tz = m[2] * x + m[6] * y + m[10] * z + m[14];
-                if (tx < minX) minX = tx; if (tx > maxX) maxX = tx;
-                if (ty < minY) minY = ty; if (ty > maxY) maxY = ty;
-                if (tz < minZ) minZ = tz; if (tz > maxZ) maxZ = tz;
+                box.Add(m[0] * x + m[4] * y + m[8] * z + m[12],
+                        m[1] * x + m[5] * y + m[9] * z + m[13],
+                        m[2] * x + m[6] * y + m[10] * z + m[14]);
             }
-            return new[] { (minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (minZ + maxZ) * 0.5f,
-                           (maxX - minX) * 0.5f, (maxY - minY) * 0.5f, (maxZ - minZ) * 0.5f };
+            return new[] { (box.MinX + box.MaxX) * 0.5f, (box.MinY + box.MaxY) * 0.5f, (box.MinZ + box.MaxZ) * 0.5f,
+                           (box.MaxX - box.MinX) * 0.5f, (box.MaxY - box.MinY) * 0.5f, (box.MaxZ - box.MinZ) * 0.5f };
         }
 
         /// <summary>
@@ -475,8 +471,7 @@ namespace Morgott.ContentTool.Bake
             aabbs.Children.Clear();
             for (int b = 0; b < bones; b++)
             {
-                float minX = 0f, minY = 0f, minZ = 0f, maxX = 0f, maxY = 0f, maxZ = 0f;
-                bool any = false;
+                Box box = new Box();
                 for (int v = 0; v < n; v++)
                 {
                     if (skin.WeightOf(v, b) <= 0f) continue;
@@ -485,18 +480,11 @@ namespace Morgott.ContentTool.Bake
                     float y = BitConverter.ToSingle(skin.Mesh.VertexData, at + 4);
                     float z = BitConverter.ToSingle(skin.Mesh.VertexData, at + 8);
                     float[] m = skin.BindPoses[b];
-                    float bx = m[0] * x + m[4] * y + m[8] * z + m[12];
-                    float by = m[1] * x + m[5] * y + m[9] * z + m[13];
-                    float bz = m[2] * x + m[6] * y + m[10] * z + m[14];
-                    if (!any) { minX = maxX = bx; minY = maxY = by; minZ = maxZ = bz; any = true; continue; }
-                    if (bx < minX) minX = bx; if (bx > maxX) maxX = bx;
-                    if (by < minY) minY = by; if (by > maxY) maxY = by;
-                    if (bz < minZ) minZ = bz; if (bz > maxZ) maxZ = bz;
+                    box.Add(m[0] * x + m[4] * y + m[8] * z + m[12],
+                            m[1] * x + m[5] * y + m[9] * z + m[13],
+                            m[2] * x + m[6] * y + m[10] * z + m[14]);
                 }
-                AssetTypeValueField e = ValueBuilder.DefaultValueFieldFromArrayTemplate(aabbs);
-                PrefabFields.Vector3(e["m_Min"], minX, minY, minZ);
-                PrefabFields.Vector3(e["m_Max"], maxX, maxY, maxZ);
-                aabbs.Children.Add(e);
+                aabbs.Children.Add(box.Field(aabbs));
             }
 
             mesh["m_MeshUsageFlags"].AsInt = 1;
@@ -823,9 +811,7 @@ namespace Morgott.ContentTool.Bake
             int bones = bind.Length, n = baked.VertexCount;
             int stride = SkinStride(influences);
             byte[] skin = new byte[n * stride];
-            float[] minX = new float[bones], minY = new float[bones], minZ = new float[bones];
-            float[] maxX = new float[bones], maxY = new float[bones], maxZ = new float[bones];
-            bool[] used = new bool[bones];
+            Box[] boxes = new Box[bones];
             for (int i = 0; i < n; i++)
             {
                 int at = i * BakedMesh.Stride;
@@ -844,18 +830,9 @@ namespace Morgott.ContentTool.Bake
                     if (w[i * influences + k] <= 0f) continue;
                     int d = (int)idx[i * influences + k];
                     float[] m = bind[d];
-                    float tx = m[0] * x + m[1] * y + m[2] * z + m[3];
-                    float ty = m[4] * x + m[5] * y + m[6] * z + m[7];
-                    float tz = m[8] * x + m[9] * y + m[10] * z + m[11];
-                    if (!used[d])
-                    {
-                        used[d] = true;
-                        minX[d] = maxX[d] = tx; minY[d] = maxY[d] = ty; minZ[d] = maxZ[d] = tz;
-                        continue;
-                    }
-                    if (tx < minX[d]) minX[d] = tx; if (tx > maxX[d]) maxX[d] = tx;
-                    if (ty < minY[d]) minY[d] = ty; if (ty > maxY[d]) maxY[d] = ty;
-                    if (tz < minZ[d]) minZ[d] = tz; if (tz > maxZ[d]) maxZ[d] = tz;
+                    boxes[d].Add(m[0] * x + m[1] * y + m[2] * z + m[3],
+                                 m[4] * x + m[5] * y + m[6] * z + m[7],
+                                 m[8] * x + m[9] * y + m[10] * z + m[11]);
                 }
 
                 int sa = i * stride;
@@ -870,13 +847,7 @@ namespace Morgott.ContentTool.Bake
 
             AssetTypeValueField aabbs = mesh["m_BonesAABB"]["Array"];
             aabbs.Children.Clear();
-            for (int b = 0; b < bones; b++)
-            {
-                AssetTypeValueField e = ValueBuilder.DefaultValueFieldFromArrayTemplate(aabbs);
-                PrefabFields.Vector3(e["m_Min"], minX[b], minY[b], minZ[b]);
-                PrefabFields.Vector3(e["m_Max"], maxX[b], maxY[b], maxZ[b]);
-                aabbs.Children.Add(e);
-            }
+            for (int b = 0; b < bones; b++) aabbs.Children.Add(boxes[b].Field(aabbs));
 
             // The per-vertex influence COUNT of the old geometry. Left behind it is read in preference
             // to the width this stream declares - the same trap MeshFields.Fill clears for the
@@ -901,11 +872,7 @@ namespace Morgott.ContentTool.Bake
                           " bonesAABB=" + mesh["m_BonesAABB"]["Array"].Children.Count;
             if (chs.Children.Count <= ChannelBlendIndices) return head + " (no skin channel slots)";
 
-            AssetTypeValueField w = chs.Children[ChannelBlendWeight], b = chs.Children[ChannelBlendIndices];
-            string layout = "weightCh=stream" + w["stream"].AsByte + "/off" + w["offset"].AsByte +
-                            "/fmt" + w["format"].AsByte + "/dim" + w["dimension"].AsByte +
-                            " indexCh=stream" + b["stream"].AsByte + "/off" + b["offset"].AsByte +
-                            "/fmt" + b["format"].AsByte + "/dim" + b["dimension"].AsByte;
+            string layout = Layout(chs);
             head += " " + layout;
             int inf = InfluencesOf(mesh);
             if (layout != OurLayout(inf)) return head + " skinBytes=(other layout) boneMax=(other layout) inRange=(other layout)";
@@ -1241,11 +1208,7 @@ namespace Morgott.ContentTool.Bake
             AssetTypeValueField vd = mesh["m_VertexData"];
             AssetTypeValueField chs = vd["m_Channels"]["Array"];
             if (chs.Children.Count <= ChannelBlendIndices) return "(no skin channel slots)";
-            AssetTypeValueField w = chs.Children[ChannelBlendWeight], b = chs.Children[ChannelBlendIndices];
-            string layout = "weightCh=stream" + w["stream"].AsByte + "/off" + w["offset"].AsByte +
-                            "/fmt" + w["format"].AsByte + "/dim" + w["dimension"].AsByte +
-                            " indexCh=stream" + b["stream"].AsByte + "/off" + b["offset"].AsByte +
-                            "/fmt" + b["format"].AsByte + "/dim" + b["dimension"].AsByte;
+            string layout = Layout(chs);
             int inf = InfluencesOf(mesh);
             if (layout != OurLayout(inf)) return "(other layout: " + layout + ")";
 
@@ -1266,6 +1229,45 @@ namespace Morgott.ContentTool.Bake
                     s.Append(k == 0 ? "->bone" : "+bone").Append(BitConverter.ToUInt32(data, v + inf * 4 + k * 4));
             }
             return s.ToString();
+        }
+
+        /// <summary>The skin channels' layout as the file declares it - the one spelling SkinSummary
+        /// and SkinInfluences both print and compare against <see cref="OurLayout"/>.</summary>
+        private static string Layout(AssetTypeValueField channels)
+        {
+            AssetTypeValueField w = channels.Children[ChannelBlendWeight], b = channels.Children[ChannelBlendIndices];
+            return "weightCh=stream" + w["stream"].AsByte + "/off" + w["offset"].AsByte +
+                   "/fmt" + w["format"].AsByte + "/dim" + w["dimension"].AsByte +
+                   " indexCh=stream" + b["stream"].AsByte + "/off" + b["offset"].AsByte +
+                   "/fmt" + b["format"].AsByte + "/dim" + b["dimension"].AsByte;
+        }
+
+        /// <summary>
+        /// A min/max box grown one point at a time, in whatever space the caller transforms into -
+        /// the per-bone and renderer AABB loops share it. An EMPTY box writes zeros, which is what
+        /// each of those loops wrote for a bone no vertex reaches.
+        /// </summary>
+        private struct Box
+        {
+            internal float MinX, MinY, MinZ, MaxX, MaxY, MaxZ;
+            private bool any;
+
+            internal void Add(float x, float y, float z)
+            {
+                if (!any) { MinX = MaxX = x; MinY = MaxY = y; MinZ = MaxZ = z; any = true; return; }
+                if (x < MinX) MinX = x; if (x > MaxX) MaxX = x;
+                if (y < MinY) MinY = y; if (y > MaxY) MaxY = y;
+                if (z < MinZ) MinZ = z; if (z > MaxZ) MaxZ = z;
+            }
+
+            /// <summary>One m_BonesAABB entry holding this box.</summary>
+            internal AssetTypeValueField Field(AssetTypeValueField array)
+            {
+                AssetTypeValueField e = ValueBuilder.DefaultValueFieldFromArrayTemplate(array);
+                PrefabFields.Vector3(e["m_Min"], MinX, MinY, MinZ);
+                PrefabFields.Vector3(e["m_Max"], MaxX, MaxY, MaxZ);
+                return e;
+            }
         }
 
         /// <summary>The channel layout <see cref="SetSkinStream"/> writes at a given width, as
@@ -1371,24 +1373,16 @@ namespace Morgott.ContentTool.Bake
             aabbs.Children.Clear();
             for (int bone = 0; bone < 2; bone++)
             {
-                AssetTypeValueField e = ValueBuilder.DefaultValueFieldFromArrayTemplate(aabbs);
-                float minX = 0f, minY = 0f, minZ = 0f, maxX = 0f, maxY = 0f, maxZ = 0f;
-                bool any = false;
+                Box box = new Box();
                 for (int i = 0; i < baked.VertexCount; i++)
                 {
                     if (boneOfVertex[i] != bone) continue;
                     int at = i * BakedMesh.Stride;
-                    float x = BitConverter.ToSingle(baked.VertexData, at);
-                    float y = BitConverter.ToSingle(baked.VertexData, at + 4) - (bone == 1 ? boneY : 0f);
-                    float z = BitConverter.ToSingle(baked.VertexData, at + 8);
-                    if (!any) { minX = maxX = x; minY = maxY = y; minZ = maxZ = z; any = true; continue; }
-                    if (x < minX) minX = x; if (x > maxX) maxX = x;
-                    if (y < minY) minY = y; if (y > maxY) maxY = y;
-                    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+                    box.Add(BitConverter.ToSingle(baked.VertexData, at),
+                            BitConverter.ToSingle(baked.VertexData, at + 4) - (bone == 1 ? boneY : 0f),
+                            BitConverter.ToSingle(baked.VertexData, at + 8));
                 }
-                PrefabFields.Vector3(e["m_Min"], minX, minY, minZ);
-                PrefabFields.Vector3(e["m_Max"], maxX, maxY, maxZ);
-                aabbs.Children.Add(e);
+                aabbs.Children.Add(box.Field(aabbs));
             }
 
             // Both measured on every shipped skinned Mesh; the empty template has 0 for all three.
@@ -1466,8 +1460,6 @@ namespace Morgott.ContentTool.Bake
             return s.ToString();
         }
 
-        // InvariantCulture: these lines are machine-compared and a ru-RU machine writes 0,5 for 0.5
-        // (the trap MeshFields.V and ReadMaterialProperties both document).
-        private static string F(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string F(float v) => PrefabFields.F(v);
     }
 }

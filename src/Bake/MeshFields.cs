@@ -86,8 +86,8 @@ namespace Morgott.ContentTool.Bake
             ClearCompressed(mesh["m_CompressedMesh"]);
 
             AssetTypeValueField aabb = mesh["m_LocalAABB"];
-            SetVector3(aabb["m_Center"], baked.CenterX, baked.CenterY, baked.CenterZ);
-            SetVector3(aabb["m_Extent"], baked.ExtentX, baked.ExtentY, baked.ExtentZ);
+            PrefabFields.Vector3(aabb["m_Center"], baked.CenterX, baked.CenterY, baked.CenterZ);
+            PrefabFields.Vector3(aabb["m_Extent"], baked.ExtentX, baked.ExtentY, baked.ExtentZ);
 
             // ONE SUBMESH PER MATERIAL, because Unity binds submesh i to the renderer's
             // m_Materials[i]. A model whose file named no materials still bakes as exactly one
@@ -116,8 +116,8 @@ namespace Morgott.ContentTool.Bake
                 // culling only, and a conservative box culls late rather than wrongly - a per-range
                 // box would mean a second pass over the vertices each submesh actually touches.
                 // Tighten it if a model ever culls visibly late.
-                SetVector3(sub["localAABB"]["m_Center"], baked.CenterX, baked.CenterY, baked.CenterZ);
-                SetVector3(sub["localAABB"]["m_Extent"], baked.ExtentX, baked.ExtentY, baked.ExtentZ);
+                PrefabFields.Vector3(sub["localAABB"]["m_Center"], baked.CenterX, baked.CenterY, baked.CenterZ);
+                PrefabFields.Vector3(sub["localAABB"]["m_Extent"], baked.ExtentX, baked.ExtentY, baked.ExtentZ);
                 firstByte += (uint)(counts[i] * stride);
             }
         }
@@ -288,7 +288,7 @@ namespace Morgott.ContentTool.Bake
             return "verts=" + mesh["m_VertexData"]["m_VertexCount"].AsUInt +
                    " indices=" + (indices == null ? 0 : indices.Length / (wide ? 4 : 2)) +
                    " format=" + (wide ? "UInt32" : "UInt16") +
-                   " centre=" + V(aabb["m_Center"]) + " extent=" + V(aabb["m_Extent"]) +
+                   " centre=" + PrefabFields.V(aabb["m_Center"]) + " extent=" + PrefabFields.V(aabb["m_Extent"]) +
                    " submeshes=" + mesh["m_SubMeshes"]["Array"].Children.Count +
                    " vertexBytes=" + (mesh["m_VertexData"]["m_DataSize"].AsByteArray == null
                                       ? 0 : mesh["m_VertexData"]["m_DataSize"].AsByteArray.Length) +
@@ -376,20 +376,6 @@ namespace Morgott.ContentTool.Bake
                 if (!v["m_BitSize"].IsDummy) v["m_BitSize"].AsInt = 0;
                 if (!v["m_Data"].IsDummy) ClearArray(v["m_Data"]["Array"]);
             }
-        }
-
-        private static void SetVector3(AssetTypeValueField v, float x, float y, float z)
-        {
-            v["x"].AsFloat = x; v["y"].AsFloat = y; v["z"].AsFloat = z;
-        }
-
-        private static string V(AssetTypeValueField v)
-        {
-            // InvariantCulture: this line is machine-compared, and a ru-RU machine writes 0,5 for 0.5
-            // (the same trap ReadMaterialProperties documents).
-            return v["x"].AsFloat.ToString("0.###", CultureInfo.InvariantCulture) + "," +
-                   v["y"].AsFloat.ToString("0.###", CultureInfo.InvariantCulture) + "," +
-                   v["z"].AsFloat.ToString("0.###", CultureInfo.InvariantCulture);
         }
     }
 }
