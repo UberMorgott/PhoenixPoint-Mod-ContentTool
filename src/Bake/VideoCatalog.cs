@@ -513,12 +513,14 @@ namespace Morgott.ContentTool.Bake
         internal static string UndoMod(string modDir)
         {
             List<string> keys = Project.ContentState.Release(modDir, Route);
+            string owner = OwnerOf(modDir);
             if (keys.Count == 0) return null;
             StringBuilder log = new StringBuilder();
             foreach (string key in keys)
             {
                 string before = LiveResolve(key);
-                string was = CatalogLive.Unregister(key);
+                // OWNED: only this mod's want goes - a key another mod also serves stays that mod's.
+                string was = CatalogLive.UnregisterFor(owner, key);
                 log.AppendLine("  " + key + "\n    before: " + (before ?? "(no manager)") +
                                "\n    after:  " + (LiveResolve(key) ?? "(no manager)") +
                                "\n    restored to " + (was ?? "(nothing to restore)"));
@@ -528,14 +530,30 @@ namespace Morgott.ContentTool.Bake
                    Environment.NewLine + log.ToString().TrimEnd();
         }
 
+        /// <summary>Mod folder (<see cref="Project.ModGate.Key"/>) -> the ppcontent id its clips were
+        /// registered under, so the undo drops exactly that owner's wants even if the manifest has
+        /// changed on disk since.</summary>
+        private static readonly Dictionary<string, string> owners = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        /// <summary>The owner a mod's clips were registered under; the manifest's id when this
+        /// session never registered any.</summary>
+        private static string OwnerOf(string modDir)
+        {
+            string id;
+            if (owners.TryGetValue(Project.ModGate.Key(modDir), out id)) return id;
+            try { return ContentProject.LoadDeclared(modDir).Id; }
+            catch (Exception) { return null; }
+        }
+
         internal static string LiveAt(string root)
         {
             int served;
             return LiveAt(root, out served);
         }
 
-        /// <summary><paramref name="served"/> = rows that ACTUALLY reached the live catalog, so the
-        /// caller holding a claim knows whether it has anything to hand back.</summary>
+        /// <summary><paramref name="served"/> = rows CatalogLive actually recorded for this mod - served,
+        /// or held behind a lower mod id - so the caller holding a claim knows whether it has
+        /// anything to hand back.</summary>
         internal static string LiveAt(string root, out int served)
         {
             served = 0;
@@ -544,9 +562,10 @@ namespace Morgott.ContentTool.Bake
             ContentProject.Declared p = ContentProject.LoadDeclared(root);
             string json = File.Exists(Catalog) ? File.ReadAllText(Catalog) : "";
             string name = new DirectoryInfo(root).Name;
+            owners[Project.ModGate.Key(root)] = p.Id;
 
             StringBuilder log = new StringBuilder();
-            int n = 0, refused = 0;
+            int n = 0, queued = 0, refused = 0;
             foreach (ShippedReplacement r in p.Replace)
             {
                 if (string.IsNullOrEmpty(r.video)) continue;
@@ -563,7 +582,9 @@ namespace Morgott.ContentTool.Bake
                     if (key == null) { log.AppendLine("SKIP " + why); refused++; continue; }
                 }
                 string before = LiveResolve(key);
-                string note = CatalogLive.Register(key, v.Path);
+                // Under the project's id: two mods naming one key get the lower id's clip, the same
+                // winner on every machine, and neither one's undo takes the other's row away.
+                string note = CatalogLive.RegisterFor(p.Id, key, v.Path);
                 // Register REFUSES rather than throws (it runs as a Harmony postfix), so its refusal
                 // has to be read: recording a row it did not install made the summary say "serving"
                 // over a clip the game never sees, and made the undo hand back a row nobody replaced.
@@ -574,17 +595,24 @@ namespace Morgott.ContentTool.Bake
                 }
                 // A no-op unless this mod is CLAIMED (the shipped path); the console verb records
                 // nothing, because nothing claimed it and there is nothing to hand back.
+                // A QUEUED row is recorded too: it is held behind a lower mod id and takes over when
+                // that one lets go, so this mod's undo has to drop it or a switched-off mod's clip
+                // would come back later.
                 Project.ContentState.Served(root, Route, key);
+                bool held = note != null && note.StartsWith("QUEUED", StringComparison.Ordinal);
                 log.AppendLine("  " + key + "\n    before: " + (before ?? "(no manager)") +
                                "\n    after:  " + (LiveResolve(key) ?? "(no manager)") + "\n    " + note);
+                if (held) queued++;
+                else n++;
                 // Counted AS it lands, not after the loop: a throw on the next row must still leave
-                // the caller knowing this one reached the live catalog.
-                served = ++n;
+                // the caller knowing this one is recorded and has to be handed back.
+                served = n + queued;
             }
             // ONE line per mod, first and unconditional, so a modder reads at a glance that enabling
             // the mod was enough - and reads the reason on the same line when it was not.
             StringBuilder head = new StringBuilder("  " + name + ": " + n +
                 " clip(s) served in memory from " + root +
+                (queued > 0 ? ", " + queued + " held behind a lower mod id" : "") +
                 (refused > 0 ? ", " + refused + " refused/skipped" : "") +
                 "; nothing in the install was written");
             if (log.Length > 0) head.Append(Environment.NewLine).Append(log.ToString().TrimEnd());

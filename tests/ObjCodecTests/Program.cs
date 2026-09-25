@@ -348,6 +348,7 @@ internal static class Program
         Console.WriteLine(MeshExtractTests.Run());
         Console.WriteLine(VideoExtractTests.Run());
         Console.WriteLine(VideoCatalogTests.Run());
+        Console.WriteLine(CatalogOwnersTests.Run());
         Console.WriteLine(AudioExtractTests.Run());
         Console.WriteLine(SoundbankNamesTests.Run());
         string wav = WavReadTests.Run();

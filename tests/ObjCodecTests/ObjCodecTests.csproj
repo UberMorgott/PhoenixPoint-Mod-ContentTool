@@ -122,6 +122,11 @@
          and the duplicate-RuntimeKey refusal (which would otherwise brick a player's boot scene)
          are proven against the REAL shipped Catalog.json here, not in a game session. -->
     <Compile Include="..\..\src\Bake\CatalogText.cs" Link="CatalogText.cs" />
+    <!-- WHO serves a live video key two mods both want: CatalogLive's bookkeeping half carries no
+         UnityEngine type, and neither does the one ownership policy it asks (BundleClaims.Keeps). -->
+    <Compile Include="..\..\src\Bake\CatalogOwners.cs" Link="CatalogOwners.cs" />
+    <Compile Include="..\..\src\Bake\BundleClaims.cs" Link="BundleClaims.cs" />
+    <Compile Include="CatalogOwnersTests.cs" />
     <Compile Include="AudioExtractTests.cs" />
     <!-- WHAT a shipped sound is called. The name map is the game's own SoundbanksInfo.xml and the
          parse touches no UnityEngine type, so the whole map - names, banks, loose vs in-bank, the

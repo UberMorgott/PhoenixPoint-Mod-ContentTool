@@ -28,8 +28,12 @@ namespace Morgott.ContentTool.Bake
     /// </summary>
     public static class CatalogLive
     {
-        /// <summary>RuntimeKey -> StreamingPath, relative to StreamingRoot (the game concatenates).</summary>
-        private static readonly Dictionary<string, string> registered = new Dictionary<string, string>(StringComparer.Ordinal);
+        /// <summary>RuntimeKey -> every owner that wants it, each with its StreamingPath relative to
+        /// StreamingRoot (the game concatenates). The lowest owner id is the one the catalog serves.</summary>
+        private static readonly CatalogOwners owners = new CatalogOwners();
+        /// <summary>The owner a caller that names none registers as. Empty, so it sorts BELOW every
+        /// mod id and keeps what a direct <see cref="Register"/> call always did: take the row.</summary>
+        private const string Anonymous = "";
         /// <summary>What the game said about a key BEFORE we first touched it: its own StreamingPath,
         /// or null for a key the game never had. Captured once, so an undo restores the shipped row
         /// rather than whatever the last mod wrote.</summary>
@@ -53,21 +57,60 @@ namespace Morgott.ContentTool.Bake
         /// of. The failure that empties MOD_ACTIVATED and silently disables every other mod (measured
         /// 2026-08-13, commit 632fba7) came from referencing a Managed\ Unity module ModSDK\ does not
         /// ship - UnityEngine.VideoModule - never from referencing ContentTool.dll.
+        ///
+        /// This form names NO owner, so it registers as the anonymous owner "" - which outranks
+        /// every mod id. A mod that may share a key with another should call <see cref="RegisterFor"/>.
         /// </summary>
         public static string Register(string key, string absolutePath)
         {
+            return RegisterFor(Anonymous, key, absolutePath);
+        }
+
+        /// <summary>
+        /// <see cref="Register"/>, OWNED: <paramref name="modId"/> wants <paramref name="key"/>
+        /// served from <paramref name="absolutePath"/>. When two mods want one key the LOWER mod id
+        /// serves it (the rule every ContentTool route shares, so two players with the same mods get
+        /// the same clip); the other is held, not refused, and takes over when the lower one lets go.
+        ///
+        /// Returns "registered ..." when this mod now serves the key, "QUEUED: ..." when a lower id
+        /// holds it, "REFUSED: ..." when nothing was recorded. A separate NAME rather than an
+        /// overload, so a caller's GetMethod("Register") cannot turn ambiguous.
+        /// </summary>
+        public static string RegisterFor(string modId, string key, string absolutePath)
+        {
             if (string.IsNullOrEmpty(key)) return "REFUSED: no RuntimeKey";
             if (!System.IO.File.Exists(absolutePath)) return "REFUSED: no file at " + absolutePath;
+            string owner = modId ?? Anonymous;
 
+            string before = owners.Serving(key), had = owners.PathFor(key, owner);
             if (!origin.ContainsKey(key)) origin[key] = Shipped(key);
-            registered[key] = Relative(absolutePath);
+            string serving = owners.Want(key, owner, Relative(absolutePath));
             if (harmony == null)
             {
                 harmony = new Harmony("com.morgott.ContentTool.CatalogLive");
                 harmony.Patch(AccessTools.Method(typeof(StreamableAssetsManager), "Initialize"),
                               postfix: new HarmonyMethod(typeof(CatalogLive), nameof(Reinject)));
             }
-            return Inject() ?? ("registered " + key + " -> " + registered[key]);
+            if (!string.Equals(serving, owner, StringComparison.Ordinal))
+                return "QUEUED: mod '" + serving + "' already serves key '" + key + "' and the lower mod " +
+                       "id keeps it - '" + owner + "''s clip is held and takes over if '" + serving + "' lets go";
+
+            string refusal = Inject();
+            if (refusal != null)
+            {
+                // Nothing reached the catalog, so the record goes back to what it was: a want that
+                // outlived its refusal would be pushed in by the next scene load's postfix with no one
+                // to undo it. A re-register keeps the path the catalog still serves.
+                if (had != null) owners.Want(key, owner, had);
+                else owners.Drop(key, owner);
+                if (!owners.Wanted(key)) origin.Remove(key);
+                return refusal;
+            }
+            return "registered " + key + " -> " + owners.PathOf(key) +
+                   (before != null && !string.Equals(before, owner, StringComparison.Ordinal)
+                    ? " (taken from '" + before + "' - the lower mod id keeps a key; its clip comes back if '" +
+                      owner + "' lets go)"
+                    : "");
         }
 
         /// <summary>
@@ -77,12 +120,36 @@ namespace Morgott.ContentTool.Bake
         /// it puts the shipped cutscene back with no restart.
         ///
         /// Returns what the key resolves to afterwards, so the caller can log a measured before/after
-        /// pair instead of claiming an undo happened.
+        /// pair instead of claiming an undo happened. Anonymous, like <see cref="Register"/>.
         /// </summary>
         public static string Unregister(string key)
         {
-            if (string.IsNullOrEmpty(key) || !registered.ContainsKey(key)) return null;
-            registered.Remove(key);
+            return UnregisterFor(Anonymous, key);
+        }
+
+        /// <summary>
+        /// <see cref="Unregister"/>, OWNED: drops only what <paramref name="modId"/> wanted. When
+        /// another mod still wants the key its clip is served next instead of the game's; when that
+        /// mod was only held behind a lower id, the catalog is not touched at all. Null when this mod
+        /// wanted nothing under that key.
+        /// </summary>
+        public static string UnregisterFor(string modId, string key)
+        {
+            string owner = modId ?? Anonymous;
+            if (string.IsNullOrEmpty(key)) return null;
+            bool served = string.Equals(owners.Serving(key), owner, StringComparison.Ordinal);
+            if (!owners.Drop(key, owner)) return null;
+            if (owners.Wanted(key))
+            {
+                // Someone else still wants it: a held mod was dropped (nothing to do), or the server
+                // was, and the next-lowest id takes the row over through the ordinary injection.
+                if (served)
+                {
+                    string why = Inject();
+                    if (why != null) return why;
+                }
+                return owners.PathOf(key);
+            }
 
             StreamableAssetsManager mgr = StreamableAssetsManager.Instance;
             StreamableAssetsCatalog cat = mgr == null || CatalogField == null
@@ -137,6 +204,7 @@ namespace Morgott.ContentTool.Bake
         public static string Inject()
         {
             StreamableAssetsManager mgr = StreamableAssetsManager.Instance;
+            Dictionary<string, string> registered = owners.Served();
             if (mgr == null || registered.Count == 0) return null;
             StreamableAssetsCatalog cat = CatalogField == null ? null : CatalogField.GetValue(mgr) as StreamableAssetsCatalog;
             if (cat == null || cat.AllLocations == null) return "REFUSED: no live catalog to extend";
