@@ -1464,6 +1464,13 @@ namespace Morgott.ContentTool.Import
                     float u;
                     int k = Segment(keys, times[f], step, ref cursor, out u);
                     sampled[f] = u <= 0f ? keyed[k] : Slerp(keyed[k], keyed[k + 1], u);
+                    // ONE HEMISPHERE, frame to frame - the same rule Root() applies, for every bone.
+                    // Slerp takes the short arc between two keys, but a frame that lands ON a key
+                    // returns that key as the file wrote it, and an exporter is free to write q or -q:
+                    // the dense bank would then ramp the long way round and the bone spins for a frame.
+                    if (f > 0 && sampled[f - 1].X * sampled[f].X + sampled[f - 1].Y * sampled[f].Y +
+                                 sampled[f - 1].Z * sampled[f].Z + sampled[f - 1].W * sampled[f].W < 0f)
+                        sampled[f] = new ObjQuaternion(-sampled[f].X, -sampled[f].Y, -sampled[f].Z, -sampled[f].W);
                 }
                 track.Rotations = sampled;
                 return;

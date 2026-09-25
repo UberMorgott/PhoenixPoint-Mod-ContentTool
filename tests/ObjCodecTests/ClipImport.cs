@@ -50,6 +50,9 @@ internal static class ClipImport
     ///   head translation keys (1,0,0) (2,0,0) (3,0,0) in the in-between space
     ///   -> Rz(90) takes x onto y, +2 up: hip-space (0,3,0) (0,4,0) (0,5,0), Unity x negated = same
     ///   unfolded, it would read (-1,0,0) (-2,0,0) (-3,0,0).
+    ///
+    /// Plus the hemisphere rule on a plain bone: hip's middle rotation key is written as -q, which
+    /// is the same rotation, and the stored frames must not flip sign between neighbours.
     /// </summary>
     private static string Between()
     {
@@ -57,7 +60,7 @@ internal static class ClipImport
         SkinnedModel model = GlbReader.Read(Assimp(false), clips);
         BakedSkin skin = ModelBuild.From(model, "assimp");
         SampledClip clip = clips[0];
-        SampledTrack head = Track(clip, skin, "head");
+        SampledTrack head = Track(clip, skin, "head"), hip = Track(clip, skin, "hip");
         Assert(skin.BonePath(head.Node) == "hip/head", "the in-between node is skipped in the rig: " + skin.BonePath(head.Node));
         string ladder = "";
         for (int f = 0; f < head.Translations.Length; f++)
@@ -70,12 +73,21 @@ internal static class ClipImport
                "and head's unkeyed rotation comes back as its rest, the fold taken off and put back: w=" +
                F(head.Rotations[0].W));
 
+        bool oneHemisphere = true;
+        for (int f = 1; f < hip.Rotations.Length; f++)
+        {
+            ObjQuaternion a = hip.Rotations[f - 1], b = hip.Rotations[f];
+            oneHemisphere &= a.X * b.X + a.Y * b.Y + a.Z * b.Z + a.W * b.W >= 0f;
+        }
+        Assert(oneHemisphere && hip.Rotations[1].W > 0f,
+               "a key written as -q is stored in its neighbours' hemisphere: w=" + F(hip.Rotations[1].W));
+
         string refusal = Refusal(Assimp(true));
         Assert(refusal.Contains("'head_$AssimpFbx$_PreRotation'") &&
                refusal.Contains("between the bone 'hip' and its child 'head'") && refusal.Contains("Blender"),
                "an ANIMATED in-between node is refused by name: " + refusal);
 
-        return "in-between node folded: head " + ladder + " | animated " +
+        return "in-between node folded: head " + ladder + " | -q key kept in one hemisphere | animated " +
                "in-between node refused by name";
     }
 
