@@ -983,22 +983,36 @@ namespace Morgott.ContentTool.Bake
         /// </summary>
         private static string ProbeArchive(string bundleFileName)
         {
+            string state;
+            AssetBundle probe = Mount(bundleFileName, out state);
+            if (probe != null) probe.Unload(false);
+            return state;
+        }
+
+        /// <summary>The same measurement, KEEPING the archive when we could open it: non-null with
+        /// <paramref name="state"/> = <see cref="Free"/> (the caller unloads it), or null with
+        /// <see cref="Held"/> - already mounted by the game, so its externals resolve all the same - or
+        /// Unity's own complaint verbatim. ProjectBake's _common mount asks this, so a mount the game
+        /// already holds is not reported as FAILED.</summary>
+        internal static AssetBundle Mount(string bundleFileName, out string state)
+        {
             string path = ShippedBundlePath(bundleFileName);
-            if (!File.Exists(path)) return "no such file: " + path;
+            if (!File.Exists(path)) { state = "no such file: " + path; return null; }
             string said = null;
             Application.LogCallback tap = (msg, stack, type) =>
             {
                 if (said == null && (type == LogType.Error || type == LogType.Exception)) said = msg;
             };
             Application.logMessageReceived += tap;
-            AssetBundle probe;
-            try { probe = AssetBundle.LoadFromFile(path); }
+            AssetBundle opened;
+            try { opened = AssetBundle.LoadFromFile(path); }
             finally { Application.logMessageReceived -= tap; }
-            if (probe != null) { probe.Unload(false); return Free; }
+            if (opened != null) { state = Free; return opened; }
             // Unity names this one case in so many words, and it is the only failure that leaves the
             // archive MOUNTED and every external in it resolvable.
-            if (said != null && said.Contains("already loaded")) return Held;
-            return said == null ? "LoadFromFile returned null and Unity logged nothing" : said;
+            state = said != null && said.Contains("already loaded") ? Held
+                  : said ?? "LoadFromFile returned null and Unity logged nothing";
+            return null;
         }
 
         private static int Check(StringBuilder log, string gate, bool ok, string detail)

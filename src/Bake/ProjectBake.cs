@@ -509,8 +509,16 @@ namespace Morgott.ContentTool.Bake
             AssetBundle common = null;
             if (commonExt != 0)
             {
-                common = AssetBundle.LoadFromFile(BakeSelfCheck.ShippedBundlePath(BakeSelfCheck.CommonBundle));
-                log.AppendLine("mount " + BakeSelfCheck.CommonBundle + ": " + (common == null ? "FAILED" : "ok"));
+                // MEASURED, like BakeSelfCheck's premount arms: a null here is usually the GAME holding
+                // _common already (Addressables pulled it in), which resolves the external just the same -
+                // "FAILED" for that sent authors hunting a fault that was not there.
+                string state;
+                common = BakeSelfCheck.Mount(BakeSelfCheck.CommonBundle, out state);
+                log.AppendLine("mount " + BakeSelfCheck.CommonBundle + ": " +
+                               (common != null ? "ok"
+                                : state == BakeSelfCheck.Held ? "already mounted by the game - the animator's " +
+                                                                 "external resolves against that copy"
+                                : "FAILED - " + state));
             }
 
             // The mod that SHIPS this project may already have this bundle open - its own DLL loads
