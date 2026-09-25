@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -360,54 +361,76 @@ namespace Morgott.ContentTool.Dev
         /// EVERY loose media the filter matches, decoded in one go. Extracting sounds one id at a time
         /// was the only way to get at them, which for 3105 files is not a way at all.
         ///
-        /// A failing decode is COUNTED AND NAMED, never fatal: one unreadable file must not cost the
-        /// other 3104. index.csv covers ALL media including the in-bank ones, so the name -> id map
-        /// survives outside the console for the sounds this cannot write.
+        /// The decode runs OFF the main thread (<see cref="AudioBatch"/>): inside the console command
+        /// it froze the game for minutes. Everything the worker touches is resolved here first -
+        /// streamingAssetsPath, persistentDataPath and the name map are main-thread reads - and the
+        /// progress and closing lines are printed by a coroutine, never from the worker. The command
+        /// itself answers at once; <see cref="AsyncGate"/> holds ct_autorun's DONE until the run ends.
         /// </summary>
         private static string AudioAll(string filter)
         {
             if (!Directory.Exists(AudioRoot)) return "ct_extract VOID - no audio folder at " + AudioRoot;
-            SoundbankNames names = Names;
             List<string> rel = LooseFiles.Find(AudioRoot, ".wem", null);
-            List<string> stems = Stems(rel);
-            string dir = OutDir("audio");
-            Directory.CreateDirectory(dir);
+            string refusal;
+            AudioBatch batch = AudioBatch.TryBegin(Names, AudioRoot, rel, Stems(rel), OutDir("audio"),
+                                                   filter, out refusal);
+            if (batch == null) return refusal;
 
-            var wavByMedia = new Dictionary<uint, string>();
-            var failures = new List<string>();
-            int matched = 0, done = 0;
-            for (int k = 0; k < stems.Count; k++)
+            GameObject go = new GameObject("ct_extract_audio");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            go.AddComponent<AudioRunner>().Begin(batch);
+            return "ct_extract audio --all: decoding " + batch.Matched + " matched loose media into " +
+                   batch.Dir + " in the background - the game stays playable; progress every 200 and the " +
+                   "closing 'extracted N of M' line print to the log";
+        }
+
+        /// <summary>
+        /// Owns one <see cref="AudioBatch"/> from start to its report: starts the worker, then polls it
+        /// each frame from a coroutine, so every log line leaves from the main thread.
+        /// </summary>
+        private sealed class AudioRunner : MonoBehaviour
+        {
+            private AudioBatch batch;
+
+            internal void Begin(AudioBatch run)
             {
-                string stem = stems[k];
-                uint id = SoundbankNames.IdOf(stem);
-                if (!names.Matches(id, stem, filter)) continue;
-                matched++;
-                string wav = Path.Combine(dir, SoundbankNames.WavName(names.Name(id), id, stem) + ".wav");
-                string why;
+                batch = run;
+                AsyncGate.Pending++;
+                // A worker that never started would leave the run slot claimed and AsyncGate raised
+                // for good - the batch is run inline then, a freeze being better than a stuck gate.
                 try
                 {
-                    why = WwiseWem.ToWav(File.ReadAllBytes(
-                        Path.Combine(AudioRoot, rel[k].Replace('/', Path.DirectorySeparatorChar))), wav);
+                    new System.Threading.Thread(batch.Run)
+                    { IsBackground = true, Name = "ct_extract audio --all" }.Start();
                 }
-                catch (Exception ex) { why = ex.GetType().Name + ": " + ex.Message; }
-                if (why == null) { done++; if (id != 0) wavByMedia[id] = Path.GetFileName(wav); }
-                else failures.Add(stem + " (" + (names.Name(id) == "" ? "unnamed" : names.Name(id)) + ") - " + why);
-                if (matched % 200 == 0)
-                    Dev.ChunkedLog.Say("[ContentTool] ct_extract audio --all: " + done + " of " + matched + " so far");
+                catch (Exception) { batch.Run(); }
+                StartCoroutine(Watch());
             }
 
-            int inBank = names.InBankMatches(stems, filter);
-            string csv = Path.Combine(dir, "index.csv");
-            File.WriteAllText(csv, names.Csv(stems, wavByMedia));
-
-            StringBuilder b = new StringBuilder();
-            b.Append("ct_extract wrote ").Append(csv).Append(" (").Append(names.Count)
-             .Append(" named media").Append(names.Why == null ? "" : " - NO NAMES: " + names.Why).Append(")");
-            for (int i = 0; i < failures.Count; i++) b.Append("\n  FAILED ").Append(failures[i]);
-            b.Append("\nextracted ").Append(done).Append(" of ").Append(matched)
-             .Append(" loose media (").Append(inBank).Append(" in-bank skipped) into ").Append(dir);
-            if (failures.Count > 0) b.Append(" - ").Append(failures.Count).Append(" FAILED, named above");
-            return b.ToString();
+            private IEnumerator Watch()
+            {
+                try
+                {
+                    int reported = 0;
+                    while (!batch.Finished)
+                    {
+                        int now = batch.Processed;
+                        if (now / 200 > reported / 200)
+                        {
+                            ContentToolMain.Say("ct_extract audio --all: " + batch.Done + " of " + now +
+                                                " decoded so far, " + batch.Matched + " matched");
+                            reported = now;
+                        }
+                        yield return null;
+                    }
+                }
+                finally
+                {
+                    ContentToolMain.Say(batch.Summary ?? "ct_extract audio --all: the run ended with no report");
+                    AsyncGate.Pending--;
+                    Destroy(gameObject);
+                }
+            }
         }
 
         /// <summary>

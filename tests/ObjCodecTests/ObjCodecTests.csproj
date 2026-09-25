@@ -133,6 +133,8 @@
     <Compile Include="..\..\src\Bake\HexColor.cs" Link="HexColor.cs" />
     <Compile Include="BakeParseTests.cs" />
     <Compile Include="AudioExtractTests.cs" />
+    <Compile Include="..\..\src\Dev\AudioBatch.cs" Link="AudioBatch.cs" />
+    <Compile Include="AudioBatchTests.cs" />
     <!-- WHAT a shipped sound is called. The name map is the game's own SoundbanksInfo.xml and the
          parse touches no UnityEngine type, so the whole map - names, banks, loose vs in-bank, the
          filter every audio command shares, and the missing-file fallback to numeric names - is proven
