@@ -65,6 +65,7 @@ namespace Morgott.ContentTool.Dev
             if (Event.current.type != EventType.Layout) return;
             pending.Back = back;
             pending.Jump = jump;
+            pending.MaxJump = maxJump;
             pending.Sub = subView;
         }
 
