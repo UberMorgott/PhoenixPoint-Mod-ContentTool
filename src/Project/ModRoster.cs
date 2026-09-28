@@ -107,7 +107,8 @@ namespace Morgott.ContentTool.Project
             if (toggle != null)
                 harmony.Patch(toggle,
                     prefix: new HarmonyMethod(AccessTools.Method(typeof(ModRoster), nameof(BeforeSetEnabled))),
-                    postfix: new HarmonyMethod(AccessTools.Method(typeof(ModRoster), nameof(AfterSetEnabled))));
+                    postfix: new HarmonyMethod(AccessTools.Method(typeof(ModRoster), nameof(AfterSetEnabled))),
+                    finalizer: new HarmonyMethod(AccessTools.Method(typeof(ModRoster), nameof(SetEnabledFinally))));
             else
                 // AccessTools.Method matches parameter types EXACTLY and returns null on a miss, and a
                 // null target makes Harmony do nothing at all - which here means every dependent mod
@@ -230,18 +231,47 @@ namespace Morgott.ContentTool.Project
         /// and the startup reconcile's repeat of the same call a no-op. The ownership refusals are
         /// unaffected for the same reason - a mod re-claiming what it already holds never reaches them.
         /// </summary>
-        private static void BeforeSetEnabled(ModEntry __instance, bool enable)
+        private static void BeforeSetEnabled(ModEntry __instance, bool enable, out bool __state)
         {
+            __state = false;
             try
             {
                 if (__instance == null ||
                     !Bake.BundleClaims.PublishesBeforeInit(enable, __instance.Enabled,
                                                            HasContent(__instance.Directory))) return;
                 StringBuilder log = new StringBuilder();
-                Reconciled(log, __instance.ID, __instance.Directory, true);
+                __state = Reconciled(log, __instance.ID, __instance.Directory, true);
                 if (log.Length > 0) Dev.ChunkedLog.Say(log.ToString().TrimEnd());
             }
             catch (Exception ex) { Dev.ChunkedLog.Fail("ct_content pre-enable: " + ex); }
+        }
+
+        /// <summary>
+        /// Harmony FINALIZER on ModEntry.SetEnabled: the prefix's early publish, taken back when the
+        /// enable it anticipated did not happen.
+        ///
+        /// The prefix installs the routes BEFORE the mod's own DLL loads and runs OnModEnabled
+        /// (ModEntry.cs:198-220). Either can throw - LoadMod returning null throws at :203, and a
+        /// mod's OnModEnabled is arbitrary code - and TryEnableMod catches it and leaves Enabled
+        /// false (ModManager.cs:208-220). The postfix never runs on a throw, so without this the mod
+        /// is OFF in the manager while its keys and redirections stay live for the whole session.
+        /// A finalizer runs on both paths; it only acts when THIS call's prefix actually moved a
+        /// route (<paramref name="__state"/>) and the mod did not end up enabled. Void, so the
+        /// original exception still reaches TryEnableMod's own catch and log line unchanged.
+        /// </summary>
+        private static void SetEnabledFinally(ModEntry __instance, bool __state)
+        {
+            try
+            {
+                if (!__state || __instance == null || __instance.Enabled) return;
+                StringBuilder log = new StringBuilder();
+                Reconciled(log, __instance.ID, __instance.Directory, false);
+                Dev.ChunkedLog.Say("ct_content: '" + __instance.ID + "' FAILED to enable (its own load or " +
+                                   "OnModEnabled threw - see the mod manager's error above), so the content " +
+                                   "published for it ahead of that was taken back." +
+                                   (log.Length > 0 ? Environment.NewLine + log.ToString().TrimEnd() : ""));
+            }
+            catch (Exception ex) { Dev.ChunkedLog.Fail("ct_content enable rollback: " + ex); }
         }
 
         /// <summary>
@@ -340,13 +370,14 @@ namespace Morgott.ContentTool.Project
         }
 
         /// <summary>One mod put into the state the mod manager says it should be in, and the line for
-        /// it. Silent when the routes were already there, which is the normal case.</summary>
-        private static void Reconciled(StringBuilder log, string who, string dir, bool on)
+        /// it. Silent when the routes were already there, which is the normal case. True when a
+        /// route actually moved - what the enable finalizer needs to know there is something to undo.</summary>
+        private static bool Reconciled(StringBuilder log, string who, string dir, bool on)
         {
             string what;
             try { what = Bake.Route7.Toggle(dir, on); }
             catch (Exception ex) { what = "ct_route7 reconcile FAILED: " + ex.Message; }
-            if (what == null) return;
+            if (what == null) return false;
             // A refusal means nothing moved - the message already names the files and the repair, so
             // it must not get the "was applied"/"was undone" wrapper.
             if (what.StartsWith("REFUSED:"))
@@ -355,6 +386,11 @@ namespace Morgott.ContentTool.Project
                 log.AppendLine("ct_content: '" + who + "' is " + (on ? "ON" : "OFF") + " in the mod " +
                                "manager, so its live registrations were " + (on ? "installed" : "undone") +
                                " at startup." + Environment.NewLine + what);
+            // ANY line means something MAY have moved - even a REFUSED one: Route7.Toggle refuses the
+            // replace route over a legacy record and can still publish keys in the same call
+            // (Route7.cs:209-233), and a FAILED one may have moved half. Undoing is guarded per route
+            // (BundleClaims.RouteMoves), so over-reporting costs at most a no-op rollback.
+            return true;
         }
 
         private static string Join(string a, string b)
