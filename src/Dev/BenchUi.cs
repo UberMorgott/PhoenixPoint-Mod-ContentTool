@@ -96,6 +96,9 @@ namespace Morgott.ContentTool.Dev
         {
             Init();
             BenchNav.StepsSeen(names, current);
+            // The native shell draws the bar in its band from what StepsSeen just reported; here it is ONE
+            // zero-height control, so the screen's control count does not depend on which frame is up.
+            if (BenchShell.Live) { Hint(null); return; }
             GUILayout.BeginHorizontal();
             for (int i = 0; i < names.Length; i++)
             {

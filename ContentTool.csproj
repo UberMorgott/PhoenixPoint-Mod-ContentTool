@@ -180,6 +180,12 @@
          the game itself uses for a full-screen developer window (GameConsoleWindow.cs:15 is an
          OnGUI), so this costs no prefab, no canvas and no third-party UI. Verified present in this
          install: UnityEngine.IMGUIModule.dll, 156,160 B. -->
+    <!-- uGUI (Canvas widgets: Button, Text, Image, layout groups) - the bench's native shell clones the
+         game's own widgets onto its own canvas (src\Dev\NativeKit.cs, BenchShell.cs). The game ships it. -->
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(UnityManaged)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>$(UnityManaged)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
