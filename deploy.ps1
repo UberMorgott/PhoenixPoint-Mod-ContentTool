@@ -70,7 +70,7 @@ foreach ($demo in $folders) {
         if (Test-Path $from) { Copy-Item $from $to -Recurse -Force }
     }
     Write-SourceMarker $to $demo.FullName
-    # The two demos that ship a trigger build their own DLL; the other four are content only.
+    # Six demos ship a trigger and build their own DLL; the other five are content only.
     $csproj = Get-ChildItem $demo.FullName -Filter '*.csproj' | Select-Object -First 1
     if ($csproj) {
         dotnet build $csproj.FullName -c Release

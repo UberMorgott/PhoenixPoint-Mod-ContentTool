@@ -1,5 +1,10 @@
 # Demo mod — the assault rifle every soldier starts with is now somebody else's model
 
+> **Build ContentTool first.** This demo has its own DLL, and its `.csproj` references
+> `..\..\bin\Release\ContentTool\ContentTool.dll`. On a fresh clone run
+> `dotnet build ContentTool.csproj -c Release` at the repository root before `deploy.ps1` or
+> `package.ps1`, or the demo build fails with missing ContentTool types.
+
 **A content mod is a FOLDER of assets - no code - and ContentTool plays it.**
 
 > **This is a SEPARATE MOD.** It installs as `Mods\WeaponMesh\` and the mod manager lists it as
@@ -53,7 +58,7 @@ ct_route7 status                    # what is redirected right now
 
 Look for `W1-icon PASS` in `Player.log` to know the icon half bound.
 
-The mechanism is gate **P4** in `docs\PROVEN-FOUNDATIONS.md` — a declared mesh change reaching the
+The mechanism is gate **P4** in `internal-docs\engine\PROVEN-FOUNDATIONS.md` — a declared mesh change reaching the
 game with zero runtime code, eye-confirmed on `px_assault_assets_all.bundle` (110 MB). This demo
 aims the same machinery at `px_equipment_assets_all.bundle`, which is **403 MB**: the patched copy is
 written by decompressing the whole archive, so expect the `apply` step to take a while and to want

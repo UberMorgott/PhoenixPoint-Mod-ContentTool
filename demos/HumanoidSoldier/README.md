@@ -8,7 +8,7 @@ It is the counterpart of [CustomCreature](../CustomCreature/README.md), which te
 case: a creature that ships its own clips and needs a small DLL. The engine-level explanation of both
 (def cloning, animation events, root motion, controller override) lives there and is not repeated
 here. The full recipe, with the measurements behind it, is
-[docs/guides/humanoid-soldier.md](../../docs/guides/humanoid-soldier.md) — read that page first; this
+[Add a playable humanoid soldier](; this
 folder is its worked instance.
 
 ## What ships, and what you supply
@@ -155,7 +155,7 @@ treats as viewable but never tunable: a shipped weapon has no `ppcontent.json` r
 nowhere for a save to go", and its axis buttons are not drawn at all (`src\Dev\FitBench.cs:53-55`).
 What it is still good for here is COMPARISON: put a shipped weapon in the hand and see how far off
 the socket is. See
-[docs/guides/humanoid-soldier.md](../../docs/guides/humanoid-soldier.md#load-the-soldier-and-how-its-weapons-sit-in-its-hands).
+[internal-docs/legacy-pages/guides/humanoid-soldier.md](../../internal-docs/legacy-pages/guides/humanoid-soldier.md#load-the-soldier-and-how-its-weapons-sit-in-its-hands).
 
 ## Checked offline
 

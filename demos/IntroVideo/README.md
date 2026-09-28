@@ -1,5 +1,10 @@
 # Demo mod — a whole cutscene: picture, sound and subtitles
 
+> **Build ContentTool first.** This demo has its own DLL, and its `.csproj` references
+> `..\..\bin\Release\ContentTool\ContentTool.dll`. On a fresh clone run
+> `dotnet build ContentTool.csproj -c Release` at the repository root before `deploy.ps1` or
+> `package.ps1`, or the demo build fails with missing ContentTool types.
+
 **A content mod is a FOLDER of assets - no code - and ContentTool plays it.** This one is the
 exception that proves where the line is: two of its three parts are pure content, and the third
 costs a DLL.

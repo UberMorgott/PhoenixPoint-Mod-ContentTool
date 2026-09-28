@@ -15,7 +15,7 @@ It is the REPLACE half of a pair. The ADD half is
 [HumanoidSoldier](../HumanoidSoldier/README.md) — the same model, the same toolchain, the same five
 clip roles, put into the game as a NEW person instead of over an existing one. The full recipe, the
 seam it writes to and the limits are in
-[docs/guides/replace-character-body.md](../../docs/guides/replace-character-body.md).
+[Replace a character's body](.
 
 ## Run it
 

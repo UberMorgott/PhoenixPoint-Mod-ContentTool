@@ -1,5 +1,10 @@
 # Demo mod — a video plays when you quit from the MAIN MENU, then the game exits
 
+> **Build ContentTool first.** This demo has its own DLL, and its `.csproj` references
+> `..\..\bin\Release\ContentTool\ContentTool.dll`. On a fresh clone run
+> `dotnet build ContentTool.csproj -c Release` at the repository root before `deploy.ps1` or
+> `package.ps1`, or the demo build fails with missing ContentTool types.
+
 ESC skips it and exits immediately. Quitting from the in-game pause screen exits normally with no
 clip: `GeoscapeView.ToCutsceneState` takes a priority and not a completion callback
 (`GeoscapeView.cs:672`), so there is no shipped "play then continue" outside the home screen.
@@ -166,7 +171,7 @@ that, and one of them matters more than the cutscene does:
 `CommonModules.CutscenesPlayer.VideoPlayer` reported `prepared=True playing=True frameCount=90
 length=3s 1280x720 playbackSource=QuitCutscene_Runtime`, and then the process exited. The added
 catalog key resolved to `…\Mods\QuitCutscene\Content\Videos\quit_outro.webm`, 90 frames 1280×720 —
-`docs\VERIFIED-DEMOS.md`, and `ZW5` in `docs\PROVEN-FOUNDATIONS.md`.
+`internal-docs\evidence\VERIFIED-DEMOS.md`, and `ZW5` in `internal-docs\engine\PROVEN-FOUNDATIONS.md`.
 
 Two things that run left UNMEASURED, and neither affects whether the clip plays. **Which code path
 performed the exit is not known**: the watchdog quits unconditionally

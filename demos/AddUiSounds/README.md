@@ -1,5 +1,10 @@
 # Demo mod — ADD a sound the game never had, and pay for the trigger
 
+> **Build ContentTool first.** This demo has its own DLL, and its `.csproj` references
+> `..\..\bin\Release\ContentTool\ContentTool.dll`. On a fresh clone run
+> `dotnet build ContentTool.csproj -c Release` at the repository root before `deploy.ps1` or
+> `package.ps1`, or the demo build fails with missing ContentTool types.
+
 **A content mod is a FOLDER of assets - no code - and ContentTool plays it.** This mod is where that
 stops being true, and the reason is worth the whole demo: the *sounds* here are still pure content,
 but nothing in Phoenix Point would ever play them. Deciding **when** to post an event is behaviour,

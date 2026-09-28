@@ -8,12 +8,19 @@ A folder without `meta.json` is invisible — PPModLoader discovers only TOP-LEV
 Copy an existing `meta.json`. The four rules:
 
 - **ID** `morgott.demo.<name>`, matching the project's `ppcontent.json` `"id"`.
-- **Name** `ContentTool Demo: <X>` — one prefix, so the ten sort together among hundreds of mods.
+- **Name** `ContentTool Demo: <X>` — one prefix, so the eleven sort together among hundreds of mods.
   The list uppercases it for you.
 - **Dependencies** `[ "com.morgott.ContentTool" ]`. It is enforced: a missing dependency makes the
   mod un-enablable (`ModEntry.cs:53-63`), and enabling a demo auto-enables ContentTool
   (`ModManager.TryEnableMod:200-207`).
 - **Description** — see below. This one bites.
+
+## Demos with a DLL need ContentTool built first
+
+Six demos (AddUiSounds, CustomCreature, IntroVideo, QuitCutscene, WeaponAdd, WeaponMesh) carry a
+`.csproj` whose `HintPath` is `..\..\bin\Release\ContentTool\ContentTool.dll`. Run
+`dotnet build ContentTool.csproj -c Release` at the repository root once, before `deploy.ps1` or
+`package.ps1`; neither script builds ContentTool for you. The other five demos are content only.
 
 ## The description is TWO surfaces, and the row shows only the FIRST LINE
 

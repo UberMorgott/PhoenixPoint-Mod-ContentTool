@@ -1,5 +1,10 @@
 # Demo mod — a creature downloaded from the internet, in your squad, with its OWN skeleton and its OWN animations
 
+> **Build ContentTool first.** This demo has its own DLL, and its `.csproj` references
+> `..\..\bin\Release\ContentTool\ContentTool.dll`. On a fresh clone run
+> `dotnet build ContentTool.csproj -c Release` at the repository root before `deploy.ps1` or
+> `package.ps1`, or the demo build fails with missing ContentTool types.
+
 **Start a new campaign and the spider is standing in your aircraft.** It is a CC BY 4.0 model
 downloaded from Sketchfab untouched, its 49-bone skeleton is the one that came inside the file, and
 the clips it plays while it walks, shoots, flinches and dies are the clips that came inside the

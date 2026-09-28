@@ -1,5 +1,10 @@
 # Demo mod -- three weapons Phoenix Point does not ship, waiting in the base on day one
 
+> **Build ContentTool first.** This demo has its own DLL, and its `.csproj` references
+> `..\..\bin\Release\ContentTool\ContentTool.dll`. On a fresh clone run
+> `dotnet build ContentTool.csproj -c Release` at the repository root before `deploy.ps1` or
+> `package.ps1`, or the demo build fails with missing ContentTool types.
+
 **A content mod is a FOLDER of assets -- and when the thing you are adding is a *weapon*, the assets
 are only half of it. The other half is a def.**
 
@@ -10,7 +15,7 @@ are only half of it. The other half is a def.**
 > **Nothing is written into your game files.** Unlike its sibling `WeaponMesh`, this demo does not
 > patch a shipped bundle: the models are served out of *this mod's own* bundle under *their own*
 > catalog keys. Disabling the mod un-publishes those keys on the spot, but defs already created stay
-> alive for the session; restart for a clean undo (`docs/SHIPPING-A-CONTENT-MOD.md:396-404`).
+> alive for the session; restart for a clean undo (`internal-docs/legacy-pages/SHIPPING-A-CONTENT-MOD.md:396-404`).
 
 Meet the **Vulture AR**, the **Vulture Sniper** and the **Vulture Sidearm** -- three `WeaponDef`s
 the game does not ship, sitting in the Phoenix base's inventory the moment a new campaign begins,
