@@ -387,6 +387,7 @@ internal static class Program
         Console.WriteLine(Compressed.Run());
         Console.WriteLine(DracoTests.Run());
         Console.WriteLine(AssetIndexTests.Run());
+        Console.WriteLine(BlockReuseTests.Run());
         Console.WriteLine(InspectTests.Run());
         Console.WriteLine(GlbDocTests.Run());
         Console.WriteLine(GlbSlimTests.Run());

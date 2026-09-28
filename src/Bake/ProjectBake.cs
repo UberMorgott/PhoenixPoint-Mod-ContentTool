@@ -1920,7 +1920,8 @@ namespace Morgott.ContentTool.Bake
                         // The FINAL path is what the line names - that is where these bytes are going, and the
                         // temp's name is a GUID nobody can act on.
                         log.AppendLine("WROTE " + copy + " " + new FileInfo(copyTmp).Length + " B as " +
-                                       baker.WrittenIdentity + " (shipped source is " + new FileInfo(shipped).Length + " B)");
+                                       baker.WrittenIdentity + " by " + baker.WriteMode +
+                                       " (shipped source is " + new FileInfo(shipped).Length + " B)");
                         refusedHere = failures - refusedHere;
                         if (refusedHere > 0)
                             log.AppendLine("PARTIAL " + bundleFile + ": " + refusedHere + " row(s) above were " +

@@ -42,6 +42,12 @@ namespace Morgott.ContentTool.Bake
         /// <summary>The identity actually written, for the log - never the caller's intent.</summary>
         internal string WrittenIdentity { get; private set; }
 
+        /// <summary>How Write produced the file ("block-reuse", or "repack ..." with the reason), for the log.</summary>
+        internal string WriteMode { get; private set; }
+
+        /// <summary>Tests only: skip the block-reuse writer, so its output can be compared with the full repack.</summary>
+        internal bool ForceRepack { get; set; }
+
         internal BundleBaker(string sourceBundlePath, string modId)
         {
             if (!File.Exists(sourceBundlePath))
@@ -1107,6 +1113,22 @@ namespace Morgott.ContentTool.Bake
             // for px_equipment, +11% disk. Unity reads both from the same block flags. The mod's OWN bundle
             // ships in the package and keeps the source's ratio.
             if (bundleName == null && comp == AssetBundleCompressionType.LZ4) comp = AssetBundleCompressionType.LZ4Fast;
+            // Better still (PERF.md design 2b): only entry 0 changed, so re-encode only it and byte-copy the
+            // shipped compressed blocks of everything else - px_equipment 5.4 s -> well under 1 s. Any
+            // layout BlockReuse does not reproduce exactly falls through to the full repack below.
+            WriteMode = "repack " + comp;
+            if (bundleName == null && comp != AssetBundleCompressionType.None && !ForceRepack)
+            {
+                byte[] cab;
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    using (AssetsFileWriter cw = new AssetsFileWriter(ms)) { afile.Write(cw, 0); cw.Flush(); }
+                    cab = ms.ToArray();
+                }
+                string why = BlockReuse.TryWrite(source.Name, cab, outPath);
+                if (why == null) { WriteMode = "block-reuse"; return; }
+                WriteMode = "repack " + comp + " (block reuse refused: " + why + ")";
+            }
             using (MemoryStream raw = new MemoryStream())
             {
                 using (AssetsFileWriter rw = new AssetsFileWriter(raw))
