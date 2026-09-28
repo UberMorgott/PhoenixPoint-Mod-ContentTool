@@ -685,9 +685,11 @@ namespace Morgott.ContentTool.Bake
                     return log.Append("REFUSED: " + bundle + " did not open - nothing was published.").ToString();
                 foreach (Morgott.ContentTool.Project.PublishedKey k in project.Publish)
                 {
-                    // BundleBaker's own naming rule: "assets/<modid>/<relative path>", lowercased.
-                    string asset = "assets/" + project.Id + "/" +
-                                   k.asset.Replace('\\', '/').Trim('/').ToLowerInvariant();
+                    // BundleBaker's own naming rule: "assets/<modid>/<relative path>", ALL of it lowercased -
+                    // the baker normalizes the mod id too (BundleBaker ctor), so a mixed-case id such as
+                    // the bench's "CtWpnTest" was refused here although its asset was in the bundle.
+                    string asset = ("assets/" + project.Id + "/" +
+                                    k.asset.Replace('\\', '/').Trim('/')).ToLowerInvariant();
                     if (!ab.Contains(asset))
                         return log.Append("REFUSED: '" + asset + "' is not in " + Path.GetFileName(bundle) +
                                           " (it holds " + ab.GetAllAssetNames().Length + " asset(s)); the key '" +
