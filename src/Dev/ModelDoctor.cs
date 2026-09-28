@@ -1658,7 +1658,8 @@ namespace Morgott.ContentTool.Dev
             if (shipResult.Length > 0) s.Append(shipResult).Append('\n');
             if (shipTail.Length > 0) s.Append(shipTail).Append('\n');
             string build = s.Length > 0 ? "\nBUILD\n" + s : "";
-            detailsShown = b.ToString().TrimEnd('\n') + build;
+            string rows = b.ToString().TrimEnd('\n');
+            detailsShown = (rows.Length > 0 ? rows : "No warnings or notes - nothing to fix.") + build;
             detailsFull = PlainTextOf(Ready, Path, Target) + build;
         }
 
