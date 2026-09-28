@@ -610,6 +610,18 @@ namespace Morgott.ContentTool.Bake
             internal static readonly string[] Stages = { "Validate", "Bake", "Apply", "Verify", "Package" };
 
             private int at = -1;
+            /// <summary>How many of <see cref="Stages"/> this chain runs: all five for `Run all`, four for
+            /// the bench's "Build &amp; test", which stops after Verify and leaves Package to its own button.</summary>
+            private readonly int count;
+
+            internal Sequence() : this(null) { }
+
+            /// <param name="last">the final stage to run, or null for all five.</param>
+            internal Sequence(string last)
+            {
+                int i = last == null ? -1 : Array.IndexOf(Stages, last);
+                count = i < 0 ? Stages.Length : i + 1;
+            }
 
             /// <summary>The stage last handed out, so <see cref="Report"/> knows whose report it is.</summary>
             internal string Current { get; private set; }
@@ -618,14 +630,14 @@ namespace Morgott.ContentTool.Bake
             /// <summary>The chain ended early. <see cref="Terminal"/> says why, in the producer's own words
             /// or in the refusal's.</summary>
             internal bool Stopped { get; private set; }
-            internal bool Done { get { return Stopped || at >= Stages.Length; } }
+            internal bool Done { get { return Stopped || at >= count; } }
 
             /// <summary>The next stage to dispatch, or null when the chain is over - stopped, or all five
             /// done. A refusal stops it and is remembered as the terminal line.</summary>
             internal string Next(Admission ctx)
             {
                 if (Stopped) return null;
-                if (++at >= Stages.Length) { Current = null; return null; }
+                if (++at >= count) { Current = null; return null; }
 
                 string stage = Stages[at];
                 Current = stage;
@@ -671,7 +683,7 @@ namespace Morgott.ContentTool.Bake
                 // keeps its own words; the finished stage keeps its PASS and only the continuation ends.
                 // The LAST stage has no continuation: CancelledAfter would claim later stages were skipped
                 // over a run that ran every one of them.
-                else if (cancelRequested && Current != Stages[Stages.Length - 1])
+                else if (cancelRequested && Current != Stages[count - 1])
                 { Stopped = true; Terminal = StageText.CancelledAfter(Current); }
             }
         }

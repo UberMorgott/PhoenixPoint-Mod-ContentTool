@@ -461,7 +461,9 @@ namespace Morgott.ContentTool.Dev
         /// nothing on screen to say why. It lives HERE rather than in the Unity half precisely so the
         /// offline gate can measure whether a row of buttons actually fits inside it.
         /// </summary>
-        internal const float PanelWidth = 380f;
+        /// 448 = 35% of the 1280 px window the bench is checked at: the left column holds the steps and
+        /// ONE main button, the viewport keeps the rest (UI redesign 2026-09-28).
+        internal const float PanelWidth = 448f;
 
         /// <summary>The margin <c>GUILayout.BeginArea</c> is inset by on each side.</summary>
         internal const float PanelInset = 8f;
@@ -513,20 +515,20 @@ namespace Morgott.ContentTool.Dev
         /// simply CLIPS it. That is how the one-line header read "| prototype Hun" and the browser's
         /// counter, the one control with no width of its own, fell into a vertical column of characters.
         /// </summary>
-        internal const float DocSourceW = 200f, DocBrowseW = 80f, DocAliasW = 68f,
-                             DocProtoW = 176f, DocChangeW = 68f, DocModeW = 100f,
-                             DocVariantW = 160f, DocBarW = 8f,
-                             DocBackW = 70f, DocSearchLabelW = 46f, DocSearchFieldW = 220f;
+        internal const float DocLabelW = 84f, DocSourceW = 190f, DocBrowseW = 80f, DocAliasW = 44f,
+                             DocProtoW = 230f, DocChangeW = 80f, DocModeW = 160f,
+                             DocBackW = 70f, DocSearchLabelW = 46f, DocSearchFieldW = 280f;
 
-        /// <summary>Does every one of those rows fit inside the panel? Same silence as
-        /// <see cref="RowFits"/>'s, and the same assert.</summary>
+        /// <summary>Does every one of those rows fit inside the panel - WITH the outer scroll view's
+        /// scrollbar, which a long report always brings? Same silence as <see cref="RowFits"/>'s, and
+        /// the same assert.</summary>
         internal static bool DoctorRowsFit(float panelW)
         {
-            float w = ContentWidth(panelW);
-            return DocSourceW + DocBrowseW + DocAliasW + 3f * RowGap <= w
-                && DocProtoW + DocChangeW + DocModeW + 3f * RowGap <= w
-                && DocVariantW + DocBarW + 3f * RowGap <= w
-                && DocBackW + DocSearchLabelW + DocSearchFieldW + 3f * RowGap <= w;
+            float w = ContentWidth(panelW) - ScrollbarWidth;
+            return DocLabelW + DocSourceW + DocBrowseW + DocAliasW + 3f * RowGap <= w
+                && DocLabelW + DocProtoW + DocChangeW + 2f * RowGap <= w
+                && DocLabelW + DocModeW + RowGap <= w
+                && DocBackW + DocSearchLabelW + DocSearchFieldW + 2f * RowGap <= w;
         }
 
         /// <summary>A long def name shortened from the MIDDLE, because both ends carry meaning
@@ -543,7 +545,81 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>Roughly how many characters of the default IMGUI font fit one panel line. A
         /// calibration knob: it is measured by eye against a real screenshot, not derived.</summary>
-        internal const int NameChars = 44;
+        internal const int NameChars = 52;
+
+        // ================================================================ plain words for def names
+
+        /// <summary>The body regions a bone problem is counted under, in the order the panel lists them.</summary>
+        internal static readonly string[] Regions =
+            { "Head", "Body", "Left arm", "Right arm", "Left hand", "Right hand", "Left leg", "Right leg", "Other" };
+
+        /// <summary>Which body region a bone NAME belongs to, by the words rigs actually use
+        /// ("L.ForeArm", "Bip01 R Thigh", "hand_r", "LeftToeBase"). A grouping aid only: nothing binds or
+        /// refuses by it, so a wrong guess costs a row in the wrong group, never a wrong bone.</summary>
+        internal static string RegionOf(string bone)
+        {
+            if (string.IsNullOrEmpty(bone)) return "Other";
+            string b = bone.ToLowerInvariant();
+            int side = SideOf(bone);
+            if (Has(b, "head", "neck", "jaw", "eye", "face", "brow", "lip", "tongue", "helm", "hair")) return "Head";
+            if (Has(b, "finger", "thumb", "index", "middle", "ring", "pinky", "hand", "wrist", "palm"))
+                return side < 0 ? "Left hand" : side > 0 ? "Right hand" : "Other";
+            if (Has(b, "arm", "shoulder", "clavicle", "elbow", "bicep"))
+                return side < 0 ? "Left arm" : side > 0 ? "Right arm" : "Other";
+            if (Has(b, "leg", "thigh", "knee", "calf", "shin", "foot", "toe", "ankle"))
+                return side < 0 ? "Left leg" : side > 0 ? "Right leg" : "Other";
+            if (Has(b, "spine", "chest", "pelvis", "hip", "root", "torso", "belly", "stomach", "back", "waist"))
+                return "Body";
+            return "Other";
+        }
+
+        /// <summary>-1 left, +1 right, 0 unknown - from the separators rigs put around an L/R marker.</summary>
+        private static int SideOf(string bone)
+        {
+            string b = bone.ToLowerInvariant();
+            if (b.Contains("left")) return -1;
+            if (b.Contains("right")) return 1;
+            string[] parts = b.Split(new[] { '.', '_', ' ', '-', ':' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string p in parts)
+            {
+                if (p == "l") return -1;
+                if (p == "r") return 1;
+            }
+            // "LForeArm" / "RThigh": a capital L or R glued to the next capitalised word.
+            if (bone.Length > 1 && char.IsUpper(bone[1]) && (bone[0] == 'L' || bone[0] == 'R'))
+                return bone[0] == 'L' ? -1 : 1;
+            return 0;
+        }
+
+        private static bool Has(string text, params string[] words)
+        {
+            foreach (string w in words) if (text.IndexOf(w, StringComparison.Ordinal) >= 0) return true;
+            return false;
+        }
+
+        /// <summary>Counts per <see cref="Regions"/> entry, same order, for a list of bone names.</summary>
+        internal static int[] CountByRegion(IEnumerable<string> bones)
+        {
+            int[] n = new int[Regions.Length];
+            if (bones == null) return n;
+            foreach (string b in bones) n[Array.IndexOf(Regions, RegionOf(b))]++;
+            return n;
+        }
+
+        /// <summary>The user's word for a lifecycle stage. The stage token itself is the RPC contract and
+        /// never changes; this is only what the button says, with the token kept in its tooltip.</summary>
+        internal static string StageWord(string stage)
+        {
+            switch (stage)
+            {
+                case "Validate": return "Check files";
+                case "Bake": return "Build";
+                case "Apply": return "Install";
+                case "Verify": return "Verify install";
+                case "Package": return "Package for sharing";
+                default: return stage ?? "";
+            }
+        }
 
         // ---- the vertical budget ----
         // ponytail: rows are counted, not measured. IMGUI can only measure inside a layout pass, and

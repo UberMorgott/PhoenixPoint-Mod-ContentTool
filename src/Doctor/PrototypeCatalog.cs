@@ -343,6 +343,128 @@ namespace Morgott.ContentTool.Doctor
             return hits;
         }
 
+        /// <summary>One SLOT a search matched - what the author actually picks ("Anu Assault 1 - Head"),
+        /// instead of a record to open, a variant to stand up and a slot list to scan.</summary>
+        internal sealed class SlotHit
+        {
+            internal PrototypeRecord Record;
+            internal PrototypeVariant Variant;
+            internal string SlotDefName;
+        }
+
+        /// <summary>Token-AND over each slot's own haystack: prototype, variant (raw and in
+        /// plain words), representative and slot (raw and plain), so "anu head" and "AN_Assault1 Head"
+        /// both land. At most <paramref name="max"/> hits are returned; <paramref name="total"/> says how
+        /// many matched. An empty query matches nothing - the browse tree is the empty-query view.</summary>
+        internal static List<SlotHit> SearchSlots(IList<PrototypeRecord> all, string query, int max, out int total)
+        {
+            var hits = new List<SlotHit>();
+            total = 0;
+            string[] tokens = (query ?? string.Empty).Split(new[] { ' ', '\t', '\r', '\n' },
+                                                            StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0 || all == null) return hits;
+            foreach (PrototypeRecord record in all)
+                foreach (PrototypeVariant variant in record.Variants)
+                    foreach (PrototypeSlot slot in variant.Slots)
+                    {
+                        // NOT the category: "Human & Anu" holds every human, so "anu head" would match
+                        // them all instead of the Anu armour sets.
+                        string hay = record.DisplayName + "\n" + variant.Name + "\n" +
+                                     VariantWord(variant.Name) + "\n" +
+                                     variant.RepresentativeCharacter + "\n" + slot.SlotDefName + "\n" +
+                                     SlotWord(slot.SlotDefName);
+                        bool every = true;
+                        foreach (string token in tokens)
+                            if (hay.IndexOf(token, StringComparison.OrdinalIgnoreCase) < 0) { every = false; break; }
+                        if (!every) continue;
+                        total++;
+                        if (hits.Count < max)
+                            hits.Add(new SlotHit { Record = record, Variant = variant, SlotDefName = slot.SlotDefName });
+                    }
+            return hits;
+        }
+
+        // ---- plain words for def names (the bench shows these; the def name stays in a tooltip)
+
+        /// <summary>"Human_Head_SlotDef" -&gt; "Head", "Crabman_LeftArm_SlotDef" -&gt; "Left arm". The def name
+        /// stays reachable in a tooltip; this is only what a row SAYS.</summary>
+        internal static string SlotWord(string slotDefName)
+        {
+            if (string.IsNullOrEmpty(slotDefName)) return "(slot)";
+            string s = TrimEnd(slotDefName, "_SlotDef");
+            string[] parts = s.Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length > 1) s = string.Join(" ", parts, 1, parts.Length - 1);
+            return Spaced(s);
+        }
+
+        /// <summary>"Human / AN_Assault2_1" -&gt; "Anu Assault 2-1". Unknown prefixes are kept as they are.</summary>
+        internal static string VariantWord(string variantName)
+        {
+            if (string.IsNullOrEmpty(variantName)) return "-";
+            string s = variantName;
+            int slash = s.LastIndexOf(" / ", StringComparison.Ordinal);
+            if (slash >= 0) s = s.Substring(slash + 3);
+            s = TrimEnd(TrimEnd(TrimEnd(s, "_CharacterTemplateDef"), "_TacCharacterDef"), "_WeaponDef");
+            string[] parts = s.Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return variantName;
+            var words = new List<string>();
+            int from = 0;
+            string faction = Faction(parts[0]);
+            if (faction != null) { words.Add(faction); from = 1; }
+            string tail = "";
+            for (int i = from; i < parts.Length; i++)
+            {
+                bool digits = true;
+                foreach (char c in parts[i]) if (!char.IsDigit(c)) { digits = false; break; }
+                if (digits && words.Count > 0 && i > from) tail += "-" + parts[i];
+                else { if (tail.Length > 0) { words[words.Count - 1] += tail; tail = ""; } words.Add(Spaced(parts[i])); }
+            }
+            if (tail.Length > 0) words[words.Count - 1] += tail;
+            return string.Join(" ", words.ToArray());
+        }
+
+        private static string Faction(string prefix)
+        {
+            switch (prefix)
+            {
+                case "AN": return "Anu";
+                case "NJ": return "New Jericho";
+                case "SY": return "Synedrion";
+                case "PX": return "Phoenix";
+                case "IN": return "Independent";
+                case "FS": return "Forsaken";
+                case "PU": return "Pure";
+                case "BAN": return "Bandit";
+                default: return null;
+            }
+        }
+
+        private static string TrimEnd(string s, string suffix)
+        {
+            return s.EndsWith(suffix, StringComparison.Ordinal) ? s.Substring(0, s.Length - suffix.Length) : s;
+        }
+
+        /// <summary>"LeftArm2" -&gt; "Left arm 2": spaces at case and digit boundaries, later words lowered.</summary>
+        internal static string Spaced(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s ?? "";
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (i > 0)
+                {
+                    char p = s[i - 1];
+                    bool cap = char.IsUpper(c) && char.IsLower(p);
+                    bool num = char.IsDigit(c) && char.IsLetter(p);
+                    if (cap || num) sb.Append(' ');
+                    if (cap && !(i + 1 < s.Length && char.IsUpper(s[i + 1]))) c = char.ToLowerInvariant(c);
+                }
+                sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
         /// <summary>The 8 navigation groups, keyed off ResourcePath's faction folder plus the manager
         /// name. Navigation only - it never merges or splits anything.</summary>
         internal static string CategoryOf(string resourcePath, string managerName)

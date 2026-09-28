@@ -71,15 +71,16 @@ namespace Morgott.ContentTool.Dev
             string picked = null;
             GUILayout.BeginVertical(GUI.skin.box);
 
+            BenchUi.Title("Pick your .glb file");
             GUILayout.BeginHorizontal();
-            GUILayout.Label("in: " + BenchList.Elide(dir, BenchList.NameChars));
-            if (GUILayout.Button("up", GUILayout.Width(40f))) Up();
-            if (GUILayout.Button("x", GUILayout.Width(24f))) Open = false;
+            GUILayout.Label(new GUIContent(BenchList.Elide(dir, BenchList.NameChars - 18), dir));
+            if (GUILayout.Button("Up", GUILayout.Width(44f))) Up();
+            if (GUILayout.Button("Cancel", GUILayout.Width(64f))) Open = false;
             GUILayout.EndHorizontal();
 
             if (recent.Count > 0)
             {
-                GUILayout.Label("recent");
+                BenchUi.Hint("Recent files");
                 // A copy, because picking one calls Remember and reorders the list we are walking.
                 foreach (string r in recent.ToArray())
                     if (GUILayout.Button(BenchList.Elide(Path.GetFileName(r), BenchList.NameChars),
@@ -87,11 +88,10 @@ namespace Morgott.ContentTool.Dev
                         picked = r;
             }
 
-            if (problem != null) GUILayout.Label(problem);
+            if (problem != null) BenchUi.Hint(problem);
 
+            BenchUi.Hint("This folder - .glb files and sub-folders (>); other drives at the bottom");
             scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(height));
-            foreach (string drive in drives)
-                if (GUILayout.Button("[" + drive + "]", GUILayout.Height(18f))) pending = drive;
             foreach (string sub in subs)
                 if (GUILayout.Button("> " + BenchList.Elide(Leaf(sub), BenchList.NameChars - 2),
                                      GUILayout.Height(18f)))
@@ -100,6 +100,9 @@ namespace Morgott.ContentTool.Dev
                 if (GUILayout.Button(BenchList.Elide(Path.GetFileName(file), BenchList.NameChars),
                                      GUILayout.Height(18f)))
                     picked = file;
+            // Drives LAST: they are how to leave this disk, not what is being looked for.
+            foreach (string drive in drives)
+                if (GUILayout.Button("Drive " + drive, GUILayout.Height(18f))) pending = drive;
             GUILayout.EndScrollView();
             GUILayout.EndVertical();
 

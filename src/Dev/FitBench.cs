@@ -257,8 +257,70 @@ namespace Morgott.ContentTool.Dev
         internal static bool DoctorShowing { get { return open && tab == TabDoctor; } }
         /// <summary>Which of the three columns is drawn. ONE int, not two bools: two flags can both be
         /// true, and "the Doctor and the Lifecycle at once" is a layout stack nobody balances.</summary>
-        private const int TabFit = 0, TabDoctor = 1, TabLifecycle = 2;
+        private const int TabHome = 0, TabFit = 1, TabDoctor = 2, TabLifecycle = 3;
         private static int tab;
+
+        /// <summary>Opens a screen by its plain name ("home", "fit", "doctor", "build") - the seam an
+        /// external driver (PPCLI `call`) uses to reach a screen without clicking. Outside a GUI event,
+        /// like every other tab move; refused while the Doctor has a press armed or a run owns the job.</summary>
+        internal static string ShowScreen(string name)
+        {
+            if (doctor.ShipPending || LifecycleDashboard.Busy) return "busy - screen not changed";
+            switch ((name ?? "").ToLowerInvariant())
+            {
+                case "home": tab = TabHome; break;
+                case "fit": tab = TabFit; break;
+                case "doctor": tab = TabDoctor; break;
+                case "build": tab = TabLifecycle; break;
+                default: return "unknown screen '" + name + "' - home, fit, doctor or build";
+            }
+            return "screen " + name;
+        }
+
+        /// <summary>A def name in plain words, cached: the two pickers ask for several hundred per pass.</summary>
+        private static string Word(string defName)
+        {
+            if (defName == null) return "-";
+            string w;
+            if (!words.TryGetValue(defName, out w)) words[defName] = w = PrototypeCatalog.VariantWord(defName);
+            return w;
+        }
+        private static readonly Dictionary<string, string> words = new Dictionary<string, string>();
+        private static readonly string[] FitSteps = { "Soldier", "Weapon", "Adjust", "Save" };
+
+        private static string TabTitle()
+        {
+            switch (tab)
+            {
+                case TabFit: return "Fit a weapon in the hand";
+                case TabDoctor: return "Replace a model";
+                case TabLifecycle: return "Build & share";
+                default: return "What do you want to do?";
+            }
+        }
+
+        /// <summary>The home screen: one card per task. Returns the tab a card asked for (or home).
+        /// Sounds, videos and new weapons have no screen yet - their cards say so instead of vanishing.</summary>
+        private static int Home()
+        {
+            int wanted = TabHome;
+            bool free = !doctor.ShipPending && !LifecycleDashboard.Busy;
+            GUI.enabled = free;
+            if (BenchUi.Card("Replace a model", "Put your .glb on a soldier or creature part and check its bones"))
+                wanted = TabDoctor;
+            if (BenchUi.Card("Fit a weapon", "Position a weapon your mod adds in a soldier's hand, then save"))
+                wanted = TabFit;
+            GUI.enabled = !doctor.ShipPending;      // arriving at a busy run is always allowed
+            if (BenchUi.Card("Build & share", "Build, install and test your mod, then package it for sharing"))
+                wanted = TabLifecycle;
+            GUI.enabled = true;
+            BenchUi.Card("Add a weapon", null, "coming in the next update - for now use the ct_project console command");
+            BenchUi.Card("Sounds", null, "coming in the next update - for now use ct_sound in the console");
+            BenchUi.Card("Videos", null, "coming in the next update - for now use ct_video in the console");
+            GUILayout.Space(6f);
+            BenchUi.Hint("The model on the right is a live preview: middle-drag to orbit, wheel to zoom, F to frame.");
+            return wanted;
+        }
         /// <summary>The file utilities that sit under the Doctor's Advanced toggle (design §6). It
         /// owns no Unity object, so unlike <see cref="doctor"/> it survives a close untouched apart
         /// from the run <see cref="Close"/> cancels.</summary>
@@ -1184,7 +1246,7 @@ namespace Morgott.ContentTool.Dev
             // renderers are still the ones on screen. It is a Step like the rest - a throw in here is
             // reported and retried by a second close, not swallowed, and NOT placed at the end where
             // the partial-failure return above would skip it.
-            Step(failed, "the Model Doctor's preview meshes", () => { doctor.Dispose(); tab = TabFit; });
+            Step(failed, "the Model Doctor's preview meshes", () => { doctor.Dispose(); tab = TabHome; });
             // THE BAY'S OWN SOLDIER. AFTER the Doctor has given the shipped meshes back - restoring
             // first would rebuild the rig out from under the renderers it still has to un-swap - and
             // BEFORE both FitAnim.Release, which plays a default state on the animator this restore
@@ -1743,19 +1805,28 @@ namespace Morgott.ContentTool.Dev
                                          BenchList.ContentWidth(w), viewportH));
             panelScroll = GUILayout.BeginScrollView(panelScroll);
 
+            BenchUi.Frame();
+            // THE ONE TOP ROW: back to the task cards, the view reset, and the way out.
+            // DEAD WHILE THE DOCTOR HAS A PRESS ARMED or a lifecycle run owns the job - see the tab note
+            // below: leaving the tab mid-press or mid-run is what those gates forbid.
             GUILayout.BeginHorizontal();
+            // A busy lifecycle run forbids LEAVING its tab, never arriving - so from FIT or the Doctor the
+            // way home (and on to the Lifecycle card) stays open while a run started elsewhere is busy.
+            GUI.enabled = !doctor.ShipPending && !(LifecycleDashboard.Busy && tab == TabLifecycle);
+            bool homing = tab != TabHome && GUILayout.Button("< Tasks", GUILayout.Width(80f));
+            GUI.enabled = true;
+            GUILayout.FlexibleSpace();
             // The close is deferred to AFTER EndArea on purpose: returning out of the middle of a
             // GUILayout block leaves the layout stack unbalanced, and IMGUI answers that with an
             // exception every frame - i.e. exactly the wedged screen this button exists to escape.
-            bool leaving = GUILayout.Button("CLOSE (" + HotkeyLabel + ")", GUILayout.Width(150f));
-            bool resetting = GUILayout.Button("RESET VIEW", GUILayout.Width(110f));
+            bool resetting = GUILayout.Button(new GUIContent("Reset view", "camera back to the start (Home key)"),
+                                              GUILayout.Width(96f));
+            bool leaving = GUILayout.Button("Close (" + HotkeyLabel + ")", GUILayout.Width(140f));
             GUILayout.EndHorizontal();
+            BenchUi.Title(TabTitle());
 
-            // TWO TABS, ONE COLUMN. The Doctor is a different job done against the same standing
-            // character - it needs the whole width, and none of the fit rows mean anything while a
-            // mesh is being diagnosed. The close is still deferred past EndArea, exactly as below:
-            // the tab is a different panel, not a different set of rules about the layout stack.
-            GUILayout.BeginHorizontal();
+            // TASK CARDS, ONE COLUMN. Each card opens one screen; "< Tasks" comes back. The rules below
+            // were written for the old tab strip and still hold for the cards:
             // DEAD WHILE THE DOCTOR HAS A PRESS ARMED. Its two-frame gate closes on a PAINT of its own
             // SHIP label, and leaving the tab stops Draw being called at all while Tick keeps running
             // below - so the press would sit armed and fire whenever the author came back.
@@ -1772,20 +1843,17 @@ namespace Morgott.ContentTool.Dev
             // out a different number of controls than the Layout pass had cached - IMGUI's
             // `ArgumentException`, and OnGUI's own catch answers that by closing the bench. `Update`'s
             // SHIP landing (Arm.Update, TakeShipLanding) moves the tab the same way: outside a GUI event.
-            GUI.enabled = !doctor.ShipPending && !LifecycleDashboard.Busy;
-            // ONLY A TOGGLE FOR A TAB WE ARE NOT ON RECORDS A CHANGE. The one for the ACTIVE tab is drawn
-            // CHECKED, so it returns true every frame - and being drawn LAST it would overwrite a press on
-            // an earlier toggle, which made every leftward move (DOCTOR -> FIT, LIFECYCLE -> anything)
-            // impossible without closing the bench.
-            int wanted = tab;
-            if (GUILayout.Toggle(tab == TabFit, " FIT", GUILayout.Width(70f)) && tab != TabFit) wanted = TabFit;
-            if (GUILayout.Toggle(tab == TabDoctor, " MODEL DOCTOR", GUILayout.Width(130f)) && tab != TabDoctor) wanted = TabDoctor;
-            // The Doctor's armed press still gates it: that press fires on a PAINT of its own SHIP label,
-            // and it is the leaving of the Doctor's tab - not the lifecycle job - that this half forbids.
-            GUI.enabled = !doctor.ShipPending;
-            if (GUILayout.Toggle(tab == TabLifecycle, " LIFECYCLE", GUILayout.Width(100f)) && tab != TabLifecycle) wanted = TabLifecycle;
-            GUI.enabled = true;
-            GUILayout.EndHorizontal();
+            int wanted = homing ? TabHome : tab;
+            if (tab == TabHome)
+            {
+                wanted = Home();
+                GUILayout.EndScrollView();
+                GUILayout.EndArea();
+                tab = wanted;
+                if (leaving) message = Close();
+                else if (resetting) message = ResetView();
+                return;
+            }
             if (tab == TabLifecycle)
             {
                 LifecycleDashboard.Draw();
@@ -1804,7 +1872,9 @@ namespace Morgott.ContentTool.Dev
                 // The SAME toggle the fit side uses, drawn again here because that one lives on the
                 // other tab: an author on the Doctor should not have to go to FIT and back to reach
                 // the file utilities. Design §6 puts them under Advanced, and this is where they are.
-                advanced = GUILayout.Toggle(advanced, " Advanced (file utilities)");
+                GUILayout.Space(6f);
+                advanced = GUILayout.Toggle(advanced, new GUIContent(" Advanced file tools",
+                    "shrink a .glb, pack it, check its skeleton (SLIM / ZIP / SKEL)"));
                 // The prototype the Doctor is holding is what a SKEL run verifies against. Handed down
                 // rather than looked up: the panel never picks a prototype, it only reports on one.
                 slim.Target = doctor.Prototype;
@@ -1818,9 +1888,8 @@ namespace Morgott.ContentTool.Dev
             }
 
             string fitKey = weapon == null ? null : BenchList.KeyFor(weapon.name, WeaponBuild.FittedKeys);
-            GUILayout.Label("unit:   " + BenchList.Elide(unit == null ? "-" : unit.name, BenchList.NameChars));
-            GUILayout.Label("weapon: " + BenchList.Elide(weapon == null ? "-" : weapon.name, BenchList.NameChars) +
-                            (weapon == null ? "" : fitKey != null ? "  [tunable]" : "  [vanilla]"));
+            BenchUi.Steps(FitSteps, weapon == null ? (unitsOpen ? 0 : 1) : fitKey == null ? 1
+                                  : WeaponBuild.Modified(fitKey) ? 3 : 2);
 
             // THE PICKERS COME BEFORE THE WRAPPING BLOCKS. See the note on Draw: closed they are two
             // rows, so the dial stays where S29 put it; open they push the dial down, which is right,
@@ -1854,7 +1923,8 @@ namespace Morgott.ContentTool.Dev
         private static void View()
         {
             GUILayout.Space(4f);
-            advanced = GUILayout.Toggle(advanced, " Advanced (numeric readouts and per-axis nudges)");
+            advanced = GUILayout.Toggle(advanced, new GUIContent(" Show numbers and step buttons",
+                                                                 "numeric readouts, per-axis nudges and camera buttons"));
             if (advanced)
             {
                 GUILayout.BeginHorizontal();
@@ -1891,7 +1961,8 @@ namespace Morgott.ContentTool.Dev
             // platform and dial the same number against him. Nothing is written anywhere - see
             // <see cref="viewScale"/> - so '1x' is not an undo of a save, it is simply the value 1.
             GUILayout.BeginHorizontal();
-            GUILayout.Label("model", GUILayout.Width(40f));
+            GUILayout.Label(new GUIContent("Size", "preview size of the model - compare it to a soldier. Nothing is saved."),
+                            GUILayout.Width(40f));
             float dialled = GUILayout.HorizontalSlider(viewScale, BenchList.ModelScaleMin,
                                                        BenchList.ModelScaleMax);
             if (Mathf.Abs(dialled - viewScale) > 1e-4f) Rescale(dialled, true);
@@ -1920,21 +1991,24 @@ namespace Morgott.ContentTool.Dev
             // in Advanced, so only Advanced appends them. NOT FRAMED is neither: it is the panel's only
             // word for "there is nothing on the platform", the one state an author cannot reason their
             // way out of, so it is always drawn. Still exactly ONE row either way - see the note above.
+            // ONE short line; the full gesture list is its tooltip.
             if (!framed)
-                GUILayout.Label("NOT FRAMED - nothing with a renderer is standing there yet. Try RESET VIEW.");
+                BenchUi.Hint("Nothing is standing on the platform yet - try Reset view.");
             else
-                GUILayout.Label(
-                    (FitGizmo.Live ? "ARROWS on the gun = move it, RINGS = turn it about that axis (Esc " +
-                                     "cancels; a dimmed handle is edge-on to the camera). " : "handles OFF. ") +
-                    "MIDDLE-drag = orbit (Alt+left too), SHIFT+middle = pan, wheel = zoom at the " +
-                    "cursor, F = frame, Home = reset, WASD/QE (Shift = faster) = fly." +
+                BenchUi.Hint(
+                    (FitGizmo.Live ? "Drag the arrows / rings on the gun to move / turn it.  " : "") +
+                    "Middle-drag = orbit, wheel = zoom (hover for all keys)" +
                     (advanced
                         ? "  x" + view.Zoom.ToString("0.00", CultureInfo.InvariantCulture) +
                           " lift " + lift.ToString("0.00", CultureInfo.InvariantCulture) +
                           " yaw " + view.Yaw.ToString("0", CultureInfo.InvariantCulture) +
                           " pitch " + view.Pitch.ToString("0", CultureInfo.InvariantCulture) +
                           " r " + frameRadius.ToString("0.00", CultureInfo.InvariantCulture) + "m"
-                        : ""));
+                        : ""),
+                    (FitGizmo.Live ? "ARROWS on the gun = move it, RINGS = turn it about that axis (Esc " +
+                                     "cancels; a dimmed handle is edge-on to the camera).\n" : "handles OFF.\n") +
+                    "MIDDLE-drag = orbit (Alt+left too), SHIFT+middle = pan, wheel = zoom at the " +
+                    "cursor, F = frame, Home = reset, WASD/QE (Shift = faster) = fly.");
         }
 
         /// <summary>Set the preview scale and re-apply the pose through the SAME callback that poses
@@ -1954,7 +2028,12 @@ namespace Morgott.ContentTool.Dev
         {
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button((unitsOpen ? "v " : "> ") + "unit (" + units.Count + ")", GUILayout.Width(110f)))
+            GUILayout.Label("Soldier", GUILayout.Width(60f));
+            if (GUILayout.Button(new GUIContent((unitsOpen ? "v " : "> ") +
+                                                (unitsOpen ? "find (" + units.Count + ")"
+                                                           : BenchList.Elide(unit == null ? "-" : Word(unit.name), 30)),
+                                                unit == null ? "pick the soldier to hold the weapon" : unit.name),
+                                 GUILayout.Width(unitsOpen ? 90f : 250f)))
                 unitsOpen = !unitsOpen;
             if (unitsOpen)
             {
@@ -1963,26 +2042,28 @@ namespace Morgott.ContentTool.Dev
                 // The catalogue is read once per open, so a content mod enabled or re-projected WHILE
                 // the bench is up is otherwise invisible until it is closed and re-opened. Re-reading it
                 // is one repository walk and touches nothing that is on screen.
-                if (GUILayout.Button("rescan", GUILayout.Width(58f)))
+                if (GUILayout.Button(new GUIContent("rescan", "re-read the list - picks up a mod enabled while the bench is open"),
+                                     GUILayout.Width(58f)))
                 {
                     Catalog();
                     message = "ct_bench: catalogue re-read - " + units.Count + " unit(s), " +
                               ourUnits.Count + " of them built by a content mod and listed FIRST.";
                 }
             }
-            else GUILayout.Label(BenchList.Elide(unit == null ? "-" : unit.name, 28));
             GUILayout.EndHorizontal();
             if (!unitsOpen || height <= 0f) return;
 
             unitScroll = GUILayout.BeginScrollView(unitScroll, GUILayout.Height(height));
             foreach (TacCharacterDef d in units)
             {
-                if (!BenchList.Matches(d.name, unitFilter)) continue;
+                string word = Word(d.name);
+                if (!BenchList.Matches(d.name, unitFilter) && !BenchList.Matches(word, unitFilter)) continue;
                 // Same mark, same reason, as the weapon list's: which of these several hundred templates
                 // came out of a content mod has to be readable without picking each one.
                 bool ours = ourUnits.Contains(d);
-                if (!GUILayout.Button(BenchList.Elide(d.name, BenchList.NameChars - (ours ? 4 : 0)) +
-                                      (ours ? "  *" : ""))) continue;
+                if (!GUILayout.Button(new GUIContent(BenchList.Elide(word, BenchList.NameChars - (ours ? 4 : 0)) +
+                                                     (ours ? "  *" : ""),
+                                                     d.name + (ours ? "\n* built by your mod" : "")))) continue;
                 unit = d; Pick();
                 // Picked, so out of the way: the model and the dial are what he came for.
                 unitsOpen = false;
@@ -1995,8 +2076,12 @@ namespace Morgott.ContentTool.Dev
             IEnumerable<string> keys = WeaponBuild.FittedKeys;
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button((weaponsOpen ? "v " : "> ") + "weapon (" + offered.Count + ")",
-                                 GUILayout.Width(110f)))
+            GUILayout.Label("Weapon", GUILayout.Width(60f));
+            if (GUILayout.Button(new GUIContent((weaponsOpen ? "v " : "> ") +
+                                                (weaponsOpen ? "find (" + offered.Count + ")"
+                                                             : BenchList.Elide(weapon == null ? "-" : Word(weapon.name), 22)),
+                                                weapon == null ? "pick a weapon to put in the hand" : weapon.name),
+                                 GUILayout.Width(weaponsOpen ? 90f : 200f)))
                 weaponsOpen = !weaponsOpen;
             if (weaponsOpen)
             {
@@ -2005,16 +2090,16 @@ namespace Morgott.ContentTool.Dev
                 // The calibration knob. The slot test is the game's own, but it is being asked a
                 // question the game never asks it - about a bare template with no recruit behind it -
                 // so there is one switch that says "show me the catalogue anyway" instead of a dead end.
-                bool all = GUILayout.Toggle(offerAll, "all", GUILayout.Width(40f));
+                bool all = GUILayout.Toggle(offerAll, new GUIContent("all", "also list weapons this soldier cannot equip"),
+                                            GUILayout.Width(40f));
                 if (all != offerAll) { offerAll = all; Offer(); }
             }
-            else GUILayout.Label(BenchList.Elide(weapon == null ? "-" : weapon.name, 20));
             // OUT OF THE HAND AND BACK IN, and OUTSIDE the picker's fold so it is reachable with the
             // list shut - which is how the panel is used once a weapon has been chosen. Both directions
             // are the same rebuild the picker itself causes (Show -> RebuildCharacter), so the idle, the
             // clip set and the transport all re-resolve exactly as they do for any other change.
             GUI.enabled = weapon != null || lastWeapon != null;
-            if (GUILayout.Button(weapon == null ? "RE-EQUIP" : "UNEQUIP", GUILayout.Width(84f)))
+            if (GUILayout.Button(weapon == null ? "Re-equip" : "Unequip", GUILayout.Width(76f)))
             {
                 if (weapon != null) { lastWeapon = weapon; weapon = null; }
                 else weapon = lastWeapon;
@@ -2024,13 +2109,14 @@ namespace Morgott.ContentTool.Dev
             GUILayout.EndHorizontal();
             if (!weaponsOpen || height <= 0f) return;
 
-            GUILayout.Label(offered.Count + "/" + weapons.Count + " fit this unit" +
-                            (offerAll ? " (filter OFF)" : "") + " | " + mine + " ours" +
-                            (refused > 0 ? ", " + refused + " refused here" : ""));
+            BenchUi.Hint(offered.Count + " of " + weapons.Count + " weapons fit this soldier" +
+                         (offerAll ? " (showing all)" : "") + "   * = made by your mod (" + mine + ")" +
+                         (refused > 0 ? ", " + refused + " refused here" : ""));
             weaponScroll = GUILayout.BeginScrollView(weaponScroll, GUILayout.Height(height));
             foreach (WeaponDef d in offered)
             {
-                if (!BenchList.Matches(d.name, weaponFilter)) continue;
+                string word = Word(d.name);
+                if (!BenchList.Matches(d.name, weaponFilter) && !BenchList.Matches(word, weaponFilter)) continue;
                 // The mod's own say so IN THE LIST, not only after you pick one: the whole point of
                 // listing the shipped weapons is to stand one beside yours, and which is which has to
                 // be readable at a glance. The mark is the DEF's own ResourcePath, not a live-fit
@@ -2038,15 +2124,16 @@ namespace Morgott.ContentTool.Dev
                 // test called the author's own guns vanilla for as long as it mattered.
                 bool ours = Mine(d);
                 bool live = ours && BenchList.KeyFor(d.name, keys) != null;
-                string label = BenchList.Elide(d.name, BenchList.NameChars - (ours ? 7 : 0)) +
+                string label = BenchList.Elide(word, BenchList.NameChars - (ours ? 7 : 0)) +
                                (ours ? live ? "  * live" : "  *" : "");
-                if (!GUILayout.Button(label)) continue;
+                if (!GUILayout.Button(new GUIContent(label, d.name +
+                        (ours ? "\n* built by your mod - the only kind with a manifest row to save into" : "") +
+                        (live ? "\nlive = its fit is loaded this session, so the adjust buttons work" : ""))))
+                    continue;
                 weapon = d; Show();
                 weaponsOpen = false;
             }
             GUILayout.EndScrollView();
-            GUILayout.Label("*  built by this mod - the only kind with a manifest row to save into.\n" +
-                            "*  live  =  its fit is loaded this session, so the axis buttons work.");
         }
 
         /// <summary>
@@ -2057,29 +2144,20 @@ namespace Morgott.ContentTool.Dev
         private static void Dial(string fitKey)
         {
             GUILayout.Space(6f);
-            if (weapon == null) { GUILayout.Label("pick a weapon to fit it."); return; }
-            if (!Mine(weapon))
+            // EVERY "NOT YET" IS THE SAVE BUTTON'S OWN REASON: the button is always drawn, grey, with the
+            // one sentence that says what is missing under it.
+            string refusal = weapon == null ? "pick a weapon first"
+                : !Mine(weapon) ? "this is a game weapon - it is in the hand for comparison only; only weapons " +
+                                  "your mod builds have a file to save into"
+                // Built by this mod, but not yet FITTED this session - two different answers.
+                : fitKey == null ? "wait - the weapon has not loaded in the hand yet (re-pick it if this stays)"
+                : null;
+            Vector3 pos = Vector3.zero, euler = Vector3.zero, offset = Vector3.zero; float scale = 1f;
+            if (refusal == null && !WeaponBuild.State(fitKey, out pos, out euler, out scale, out offset))
+                refusal = "equip it once so its model loads, then it can be adjusted";
+            if (refusal != null)
             {
-                GUILayout.Label("'" + weapon.name + "' is a SHIPPED weapon. It is in the hand for " +
-                                "comparison only: it has no ppcontent.json row, so there is nothing to " +
-                                "tune and nowhere to save.");
-                return;
-            }
-            // Built by this mod, but not yet FITTED this session - two different answers, and the old
-            // panel gave the first one's message for both.
-            if (fitKey == null)
-            {
-                GUILayout.Label("'" + weapon.name + "' WAS built by this mod, but no live fit for it " +
-                                "exists yet this session: WeaponBuild only remembers a fit once the " +
-                                "weapon's prefab has been instantiated in a hand. Pick it above (it is " +
-                                "already selected) and let the rebuild finish, then the axes appear.");
-                return;
-            }
-
-            Vector3 pos, euler, offset; float scale;
-            if (!WeaponBuild.State(fitKey, out pos, out euler, out scale, out offset))
-            {
-                GUILayout.Label("'" + fitKey + "' has no live fit yet - equip it once so its prefab loads.");
+                BenchUi.Main("Save to file", refusal);
                 return;
             }
             // ============ SAVED, OR MESSED ABOUT WITH ============
@@ -2088,10 +2166,10 @@ namespace Morgott.ContentTool.Dev
             // nothing more: no history, no undo stack. What it buys is that experimenting stops being
             // frightening, because the answer to "have I changed anything" is on screen.
             bool dirty = WeaponBuild.Modified(fitKey);
-            GUILayout.Label(dirty
-                ? ">> MODIFIED - these numbers are NOT in the file yet. SAVE keeps them, REVERT throws "
-                  + "them away. Nothing has been written to disk."
-                : ">> SAVED - what is on screen is exactly what the manifest holds.");
+            BenchUi.Badge(dirty ? Grade.Warn : Grade.Pass,
+                          dirty ? "Changed - not saved yet." : "Saved - the file matches what you see.",
+                          dirty ? "these numbers are NOT in the file yet. Save keeps them, Revert throws them away."
+                                : "what is on screen is exactly what the manifest holds");
 
             // ============ THE NUMBERS, AND WHO THEY ARE FOR ============
             // Everything from here to the SAVE row is the ten-minute job of dialling a weapon into a
@@ -2134,21 +2212,21 @@ namespace Morgott.ContentTool.Dev
             // rather than abbreviated: the terse "reload" beside "SAVE" was a save-shaped button next
             // to a discard-shaped one with nothing to say which was which.
             GUILayout.Space(4f);
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(dirty ? "SAVE TO FILE *" : "SAVE TO FILE", GUILayout.Width(126f)))
+            if (BenchUi.Main(dirty ? "Save to file *" : "Save to file", null,
+                             "writes " + BenchList.Id(fitKey) + " into its ppcontent.json (the path is in Details)"))
                 message = SaveAndMirror(fitKey);
+            GUILayout.BeginHorizontal();
             // Level 1 undo: back to what the file currently says. WeaponBuild.Reload re-reads the
             // manifest and re-applies it, which is exactly "throw away what I have been nudging".
-            if (GUILayout.Button("REVERT", GUILayout.Width(90f)))
+            if (GUILayout.Button(new GUIContent("Revert", "back to what the file says. Does not touch the disk."),
+                                 GUILayout.Width(90f)))
                 message = WeaponBuild.Reload(fitKey);
             // Level 2 undo: back to the solve, with the file's own overrides ignored too. This is the
             // one for a bad fit that has already been saved.
-            if (GUILayout.Button("RESET AUTO", GUILayout.Width(110f)))
+            if (GUILayout.Button(new GUIContent("Reset to automatic", "back to the measured fit, every override " +
+                                                "dropped. Does not touch the disk."), GUILayout.Width(150f)))
                 message = WeaponBuild.Auto(fitKey);
             GUILayout.EndHorizontal();
-            GUILayout.Label("SAVE writes " + BenchList.Id(fitKey) + " into its ppcontent.json (the path " +
-                            "is printed below).  REVERT = back to that file.  RESET AUTO = back to the " +
-                            "measured solve, every override dropped.  Neither undo touches the disk.");
         }
 
         /// <summary>
@@ -2194,8 +2272,10 @@ namespace Morgott.ContentTool.Dev
         /// pickers off the bottom of a panel that had just been reordered to keep things on it.</summary>
         private static void Message()
         {
-            GUILayout.Space(4f);
-            GUILayout.Label("last answer (this is where a save went):");
+            // The last answer's FIRST line stays visible; the whole of it (the path a save went to) is in
+            // the Details drawer.
+            BenchUi.Hint(Bake.LifecycleView.OneLine(message));
+            if (!BenchUi.Details("fit/details", "Details")) return;
             messageScroll = GUILayout.BeginScrollView(messageScroll,
                                                       GUILayout.Height(BenchList.MessageHeight));
             GUILayout.Label(message ?? "");
@@ -2492,6 +2572,8 @@ namespace Morgott.ContentTool.Dev
                     if (tab == TabDoctor)
                         doctor.Overlay(cam, PanelWidth,
                                        BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
+                    // The hovered control's tooltip, on top of everything.
+                    BenchUi.Tooltip();
                     // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.
                     guiHot = GUIUtility.hotControl != 0;
                 }

@@ -129,6 +129,7 @@
     <Compile Include="..\..\src\Bake\CatalogOwners.cs" Link="CatalogOwners.cs" />
     <Compile Include="..\..\src\Bake\BundleClaims.cs" Link="BundleClaims.cs" />
     <Compile Include="CatalogOwnersTests.cs" />
+    <Compile Include="BenchWordsTests.cs" />
     <!-- The hand-typed manifest strings the bake parses: the "tint" colour and the clip glob. -->
     <Compile Include="..\..\src\Bake\HexColor.cs" Link="HexColor.cs" />
     <Compile Include="BakeParseTests.cs" />
