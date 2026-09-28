@@ -71,7 +71,7 @@ namespace Morgott.ContentTool.Dev
     /// a mission, a return to the menu - the workbench closes itself rather than holding references
     /// into a level that no longer exists. Open likewise REFUSES unless the level is actually playing.
     /// </summary>
-    internal static class FitBench
+    internal static partial class FitBench
     {
         /// <summary>Ctrl+Alt+B. Off the function row on purpose - the game's destructive pair
         /// (QuickSave/QuickLoad) lives there - and a chord because the game's own dev surface uses one
@@ -345,7 +345,7 @@ namespace Morgott.ContentTool.Dev
             if (BenchUi.Card("Build & share", "Build, install and test your mod, then package it for sharing"))
                 wanted = TabLifecycle;
             GUI.enabled = free;
-            if (BenchUi.Card("Add a weapon", "Make a new weapon from a game weapon and your .glb model"))
+            if (BenchUi.Card("Add a weapon", "Pick its kind, add your .glb, fit it in the hand, check its moves"))
                 wanted = TabWeapon;
             if (BenchUi.Card("Sounds", "Replace a game sound with your own .wav, .ogg or .mp3"))
                 wanted = TabSounds;
@@ -1881,6 +1881,8 @@ namespace Morgott.ContentTool.Dev
             // `ArgumentException`, and OnGUI's own catch answers that by closing the bench. `Update`'s
             // SHIP landing (Arm.Update, TakeShipLanding) moves the tab the same way: outside a GUI event.
             int wanted = homing ? TabHome : tab;
+            // The clip strip walks the guided flow's class moves only on that screen; FitAnim latches it.
+            if (Event.current.type == EventType.Layout) FitAnim.Focus = tab == TabWeapon ? TaskScreens.FlowClass : null;
             // A preview belongs to the screen it was started on: leaving the screen stops it.
             if (tab != TabSounds && tab != TabVideos && Event.current.type == EventType.Layout)
                 TaskScreens.StopPreviews();
@@ -1912,7 +1914,7 @@ namespace Morgott.ContentTool.Dev
                 if (tab == TabSounds) TaskScreens.Sounds(cw);
                 else if (tab == TabVideos) TaskScreens.Videos(cw);
                 // The same deferral as every tab move: Build & share is entered after EndArea.
-                else if (TaskScreens.Weapon(cw, Donors(), Word, ShowDonor)) wanted = TabLifecycle;
+                else if (TaskScreens.Weapon(cw)) wanted = TabLifecycle;
                 GUILayout.EndScrollView();
                 GUILayout.EndArea();
                 tab = wanted;
@@ -2607,7 +2609,8 @@ namespace Morgott.ContentTool.Dev
                     if (dropFocus) { GUI.FocusControl(null); dropFocus = false; }
                     string focused = GUI.GetNameOfFocusedControl();
                     typing = focused == UnitFilterName || focused == WeaponFilterName ||
-                             focused == ScaleFieldName;
+                             focused == ScaleFieldName ||
+                             (focused != null && focused.StartsWith(TypingPrefix, StringComparison.Ordinal));
                     // FIRST, and unconditionally: it allocates a control id from this pass's counter,
                     // and an id that is only sometimes allocated is a different id every frame.
                     FitGizmo.Gui(PanelWidth,
