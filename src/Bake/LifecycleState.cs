@@ -264,7 +264,10 @@ namespace Morgott.ContentTool.Bake
         /// never "a scenario armed one": arming alone would let W13's first poll pass before the run
         /// exists (LifecycleJob.Barrier's own rule).</summary>
         internal bool BarrierParked;
-        internal bool Busy, CancelRequested, CancelAcknowledged, ParkedForPaint;
+        internal bool Busy;
+        internal bool CancelRequested { get; set; }
+        internal bool CancelAcknowledged { get; set; }
+        internal bool ParkedForPaint { get; set; }
         internal readonly Row[] Rows;
 
         internal LifecycleView()

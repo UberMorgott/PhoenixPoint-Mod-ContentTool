@@ -28,7 +28,6 @@ namespace Morgott.ContentTool.Dev
         private static bool modsStale = true;
         private static Action next;
         private static string message = "", log = "";
-        private static Vector2 listScroll;
 
         /// <summary>Runs the press recorded last pass. Called first in every screen's Draw.</summary>
         private static void Drain()
@@ -266,8 +265,8 @@ namespace Morgott.ContentTool.Dev
                     GUILayout.BeginHorizontal();
                     string path = o.Value;
                     bool bank = path.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase);
-                    uint id;
-                    uint.TryParse(Path.GetFileNameWithoutExtension(path), out id);
+                    // Not a numeric media-id file name: 0, which falls back to the plain file name below.
+                    uint id = uint.TryParse(Path.GetFileNameWithoutExtension(path), out uint parsed) ? parsed : 0u;
                     // A built bank with no source beside it: the game's own event, which plays whatever
                     // serves that sound now - the mod's version when that mod is switched on.
                     if (SoundPreview.Button(bank ? "media:" + id : "file:" + path,

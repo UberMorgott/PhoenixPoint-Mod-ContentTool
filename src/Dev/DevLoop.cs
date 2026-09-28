@@ -61,7 +61,8 @@ namespace Morgott.ContentTool.Dev
         internal static string Root { get; private set; }
 
         /// <summary>Set by <see cref="DevRunner"/> only, so "what is scheduled" is one readable fact.</summary>
-        internal static bool LoopOn, HotkeyOn;
+        internal static bool LoopOn { get; set; }
+        internal static bool HotkeyOn { get; set; }
 
         private static readonly List<FileSystemWatcher> Watchers = new List<FileSystemWatcher>();
 

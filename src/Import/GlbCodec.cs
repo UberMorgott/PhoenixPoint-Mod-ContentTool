@@ -56,7 +56,6 @@ namespace Morgott.ContentTool.Import
         /// <summary>generic | legacy | humanoid. Humanoid clips are refused, never sampled.</summary>
         internal string Kind = "generic";
         internal string WrapMode = "Default";
-        internal bool Looping;
         internal float Length;
         /// <summary>The clip's own authored rate, as Unity reports it.</summary>
         internal float FrameRate;
@@ -170,7 +169,7 @@ namespace Morgott.ContentTool.Import
         internal readonly List<string> BonePaths = new List<string>();
         internal string RootBonePath = "";
         internal string RendererPath = "";
-        internal int BindposeCount;
+        internal int BindposeCount { get; set; }
     }
 
     /// <summary>
@@ -885,7 +884,9 @@ namespace Morgott.ContentTool.Import
                     json.Key("frameRate").Val(clip.FrameRate);
                     json.Key("kind").Val(clip.Kind);
                     json.Key("length").Val(clip.Length);
-                    json.Key("looping").Val(clip.Looping);
+                    // glTF carries no loop flag and the only clip source is the .glb reader, so no
+                    // clip is ever known to loop; the ppcontent.json "loop" string declares it instead.
+                    json.Key("looping").Val(false);
                     json.Key("lossy").Val(true);
                     json.Key("lossyReason").Val(clip.LossyReason);
                     json.Key("name").Val(clip.Name);

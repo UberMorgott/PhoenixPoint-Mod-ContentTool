@@ -6,42 +6,42 @@ namespace Morgott.ContentTool.Doctor
     /// <summary>One transform under a rig prefab, exactly as the census recorded it.</summary>
     internal sealed class PrototypeBone
     {
-        internal string Name;      // Transform.name, case-sensitive - the game matches on it exactly
-        internal string Parent;    // parent's Name, or null for the prefab root
-        internal string Path;      // '/'-joined path from the root, the ONLY way to tell duplicates apart
+        internal string Name { get; set; }      // Transform.name, case-sensitive - the game matches on it exactly
+        internal string Parent { get; set; }    // parent's Name, or null for the prefab root
+        internal string Path { get; set; }      // '/'-joined path from the root, the ONLY way to tell duplicates apart
     }
 
     /// <summary>A rig prefab and everything under it. The unit the picker is really built on.</summary>
     internal sealed class RigScan
     {
-        internal string RigName;
+        internal string RigName { get; set; }
         internal List<PrototypeBone> Bones = new List<PrototypeBone>();
         internal List<string> Managers = new List<string>();   // AddonsManagerDef names using this prefab
     }
 
-    // These two are pure scan DTOs: the game-side harvester fills them by name from DefRepository,
-    // so "never assigned in this assembly" is the normal state, not a bug.
-#pragma warning disable 649
-
     /// <summary>One AddonsManagerDef, flattened. HasRig false =&gt; not a picker entry at all.</summary>
     internal sealed class ManagerScan
     {
-        internal string ManagerName, RigName, RootMotionNode, ResourcePath;
-        internal string RepresentativeCharacter;      // a TacCharacterDef name - what the bay rebuild needs
-        internal string BodyStateDef, AnimActionsDef, ControllerName;
-        internal string ClipSource, PreviewPoseClip;  // which list answered, and the def's own pose
+        internal string ManagerName { get; set; }
+        internal string RigName { get; set; }
+        internal string RootMotionNode { get; set; }
+        internal string ResourcePath { get; set; }
+        internal string RepresentativeCharacter { get; set; }      // a TacCharacterDef name - what the bay rebuild needs
+        internal string BodyStateDef { get; set; }
+        internal string AnimActionsDef { get; set; }
+        internal string ControllerName { get; set; }
+        internal string ClipSource { get; set; }       // which list answered
+        internal string PreviewPoseClip { get; set; }  //, and the def's own pose
         internal List<string> SlotNames = new List<string>();
         internal List<string> ClipNames = new List<string>();  // already deduplicated by the harvester
-        internal bool HasRig;
+        internal bool HasRig { get; set; }
     }
 
     internal sealed class PrototypeSlot
     {
-        internal string SlotDefName, AttachmentPointName;
+        internal string SlotDefName;
         internal List<string> RepresentativeAddons = new List<string>();
     }
-
-#pragma warning restore 649
 
     internal sealed class PrototypeVariant
     {
