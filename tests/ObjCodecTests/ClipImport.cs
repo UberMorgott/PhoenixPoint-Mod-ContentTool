@@ -94,6 +94,13 @@ internal static class ClipImport
         Assert(held.Count == 1 && held[0].LossyReason.Contains("1 channel(s) drive something that is not a bone"),
                "a REST-HOLDING curve on the in-between node is dropped and counted, not refused: " +
                (held.Count == 1 ? held[0].LossyReason : held.Count + " clip(s)"));
+        // The same hold as CUBICSPLINE: each key is (in-tangent, value, out-tangent) and the zero
+        // tangents are not a pose, so only the value is compared with the rest.
+        var cubic = new List<SampledClip>();
+        GlbReader.Read(Assimp(false, true, true), cubic);
+        Assert(cubic.Count == 1 && cubic[0].LossyReason.Contains("1 channel(s) drive something that is not a bone"),
+               "a CUBICSPLINE rest-holding curve on the in-between node is dropped, its zero tangents not " +
+               "read as a pose: " + (cubic.Count == 1 ? cubic[0].LossyReason : cubic.Count + " clip(s)"));
 
         return "in-between node folded: head " + ladder + " | -q key kept in one hemisphere | animated " +
                "in-between node refused by name";
@@ -101,7 +108,7 @@ internal static class ClipImport
 
     /// <summary>The Assimp-shaped rig of <see cref="Between"/>; <paramref name="animateHelper"/> adds a
     /// curve on the in-between node itself.</summary>
-    private static byte[] Assimp(bool animateHelper, bool holdHelper = false)
+    private static byte[] Assimp(bool animateHelper, bool holdHelper = false, bool cubicHold = false)
     {
         var b = new Bin();
         int position = b.Vec(3, "VEC3", 0f, 0f, 0f, 1f, 0f, 0f, 0f, 2f, 0f);
@@ -118,6 +125,10 @@ internal static class ClipImport
         // The helper's OWN rest rotation, every key - the middle one written as -q, the same rotation.
         int hold = b.Vec(3, "VEC4", 0f, 0f, 0.7071068f, 0.7071068f, 0f, 0f, -0.7071068f, -0.7071068f,
                          0f, 0f, 0.70711f, 0.70711f);
+        // The same hold as CUBICSPLINE keys: zero in/out tangents around each value.
+        int cubicKeys = b.Vec(9, "VEC4", 0f, 0f, 0f, 0f, 0f, 0f, 0.7071068f, 0.7071068f, 0f, 0f, 0f, 0f,
+                              0f, 0f, 0f, 0f, 0f, 0f, 0.7071068f, 0.7071068f, 0f, 0f, 0f, 0f,
+                              0f, 0f, 0f, 0f, 0f, 0f, 0.7071068f, 0.7071068f, 0f, 0f, 0f, 0f);
 
         string json =
             "{\"asset\":{\"version\":\"2.0\"}," +
@@ -135,11 +146,11 @@ internal static class ClipImport
               "},\"indices\":" + indices + "}]}]," +
             "\"animations\":[{\"name\":\"nod\",\"samplers\":[" +
               Sampler(times, move, "LINEAR") + "," + Sampler(times, turn, "LINEAR") + "," +
-              Sampler(times, hold, "LINEAR") + "]," +
+              Sampler(times, hold, "LINEAR") + "," + Sampler(times, cubicKeys, "CUBICSPLINE") + "]," +
             "\"channels\":[{\"sampler\":0,\"target\":{\"node\":3,\"path\":\"translation\"}}," +
               "{\"sampler\":1,\"target\":{\"node\":1,\"path\":\"rotation\"}}" +
               (animateHelper ? ",{\"sampler\":1,\"target\":{\"node\":2,\"path\":\"rotation\"}}" : "") +
-              (holdHelper ? ",{\"sampler\":2,\"target\":{\"node\":2,\"path\":\"rotation\"}}" : "") + "]}]," +
+              (holdHelper ? ",{\"sampler\":" + (cubicHold ? "3" : "2") + ",\"target\":{\"node\":2,\"path\":\"rotation\"}}" : "") + "]}]," +
             b.Json() + "}";
         return Container(json, b.Bytes());
     }

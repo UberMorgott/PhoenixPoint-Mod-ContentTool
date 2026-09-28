@@ -1324,7 +1324,11 @@ namespace Morgott.ContentTool.Import
             if (rotation && Opt(node, "rotation") is List<object> q && q.Count == 4)
                 for (int i = 0; i < 4; i++) rest[i] = Single(q[i], "nodes.rotation");
             int width = rest.Length;
-            for (int k = 0; k + width <= values.Length; k += width)
+            // CUBICSPLINE keys are (in-tangent, value, out-tangent): only the value is a pose, and
+            // a held key's tangents are zero, which is not the rest.
+            bool cubic = (Opt(curve, "interpolation") as string) == "CUBICSPLINE";
+            int stride = cubic ? 3 * width : width;
+            for (int k = cubic ? width : 0; k + width <= values.Length; k += stride)
             {
                 if (rotation)
                 {
