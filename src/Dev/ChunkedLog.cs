@@ -63,6 +63,17 @@ namespace Morgott.ContentTool.Dev
                 if (inner != null) inner.LogError(part); else UnityEngine.Debug.LogError(part);
         }
 
+        /// <summary>A CALLER'S sink, bounded. The public build entry points (WeaponBuild.Build,
+        /// CreatureBuild.Build) take a content mod's own log delegate - in practice its raw ModLogger - and
+        /// a ct_weapon PASS line runs ~7k characters: handed through whole, that one line was the startup
+        /// "Mesh can not have more than 65000 vertices" in every run with the demos enabled. Null stays
+        /// null (the callee picks its own default).</summary>
+        internal static System.Action<string> Bounded(System.Action<string> sink)
+        {
+            if (sink == null) return null;
+            return m => { foreach (string part in Bound(m)) sink(part); };
+        }
+
         /// <summary>UnityEngine.Debug.Log, bounded. The replacement for a direct call, one for one.</summary>
         internal static void Say(string msg)
         {

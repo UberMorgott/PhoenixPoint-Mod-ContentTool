@@ -57,6 +57,9 @@ namespace Morgott.ContentTool.Tactical
         public static List<WeaponDef> Build(string modDir, Action<string> log)
         {
             List<WeaponDef> built = new List<WeaponDef>();
+            // The mod's own sink (its raw ModLogger, in practice) goes through the same bound as ours: a
+            // whole PASS line is ~7k characters, past what one UI.Text can mesh (Dev.ChunkedLog.Bounded).
+            log = Dev.ChunkedLog.Bounded(log) ?? (m => ContentToolMain.Say(m));
             try
             {
                 string meta = Path.Combine(modDir, "ppcontent.json");
