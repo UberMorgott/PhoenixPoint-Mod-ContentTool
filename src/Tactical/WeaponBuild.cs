@@ -751,9 +751,17 @@ namespace Morgott.ContentTool.Tactical
                     // depending on load timing. A weapon that is the right size only sometimes is
                     // worse than one that is reliably either. This is one small prefab, once, at
                     // mod-enable, where a brief hitch costs nothing anyone can see.
-                    AsyncOperationHandle<GameObject> donorHandle =
-                        donorSkin.DefaultPrefab.LoadAssetAsync<GameObject>();
-                    GameObject donorGo = donorHandle.WaitForCompletion();
+                    // ONE LOAD PER AssetReference. The donor's reference is the SHIPPED def's object,
+                    // shared by every weapon cloned from it: a second LoadAssetAsync on it logs
+                    // "Attempting to load AssetReference that has already been loaded" and hands back an
+                    // INVALID handle, whose Status threw here - MEASURED 2026-09-28, a second mod cloning
+                    // SY_LaserSniperRifle_WeaponDef (WeaponAdd's sniper already had) lost its fit. The
+                    // live handle is exposed as OperationHandle; reuse it.
+                    AssetReference donorRef = donorSkin.DefaultPrefab;
+                    AsyncOperationHandle donorHandle = donorRef.IsValid()
+                        ? donorRef.OperationHandle
+                        : donorRef.LoadAssetAsync<GameObject>();
+                    GameObject donorGo = donorHandle.WaitForCompletion() as GameObject;
                     Vector3 s1, a1, h1;
                     bool fitted = Fit(op.Result, e, source,
                                       donorHandle.Status == AsyncOperationStatus.Succeeded ? donorGo : null,
