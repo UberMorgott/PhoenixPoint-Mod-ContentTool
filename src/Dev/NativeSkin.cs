@@ -104,6 +104,9 @@ namespace Morgott.ContentTool.Dev
                 t.overflow = new RectOffset(0, 0, 0, 0);
                 t.padding = new RectOffset(22, 0, 1, 0);
                 t.fixedHeight = 16f;
+                // The game font's line is taller than the 16 px box: the label runs a few pixels past the
+                // rect, so the margin below keeps the next control (a slider) out of its way.
+                t.margin = new RectOffset(t.margin.left, t.margin.right, t.margin.top, 6);
                 t.normal.textColor = t.onNormal.textColor = Text;
                 t.hover.textColor = t.onHover.textColor = TextHover;
                 found.Add("toggle");

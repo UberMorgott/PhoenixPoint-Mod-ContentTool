@@ -272,6 +272,8 @@ namespace Morgott.ContentTool.Dev
         private const int TabHome = 0, TabFit = 1, TabDoctor = 2, TabLifecycle = 3,
                           TabSounds = 4, TabVideos = 5, TabWeapon = 6;
         private static int tab;
+        /// <summary>The tab the last Layout pass drew - entering a screen is tab != shownTab.</summary>
+        private static int shownTab = -1;
 
         /// <summary>Opens a screen by its plain name ("home", "fit", "doctor", "build") - the seam an
         /// external driver (PPCLI `call`) uses to reach a screen without clicking. Outside a GUI event,
@@ -1333,6 +1335,7 @@ namespace Morgott.ContentTool.Dev
         {
             if (!entered) { open = false; return "ct_bench: nothing to close - nothing was changed."; }
             open = false;
+            shownTab = -1;
             List<string> failed = new List<string>();
             // Nothing the bench started may keep playing after it: the sound and the clip previews.
             Step(failed, "the sound and video previews", TaskScreens.ShutdownPreviews);
@@ -1991,7 +1994,13 @@ namespace Morgott.ContentTool.Dev
             // SHIP landing (Arm.Update, TakeShipLanding) moves the tab the same way: outside a GUI event.
             int wanted = tab;
             // The clip strip walks the guided flow's class moves only on that screen; FitAnim latches it.
-            if (Event.current.type == EventType.Layout) FitAnim.Focus = tab == TabWeapon ? TaskScreens.FlowClass : null;
+            if (Event.current.type == EventType.Layout)
+            {
+                // Entering Add a weapon puts its default soldier on the platform (TaskScreens.Entered).
+                if (tab == TabWeapon && shownTab != TabWeapon) TaskScreens.Entered();
+                shownTab = tab;
+                FitAnim.Focus = tab == TabWeapon ? TaskScreens.FlowClass : null;
+            }
             // A preview belongs to the screen it was started on: leaving the screen stops it.
             if (tab != TabSounds && tab != TabVideos && Event.current.type == EventType.Layout)
                 TaskScreens.StopPreviews();

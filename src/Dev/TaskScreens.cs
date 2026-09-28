@@ -574,6 +574,17 @@ namespace Morgott.ContentTool.Dev
             if (current == null && template != null) FitBench.Hold(template, c);
         }
 
+        /// <summary>The screen was just entered: with no kind picked yet the platform shows an Assault
+        /// soldier holding the rifle class's default weapon (the game's own idle plays), never whatever
+        /// the last screen left there (the bench's first unit is a shield-bearing Hoplite).</summary>
+        internal static void Entered()
+        {
+            if (flowClass != null || current != null) return;
+            WeaponFlow.WeaponClass rifle = WeaponFlow.ById("rifle");
+            string d = WeaponFlow.DefaultTemplate(rifle, FitBench.TemplatesOf(rifle));
+            if (d != null) FitBench.Hold(d, rifle);
+        }
+
         private static void PickTemplate(string d)
         {
             template = d;

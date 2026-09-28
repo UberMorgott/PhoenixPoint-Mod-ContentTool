@@ -1209,8 +1209,10 @@ namespace Morgott.ContentTool.Dev
                 GL.Begin(GL.QUADS);
                 // The PICKED joint gets a bigger square UNDER its own dot: an inspector that names a bone
                 // the author cannot find again on the model is half an answer.
+                // Dots in VIRTUAL pixels like the rest of the bench, so they grow with the window (BenchScale).
+                float dot = BenchScale.Real(DotPixels), ring = BenchScale.Real(DotPixels + 3f);
                 if (pickedAt >= 0 && pickedAt < joints.Length && jointVisible[pickedAt])
-                    Dot(jointX[pickedAt], jointY[pickedAt], DotPixels + 3f, PickedRing);
+                    Dot(jointX[pickedAt], jointY[pickedAt], ring, PickedRing);
                 bool arming = shownArmed != null && jointEligible != null;
                 for (int i = 0; i < joints.Length; i++)
                 {
@@ -1218,9 +1220,9 @@ namespace Morgott.ContentTool.Dev
                     Color c = Colours[(int)jointStatus[i]];
                     // ARMED: what the next click can land on is RINGED and what it cannot is faded, so
                     // an author can see that this click means something the last one did not.
-                    if (arming && jointEligible[i]) Dot(jointX[i], jointY[i], DotPixels + 3f, ArmedRing);
+                    if (arming && jointEligible[i]) Dot(jointX[i], jointY[i], ring, ArmedRing);
                     else if (arming) c = new Color(c.r, c.g, c.b, DimAlpha);
-                    Dot(jointX[i], jointY[i], DotPixels, c);
+                    Dot(jointX[i], jointY[i], dot, c);
                 }
                 GL.End();
             }
@@ -1239,10 +1241,15 @@ namespace Morgott.ContentTool.Dev
             string line = shownArmed == null ? legend
                         : "aliasing '" + BenchList.Elide(shownArmed, 30) +
                           "' - click a ringed bone, Esc to cancel";
+            // The legend is TEXT: drawn in virtual pixels under the bench's matrix, or it stays 1280x720
+            // sized on a 1440p window. The overlay's finally puts the matrix back either way.
             if (line.Length > 0)
-                GUI.Label(new Rect(panelWidth + 8f,
-                                   Mathf.Min(stripTopGui, Screen.height) - 20f,
-                                   Screen.width - panelWidth - 16f, 18f), line);
+            {
+                GUI.matrix = BenchScale.Matrix;
+                float s = BenchScale.S, left = panelWidth / s;
+                GUI.Label(new Rect(left + 8f, Mathf.Min(stripTopGui / s, BenchScale.H) - 24f,
+                                   BenchScale.W - left - 16f, 22f), line);
+            }
         }
 
         private static void Dot(float x, float y, float r, Color c)
@@ -1275,7 +1282,7 @@ namespace Morgott.ContentTool.Dev
             if (FitGizmo.WouldGrab(x, y)) return;             // the handles get first refusal
             int hit;
             if (!BoneOverlay.Nearest(x, y, jointX, jointY, jointVisible,
-                                     BoneOverlay.PickRadiusPixels, out hit)) return;
+                                     BenchScale.Real(BoneOverlay.PickRadiusPixels), out hit)) return;
             Transform t = joints[hit];
             if (t == null) return;
             string name = t.name;
@@ -1381,9 +1388,9 @@ namespace Morgott.ContentTool.Dev
             float w = BenchScale.W, h = BenchScale.H;
             float wide = Mathf.Min(InspectorWidth, w - panelWidth - 16f);
             if (wide < 160f) return;
-            // 20 px a row, not 18: IMGUI puts the style's own vertical margin BETWEEN stacked controls,
+            // 24 px a row for a 20 px label (the game font is taller than the stock one): IMGUI puts the style's own vertical margin BETWEEN stacked controls,
             // and measuring the box at the bare line height left the last row outside it.
-            float high = 26f + (shownOpen ? inspectorLines.Count * 20f + 8f : 0f);
+            float high = 30f + (shownOpen ? inspectorLines.Count * 24f + 8f : 0f);
             float top = Mathf.Min(stripTopGui, h) - high - 4f;
             if (top < 4f) return;
 
@@ -1392,7 +1399,7 @@ namespace Morgott.ContentTool.Dev
             try
             {
                 if (GUILayout.Button((shownOpen ? "v " : "> ") + "Selected bone inspector",
-                                     GUILayout.Height(18f)))
+                                     GUILayout.Height(22f)))
                     inspectorOpen = !inspectorOpen;
                 // COLLAPSED IS THE DEFAULT and the whole body hangs off the LATCHED flag, never off the
                 // live one: the button above flips it mid-frame, and reading it here would lay out a
@@ -1403,7 +1410,7 @@ namespace Morgott.ContentTool.Dev
                 // measured at 18 px a row - three of the seven rows were invisible on Instance3.
                 if (oneLine == null) oneLine = new GUIStyle(GUI.skin.label) { wordWrap = false };
                 for (int i = 0; i < inspectorLines.Count; i++)
-                    GUILayout.Label(inspectorLines[i], oneLine, GUILayout.Height(18f));
+                    GUILayout.Label(inspectorLines[i], oneLine, GUILayout.Height(20f));
             }
             finally { GUILayout.EndArea(); }
         }
