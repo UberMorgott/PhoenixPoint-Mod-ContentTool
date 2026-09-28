@@ -181,7 +181,9 @@ namespace Morgott.ContentTool.Tactical
                 if (ReferenceEquals(CreatureManifest.Parse(json), CreatureManifest.None)) continue;
                 string id = TopKey(json, "id");
                 if (Built.Any(x => string.Equals(x.Id, id, StringComparison.Ordinal))) continue;
+                System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
                 if (Build(dir, m => ContentToolMain.Say(m)) != null) made++;
+                Dev.Perf.Line("creature", id, sw);
             }
             return made == 0 ? null : "ct_creature: built " + made + " creature(s) from enabled content mods";
         }

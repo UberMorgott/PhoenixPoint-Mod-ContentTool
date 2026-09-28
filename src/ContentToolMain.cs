@@ -153,10 +153,15 @@ namespace Morgott.ContentTool
             // Both routes read the SAME roster in the SAME frame. The video pass used to run inside
             // OnModEnabled, where every dependent mod still reads Enabled=false - it could not be
             // gated there at all.
+            System.Diagnostics.Stopwatch total = Dev.Perf.Start(), sw = Dev.Perf.Start();
             try { log?.LogInfo(Bake.VideoCatalog.LiveAll()); }
             catch (Exception ex) { log?.LogError("ct_video LiveAll THREW " + ex); }
+            Dev.Perf.Line("load.video", null, sw);
+            sw = Dev.Perf.Start();
             try { log?.LogInfo(Bake.SoundLoad.LoadAll(ModDir)); }
             catch (Exception ex) { log?.LogError("ct_sound load THREW " + ex); }
+            Dev.Perf.Line("load.sound", null, sw);
+            sw = Dev.Perf.Start();
             // The Addressables routes' half of the same roster read, in BOTH directions: the live
             // redirections and published keys are session-only, so every ENABLED content mod has to
             // have them installed again on this launch, and a mod switched off BEFORE launch never
@@ -170,14 +175,20 @@ namespace Morgott.ContentTool
                 if (swept != null) log?.LogInfo(swept);
             }
             catch (Exception ex) { log?.LogError("ct_cache prune THREW " + ex); }
+            Dev.Perf.Line("load.prune", null, sw);
+            sw = Dev.Perf.Start();
             try { string moved = Project.ModRoster.Reconcile(ModDir); if (moved != null) log?.LogInfo(moved); }
             catch (Exception ex) { log?.LogError("ct_content reconcile THREW " + ex); }
+            Dev.Perf.Line("load.reconcile", null, sw);
+            sw = Dev.Perf.Start();
             // The creature route's half of the same roster read. A content mod that declares a
             // "creature" block and ships no C# has nobody else to build it - the only caller of
             // CreatureBuild.Build was a mod's own DLL, so such a mod loaded and minted nothing,
             // silently. AFTER the reconcile: the bundle it loads is the one the reconcile installed.
             try { string born = Tactical.CreatureBuild.BuildAll(ModDir); if (born != null) log?.LogInfo(born); }
             catch (Exception ex) { log?.LogError("ct_creature BuildAll THREW " + ex); }
+            Dev.Perf.Line("load.creature", null, sw);
+            Dev.Perf.Line("load.total", null, total);
             // The startup pass is over - the roster above was read from its final flags. From here
             // the mod manager's checkbox is the only thing that decides, so the dependency keep-alive
             // (ModRoster.BeforeDisable) must stop having an opinion: a mod the player switches OFF

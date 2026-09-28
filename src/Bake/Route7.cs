@@ -180,6 +180,7 @@ namespace Morgott.ContentTool.Bake
         {
             if (string.IsNullOrEmpty(modDir) ||
                 !File.Exists(Path.Combine(modDir, Project.ContentMods.Manifest))) return null;
+            System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
             Project.ContentProject.Declared project = Project.ContentProject.LoadDeclared(modDir);
             // VIDEO rows are not the replace route's work - :288 skips them when it builds `declared`,
             // so counting them here sent a video-only mod through a full blocking ProjectBake.Run that
@@ -230,10 +231,17 @@ namespace Morgott.ContentTool.Bake
                 string legacy = LegacyPub(project.Id);
                 if (legacy != null) log.AppendLine(legacy);
                 else if (BundleClaims.RouteMoves(true, KeysLive.Holds(project.Id), on))
+                {
+                    System.Diagnostics.Stopwatch pub = Dev.Perf.Start();
                     log.AppendLine(on ? CatalogApply(name) : KeysLive.Uninstall(project.Id));
+                    Dev.Perf.Line("route3." + (on ? "on" : "off"), project.Id, pub);
+                }
             }
 
             string what = log.ToString().TrimEnd();
+            // Only a toggle that DID something: the prefix, postfix and reconcile repeat the call per mod,
+            // and the no-op repeats are not what a slow startup is made of.
+            if (what.Length > 0) Dev.Perf.Line("toggle." + (on ? "on" : "off"), project.Id, sw);
             return what.Length == 0 ? null : what;
         }
 
@@ -464,7 +472,9 @@ namespace Morgott.ContentTool.Bake
             // The declared targets and the freshness verdict are ONE observation now (Observe above), so
             // the panel and this checkbox read the same `haveAll` rather than each computing it. The census
             // and its case-blindness moved with it, comments and all.
+            System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
             FreshnessObservation seen = Observe(project, projectRoot);
+            Dev.Perf.Line("route7.observe" + (seen.HaveAll ? " fresh" : " stale"), modId, sw);
             List<string> declared = new List<string>(seen.Declared);
             if (!seen.HaveAll)
             {
@@ -500,7 +510,9 @@ namespace Morgott.ContentTool.Bake
                 // and install the STALE copies as if this bake had produced them. Counting a refusal as a
                 // patch failure instead is no better: that reaches the checkbox's Failed.Add (Toggle) and
                 // blocks the mod for the rest of the session over a race nobody caused.
+                sw = Dev.Perf.Start();
                 BakeResult baked = ProjectBake.Bake(projectRoot, true);   // claimHeld: this apply owns it
+                Dev.Perf.Line("route7.bake", modId, sw);
                 pre.AppendLine(baked.Terminal);
                 if (baked.How == BakeDisposition.Refused || baked.How == BakeDisposition.Cancelled)
                     return pre.ToString();                                // `how` stays Refused; Failed untouched
@@ -563,12 +575,14 @@ namespace Morgott.ContentTool.Bake
                 pre.AppendLine("REFUSED: " + forBundle + " is not declared by this project - its " +
                                Project.ContentMods.Manifest + " names " + declared.Count + " \"replace\" " +
                                "target(s)" + (declared.Count == 0 ? "" : ": " + string.Join(", ", declared.ToArray())));
+            sw = Dev.Perf.Start();
             pre.Append("installing " + copies.Count + " patched copy(ies) as '" + modId + "'\n")
                // THE PER-TARGET ANSWER COMES OUT OF THE INSTALL LOOP, not from a second sample around it.
                // The `wasResident`/`Find` pair that used to sit here measured ONE bundle either side of a
                // loop that installs several; inside, each target is sampled at its own Register, which is
                // the same rule applied per target instead of per press.
                .Append(BundleLive.Install(modId, copies, out targets));
+            Dev.Perf.Line("route7.install", modId, sw);
             // UNCONDITIONALLY, once the copies are in. It sat inside the `!haveAll` branch, so the
             // press that arrived with a FRESH patched folder - the common case after a fix elsewhere -
             // installed the copies and left the session's "this one failed" flag standing, and the

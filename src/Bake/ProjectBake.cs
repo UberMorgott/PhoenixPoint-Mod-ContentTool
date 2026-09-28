@@ -122,6 +122,7 @@ namespace Morgott.ContentTool.Bake
             // that is the only way out of a nested importer; reporting it as "ct_project THREW" would tell
             // the author their project is broken when they are the one who pressed stop. The id is not read
             // yet, so the line names the folder they picked.
+            System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
             try { p = ContentProject.Load(projectRoot, pump); }
             catch (OperationCanceledException)
             {
@@ -140,6 +141,7 @@ namespace Morgott.ContentTool.Bake
             // AFTER Load, because p.Id is what names the patched directory - and Load writes nothing, so
             // every byte this run produces is still covered. A project that fails to load never took a
             // claim and needs no release.
+            Dev.Perf.Line("bake.load", p.Id, sw);
             string[] dirs = OutputDirs(p.Root, p.Id);
             string contended;
             if (!claimHeld && !OutputClaim.Take(dirs, out contended))
@@ -149,7 +151,9 @@ namespace Morgott.ContentTool.Bake
             // that session would be refused for a run that is long over.
             try
             {
+                sw = Dev.Perf.Start();
                 BakeResult r = Baked(p, pump, cacheKey);
+                Dev.Perf.Line("bake.baked", p.Id, sw);
                 // A CLEAN PATCH ROUTE IS THE FIX R29 ASKS FOR, from whichever door baked it - the console
                 // verb, the dashboard's Bake, or Apply's own re-bake.
                 Route7.BakeCleared(p.Id, r);
@@ -1771,6 +1775,7 @@ namespace Morgott.ContentTool.Bake
                     List<KeyValuePair<string, ImportedMesh>> meshes = new List<KeyValuePair<string, ImportedMesh>>();
                     List<KeyValuePair<string, ShippedReplacement>> clips =
                         new List<KeyValuePair<string, ShippedReplacement>>();
+                    System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
                     using (BundleBaker baker = new BundleBaker(shipped, p.Id))
                     {
                         // EVERY REFUSAL BELOW IS `failures++; continue;`, NEVER A RETURN. Returning out of
@@ -1921,7 +1926,10 @@ namespace Morgott.ContentTool.Bake
                     // one worth measuring, and nothing has been replaced yet. The one visible consequence is the
                     // P4-bytes VOID diagnostic (ReadBack.cs:121), which names the file it could not read
                     // buffers in: on that arm alone it now prints the temp's path instead of the copy's.
+                    Dev.Perf.Line("bake.patch " + bundleFile, p.Id, sw);
+                    sw = Dev.Perf.Start();
                     failures += ReadBack.Run(log, bundleFile, shipped, copyTmp, want, mats, meshes, clips).Failed;
+                    Dev.Perf.Line("bake.readback " + bundleFile, p.Id, sw);
                     copies.Add(new KeyValuePair<string, string>(bundleFile, copy.Replace('\\', '/')));
                 }
             }
