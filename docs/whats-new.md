@@ -1,6 +1,6 @@
 # What’s new
 
-## 1.3.0 (in preparation)
+## 1.3.0 (released 2026-09-28)
 
 ### New
 

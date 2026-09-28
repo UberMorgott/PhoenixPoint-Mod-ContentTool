@@ -2,6 +2,11 @@
 
 Read this first next session, then continue the plan task-by-task. Nothing here needs the user.
 
+## 2026-09-28 — SUPERSEDED: current state lives elsewhere (read that, not the blocks below)
+
+- 1.2.1 and 1.3.0 are both RELEASED (1.3.0 on 2026-09-28: redesigned bench, Sounds/Videos/Add a weapon/Fit a weapon screens, 2026-09-26 review fixes, dev gate, Route7 block reuse). Everything below this block is history.
+- Current checklist + log: `internal-docs\planning\2026-09-28-continue\TASKS.md` (also `PERF.md`, `EXAMPLES-DOCS-AUDIT.md` there); review pass before it: `internal-docs\planning\2026-09-26-review\HANDOFF.md`.
+
 ## 2026-09-06 (evening) — LIFECYCLE DASHBOARD SLICE COMPLETE (read this block first)
 
 - **All of T6-fixes → T7 → T8 landed on `main`**, tree clean except the user's untracked zips. NOT pushed (push only on the user's word). Gates at HEAD: `LIFECYCLE PASS, 230`, `PACKAGE-GATE 8`, `MANIFEST 53`, `PROJECT-SCAFFOLD 89`, `ALIAS 32`, `REFUSAL-COUNT 17`, `R0: ALL PASS`, build `Ошибок: 0`.
