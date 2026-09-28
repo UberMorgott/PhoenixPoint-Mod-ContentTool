@@ -91,5 +91,39 @@ namespace Morgott.ContentTool.Doctor
                 default: return "IMPORT REFUSED (" + Count(Severity.Blocking) + " reason(s)" + also + ")";
             }
         }
+
+        /// <summary>The badge colour of the verdict: FAIL when nothing will be written or previewed,
+        /// WARN when it imports but costs the author something (weights, a warning), PASS otherwise.</summary>
+        internal Grade Level()
+        {
+            // NotRigged is FAIL too: Preview and SHIP both refuse it - there is no skeleton to bind onto.
+            if (Outcome == Outcome.Refused || Outcome == Outcome.NotRigged || Count(Severity.Blocking) > 0)
+                return Grade.Fail;
+            if (Outcome != Outcome.ByName || Count(Severity.Warning) > 0) return Grade.Warn;
+            return Grade.Pass;
+        }
+
+        /// <summary>The verdict in ONE plain sentence, beside the badge. <see cref="Header"/> keeps the
+        /// technical wording (BY NAME / NEAREST-BONE) for the tooltip and the copied report.</summary>
+        internal string Plain()
+        {
+            int warned = Count(Severity.Warning);
+            string also = warned > 0 ? " " + warned + " warning(s) in Details." : "";
+            switch (Outcome)
+            {
+                case Outcome.ByName:
+                    return "Bones match - your model moves with the game's skeleton." + also;
+                case Outcome.NearestBone:
+                    return "Bone names don't match - it will import, but your skin weights are replaced." + also;
+                case Outcome.NotRigged:
+                    return "The game part has no skeleton to bind to - it can't be previewed or built here. " +
+                           "Pick a part that moves with the body." + also;
+                default:
+                    return "Can't be used yet - " + Count(Severity.Blocking) + " problem(s) to fix, see Details.";
+            }
+        }
     }
+
+    /// <summary>Pass / warn / fail - the one colour a verdict is drawn in.</summary>
+    internal enum Grade { Pass, Warn, Fail }
 }

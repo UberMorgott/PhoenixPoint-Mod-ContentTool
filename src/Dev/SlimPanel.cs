@@ -113,17 +113,17 @@ namespace Morgott.ContentTool.Dev
 
             GUILayout.Space(6f);
             GUILayout.Label(shownMode == Mode.Skel
-                            ? "GLB SKEL - rename this model's bones onto the prototype's"
+                            ? "Rename bones - rename this model's bones onto the game part's"
                             : shownMode == Mode.Zip
-                              ? "GLB ZIP - shrink the animation without dropping a clip"
-                              : "GLB SLIM - drop animation clips this model will never play");
+                              ? "Compress - shrink the animation without removing a clip"
+                              : "Remove clips - drop animation clips this model will never play");
 
             GUILayout.BeginHorizontal();
             GUI.enabled = !shownRunning;
             if (GUILayout.Button("Browse...", GUILayout.Width(90f)))
                 browser.Show(sourcePath == null ? "" : Path.GetDirectoryName(sourcePath));
             GUI.enabled = true;
-            GUILayout.Label("source: " + BenchList.Elide(sourcePath == null ? "-" : Path.GetFileName(sourcePath), 40));
+            GUILayout.Label("file: " + BenchList.Elide(sourcePath == null ? "-" : Path.GetFileName(sourcePath), 40));
             GUILayout.EndHorizontal();
 
             // The mode decides how many controls the block below emits, so the press only ENQUEUES -
@@ -131,9 +131,9 @@ namespace Morgott.ContentTool.Dev
             // pass counted, which is rule 1 in the remark above.
             GUILayout.BeginHorizontal();
             GUI.enabled = !shownRunning;
-            bool onSlim = GUILayout.Toggle(shownMode == Mode.Slim, " SLIM (drop clips)", GUILayout.Width(140f));
-            bool onZip = GUILayout.Toggle(shownMode == Mode.Zip, " ZIP (rewrite curves)", GUILayout.Width(160f));
-            bool onSkel = GUILayout.Toggle(shownMode == Mode.Skel, " SKEL (rename bones)", GUILayout.Width(160f));
+            bool onSlim = GUILayout.Toggle(shownMode == Mode.Slim, new GUIContent(" Remove clips", "GLB SLIM"), GUILayout.Width(120f));
+            bool onZip = GUILayout.Toggle(shownMode == Mode.Zip, new GUIContent(" Compress", "GLB ZIP - rewrite the animation curves smaller"), GUILayout.Width(110f));
+            bool onSkel = GUILayout.Toggle(shownMode == Mode.Skel, new GUIContent(" Rename bones", "GLB SKEL"), GUILayout.Width(130f));
             GUI.enabled = true;
             GUILayout.EndHorizontal();
             Mode want = shownMode;
@@ -151,15 +151,18 @@ namespace Morgott.ContentTool.Dev
             // No force outside SLIM: it overrides the mandatory-clip and rigged-character arms, and a
             // run that drops no clip cannot reach either of them.
             if (shownMode == Mode.Slim)
-                force = GUILayout.Toggle(force, " force (drop mandatory clips too)", GUILayout.Width(220f));
-            inPlace = GUILayout.Toggle(inPlace, " overwrite in place", GUILayout.Width(150f));
+                force = GUILayout.Toggle(force, new GUIContent(" also required clips", "force - drop MANDATORY clips too"), GUILayout.Width(170f));
+            inPlace = GUILayout.Toggle(inPlace, " overwrite the file", GUILayout.Width(150f));
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
             // A file with no clips is a perfectly good skeleton to rewrite, so SKEL asks for a plan
             // instead of a census.
             GUI.enabled = !shownRunning && sourcePath != null &&
                           (shownMode == Mode.Skel ? planPath != null : census.Length > 0);
-            bool run = GUILayout.Button("RUN", GUILayout.Width(70f));
+            bool run = GUILayout.Button("Run", GUILayout.Width(90f));
             GUI.enabled = shownRunning;
-            bool stop = GUILayout.Button("CANCEL", GUILayout.Width(80f));
+            bool stop = GUILayout.Button("Cancel", GUILayout.Width(80f));
             GUI.enabled = true;
             GUILayout.EndHorizontal();
             if (run) intents.Enqueue(Run);
@@ -168,7 +171,7 @@ namespace Morgott.ContentTool.Dev
             // ALWAYS these three rows, whatever the state. A row that appears only while a run is on
             // is a row that appears BETWEEN the two passes of the frame the run starts in - which is
             // rule 1 above, broken in the one place it costs a wedged panel.
-            GUILayout.Label("writes: " + (sourcePath == null ? "-"
+            GUILayout.Label("saves as: " + (sourcePath == null ? "-"
                                           : Path.GetFileName(inPlace ? sourcePath
                                                              : Beside(sourcePath, Tag(shownMode)))));
             Bar();

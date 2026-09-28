@@ -90,7 +90,13 @@ namespace Morgott.ContentTool.Dev
         /// Apply from the RPC call. The accepted tokens are exactly Validate, Bake, Apply, Verify, Package
         /// and All; anything else is R33, answered by `Admit` and not by a second list here.
         /// </summary>
-        public static string Run(string stage)
+        public static string Run(string stage) { return Run(stage, null); }
+
+        /// <summary>The panel's "Build &amp; test" press: `All`, admitted exactly as `All`, but the chain stops
+        /// after Verify - Package has its own button. Not an RPC token: the wire keeps its exact six.</summary>
+        private const string BuildTest = "BuildTest";
+
+        private static string Run(string stage, string last)
         {
             try
             {
@@ -101,7 +107,7 @@ namespace Morgott.ContentTool.Dev
 
                 if (stage == "All")
                 {
-                    chain = new LifecycleState.Sequence();
+                    chain = new LifecycleState.Sequence(last);
                     ctx.InRunAll = true;
                     ctx.ValidateOutcome = ctx.BakeOutcome = ctx.ApplyOutcome = GateOutcome.None;
                     string next = chain.Next(ctx);
@@ -674,7 +680,7 @@ namespace Morgott.ContentTool.Dev
             bool parked = LifecycleJob.ParkedForPaint;
 
             GUILayout.BeginHorizontal(); openGroups++;
-            GUILayout.Label("Project", GUILayout.Width(60f));
+            GUILayout.Label("Mod", GUILayout.Width(60f));
             GUI.enabled = !owned && roots.Length > 0;
             int at = Chosen;
             if (GUILayout.Button("<", GUILayout.Width(26f)))
@@ -682,9 +688,11 @@ namespace Morgott.ContentTool.Dev
             GUI.enabled = true;
             // BOUND BUT NOT LISTED is a real state - a project SHIP just made, or one forked under a root
             // this scan did not reach - and "(none)" over it named nothing while `Run all` acted on it.
-            GUILayout.Label(at >= 0 && at < labels.Length ? labels[at]
-                          : string.IsNullOrEmpty(root) ? "(none)"
-                          : Path.GetFileName(LifecycleSelector.Canonical(root)));
+            GUILayout.Label(new GUIContent(at >= 0 && at < labels.Length ? labels[at]
+                                           : string.IsNullOrEmpty(root) ? "(no mod picked)"
+                                           : Path.GetFileName(LifecycleSelector.Canonical(root)),
+                                           string.IsNullOrEmpty(root) ? "use < > to pick one of your content mods" : root),
+                            GUILayout.Width(200f));
             GUI.enabled = !owned && roots.Length > 0;
             if (GUILayout.Button(">", GUILayout.Width(26f)))
                 select = LifecycleSelector.Step(at, 1, roots.Length);
@@ -698,57 +706,44 @@ namespace Morgott.ContentTool.Dev
             // whatever ran last, and a green stage afterwards must not read as "nothing is owed".
             // `Finishing` is the publication window - owned, not busy - where `Ready.` was a status the
             // panel invented about a run that still held the job.
-            GUILayout.Label("Session  " + LifecycleView.Status(
+            string status = LifecycleView.Status(
                 now.Busy ? now.CancelRequested ? StageText.CancelRequested(now.Stage)
                          : parked ? StageText.WaitingForPaint(now.Stage)
                          : StageText.Running(now.Stage)
                 : owned ? StageText.Finishing(now.Stage) : null,
-                ctx.RestartRequired, blocked ? id : null));
+                ctx.RestartRequired, blocked ? id : null);
+            BenchUi.Hint(status);
 
+            // THE STEPPER: Check files -> Build -> Install -> Test in game, one line each - a pass/warn/fail
+            // mark, the step's plain name, the FIRST line of its own verdict, and a small Run for that step
+            // alone. Package is not a step of it: sharing is a separate act, drawn apart below.
+            bool none = string.IsNullOrEmpty(root);
             foreach (LifecycleView.Row r in view.Rows)
             {
-                GUILayout.BeginHorizontal(); openGroups++;
-                // THE WIDTHS ARE BenchList'S, and asserted there: this row is five FIXED columns, so it
-                // does not shrink to the panel - it is drawn past the edge, silently, with the Run button
-                // off-screen. See BenchList.StageRowFits.
-                GUILayout.Label(r.Stage, GUILayout.Width(BenchList.StageW));
-                GUILayout.Label(LifecycleView.Word(r.Freshness), GUILayout.Width(BenchList.FreshW));
-                GUILayout.Label(LifecycleView.Word(r.Outcome), GUILayout.Width(BenchList.OutcomeW));
-                GUILayout.Label(Dash(r.Installation), GUILayout.Width(BenchList.InstallW));
-                // APPLY ALONE IS BLOCKED by the session block - diagnosis (Validate, Verify) and the
-                // author's own output (Bake, Package) stay pressable, which is what an author needs in
-                // order to find out WHY the bake failed. The seam refuses it too (R29); this is the
-                // button saying so before the press.
-                GUI.enabled = !owned && !(blocked && r.Stage == "Apply");
-                if (GUILayout.Button("Run", GUILayout.Width(BenchList.StageRunW))) intent = r.Stage;
-                GUI.enabled = true;
-                openGroups--; GUILayout.EndHorizontal();
-                // The row's OWN verdict, never the tail's last line: the two answer different questions and
-                // reading one for the other is how a panel invents a verdict.
-                // ONE LINE OF IT. A Bake verdict is the whole bake log (1 225 445 chars, W10), and drawing
-                // it whole pushed the rows under it, the progress track, both buttons and the log tail off
-                // the screen - the layout moving when a result arrives, which is what design §4 forbids.
-                // The full text is untouched: the tail holds it and `Snapshot("<stage>")` serves it verbatim.
-                GUILayout.Label("  " + Dash(LifecycleView.OneLine(r.Verdict)));
+                if (r.Stage == "Package") continue;
+                StageLine(r, owned, blocked, none, false);
             }
+
+            // THE ONE MAIN BUTTON. `All` minus Package, admitted exactly as `All` (so the session block
+            // disables it for the reason `Run all` was disabled: the chain contains Apply).
+            GUILayout.Space(4f);
+            if (BenchUi.Main("Build & test", none ? "pick a mod above first"
+                                            : owned ? "a run is in progress - Cancel stops it"
+                                            : blocked ? "an install failed this session - restart the game to try again"
+                                            : null,
+                             "Validate -> Bake -> Apply -> Verify, stopping at the first failure"))
+                intent = BuildTest;
 
             SlimProgress p = now.Progress;
             GUILayout.BeginHorizontal(); openGroups++;
-            GUILayout.Label("Progress", GUILayout.Width(60f));
             // A FIXED TRACK with the fill inside it, so the phase label beside it does not walk left and
             // right as the bar grows. The fill is the slim panel's own (SlimPanel.Fill), not a copy of it.
             GUILayout.BeginHorizontal(GUILayout.Width(SlimPanel.BarWidth)); openGroups++;
             SlimPanel.Fill(p);
             GUILayout.FlexibleSpace();
             openGroups--; GUILayout.EndHorizontal();
-            GUILayout.Label(p == null ? "—" : p.Stage + " " + p.Done + "/" + p.Total);
-            openGroups--; GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal(); openGroups++;
-            // ...AND `Run all` WITH IT, because the chain contains Apply: admitted, it would run Validate
-            // and Bake and then stop at R29, which is a chain that cannot finish by construction.
-            GUI.enabled = !owned && !blocked;
-            if (GUILayout.Button("Run all", GUILayout.Width(80f))) intent = "All";
+            GUILayout.Label(p == null ? "" : BenchList.StageWord(p.Stage) + " " + p.Done + "/" + p.Total);
+            GUILayout.FlexibleSpace();
             // A CANCEL IS A REQUEST, and only until one is outstanding. `owned && !busy` is the producer's
             // publication - it has stated its verdict and the pump has not served it yet - which is exactly
             // the window in which there is nothing left to interrupt.
@@ -758,13 +753,72 @@ namespace Morgott.ContentTool.Dev
             GUI.enabled = now.Busy && !now.CancelRequested;
             if (GUILayout.Button("Cancel", GUILayout.Width(80f))) intent = "Cancel";
             GUI.enabled = true;
-            GUILayout.Label(Dash(owned && !now.Busy ? StageText.CancelUnavailable(now.Stage) : message));
+            openGroups--; GUILayout.EndHorizontal();
+            string said = owned && !now.Busy ? StageText.CancelUnavailable(now.Stage) : message;
+            BenchUi.Hint(LifecycleView.OneLine(said), said);
+
+            // SHARING, apart from the stepper.
+            BenchUi.Section("Share");
+            foreach (LifecycleView.Row r in view.Rows)
+                if (r.Stage == "Package") StageLine(r, owned, blocked, none, false);
+            GUILayout.BeginHorizontal(); openGroups++;
+            GUI.enabled = !owned && !none;
+            if (GUILayout.Button(new GUIContent("Package for sharing", "writes the zip players install (Package)"),
+                                 GUILayout.Width(180f))) intent = "Package";
+            // `Run all` KEPT: all five, Package included - disabled by the session block like `Run all` was.
+            GUI.enabled = !owned && !none && !blocked;
+            if (GUILayout.Button(new GUIContent("Build, test & package", "all five steps in one run (Run all)"),
+                                 GUILayout.Width(180f))) intent = "All";
+            GUI.enabled = true;
             openGroups--; GUILayout.EndHorizontal();
 
-            GUILayout.Label("Log tail");
-            tailScroll = GUILayout.BeginScrollView(tailScroll, GUILayout.Height(120f)); openScroll = true;
-            GUILayout.Label(string.IsNullOrEmpty(log) ? "—" : StageResult.Tail(log, 12));
+            if (!BenchUi.Details("build/log", "Details and log")) return;
+            // ONE STEP AT A TIME, for finding out WHY a step failed: each step with its own Run.
+            foreach (LifecycleView.Row r in view.Rows)
+            {
+                StageLine(r, owned, blocked, none, true);
+                BenchUi.Hint("      " + r.Stage + ": " + LifecycleView.Word(r.Freshness) + ", " +
+                             LifecycleView.Word(r.Outcome) +
+                             (string.IsNullOrEmpty(r.Installation) ? "" : ", " + r.Installation));
+            }
+            tailScroll = GUILayout.BeginScrollView(tailScroll, GUILayout.Height(160f)); openScroll = true;
+            GUILayout.Label(string.IsNullOrEmpty(log) ? "(nothing has run yet)" : StageResult.Tail(log, 12));
             openScroll = false; GUILayout.EndScrollView();
+        }
+
+        /// <summary>One step of the stepper: its mark, plain name, one line of its own verdict and its Run.
+        /// The row's OWN verdict, never the tail's last line; ONE LINE of it (a Bake verdict is the whole
+        /// bake log, 1 225 445 chars in W10) - the full text is in Details and `Snapshot("stage")`.</summary>
+        private static void StageLine(LifecycleView.Row r, bool owned, bool blocked, bool none, bool run)
+        {
+            GUILayout.BeginHorizontal(); openGroups++;
+            string mark = r.Outcome == GateOutcome.Pass ? "PASS" : r.Outcome == GateOutcome.Fail ? "FAIL"
+                        : r.Outcome == GateOutcome.Void ? "VOID" : "-";
+            if (r.Freshness == Freshness.Stale && r.Outcome != GateOutcome.None) mark += "*";
+            BenchUi.Mark(mark, r.Outcome == GateOutcome.Pass ? Doctor.Grade.Pass
+                             : r.Outcome == GateOutcome.Fail ? Doctor.Grade.Fail
+                             : r.Outcome == GateOutcome.Void ? (Doctor.Grade?)Doctor.Grade.Warn : null,
+                         r.Freshness == Freshness.Stale ? "* out of date - inputs changed since this ran"
+                                                        : LifecycleView.Word(r.Freshness), 44f);
+            GUILayout.Label(new GUIContent(BenchList.StageWord(r.Stage), "technical name: " + r.Stage),
+                            GUILayout.Width(140f));
+            GUILayout.FlexibleSpace();
+            // APPLY ALONE IS BLOCKED by the session block - diagnosis (Validate, Verify) and the
+            // author's own output (Bake, Package) stay pressable, which is what an author needs in
+            // order to find out WHY the bake failed. The seam refuses it too (R29); this is the
+            // button saying so before the press.
+            if (run)
+            {
+                GUI.enabled = !owned && !none && !(blocked && r.Stage == "Apply");
+                if (GUILayout.Button(new GUIContent("Run", "run only this step (" + r.Stage + ")"),
+                                     GUILayout.Width(BenchList.StageRunW))) intent = r.Stage;
+                GUI.enabled = true;
+            }
+            openGroups--; GUILayout.EndHorizontal();
+            // The Details copy of a row carries only its Run: the verdict line is already on the stepper.
+            if (run) return;
+            string line = LifecycleView.OneLine(r.Verdict);
+            if (!string.IsNullOrEmpty(line)) BenchUi.Hint("      " + line, r.Verdict.Length > 2000 ? null : r.Verdict);
         }
 
         private static string Dash(string s) { return string.IsNullOrEmpty(s) ? "—" : s; }
@@ -788,7 +842,8 @@ namespace Morgott.ContentTool.Dev
             if (want == "Cancel") { Cancel(); want = null; }
             if (Busy) return;
             if (pick != int.MinValue) Choose(pick);
-            if (want != null) Run(want);
+            if (want == BuildTest) Run("All", "Verify");
+            else if (want != null) Run(want);
         }
 
         /// <summary>

@@ -669,15 +669,15 @@ namespace Morgott.ContentTool.Dev
         {
             get
             {
-                if (Busy || shipPending) return "the Doctor is still working";
+                if (Busy || shipPending) return "wait - the check is still running";
                 if (Path == null || !File.Exists(Path) ||
                     !Path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase))
-                    return "no .glb is loaded";
+                    return "pick your .glb model file first";
                 if (Ready == null || Ready.Outcome != Outcome.ByName ||
                     Ready.Report.Count(Severity.Blocking) != 0)
-                    return "the report is not green by name";
+                    return "the check must pass first - every bone has to match the game's by name";
                 if (Prototype == null || Prototype.Mode != VerifyMode.Replace || Prototype.Live == null)
-                    return "no replaceable slot is picked";
+                    return "pick a game part to replace (Replace mode)";
                 if (Prototype.TargetRefusal != null) return Prototype.TargetRefusal;
                 if (Prototype.ShippedBundle == null) return "no shipped target derived for this slot";
                 if (Renderer == null) return "the slot has no renderer";
@@ -940,6 +940,14 @@ namespace Morgott.ContentTool.Dev
         private IList<PrototypeTarget> slots = new PrototypeTarget[0];
         private PrototypeVariant standing;
         private bool protoBusy;
+        /// <summary>The slot-level search results, recomputed with <see cref="shown"/> (Layout only).</summary>
+        private IList<PrototypeCatalog.SlotHit> hits = new PrototypeCatalog.SlotHit[0];
+        private int hitTotal;
+        private const int MaxHits = 200;
+        /// <summary>A search hit on a variant that was not standing yet: the rebuild was started and this
+        /// slot is picked the moment it is on the platform (see Refresh). Written only in edits.</summary>
+        private PrototypeVariant pendingVariant;
+        private string pendingSlot;
 
         private Transform root;
 
@@ -1535,47 +1543,42 @@ namespace Morgott.ContentTool.Dev
             // read anyway. browserOpen only ever moves in an edit, so the area cannot change mid-frame.
             if (browserOpen) { Browse(); return; }
 
-            float col = Mathf.Max(120f, (width - 80f) * 0.45f);
+            float col = Mathf.Max(120f, (width - 110f) * 0.5f);
 
+            // WHERE THE AUTHOR IS: file -> game part -> check -> build. Derived, never stored.
+            BenchUi.Steps(StepNames, Path == null ? 0 : !Verifiable ? 1
+                                   : Ready != null && ShipRefusal == null ? 3 : 2);
             Header();
-            if (Ready != null && Ready.Baked != null && Ready.Baked.Mesh != null)
-                GUILayout.Label("   " + Ready.Baked.Mesh.VertexCount + " verts, " +
-                                Ready.Baked.Mesh.IndexCount / 3 + " tris, " +
-                                (Ready.Model == null ? 0 : Ready.Model.JointNames.Count) + " joints, " +
-                                Ready.Baked.Influences + " influence(s)/vertex");
 
             // ABOVE the early returns. What the last press did is most worth reading exactly when the
             // panel has nothing else to show - a refused preview restarts the report, and a message
             // drawn under a verdict that is not there yet is a message nobody ever sees.
-            if (Message.Length > 0) GUILayout.Label(Message);
+            if (Message.Length > 0) BenchUi.Hint(Message);
 
-            if (Path == null || !Verifiable) { GUILayout.Label(Hint()); return; }
-            if (Ready == null) { GUILayout.Label(Busy ? "reading..." : "queued..."); return; }
+            if (Path == null || !Verifiable)
+            {
+                // THE ONE MAIN BUTTON of the first two steps is the missing half itself.
+                GUILayout.Space(6f);
+                GUI.enabled = !shipPending;
+                if (Path == null)
+                {
+                    if (BenchUi.Main("Choose your model file (.glb)...", null))
+                        browser.Show("");
+                }
+                else if (BenchUi.Main("Choose the game part it replaces...", null))
+                    edits.Enqueue(delegate { browserOpen = true; });
+                GUI.enabled = true;
+                BenchUi.Hint(Hint());
+                return;
+            }
+            if (Ready == null) { BenchUi.Hint(Busy ? "checking the model..." : "queued..."); return; }
 
             GUILayout.Space(4f);
-            GUILayout.Label(Ready.Report.Header());
+            BenchUi.Badge(Ready.Report.Level(), Ready.Report.Plain(), Ready.Report.Header());
             GUILayout.Space(2f);
 
-            // Shown whenever there is a map OR a reason to make one. Keying it on NearestBone alone hid
-            // the table the moment an alias worked, which is exactly when the author wants to look at
-            // what they mapped - and left no way to change or remove it.
-            // Replace only: the map's rows are built from MissingBone/ExtraBone, and Extend has no
-            // MissingBone by design - there would be nothing on the right-hand side to offer.
-            if (Ready.Model != null && Target != null && Target.BoneNames != null &&
-                (aliases.Count > 0 || Ready.Outcome == Outcome.NearestBone ||
-                 (Ready.Source != null && Ready.Source.AliasesApplied > 0)))
-                BoneMap(col);
 
-            rowScroll = GUILayout.BeginScrollView(rowScroll, GUILayout.Height(200f));
-            Rows(Severity.Blocking, "REFUSED");
-            Rows(Severity.Downgrade, "LOSES YOUR WEIGHTS");
-            // "WARNING", not "IGNORED": a sidecar row IS ignored, a suspect part mapping is not - it bakes,
-            // prints as "P4 WARN" and is counted as a warning, never a failure ("N warning(s), baked
-            // anyway", StageText.BakeWarnings).
-            Rows(Severity.Warning, "WARNING");
-            Rows(Severity.Info, "NOTE");
-            GUILayout.EndScrollView();
-
+            GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
             // A Blocking row is a refusal even when the VERDICT was reached before it - a live bind that
             // disagreed, a rig that moved. Preview follows the rows, not the outcome it was born with.
@@ -1594,26 +1597,50 @@ namespace Morgott.ContentTool.Dev
             GUI.enabled = !shipPending &&
                           (Ready.Outcome == Outcome.ByName || Ready.Outcome == Outcome.NearestBone) &&
                           Ready.Report.Count(Severity.Blocking) == 0 && !blind;
-            if (GUILayout.Button(blind ? "Preview - no live bones to bind onto" : "Preview",
-                                 GUILayout.Width(blind ? 230f : 80f))) Enqueue("preview");
+            if (GUILayout.Button(new GUIContent(blind ? "Preview - no live bones to bind onto" : "Preview on the model",
+                                                "Puts your mesh on the game part in the viewport. Nothing is written."),
+                                 GUILayout.Width(blind ? 230f : 150f))) Enqueue("preview");
             GUI.enabled = !shipPending && HasPreview;
-            if (GUILayout.Button("Revert preview", GUILayout.Width(110f))) Enqueue("revert");
-            // Changed AND valid, decided in Rethink: an unchanged map rewrites the sidecar for nothing,
-            // and a map AliasMap.Of refuses would be refused again by the loader about to read it.
-            GUI.enabled = !shipPending && canSave;
-            if (GUILayout.Button("Save aliases", GUILayout.Width(110f))) Enqueue("save");
-            // The same map, baked INTO the file instead of parked beside it. Offered whenever the map
-            // has anything in it - including a map already saved to a sidecar, which is exactly the
-            // state an author is in when they decide to bake it.
-            GUI.enabled = !shipPending && aliases.Count > 0;
-            if (GUILayout.Button("Write skel plan", GUILayout.Width(120f))) Enqueue("skelplan");
+            if (GUILayout.Button("Undo preview", GUILayout.Width(110f))) Enqueue("revert");
             GUI.enabled = true;
-            if (GUILayout.Button("Copy report", GUILayout.Width(100f)))
-                GUIUtility.systemCopyBuffer = PlainTextOf(Ready, Path, Target);
             GUILayout.EndHorizontal();
 
             Ship();
+            // Shown whenever there is a map OR a reason to make one. Keying it on NearestBone alone hid
+            // the table the moment an alias worked, which is exactly when the author wants to look at
+            // what they mapped - and left no way to change or remove it.
+            // Replace only: the map's rows are built from MissingBone/ExtraBone, and Extend has no
+            // MissingBone by design - there would be nothing on the right-hand side to offer.
+            if (Ready.Model != null && Target != null && Target.BoneNames != null &&
+                (aliases.Count > 0 || Ready.Outcome == Outcome.NearestBone ||
+                 (Ready.Source != null && Ready.Source.AliasesApplied > 0)))
+                BoneMap(col);
+
+            // EVERYTHING TECHNICAL, one press away and closed by default: the mesh numbers, the full
+            // verdict wording, every diagnostic row with its remedy, and the SHIP log.
+            if (!BenchUi.Details("doctor/details", "Details and log")) return;
+            if (Ready.Baked != null && Ready.Baked.Mesh != null)
+                BenchUi.Hint(Ready.Baked.Mesh.VertexCount + " verts, " + Ready.Baked.Mesh.IndexCount / 3 +
+                             " tris, " + (Ready.Model == null ? 0 : Ready.Model.JointNames.Count) + " joints, " +
+                             Ready.Baked.Influences + " influence(s)/vertex");
+            BenchUi.Hint(Ready.Report.Header());
+            rowScroll = GUILayout.BeginScrollView(rowScroll, GUILayout.Height(200f));
+            Rows(Severity.Blocking, "CAN'T BE USED");
+            Rows(Severity.Downgrade, "LOSES YOUR SKIN WEIGHTS");
+            // "WARNING", not "IGNORED": a sidecar row IS ignored, a suspect part mapping is not - it bakes,
+            // prints as "P4 WARN" and is counted as a warning, never a failure ("N warning(s), baked
+            // anyway", StageText.BakeWarnings).
+            Rows(Severity.Warning, "WARNING");
+            Rows(Severity.Info, "NOTE");
+            GUILayout.EndScrollView();
+            if (GUILayout.Button("Copy report", GUILayout.Width(110f)))
+                GUIUtility.systemCopyBuffer = PlainTextOf(Ready, Path, Target);
+            if (shipPath.Length > 0) BenchUi.Hint("mod folder " + shipPath);
+            if (shipResult.Length > 0) BenchUi.Hint(shipResult);
+            if (shipTail.Length > 0) BenchUi.Hint(shipTail);
         }
+
+        private static readonly string[] StepNames = { "Model file", "Game part", "Check", "Build" };
 
         /// <summary>
         /// SHIP: from a green verdict to a mod folder the player can switch on, in one press. Read-and-enqueue
@@ -1622,11 +1649,10 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         private void Ship()
         {
-            GUILayout.Space(6f);
-            GUILayout.Label("SHIP - write a mod folder beside ContentTool, bake it, apply it");
+            BenchUi.Section("Build the mod");
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label("project", GUILayout.Width(56f));
+            GUILayout.Label("Mod name", GUILayout.Width(84f));
             // Seeded on LAYOUT only: a value that changed between Layout and Repaint is how an IMGUI pass ends
             // up unbalanced. RE-seeded when the picked target changes, but only while the box is empty or
             // still holds the default we put there - a typed name survives every retarget.
@@ -1636,40 +1662,25 @@ namespace Morgott.ContentTool.Dev
             if (Event.current.type == EventType.Layout && wanted != null && wanted != name &&
                 (name.Length == 0 || name == seededName))
                 projectName = name = seededName = wanted;
-            projectName = GUILayout.TextField(projectName ?? "", GUILayout.Width(220f));
-            GUILayout.Label(Prototype != null && Prototype.ShippedBundle != null
-                            ? "target " + Prototype.ShippedBundle + " / " + Prototype.ShippedAsset
-                            : (Prototype != null && Prototype.TargetRefusal != null
-                               ? Prototype.TargetRefusal
-                               : "no shipped target derived for this slot"));
+            projectName = GUILayout.TextField(projectName ?? "");
             GUILayout.EndHorizontal();
+            // The shipped pair in plain words, the bundle / asset names in the tooltip.
+            if (Prototype != null && Prototype.ShippedBundle != null)
+                BenchUi.Hint("replaces the game file " + BenchList.Elide(Prototype.ShippedAsset, BenchList.NameChars),
+                             Prototype.ShippedBundle + " / " + Prototype.ShippedAsset);
 
-            // ponytail: File.Exists on every OnGUI pass - two stats a frame on a local file. Cache it in
-            // Refresh() (Layout only) if a profile ever shows it.
-            // TRIMMED FIRST, because ArmShip ships the trimmed name: judging the raw field refused
-            // "MyMod " for a trailing space the press would never have sent.
-            name = (projectName ?? "").Trim();
-            string refusal = ProjectScaffold.NameRefusal(name);
-            // THE CONDITION MOVED, unchanged, to `ShipRefusal` - the acceptance seam has to ask the same
-            // question this button asks, and a second copy of it would let a scenario press something the
-            // author cannot. The name refusal above is still what the LABEL says; the enable is the whole
-            // condition.
-            bool ready = ShipRefusal == null;
+            // THE CONDITION LIVES in `ShipRefusal` - the acceptance seam has to ask the same question this
+            // button asks, and a second copy of it would let a scenario press something the author cannot.
+            // The button draws that refusal under itself, so a grey button always says why.
+            if (BenchUi.Main("Build mod & apply", ShipRefusal,
+                             "Writes a mod folder beside ContentTool, bakes it and applies it to this session " +
+                             "(technical name: SHIP - create, bake & apply)."))
+                Enqueue("ship");
 
-            GUILayout.BeginHorizontal();
-            GUI.enabled = ready;
-            if (GUILayout.Button("CREATE, BAKE & APPLY", GUILayout.Width(200f))) Enqueue("ship");
-            GUI.enabled = true;
-            GUILayout.Label(shipPending ? shipPhase : (refusal ?? ""));
-            GUILayout.EndHorizontal();
-
-            // ALWAYS DRAWN, placeholder or not (design §4.4 "Rows, always drawn"). A row that appears only
-            // once it has content makes the section jump under the author's cursor at the exact moment they
-            // are reading a result, and an IMGUI layout that changes shape between one press and the next is
-            // also how a Layout/Repaint pair ends up unbalanced.
-            GUILayout.Label(shipPath.Length > 0 ? "project " + shipPath : "project -");
-            GUILayout.Label(shipResult.Length > 0 ? shipResult : "-");
-            GUILayout.Label(shipTail.Length > 0 ? shipTail : "-");
+            // ONE status line, always drawn: the running phase, else the first line of the last result. The
+            // whole result, the project path and the log tail are in Details.
+            BenchUi.Hint(shipPending ? shipPhase
+                         : shipResult.Length > 0 ? Bake.LifecycleView.OneLine(shipResult) : " ");
 
             // THE SECOND HALF OF THE GATE, and Repaint only: a Layout pass paints nothing, so arming on it
             // would let the freeze start under a panel that still says nothing.
@@ -1689,7 +1700,9 @@ namespace Morgott.ContentTool.Dev
         private void Header()
         {
             GUILayout.BeginHorizontal();
-            GUILayout.Label("source " + BenchList.Elide(Path == null ? "-" : System.IO.Path.GetFileName(Path), 23),
+            GUILayout.Label("Your model", GUILayout.Width(BenchList.DocLabelW));
+            GUILayout.Label(new GUIContent(BenchList.Elide(Path == null ? "(none yet)" : System.IO.Path.GetFileName(Path), 26),
+                                           Path ?? "no .glb picked"),
                             GUILayout.Width(BenchList.DocSourceW));
             // DEAD WHILE A PRESS IS ARMED, like every control below it - and these three for a second
             // reason: each one takes Draw down a path that never reaches the SHIP section, so the gate's
@@ -1699,36 +1712,43 @@ namespace Morgott.ContentTool.Dev
                 browser.Show(Path == null ? "" : System.IO.Path.GetDirectoryName(Path));
             GUI.enabled = true;
             if (Ready != null && Ready.Source != null && Ready.Source.AliasesApplied > 0)
-                GUILayout.Label("ALIASES (" + Ready.Source.AliasesApplied + ")",
+                GUILayout.Label(new GUIContent("+" + Ready.Source.AliasesApplied + " renamed",
+                                               "bone names renamed by your saved bone map (aliases sidecar)"),
                                 GUILayout.Width(BenchList.DocAliasW));
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label("prototype " + BenchList.Elide(Prototype == null || Prototype.Record == null
-                                                           ? "-" : Prototype.Record.DisplayName, 17),
-                            GUILayout.Width(BenchList.DocProtoW));
+            GUILayout.Label("Replaces", GUILayout.Width(BenchList.DocLabelW));
+            string what = Prototype == null ? "(no game part yet)"
+                        : PrototypeCatalog.VariantWord(Prototype.Variant != null ? Prototype.Variant.Name
+                                                : Prototype.Record != null ? Prototype.Record.DisplayName : "-") +
+                          " - " + PrototypeCatalog.SlotWord(Prototype.SlotDefName);
+            string raw = Prototype == null ? "pick a game part with Change"
+                       : (Prototype.Record == null ? "" : Prototype.Record.DisplayName + " / ") +
+                         (Prototype.Variant == null ? "" : Prototype.Variant.Name + " / ") + (Prototype.SlotDefName ?? "-");
+            GUILayout.Label(new GUIContent(BenchList.Elide(what, 26), raw), GUILayout.Width(BenchList.DocProtoW));
             GUI.enabled = !shipPending;
-            if (GUILayout.Button("Change", GUILayout.Width(BenchList.DocChangeW)))
+            if (GUILayout.Button("Change...", GUILayout.Width(BenchList.DocChangeW)))
                 edits.Enqueue(delegate { browserOpen = true; });
             GUI.enabled = true;
+            GUILayout.EndHorizontal();
+
             // The mode is a TOGGLE and not a label: Replace and Extend answer two different questions
             // about the same slot, and swapping between them is the comparison the author came for.
-            GUI.enabled = !shipPending && Prototype != null;
-            if (GUILayout.Button(Prototype == null ? "Replace/Extend" : Prototype.Mode.ToString(),
+            if (Prototype == null) return;
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Mode", GUILayout.Width(BenchList.DocLabelW));
+            GUI.enabled = !shipPending;
+            if (GUILayout.Button(new GUIContent(Prototype.Mode == VerifyMode.Replace ? "Replace the part" : "Add to the part",
+                                                "Replace: your mesh must use exactly this part's bones (technical: Replace).\n" +
+                                                "Add: your mesh may use any bone of the creature (technical: Extend).\n" +
+                                                "Press to switch."),
                                  GUILayout.Width(BenchList.DocModeW)))
             {
                 PrototypeTarget pick = Prototype;
                 edits.Enqueue(delegate { Flip(pick); });
             }
             GUI.enabled = true;
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(BenchList.Elide(Prototype == null || Prototype.Variant == null
-                                            ? "-" : Prototype.Variant.Name, VariantChars),
-                            GUILayout.Width(BenchList.DocVariantW));
-            GUILayout.Label("|", GUILayout.Width(BenchList.DocBarW));
-            GUILayout.Label(BenchList.Elide(Prototype == null ? "-" : Prototype.SlotDefName ?? "-", 22));
             GUILayout.EndHorizontal();
         }
 
@@ -1754,9 +1774,9 @@ namespace Morgott.ContentTool.Dev
             // Both halves are needed for a verdict and neither implies the other, so the hint names
             // exactly the one that is missing.
             if (Path == null && !Verifiable)
-                return "pick a .glb and a prototype slot to see what the bake would do with them";
-            return Path == null ? "pick a .glb to see what the bake would do with it"
-                                : "pick a prototype slot to hold this file against - press Change";
+                return "Then pick the game part it replaces. The check tells you whether the game can use it.";
+            return Path == null ? "Pick the .glb file exported from Blender."
+                                : "Pick the soldier or creature part your model replaces.";
         }
 
         // ------------------------------------------------------------------ the prototype browser
@@ -1779,6 +1799,18 @@ namespace Morgott.ContentTool.Dev
             if (Prototype != null && !ReferenceEquals(Prototype.Variant, standing))
                 edits.Enqueue(delegate { PickTarget((PrototypeTarget)null); });
 
+            // A SEARCH HIT WAITING FOR ITS REBUILD. Once the variant stands, its slot is picked exactly as
+            // the tree's Replace button would pick it (Extend when the slot produced no renderer).
+            if (pendingSlot != null && !protoBusy && ReferenceEquals(standing, pendingVariant))
+            {
+                PrototypeTarget found = null;
+                foreach (PrototypeTarget t in slots) if (t.SlotDefName == pendingSlot) { found = t; break; }
+                string missed = pendingSlot;
+                pendingSlot = null; pendingVariant = null;
+                if (found != null) Choose(found, found.Unavailable == null ? VerifyMode.Replace : VerifyMode.Extend);
+                else edits.Enqueue(delegate { Message = "'" + missed + "' is not on this model - pick another part"; });
+            }
+
             if (!browserOpen) return;
             all = FitBench.Prototypes();               // harvested here and nowhere else: FIRST open only
             if (queried == query && ReferenceEquals(seen, all)) return;
@@ -1787,6 +1819,7 @@ namespace Morgott.ContentTool.Dev
             queried = query;
             seen = all;
             shown = PrototypeCatalog.Search(all, query);
+            hits = PrototypeCatalog.SearchSlots(all, query, MaxHits, out hitTotal);
 
             // A search AUTO-EXPANDS what it matched, and clearing it puts back exactly the groups the
             // author had open before they started typing.
@@ -1812,24 +1845,77 @@ namespace Morgott.ContentTool.Dev
         /// press enqueues; nothing that decides a control's existence is written here.</summary>
         private void Browse()
         {
+            BenchUi.Title("Which game part does it replace?");
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("< Back", GUILayout.Width(BenchList.DocBackW)))
                 edits.Enqueue(delegate { browserOpen = false; });
-            GUILayout.Label("search", GUILayout.Width(BenchList.DocSearchLabelW));
+            GUILayout.Label("Find", GUILayout.Width(BenchList.DocSearchLabelW));
             query = GUILayout.TextField(query ?? "", GUILayout.Width(BenchList.DocSearchFieldW));
             GUILayout.EndHorizontal();
-            // ITS OWN LINE. The row above already fills the panel, so the counter - the one control
-            // with no width of its own - was laid out into the few pixels left over and wrapped one
-            // character per line into a vertical column at the panel edge.
-            GUILayout.Label(shown.Count + " of " + all.Count + " prototype(s)" +
-                            (protoBusy ? "   rebuilding..." : ""));
-            if (Message.Length > 0) GUILayout.Label(Message);
+            if (Message.Length > 0) BenchUi.Hint(Message);
+            if (protoBusy) BenchUi.Hint("putting the model on the platform...");
 
             browserScroll = GUILayout.BeginScrollView(browserScroll);
             if (all.Count == 0)
-                GUILayout.Label("   no prototypes were found - the catalogue is read off DefRepository " +
-                                "when the bench opens in a geoscape campaign");
-            else if (shown.Count == 0) GUILayout.Label("   nothing matches '" + query + "'");
+                BenchUi.Hint("no game models were found - the list is read when the bench opens in a " +
+                             "geoscape campaign");
+            // `queried`, NOT `query`: the field above changes `query` inside the KeyDown pass, and switching
+            // between the result list and the tree mid-pass is a control-count mismatch. `queried` moves on
+            // the next Layout, together with the hits it was searched for.
+            else if ((queried ?? "").Trim().Length > 0)
+            {
+                // SLOT-LEVEL RESULTS: the row IS the pick. Standing up the variant and choosing the slot
+                // are the same two edits the tree's buttons make, one press instead of four levels.
+                if (hitTotal == 0) BenchUi.Hint("nothing matches '" + queried + "'");
+                else BenchUi.Hint(hitTotal > hits.Count
+                    ? "showing " + hits.Count + " of " + hitTotal + " parts - type more words to narrow it"
+                    : hitTotal + " part(s)");
+                GUI.enabled = !protoBusy;
+                foreach (PrototypeCatalog.SlotHit h in hits)
+                {
+                    string line = PrototypeCatalog.VariantWord(h.Variant.Name) + " - " + PrototypeCatalog.SlotWord(h.SlotDefName) +
+                                  "   (" + h.Record.DisplayName + ")";
+                    if (!BenchUi.Pick(new GUIContent(BenchList.Elide(line, BenchList.NameChars),
+                                                     h.Variant.Name + " / " + h.SlotDefName)))
+                        continue;
+                    PrototypeCatalog.SlotHit hit = h;
+                    edits.Enqueue(delegate { PickHit(hit); });
+                }
+                GUI.enabled = true;
+            }
+            else
+            {
+                BenchUi.Hint("Type what you want to replace - e.g. 'anu head', 'crabman legs', 'assault helmet'. " +
+                             "Or browse every game model below.");
+                if (BenchUi.Fold("doctor/tree", "Browse all " + all.Count + " game models")) Tree();
+            }
+            GUILayout.EndScrollView();                 // closed on EVERY path out of this method
+        }
+
+        /// <summary>A search hit, picked: straight to the slot when its variant already stands, else the
+        /// rebuild starts and <see cref="Refresh"/> picks the slot once it is on the platform.</summary>
+        private void PickHit(PrototypeCatalog.SlotHit hit)
+        {
+            if (ReferenceEquals(hit.Variant, standing))
+            {
+                foreach (PrototypeTarget t in slots)
+                    if (t.SlotDefName == hit.SlotDefName)
+                    {
+                        t.Mode = t.Unavailable == null ? VerifyMode.Replace : VerifyMode.Extend;
+                        PickTarget(t);
+                        browserOpen = false;
+                        return;
+                    }
+            }
+            string failed = FitBench.ShowPrototype(hit.Record, hit.Variant);
+            if (failed != null) { Message = failed; return; }
+            pendingVariant = hit.Variant; pendingSlot = hit.SlotDefName;
+            Message = "";
+        }
+
+        /// <summary>The full category -&gt; model -&gt; variant -&gt; slot tree, for browsing without a search.</summary>
+        private void Tree()
+        {
             foreach (string category in groups)
             {
                 bool open = openGroups.Contains(category);
@@ -1841,7 +1927,6 @@ namespace Morgott.ContentTool.Dev
                 if (!open) continue;
                 foreach (PrototypeRecord r in shown) if (r.Category == category) Record(r);
             }
-            GUILayout.EndScrollView();                 // closed on EVERY path out of this method
         }
 
         private int CountIn(string category)
@@ -1854,10 +1939,11 @@ namespace Morgott.ContentTool.Dev
         private void Record(PrototypeRecord r)
         {
             bool open = r.Id == openRecord;
-            if (GUILayout.Button("   " + (open ? "v " : "> ") + BenchList.Elide(r.DisplayName, 26) +
-                                 "   " + r.BindableBones.Count + " bindable bone(s), " +
-                                 r.Variants.Count + " variant(s)" +
-                                 (r.Warning == null ? "" : "   [duplicate bone names]")))
+            if (GUILayout.Button(new GUIContent("   " + (open ? "v " : "> ") + BenchList.Elide(r.DisplayName, 26) +
+                                                "   " + r.Variants.Count + " look(s)" +
+                                                (r.Warning == null ? "" : "   [duplicate bone names]"),
+                                                r.BindableBones.Count + " bindable bone(s), " + r.Variants.Count +
+                                                " variant(s)")))
             {
                 string id = open ? null : r.Id;
                 edits.Enqueue(delegate { openRecord = id; });
@@ -1873,8 +1959,9 @@ namespace Morgott.ContentTool.Dev
             // Refused while a rebuild is in flight: two overlapping rebuilds leave the bay showing a
             // mix of two prototypes and neither slot list is worth reading.
             GUI.enabled = !protoBusy;
-            if (GUILayout.Button((here ? "      * " : "        ") + BenchList.Elide(v.Name, VariantChars) +
-                                 "   " + v.Slots.Count + " slot(s)", GUILayout.Width(340f)))
+            if (GUILayout.Button(new GUIContent((here ? "      * " : "        ") +
+                                                BenchList.Elide(PrototypeCatalog.VariantWord(v.Name), VariantChars) +
+                                                "   " + v.Slots.Count + " part(s)", v.Name), GUILayout.Width(280f)))
             {
                 PrototypeRecord rec = r; PrototypeVariant var = v;
                 edits.Enqueue(delegate
@@ -1897,16 +1984,19 @@ namespace Morgott.ContentTool.Dev
         {
             bool chosen = ReferenceEquals(t, Prototype);
             GUILayout.BeginHorizontal();
-            GUILayout.Label((chosen ? "           > " : "             ") +
-                            BenchList.Elide(t.SlotDefName ?? "(slot)", 26), GUILayout.Width(260f));
+            string bones = t.Unavailable ?? ((t.Live == null || t.Live.BoneNames == null
+                                               ? 0 : t.Live.BoneNames.Length) + " live bone(s)");
+            GUILayout.Label(new GUIContent((chosen ? "         > " : "           ") +
+                                           BenchList.Elide(PrototypeCatalog.SlotWord(t.SlotDefName), 18),
+                                           (t.SlotDefName ?? "(slot)") + " - " + bones), GUILayout.Width(170f));
             GUI.enabled = t.Unavailable == null;
-            if (GUILayout.Button(chosen && t.Mode == VerifyMode.Replace ? "[Replace]" : "Replace",
-                                 GUILayout.Width(90f))) Choose(t, VerifyMode.Replace);
+            if (GUILayout.Button(new GUIContent(chosen && t.Mode == VerifyMode.Replace ? "[Replace]" : "Replace",
+                                                t.Unavailable ?? "your mesh takes this part's place"),
+                                 GUILayout.Width(80f))) Choose(t, VerifyMode.Replace);
             GUI.enabled = true;
-            if (GUILayout.Button(chosen && t.Mode == VerifyMode.Extend ? "[Extend]" : "Extend",
-                                 GUILayout.Width(90f))) Choose(t, VerifyMode.Extend);
-            GUILayout.Label(t.Unavailable ?? ((t.Live == null || t.Live.BoneNames == null
-                                               ? 0 : t.Live.BoneNames.Length) + " live bone(s)"));
+            if (GUILayout.Button(new GUIContent(chosen && t.Mode == VerifyMode.Extend ? "[Add]" : "Add",
+                                                "your mesh is added using the creature's bones (technical: Extend)"),
+                                 GUILayout.Width(60f))) Choose(t, VerifyMode.Extend);
             GUILayout.EndHorizontal();
         }
 
@@ -1949,11 +2039,6 @@ namespace Morgott.ContentTool.Dev
 
         private void BoneMap(float col)
         {
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button((mapOpen ? "v " : "> ") + "bone map", GUILayout.Width(110f))) mapOpen = !mapOpen;
-            GUILayout.EndHorizontal();
-            if (!mapOpen) return;
-
             var free = new List<string>();                 // target bones the file matched nothing to
             foreach (Diagnostic d in Ready.Report.Rows)
                 if (d.Code == "MissingBone" && d.Subject != null) free.Add(d.Subject);
@@ -1963,10 +2048,76 @@ namespace Morgott.ContentTool.Dev
             // see a mapping only while it was wrong, and could never take one back.
             var rows = new List<string>();
             foreach (KeyValuePair<string, string> e in aliases) rows.Add(e.Key);
+            int unmapped = 0;
             foreach (Diagnostic d in Ready.Report.Rows)
                 if (d.Code == "ExtraBone" && d.Subject != null && !aliases.ContainsKey(d.Subject))
-                    rows.Add(d.Subject);
+                { rows.Add(d.Subject); unmapped++; }
 
+            // THE SUMMARY IS COUNTS, never the 200-row table: one line, then one fold per body region.
+            // Only the region the author opens lays out its rows.
+            BenchUi.Section("Bones to fix");
+            // Drawn with the state this pass STARTED with; the press takes effect next pass, so the rows
+            // below never appear mid-event.
+            bool wasOpen = mapOpen;
+            if (GUILayout.Button((wasOpen ? "v  " : ">  ") +
+                                 (unmapped == 0 ? "all " + aliases.Count + " renamed bone(s) are mapped"
+                                                : unmapped + " extra bone(s) in your file need a game bone"),
+                                 GUILayout.ExpandWidth(true)))
+                mapOpen = !mapOpen;
+            if (!wasOpen) return;
+
+            var byRegion = new Dictionary<string, List<string>>();
+            foreach (string fileBone in rows)
+            {
+                string region = BenchList.RegionOf(fileBone);
+                List<string> list;
+                if (!byRegion.TryGetValue(region, out list)) byRegion[region] = list = new List<string>();
+                list.Add(fileBone);
+            }
+            foreach (string region in BenchList.Regions)
+            {
+                List<string> inRegion;
+                if (!byRegion.TryGetValue(region, out inRegion)) continue;
+                int todo = 0;
+                foreach (string b in inRegion) if (!aliases.ContainsKey(b)) todo++;
+                if (!BenchUi.Fold("bones/" + region, region + "   " +
+                                  (todo > 0 ? todo + " to fix" : "done") +
+                                  (inRegion.Count > todo ? ", " + (inRegion.Count - todo) + " mapped" : "")))
+                    continue;
+                BoneRows(inRegion, free, col);
+            }
+
+            // WHAT IS STILL UNSPOKEN FOR, said outside any dropdown: the bones the target has and this
+            // file answered nothing for are the whole reason the weights are being lost. A count, with the
+            // names in its tooltip.
+            var open = new List<string>();
+            foreach (string bone in free) if (!Claimed(bone, null)) open.Add(bone);
+            GUILayout.Label(new GUIContent(open.Count == 0
+                                               ? "   no bone of the game part is missing from your file"
+                                               : "   " + open.Count + " bone(s) of the game part are missing from your file (hover for names)",
+                                           string.Join(", ", open.ToArray())));
+
+            GUILayout.BeginHorizontal();
+            // Changed AND valid, decided in Rethink: an unchanged map rewrites the sidecar for nothing,
+            // and a map AliasMap.Of refuses would be refused again by the loader about to read it.
+            GUI.enabled = !shipPending && canSave;
+            if (GUILayout.Button(new GUIContent("Save bone map", "Saves the mapping beside your .glb " +
+                                                "(technical: Save aliases - an aliases sidecar)."),
+                                 GUILayout.Width(130f))) Enqueue("save");
+            // The same map, baked INTO the file instead of parked beside it. Offered whenever the map
+            // has anything in it - including a map already saved to a sidecar, which is exactly the
+            // state an author is in when they decide to bake it.
+            GUI.enabled = !shipPending && aliases.Count > 0;
+            if (GUILayout.Button(new GUIContent("Rename in the file...", "Writes a plan that renames the " +
+                                                "bones inside the .glb itself (technical: Write skel plan, run by ppskel)."),
+                                 GUILayout.Width(160f))) Enqueue("skelplan");
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+        }
+
+        /// <summary>The mapping rows of one body region: file bone, arrow, the game bone it lands on.</summary>
+        private void BoneRows(List<string> rows, List<string> free, float col)
+        {
             foreach (string fileBone in rows)
             {
                 string current;
@@ -1993,7 +2144,7 @@ namespace Morgott.ContentTool.Dev
 
                 // THE ARMED ROW SAYS SO ON THE ROW, not only over the viewport: the list below is a
                 // column of names, and nothing in it hints that the model itself became clickable.
-                GUILayout.Label("   armed - click a ringed bone on the model, or pick one here; Esc cancels");
+                BenchUi.Hint("   click a ringed bone on the model, or pick one here (Esc cancels)");
                 foreach (string bone in free)
                 {
                     if (Claimed(bone, fileBone)) continue;
@@ -2004,16 +2155,6 @@ namespace Morgott.ContentTool.Dev
                     boneOpen = null;
                 }
             }
-
-            // WHAT IS STILL UNSPOKEN FOR, said outside any dropdown: the bones the target has and this
-            // file answered nothing for are the whole reason the weights are being lost, and an author
-            // cannot count them by opening every row's list one at a time.
-            var open = new List<string>();
-            foreach (string bone in free) if (!Claimed(bone, null)) open.Add(bone);
-            GUILayout.Label(open.Count == 0
-                ? "   every target bone is spoken for"
-                : "   unmatched target bones (" + open.Count + "): " +
-                  BenchList.Elide(string.Join(", ", open.ToArray()), 110));
         }
 
         /// <summary>Is this target bone already the output of some OTHER file bone? Two file bones on

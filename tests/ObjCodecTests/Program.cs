@@ -399,6 +399,7 @@ internal static class Program
         Console.WriteLine(VideoExtractTests.Run());
         Console.WriteLine(VideoCatalogTests.Run());
         Console.WriteLine(CatalogOwnersTests.Run());
+        Console.WriteLine(BenchWordsTests.Run());
         Console.WriteLine(BakeParseTests.Run());
         Console.WriteLine(AudioExtractTests.Run());
         Console.WriteLine(AudioBatchTests.Run());

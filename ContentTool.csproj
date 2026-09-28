@@ -184,6 +184,11 @@
       <HintPath>$(UnityManaged)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- FontStyle / TextAnchor for the bench's own label styles (src\Dev\BenchUi.cs). The game ships it. -->
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(UnityManaged)\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- AkSoundEngine / AkCallbackManager / AkDurationCallbackInfo. The game ships it; the mod
          only calls into it. -->
     <Reference Include="AK.Wwise.Unity.API">
