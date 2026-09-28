@@ -104,6 +104,7 @@ namespace Morgott.ContentTool.Dev
         internal const string TypingPrefix = "type/";
 
         private static readonly string[] tuneText = new string[7];
+        private static string tunedKey;
         private static readonly string[] TuneRow = { "move X", "move Y", "move Z", "turn X", "turn Y", "turn Z", "size" };
 
         /// <summary>
@@ -117,6 +118,9 @@ namespace Morgott.ContentTool.Dev
             Vector3 pos, euler, offset; float scale;
             if (!WeaponBuild.State(fitKey, out pos, out euler, out scale, out offset)) return null;
             string said = null;
+            // A typed buffer belongs to the weapon it was typed for: another key drops focus, so every
+            // field re-reads the new weapon's numbers instead of applying the old one's to it.
+            if (fitKey != tunedKey) { tunedKey = fitKey; GUI.FocusControl(null); }
             string focused = GUI.GetNameOfFocusedControl();
 
             GUILayout.BeginHorizontal();

@@ -181,7 +181,8 @@ namespace Morgott.ContentTool.Dev
             Reshow();
             // Frame 0 and PAUSED for a clip we have not seen before: the workbench is a bench, and a
             // model that starts moving on its own is a model that has to be caught before it can be read.
-            if (was != null && names.IndexOf(was) >= 0) { t = wasT; playing = wasPlaying; }
+            // Only when the class filter kept that clip selected: Reshow may have moved to another one.
+            if (was != null && names.IndexOf(was) >= 0 && chosen == names.IndexOf(was)) { t = wasT; playing = wasPlaying; }
         }
 
         /// <summary>
