@@ -1,102 +1,70 @@
 # Project files and folders
 
-Keep an authoring project beside ContentTool. Every author command takes the bare folder name. A
-path such as `E:\Games\Phoenix Point\Mods\MyMod` is not a valid command argument.
+Make a folder for your mod beside the `ContentTool` folder under `Mods`. Pass its **folder name** to authoring commands. If that sibling has no `ppcontent.json`, ContentTool can instead select a same-named folder inside its own folder. Keep one working copy so the selected project is clear.
 
 ```text
-Phoenix Point\
+<Phoenix Point>\
   Mods\
     ContentTool\
-      meta.json
-      MyMod\                   <- fallback location, used only when no sibling project is found
+      ContentTool.dll
+      <project>\                 <- fallback when no sibling project has ppcontent.json
         ppcontent.json
-    MyMod\                     <- preferred; this sibling wins when it has ppcontent.json
-      meta.json                <- mod manager and packager metadata
-      ppcontent.json           <- ContentTool project and route declarations
-      README.md                <- optional release notes
-      SOURCES.md               <- optional source and licence notes
-      LICENSE                  <- optional
-      Icons\                   <- optional mod-manager art
-      Content\                 <- author-owned source files
-        Textures\              <- .png, .jpg, .jpeg
-        Meshes\                <- .obj, .glb used as replacement geometry
-        Models\                <- .glb published as a complete new model
-        Audio\                 <- .wav, .ogg, .mp3 used as new sounds
-          Replace\             <- shipped-sound replacement sources; not scanned as new sounds
-        Videos\                <- .webm, .mp4, .mov
-      Dist\                    <- baked mod-owned output and sound banks
+    <project>\                   <- preferred authoring project
+      meta.json
+      ppcontent.json
+      README.md                  <- optional release notes
+      SOURCES.md                 <- optional source and licence notes
+      LICENSE                    <- optional
+      Icons\                     <- optional mod-manager and weapon art
+      Content\
+        Textures\                <- .png, .jpg, .jpeg
+        Meshes\                  <- .obj, .glb replacement geometry
+        Models\                  <- .glb complete new models
+        Audio\                   <- .wav, .ogg, .mp3 new sounds
+          Replace\               <- source files for shipped-sound replacements
+        Videos\                  <- .webm, .mp4, .mov
+      Dist\
+        <bundle>                 <- mod-owned baked bundle
+        Sounds\
+          <mediaId>.bnk          <- baked shipped-sound replacements
+          sources.ledger
 ```
 
-The sibling is selected only when it has `ppcontent.json`. If it does not, a stale
-`Mods\ContentTool\MyMod\ppcontent.json` can be selected instead. Keep one working copy.
+Baking streamed new sounds extracts their streams into the project's own `WwiseAudio\` folder; ContentTool's self-check uses `<ContentTool mod folder>\WwiseAudio\`. Neither is part of a release. Patched copies of **shipped** bundles live outside the project at `<persistentDataPath>\ContentTool\Patched\<install-tag>\<id>\`. Do not put them in the mod or a release archive. `ct_package` refuses a `Patched` folder in staged content. Its publishable output is `<persistentDataPath>\ContentTool\Packaged\<project>\`.
 
 ## Root files
 
-`meta.json` is required for the mod manager and packaging. `ct_package` checks these fields:
+- `ppcontent.json` is required. Its root `id` and `bundle` must be non-empty, safe single names. They determine the patched-copy folder and `Dist\<bundle>`. See [all manifest keys](ppcontent-json.md).
+- `meta.json` is required for a mod the player can install. Its `ID` must be non-empty, `Dependencies` must contain `com.morgott.ContentTool`, and a declared `AssemblyName` must name a DLL in the package. See [metadata fields](meta-json.md).
+- ContentTool does not compare the two IDs. Give `meta.json`'s `ID` and `ppcontent.json`'s `id` the same globally distinct value.
 
-- `ID` must be present and non-empty. The mod manager keys mods on it.
-- `Dependencies` must contain `com.morgott.ContentTool`.
-- If `AssemblyName` names a DLL, that DLL must be present in the staged package. Use an empty string
-  for a content-only mod.
+## Source files
 
-`ppcontent.json` is required for every ContentTool project. Its root `id` and `bundle` values must be
-present and non-empty. The current code does not compare `meta.json`'s `ID` with `ppcontent.json`'s
-`id`; use the same globally distinct value so one mod is not given two identities.
+ContentTool scans files **directly inside** the named source folders. It does not search their subfolders.
 
-A `replace[]` row needs exactly one of `texture`, `material`, `mesh`, `clip` or `video`. Texture,
-material, mesh and clip rows also need `bundle` and `asset`. A video row has no bundle; omitting its
-`asset` makes it an Add row instead of a replacement.
-
-## What is scanned
-
-ContentTool scans only files directly inside each named folder. It does not recurse into subfolders.
-
-| Folder | Accepted extensions | Name used by the manifest | Other files |
+| Folder | Accepted extensions | How the name is used | Other files |
 |---|---|---|---|
-| `Content\Textures\` | `.png`, `.jpg`, `.jpeg` | lower-case file stem | not enumerated; silently ignored |
-| `Content\Meshes\` | `.obj`, `.glb` | lower-case file stem | not enumerated; silently ignored |
-| `Content\Models\` | `.glb` | lower-case file stem | not enumerated; silently ignored |
-| `Content\Audio\` | `.wav`, `.ogg`, `.mp3` | file stem for imported sound records | reported by name as unsupported |
-| `Content\Videos\` | `.webm`, `.mp4`, `.mov` | lower-case file stem | not enumerated; silently ignored |
+| `Content\Textures\` | `.png`, `.jpg`, `.jpeg` | Lowercase file stem for a texture source. | Not imported. |
+| `Content\Meshes\` | `.obj`, `.glb` | Lowercase file stem for replacement geometry. A mesh needs a `replace` row to be baked. | Not imported. |
+| `Content\Models\` | `.glb` | Lowercase file stem for a complete new model. | Not imported. |
+| `Content\Audio\` | `.wav`, `.ogg`, `.mp3` | Stem contributes to an added-sound record. | Unsupported files are named and counted as skipped sources. |
+| `Content\Audio\Replace\` | `.wav`, `.ogg`, `.mp3` | A numeric stem can identify shipped media directly; a `sounds` row can instead name a source file. | Handled by `ct_sound bake`, not the new-sound scan. |
+| `Content\Videos\` | `.webm`, `.mp4`, `.mov` | Lowercase file stem for a live video row. | Not imported. |
 
-“Silently ignored” means the file is absent from the imported source list. If `ppcontent.json`
-declares a replacement that needs its stem, the replacement row later prints a refusal and the run
-ends with failures. A stray undeclared file can pass unnoticed.
+For example, a texture row naming stem `<stem>` looks for an accepted file directly in `Content\Textures\`. A file in `Content\Textures\Characters\` is too deep. The old `Content\Meshes\materials\` layout is not a texture source folder. Material property changes are `material` values in `ppcontent.json`, not separate material files.
 
-Do not place sources in deeper folders such as `Content\Textures\Characters\`. Move the files up one
-level. `Content\Audio\Replace\` is deliberately separate and is handled by the shipped-sound route.
+!!! warning "Added sounds"
 
-## Names and case
+    New sounds in `Content\Audio` bake and self-check, but ContentTool does not load their added bank when players run the mod. They are silent unless the mod's own DLL loads that bank. Replacement sources in `Content\Audio\Replace` become banks in `Dist\Sounds` and work without a DLL. New sources named `<name>.stream.wav`, `<name>.stream.ogg`, or `<name>.stream.mp3` are not packaged.
 
-- A source is named by its file stem. `Soldier_Albedo.png` becomes `soldier_albedo` when imported.
-- Source references are matched without regard to case.
-- Two accepted files in one source folder may not have the same stem ignoring case. This includes
-  two formats such as `swatch.png` and `SWATCH.jpg`.
-- A shipped Unity asset target is matched by exact, case-sensitive `m_Name`. Copy it from `ct_list`.
-- That name must identify exactly one asset of the requested class in the bundle. Zero matches and
-  duplicate names are both refused; ContentTool does not guess from path ID or list order.
-- Replacement bundle rows are grouped without regard to case. The named shipped bundle must exist.
-- Keep JSON field spelling exactly as shown. Several route arrays are read from the raw JSON text.
+## Names and collisions
 
-## Textures are not materials
+- An imported source gets its file stem as its name. Source references ignore case; imported stems are lowercased.
+- Do not put two accepted files with the same stem, ignoring case, in one source folder. For example, `swatch.png` and `SWATCH.jpg` both claim `swatch`. **Both** files of a colliding stem are skipped and the failure is counted; other stems can still bake. This also applies to `Content\Videos`.
+- `Content\Audio\Replace` must not contain two files aimed at the same media ID. `ct_sound bake` refuses that collision.
+- A shipped Unity asset target is matched by its exact, case-sensitive `m_Name`. Use `ct_list` to copy the name. If no asset or more than one asset of the requested class has that name in the bundle, the row is refused.
+- A replacement's shipped bundle name is matched without regard to case, but it must name a bundle the game ships.
+- Root `id` and `bundle` must each be **one plain file or folder name**, not a path. They cannot be empty, `.` or `..`, contain a path separator, colon, or invalid filename character, start or end with a space, or end with a dot. Windows reserved device names are also refused, even with an extension: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, and `LPT1`–`LPT9`.
+- Keep JSON key spelling as shown in [the manifest reference](ppcontent-json.md). `replace`, `publish`, and `sounds` use a JSON parser; `creature` and `weapons` use their documented block and flat-row forms.
 
-This is the ContentTool layout:
-
-```text
-MyMod\
-  ppcontent.json
-  Content\
-    Textures\
-      soldier_albedo.png      <- imported as texture source "soldier_albedo"
-    Meshes\
-      soldier.glb             <- replacement geometry only
-      materials\
-        soldier_albedo.png    <- old Resource Replacer layout; ignored by texture import
-```
-
-A material change has no material source file. It is a value such as
-`"material": "_GlossMapScale=0.15"` in a `replace[]` row. The old
-`Content\Meshes\materials\` convention has no meaning to ContentTool.
-
-Next: [find target names](../find-content/index.md) or
-[read placement failures](../troubleshooting/bake-errors.md).
+Before publishing, run the applicable bake commands and then `ct_package <project>`. Zip the **package folder itself**, so extraction into `Mods\` places `meta.json` inside the mod's own folder.

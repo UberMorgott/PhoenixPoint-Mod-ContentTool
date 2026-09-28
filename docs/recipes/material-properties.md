@@ -1,31 +1,32 @@
-# Change a material number
+# Change a material property
 
-This changes one numeric property on a shipped Unity `Material`. Use it when the existing shader and
-textures are right but a value such as gloss strength is not.
+Change one numeric property on a shipped Unity `Material`. This example makes the damaged Fireworm material less glossy.
 
-## What you need before you start
+## You need
 
-- The shipped bundle filename and the material's exact, case-sensitive `m_Name`.
-- The serialized property name and a decimal value written with `.`.
-- No source image and no material file. This route is one manifest row.
+- ContentTool installed and enabled.
+- The shipped bundle and exact material name.
+- The serialized property name and a number. Fractions use `.`; values such as `1` and `1e-3` are also accepted.
+- No image or material source file.
 
-## Folder tree
+## Folder layout
 
 ```text
-MyMaterialMod\
-  meta.json                    <- declares the ContentTool dependency
-  ppcontent.json               <- holds the complete material edit
+Mods\
+  MyMaterialMod\
+    meta.json                 <- declares the ContentTool dependency
+    ppcontent.json            <- holds the material edit
 ```
 
 ## Steps
 
-1. Find a unique material name:
+1. Find the material in the game console. You should see the exact name `ALN_Fireworm_DMG`.
 
    ```text
-   ct_list assets aln_fireworm_assets_all.bundle Material Fireworm
+   ct_list assets aln_fireworm_assets_all.bundle Material ALN_Fireworm_DMG
    ```
 
-2. List that material's serialized properties:
+2. List its serialized properties. Check that `_GlossMapScale` is present.
 
    ```text
    ct_list props aln_fireworm_assets_all.bundle ALN_Fireworm_DMG
@@ -36,14 +37,13 @@ MyMaterialMod\
    ```json
    {
      "ID": "example.mymaterialmod",
-     "AssemblyName": "",
      "Version": "1.0.0",
      "Name": [{ "Key": "English", "Value": "My material mod" }],
      "Dependencies": ["com.morgott.ContentTool"]
    }
    ```
 
-4. Create `ppcontent.json`. The `material` value is one `<property>=<number>` string:
+4. Create `ppcontent.json`. The `material` value is one property, `=`, then one number:
 
    ```json
    {
@@ -59,36 +59,35 @@ MyMaterialMod\
    }
    ```
 
-5. Bake and inspect the result. Package only after it passes:
+5. Bake, read the final line, and package only after `ALL PASS`:
 
    ```text
    ct_project MyMaterialMod
    ct_package MyMaterialMod
    ```
 
-## What success looks like
+6. Enable the mod and load a Fireworm with damaged skin. Its material should look less glossy. Follow [the lifecycle](../concepts/lifecycle.md) when checking a bundle that may already be loaded.
+
+## Check it worked
 
 ```text
 patch aln_fireworm_assets_all.bundle: material 'ALN_Fireworm_DMG' _GlossMapScale=0.15
-WROTE <patched path> <bytes> B as <bundle identity> (shipped source is <bytes> B)
 P3 PASS material 'ALN_Fireworm_DMG' in the copy carries _GlossMapScale=0.15 -> <read-back value>
-copies ready in <path> - nothing to install: ticking 'MyMaterialMod' on in the mod manager redirects them (dev-only shortcut: ct_route7 apply MyMaterialMod)
 ct_project: ALL PASS - this project has no bundle of its own; the patched copy(ies) above are the whole output
 ```
 
-## When it fails
+The first line says what was requested. `P3 PASS` reads the value back from the patched copy.
 
-| Exact output | Meaning | Fix |
+## Common errors
+
+| What you see | Why | Fix |
 |---|---|---|
-| `P3 REFUSED "material": "_GlossMapScale,0.15" is not <property>=<number>` | The edit is not one property, `=`, and a number. | Change it to `_GlossMapScale=0.15`. |
-| `P3 REFUSED target 'ALN_Fireworm_DMG' is not a Material in aln_fireworm_assets_all.bundle - <reason> - list the names it does hold with: ct_list assets aln_fireworm_assets_all.bundle Material` | No unique material has that exact name. | Run the printed command and copy the exact case. If it reports duplicates, choose a different addressable target; ContentTool will not guess a path ID. |
+| `P3 REFUSED "material": "_GlossMapScale,0.15" is not <property>=<number>` | The edit does not use `=`. | Write `_GlossMapScale=0.15`. |
+| `P3 REFUSED target 'ALN_Fireworm_DMG' is not a Material in aln_fireworm_assets_all.bundle - <reason> - list the names it does hold with: ct_list assets aln_fireworm_assets_all.bundle Material` | The target name is missing or ambiguous. | Run the printed list command and copy an exact, unique name. |
+| `P0 REFUSED "bundle": "<file>" is not a bundle this game ships - no file at <path> - check the spelling and list the real names with: ct_list bundles` | The bundle filename is wrong. | Run `ct_list bundles` and use the shipped filename. |
 
-Read [the status glossary](../troubleshooting/bake-errors.md). A P3 refusal is a failed row in
-`ct_project`; it is not `ct_package` stopping.
+See [messages](../reference/messages.md) for other refusals.
 
-Before testing, read [when a shipped-bundle redirect takes effect and why only one mod can own a
-bundle](../getting-started/lifecycle.md#redirects-affect-future-loads).
+## Example
 
-## Worked demo
-
-[MaterialTweak](../examples/material-tweak.md) is this recipe reduced to one `_GlossMapScale` row.
+[MaterialTweak](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/MaterialTweak) contains one `_GlossMapScale` replacement row and no art or DLL.

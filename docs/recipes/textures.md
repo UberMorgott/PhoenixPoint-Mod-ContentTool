@@ -1,61 +1,52 @@
 # Replace a texture
 
-This replaces one shipped `Texture2D` while your mod is enabled. Use it for albedo, normal,
-metallic, emissive and UI texture assets that already exist in a shipped bundle.
+Change one shipped `Texture2D` while your mod is enabled. This example changes the Fireworm's shipped emissive image.
 
-## What you need before you start
+## You need
 
-- ContentTool 1.1.2 enabled in Phoenix Point.
-- A PNG, JPG or JPEG. The extension is not case-sensitive. Put it directly in `Content\Textures`.
-- The shipped bundle filename and the target texture's exact, case-sensitive Unity `m_Name`.
-- A unique project ID. Source stems are matched without regard to case; two accepted files may not
-  share a stem.
+- ContentTool installed and enabled in Phoenix Point.
+- An edited PNG, JPG or JPEG.
+- The shipped bundle filename and the texture's exact Unity asset name. Find them with `ct_list`; the source filename can be different.
+- A project folder beside `ContentTool` under `Mods`.
 
-## Folder tree
+## Folder layout
 
 ```text
-MyTextureMod\
-  meta.json                    <- mod manager reads ID and Dependencies here
-  ppcontent.json               <- asset is the game target; texture is your file stem
-  Content\
-    Textures\                  <- the only folder scanned for texture sources
-      acidworm.png             <- becomes source "acidworm"
-    Meshes\
-      materials\               <- old Resource Replacer layout; never put textures here
+Mods\
+  MyTextureMod\
+    meta.json                 <- lets the mod manager list the mod
+    ppcontent.json            <- names the shipped target and your source stem
+    Content\
+      Textures\
+        swatch.png            <- put the image directly here
 ```
 
 ## Steps
 
-1. Find the shipped target. The optional last argument filters names:
+1. In the game console, list the shipped target. You should see `fireworm_low_emissive` among the matching `Texture2D` assets.
 
    ```text
-   ct_list assets aln_acidworm_assets_all.bundle Texture2D acidworm
+   ct_list assets aln_fireworm_assets_all.bundle Texture2D fireworm_low_emissive
    ```
 
-2. If you want the shipped image as a starting point, extract it:
+2. If you want the original image as a starting point, extract it. The command prints its path under `<persistentDataPath>\ContentTool\Extracted`. Edit a copy and save it as `swatch.png`.
 
    ```text
-   ct_extract tex aln_acidworm_assets_all.bundle acidworm_low_albedo
+   ct_extract tex aln_fireworm_assets_all.bundle fireworm_low_emissive
    ```
 
-   The command prints the PNG path under
-   `<persistentDataPath>\ContentTool\Extracted\aln_acidworm_assets_all`. Copy it into your project,
-   edit it, and rename it `acidworm.png`. The source filename does not have to match the target.
-
-3. Create `meta.json`:
+3. Create `Mods\MyTextureMod\meta.json`:
 
    ```json
    {
      "ID": "example.mytexturemod",
-     "AssemblyName": "",
      "Version": "1.0.0",
      "Name": [{ "Key": "English", "Value": "My texture mod" }],
      "Dependencies": ["com.morgott.ContentTool"]
    }
    ```
 
-4. Create `ppcontent.json`. Copy `asset` from `ct_list` with the same case. `texture` is the source
-   stem, so do not include `.png`:
+4. Create `ppcontent.json`. `texture` names the file stem, without `.png`:
 
    ```json
    {
@@ -63,54 +54,46 @@ MyTextureMod\
      "bundle": "MyTextureMod.bundle",
      "replace": [
        {
-         "bundle": "aln_acidworm_assets_all.bundle",
-         "asset": "acidworm_low_albedo",
-         "texture": "acidworm"
+         "bundle": "aln_fireworm_assets_all.bundle",
+         "asset": "fireworm_low_emissive",
+         "texture": "swatch"
        }
      ]
    }
    ```
 
-5. Save `acidworm.png` directly under `Content\Textures`. Deeper folders are not scanned.
-
-6. Bake, then package only after an all-pass result:
+5. Put `swatch.png` directly in `Content\Textures`. Run the bake, then package after its final line says `ALL PASS`:
 
    ```text
    ct_project MyTextureMod
    ct_package MyTextureMod
    ```
 
-## What success looks like
+6. Enable the mod in the mod manager and load a scene containing a Fireworm. The replacement takes effect when the game next loads the redirected bundle; see [the lifecycle](../concepts/lifecycle.md).
 
-Sizes and absolute paths vary. These lines do not:
+## Check it worked
+
+Look for these bake lines; sizes and paths vary:
 
 ```text
-patch aln_acidworm_assets_all.bundle: 'acidworm_low_albedo' <- acidworm <width>x<height>
-WROTE <patched path> <bytes> B as <bundle identity> (shipped source is <bytes> B)
-P1 PASS every replaced Texture2D in aln_acidworm_assets_all.bundle reads back its new pixels
-copies ready in <path> - nothing to install: ticking 'MyTextureMod' on in the mod manager redirects them (dev-only shortcut: ct_route7 apply MyTextureMod)
-WROTE <project>\Dist\MyTextureMod.bundle <bytes> B as example_mytexturemod
-TEX PASS assets/example.mytexturemod/textures/acidworm -> <width>x<height> RGBA32 px[0,0]=<red>,<green>,<blue>,<alpha>
-ct_project: ALL PASS - <project>\Dist\MyTextureMod.bundle
+patch aln_fireworm_assets_all.bundle: 'fireworm_low_emissive' <- swatch <width>x<height>
+P1 PASS every replaced Texture2D in aln_fireworm_assets_all.bundle reads back its new pixels
+ct_project: ALL PASS - <output path>
 ```
 
-The source texture is written twice for two different jobs. P1 checks the private copy of the
-shipped bundle used by Replace. TEX checks the same imported source in this mod's own bundle.
+Then inspect the Fireworm in game. `P1 PASS` proves the private bundle copy contains the new pixels; the in-game view confirms the game loaded that copy.
 
-## When it fails
+## Common errors
 
-| Exact output | Meaning | Fix |
+| What you see | Why | Fix |
 |---|---|---|
-| `P1 REFUSED 'acidworm' is not a .png/.jpg under Content\Textures\` | The source was not imported. | Move `acidworm.png`, `.jpg` or `.jpeg` directly into `Content\Textures`, or correct `texture`. Delete any stale copy under `Content\Meshes\materials`. |
-| `P1 REFUSED target 'acidworm_low_albedo' is not a Texture2D in aln_acidworm_assets_all.bundle - <reason> - list the names it does hold with: ct_list assets aln_acidworm_assets_all.bundle Texture2D` | The source exists; the game target does not. | Run the printed command and copy the exact target name. Do not rename your source to hide a bad `asset`. |
-| `SOURCE SKIPPED: <file> <reason> - SKIPPED, the project's other sources are unaffected` | The image decoder rejected the file. | Re-export it as PNG/JPG/JPEG and remove the unreadable file. |
+| `P1 REFUSED 'swatch' is not a .png/.jpg under Content\Textures\` | The source stem was not imported. | Put the image directly in `Content\Textures` and check its stem. If the line names another folder, move the file from there. |
+| `P1 REFUSED target 'fireworm_low_emissive' is not a Texture2D in aln_fireworm_assets_all.bundle - <reason> - list the names it does hold with: ct_list assets aln_fireworm_assets_all.bundle Texture2D` | The shipped target is missing or ambiguous. | Run the command printed by the refusal and copy the exact name. |
+| `SOURCE SKIPPED: Content\Textures\ holds two files with the same name: <a> and <b> - a replacement names the stem, so one of them has to go; BOTH were SKIPPED, the project's other sources are unaffected` | Two source files share a stem, ignoring case. | Keep one image for that stem and bake again. |
+| `SOURCE SKIPPED: <file>: <reason> - SKIPPED, the project's other sources are unaffected` | The image could not be imported. This counts as a bake failure. | Re-export the named image as PNG, JPG or JPEG. |
 
-Read [the status glossary](../troubleshooting/bake-errors.md) before interpreting `SKIPPED`,
-`P1 REFUSED`, `FAILURE(S)` or a package refusal.
+See [messages](../reference/messages.md) for other refusals.
 
-Before testing, read [when a shipped-bundle redirect takes effect and why only one mod can own a
-bundle](../getting-started/lifecycle.md#redirects-affect-future-loads).
+## Example
 
-## Worked demo
-
-[WeaponMesh](../examples/weapon-mesh.md) replaces five texture slots on one shipped rifle.
+[WeaponMesh](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/WeaponMesh) replaces five shipped rifle textures with separate `replace` rows.
