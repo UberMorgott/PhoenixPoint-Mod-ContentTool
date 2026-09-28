@@ -119,6 +119,10 @@
     <Compile Include="Compressed.cs" />
     <Compile Include="DracoTests.cs" />
     <Compile Include="AssetIndexTests.cs" />
+    <!-- The patched-copy block-reuse writer is System.IO + LZ4 only, so its equivalence with the full
+         repack is proven here on a shipped bundle. -->
+    <Compile Include="..\..\src\Bake\BlockReuse.cs" Link="BlockReuse.cs" />
+    <Compile Include="BlockReuseTests.cs" />
     <Compile Include="InspectTests.cs" />
     <Compile Include="MeshExtractTests.cs" />
     <Compile Include="VideoExtractTests.cs" />
