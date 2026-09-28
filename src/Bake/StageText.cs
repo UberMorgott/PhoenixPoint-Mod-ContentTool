@@ -168,6 +168,14 @@ namespace Morgott.ContentTool.Bake
                    "patched copies and this project's own bundle are exactly as they were.";
         }
 
+        /// <summary>The mod-manager checkbox's patch-only bake (ProjectBake.Bake patchOnly): the copies are the
+        /// whole output, the mod's own bundle is the one it shipped. Same ALL PASS prefix as its siblings.</summary>
+        internal static string BakePatchOnly()
+        {
+            return "ct_project: ALL PASS - patched copy(ies) above written for the mod manager; the mod's own " +
+                   "bundle is the one it shipped (the author's 'ct_project' rebuilds it)";
+        }
+
         internal static string BakeNothingPatched(int replacements)
         {
             return "ct_project: ALL PASS - nothing needed patching: none of this project's " +

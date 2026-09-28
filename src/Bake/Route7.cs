@@ -217,7 +217,10 @@ namespace Morgott.ContentTool.Bake
                 else
                 {
                     ApplyDisposition how;
-                    log.AppendLine(ApplyProject(name, null, out how));
+                    IList<TargetInstall> ignored;
+                    // checkbox: the patch-only bake and the negative receipt (Applied) - this is the
+                    // player's enable path, not an author's.
+                    log.AppendLine(ApplyRoot(ContentToolMain.ProjectDir(name), null, out ignored, out how, true));
                     // THE PATCH ROUTE FAILED - the one outcome worth not repeating on the postfix pass.
                     // A refusal (R37/R38, a contended claim) is a race, not a broken project.
                     if (how == ApplyDisposition.BakeFailed) Failed.Add(project.Id);
@@ -438,8 +441,12 @@ namespace Morgott.ContentTool.Bake
         /// duplicate name would answer with the wrong folder. Same claim, taken once, in the same place:
         /// there is no second apply path here, only a second door onto this one.
         /// </summary>
+        /// <param name="checkbox">the mod-manager checkbox (<see cref="Toggle"/>): a stale copy is re-baked
+        /// patch-only, and a bake that already failed deterministically on these exact inputs is not re-run.
+        /// Every author door leaves it false and gets the full bake, receipt or not - that is the retry.</param>
         internal static string ApplyRoot(string projectRoot, string forBundle,
-                                         out IList<TargetInstall> targets, out ApplyDisposition how)
+                                         out IList<TargetInstall> targets, out ApplyDisposition how,
+                                         bool checkbox = false)
         {
             targets = new List<TargetInstall>();
             how = ApplyDisposition.Refused;
@@ -453,7 +460,7 @@ namespace Morgott.ContentTool.Bake
             string[] owned = ProjectBake.OutputDirs(projectRoot, project.Id);
             string contended;
             if (!OutputClaim.Take(owned, out contended)) return contended;
-            try { return Applied(project, projectRoot, forBundle, out targets, out how); }
+            try { return Applied(project, projectRoot, forBundle, out targets, out how, checkbox); }
             finally { OutputClaim.Release(owned); }
         }
 
@@ -461,7 +468,7 @@ namespace Morgott.ContentTool.Bake
         /// <c>ProjectBake.Baked</c> is: a caller that reached here directly would own nothing.</summary>
         private static string Applied(Morgott.ContentTool.Project.ContentProject project, string projectRoot,
                                       string forBundle, out IList<TargetInstall> targets,
-                                      out ApplyDisposition how)
+                                      out ApplyDisposition how, bool checkbox)
         {
             targets = new List<TargetInstall>();
             how = ApplyDisposition.Refused;
@@ -511,7 +518,9 @@ namespace Morgott.ContentTool.Bake
                 // patch failure instead is no better: that reaches the checkbox's Failed.Add (Toggle) and
                 // blocks the mod for the rest of the session over a race nobody caused.
                 sw = Dev.Perf.Start();
-                BakeResult baked = ProjectBake.Bake(projectRoot, true);   // claimHeld: this apply owns it
+                // claimHeld: this apply owns it. patchOnly for the checkbox (PERF.md design 1).
+                BakeResult baked = ProjectBake.Bake(projectRoot, true, default(System.Threading.CancellationToken),
+                                                    null, checkbox);
                 Dev.Perf.Line("route7.bake", modId, sw);
                 pre.AppendLine(baked.Terminal);
                 if (baked.How == BakeDisposition.Refused || baked.How == BakeDisposition.Cancelled)

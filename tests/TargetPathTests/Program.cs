@@ -2052,7 +2052,8 @@ internal static class Program
         string file = src == null ? null : Path.Combine(src, "Bake", "Route7.cs");
         string text = file != null && File.Exists(file) ? File.ReadAllText(file) : null;
 
-        int bake = text == null ? -1 : text.IndexOf("ProjectBake.Bake(projectRoot, true)", StringComparison.Ordinal);
+        // No closing paren: the checkbox passes patchOnly after the claim flag (PERF step 3).
+        int bake = text == null ? -1 : text.IndexOf("ProjectBake.Bake(projectRoot, true", StringComparison.Ordinal);
         int stop = text == null ? -1 : text.IndexOf("BakeDisposition.Cancelled", bake < 0 ? 0 : bake,
                                                     StringComparison.Ordinal);
         int poison = text == null || stop < 0 ? -1
