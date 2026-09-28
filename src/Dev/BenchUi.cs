@@ -11,6 +11,7 @@ namespace Morgott.ContentTool.Dev
     /// </summary>
     internal static class BenchUi
     {
+        private static GUISkin builtFor;
         private static GUIStyle title, hint, text, badge, step, stepOn, stepDone, main, card, cardSub, tip, head, none;
         private static readonly Color Grey = new Color(0.62f, 0.66f, 0.72f);
         private static readonly Color PassC = new Color(0.35f, 0.82f, 0.45f);
@@ -20,7 +21,11 @@ namespace Morgott.ContentTool.Dev
 
         private static void Init()
         {
-            if (title != null) return;
+            // Rebuilt when the skin changes: the bench draws with the game's skin while its native shell is up
+            // (NativeSkin) and with the stock one otherwise.
+            if (title != null && builtFor == GUI.skin) return;
+            builtFor = GUI.skin;
+            left = null; logArea = null;
             title = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, wordWrap = true };
             text = new GUIStyle(GUI.skin.label) { wordWrap = true };
             head = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 13 };
@@ -216,6 +221,7 @@ namespace Morgott.ContentTool.Dev
         private static GUIStyle left;
         private static GUIStyle Left()
         {
+            Init();
             if (left == null) left = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
             return left;
         }
@@ -334,7 +340,7 @@ namespace Morgott.ContentTool.Dev
             Vector2 m = Event.current.mousePosition;
             var content = new GUIContent(GUI.tooltip);
             float w = 320f, h = tip.CalcHeight(content, w);
-            float x = Mathf.Min(m.x + 16f, Screen.width - w - 4f), y = Mathf.Min(m.y + 18f, Screen.height - h - 4f);
+            float x = Mathf.Min(m.x + 16f, BenchScale.W - w - 4f), y = Mathf.Min(m.y + 18f, BenchScale.H - h - 4f);
             GUI.Box(new Rect(x, y, w, h), content, tip);
         }
     }

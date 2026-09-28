@@ -146,9 +146,9 @@ namespace Morgott.ContentTool.Dev
             Transform r = root.transform;
 
             ground = NativeKit.Plate(r, "Ground", new Color(0.055f, 0.065f, 0.085f, 1f));
-            NativeKit.Place(ground.rectTransform, 0f, 0f, builtW, builtH);
+            NativeKit.Place(ground.rectTransform, 0f, 0f, BenchScale.W, BenchScale.H);
             panel = NativeKit.Frame(r, "Panel", new Color(0.04f, 0.05f, 0.07f, 0.94f));
-            NativeKit.Place(panel.rectTransform, 0f, 0f, w, builtH);
+            NativeKit.Place(panel.rectTransform, 0f, 0f, w, BenchScale.H);
 
             band = NativeKit.Rect(r, "Band");
             NativeKit.Place(band, 0f, 0f, w, 120f);
@@ -234,6 +234,7 @@ namespace Morgott.ContentTool.Dev
             if (failed || root == null) { Live = false; return; }
             try
             {
+                // A live resize (or a mode change) is a different BenchScale: rebuilt at the new size.
                 if (Screen.width != builtW || Screen.height != builtH) Build(f.PanelWidth);
                 Sync(f);
                 Live = true;
@@ -303,7 +304,7 @@ namespace Morgott.ContentTool.Dev
             // The Home screen's task cards.
             if (cardsBox.gameObject.activeSelf != f.Home) cardsBox.gameObject.SetActive(f.Home);
             if (!f.Home) return;
-            NativeKit.Place(cardsBox, 0f, BandHeight, f.PanelWidth, builtH - BandHeight);
+            NativeKit.Place(cardsBox, 0f, BandHeight, f.PanelWidth, BenchScale.H - BandHeight);
             const float pad = 8f, h = 58f, gap = 6f;
             float cw = f.PanelWidth - 2f * pad;
             for (int i = 0; i < f.Cards.Length; i++)

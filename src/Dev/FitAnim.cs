@@ -420,7 +420,7 @@ namespace Morgott.ContentTool.Dev
         /// Repaint the Layout pass never counted is the group-imbalance error.</param>
         internal static void Draw(float panelWidth, ModelDoctor owner)
         {
-            float w = Screen.width, h = Screen.height;
+            float w = BenchScale.W, h = BenchScale.H;
             if (Event.current.type == EventType.Layout)
             {
                 doctor = owner;
@@ -469,7 +469,7 @@ namespace Morgott.ContentTool.Dev
         /// moment something is picked from it.</summary>
         private static void List(float panelWidth, float stripTop)
         {
-            float wide = Mathf.Min(460f, Screen.width - panelWidth - 2f * BenchList.StripInset);
+            float wide = Mathf.Min(460f, BenchScale.W - panelWidth - 2f * BenchList.StripInset);
             if (wide < 120f) { listRect = new Rect(0f, 0f, 0f, 0f); return; }
             float wanted = shown.Count * 22f + 12f;
             float high = Mathf.Min(wanted, Mathf.Max(66f, stripTop - 40f));
@@ -497,14 +497,14 @@ namespace Morgott.ContentTool.Dev
             finally { GUILayout.EndArea(); }
         }
 
-        /// <summary>Is this point (in <c>Input.mousePosition</c>'s convention, y from the BOTTOM) on the
+        /// <summary>Is this point (in <c>BenchScale.Mouse</c>'s convention, y from the BOTTOM) on the
         /// open clip list? The band belongs to the list while it is open, exactly as the strip's own
         /// band belongs to the transport - otherwise a click on a clip would also start an orbit.</summary>
         internal static bool OverList(float mouseX, float mouseY)
         {
             if (!listOpen || listRect.width <= 0f) return false;
             if (float.IsNaN(mouseX) || float.IsNaN(mouseY)) return false;
-            return listRect.Contains(new Vector2(mouseX, Screen.height - mouseY));
+            return listRect.Contains(new Vector2(mouseX, BenchScale.H - mouseY));
         }
 
         /// <summary>

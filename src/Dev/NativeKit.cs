@@ -37,21 +37,16 @@ namespace Morgott.ContentTool.Dev
         internal static string Missing { get; private set; }
 
         /// <summary>
-        /// The game's own scale at this resolution: its UI is authored at 3840x2160 and its CanvasScaler
-        /// matches width at 16:9 and narrower, height when wider (CanvasScalerController.cs:38-55). The shell's
-        /// canvas uses K as its scale factor, so a clone is pixel-identical to the same widget in the game's own
-        /// windows (and so is the game's tooltip), while the bench lays things out in screen pixels (Place, U)
-        /// to line up with the IMGUI it sits under.
+        /// The shell canvas's scale factor: the game's UI is authored at 3840x2160, the bench at a 720-tall
+        /// virtual screen (BenchScale), so K = S / 3 - the game's own height-matched scale. Clones and the
+        /// game's tooltip come out at their native proportions and grow with the window exactly like the
+        /// IMGUI under them (GUI.matrix = S).
         /// </summary>
-        internal static float K
-        {
-            get
-            {
-                float w = Screen.width, h = Screen.height;
-                if (w <= 0f || h <= 0f) return 1f / 3f;
-                return w / h <= 16f / 9f + 0.001f ? w / 3840f : h / 2160f;
-            }
-        }
+        internal static float K { get { return BenchScale.S / 3f; } }
+
+        /// <summary>Virtual bench pixels (BenchScale) to canvas units: the canvas is authored at 3840x2160
+        /// over the bench's 720-tall design, so one virtual pixel is three units at any resolution.</summary>
+        internal static float U(float px) { return px * 3f; }
 
         /// <summary>Finds the templates. Cheap to call again: it re-checks that what it holds still exists
         /// (a scene instance dies with its level) and looks again only then.</summary>
@@ -99,6 +94,38 @@ namespace Morgott.ContentTool.Dev
             return Missing == null;
         }
 
+        internal static GameObject ButtonTemplate { get { return buttonTpl; } }
+        internal static GameObject TabTemplate { get { return tabTpl; } }
+        internal static Sprite FrameSprite { get { return frameSprite; } }
+
+        /// <summary>The sprite of the first Image under <paramref name="go"/> whose sprite name contains
+        /// <paramref name="part"/> (the button's "...Background", "...Frame" layers), or null.</summary>
+        internal static Sprite SpriteNamed(GameObject go, string part)
+        {
+            if (go == null) return null;
+            foreach (Image img in go.GetComponentsInChildren<Image>(true))
+                if (img != null && img.sprite != null && img.sprite.name.IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return img.sprite;
+            return null;
+        }
+
+        /// <summary>The biggest sprite-carrying Image under <paramref name="go"/> - a widget's plate.</summary>
+        internal static Sprite SpriteOf(GameObject go)
+        {
+            if (go == null) return null;
+            Sprite best = null;
+            float area = 0f;
+            foreach (Image img in go.GetComponentsInChildren<Image>(true))
+            {
+                if (img == null || img.sprite == null) continue;
+                Rect r = ((RectTransform)img.transform).rect;
+                float a = Mathf.Max(1f, r.width * r.height);
+                if (a <= area) continue;
+                area = a; best = img.sprite;
+            }
+            return best;
+        }
+
         /// <summary>The object that carries the PP button (its animator and hover), not the bare Unity
         /// Button that may sit on a child of it.</summary>
         private static GameObject Holder(Component c)
@@ -136,18 +163,14 @@ namespace Morgott.ContentTool.Dev
             return rt;
         }
 
-        /// <summary>Places a top-left-anchored rect at (x, y) SCREEN PIXELS from its parent's top-left, w x h
-        /// pixels - converted to the canvas's units, which are the game's own (scale factor K).</summary>
+        /// <summary>Places a top-left-anchored rect at (x, y) VIRTUAL pixels (BenchScale) from its parent's
+        /// top-left, w x h - in the canvas's units.</summary>
         internal static void Place(RectTransform rt, float x, float y, float w, float h)
         {
-            float k = K;
             rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0f, 1f);
-            rt.anchoredPosition = new Vector2(x / k, -y / k);
-            rt.sizeDelta = new Vector2(w / k, h / k);
+            rt.anchoredPosition = new Vector2(U(x), -U(y));
+            rt.sizeDelta = new Vector2(U(w), U(h));
         }
-
-        /// <summary>Pixels to canvas units.</summary>
-        internal static float U(float px) { return px / K; }
 
         /// <summary>A label in the game's font. Never a raycast target: a label must not eat the click meant
         /// for the button under it.</summary>
@@ -156,7 +179,7 @@ namespace Morgott.ContentTool.Dev
             RectTransform rt = Rect(parent, name);
             var t = rt.gameObject.AddComponent<Text>();
             t.font = Font;
-            t.fontSize = Mathf.RoundToInt(size / K);
+            t.fontSize = Mathf.RoundToInt(U(size));
             t.color = color;
             t.alignment = anchor;
             t.raycastTarget = false;

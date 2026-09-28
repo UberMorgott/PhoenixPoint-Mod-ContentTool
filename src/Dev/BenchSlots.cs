@@ -76,7 +76,10 @@ namespace Morgott.ContentTool.Dev
 
         private static Rect ToScreen(Rect r)
         {
-            Vector2 p = GUIUtility.GUIToScreenPoint(r.position);
+            // Measured (1920x1080, S=1.5): GUIToScreenPoint = the panel area's origin UNSCALED + the local point
+            // SCALED by GUI.matrix - so the virtual point is the origin plus the scaled part divided back.
+            Vector2 g = GUIUtility.GUIToScreenPoint(r.position);
+            Vector2 p = view.position + (g - view.position) / BenchScale.S;
             return new Rect(p.x, p.y, r.width, r.height);
         }
 
@@ -133,3 +136,4 @@ namespace Morgott.ContentTool.Dev
         }
     }
 }
+

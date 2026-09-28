@@ -1179,9 +1179,9 @@ namespace Morgott.ContentTool.Dev
                 // The transport strip eats the bottom of the free region exactly as the panel eats its
                 // left, and BOTH come out of BenchList's own constants - a second idea of how tall the
                 // strip is would be a unit standing behind it with nothing on screen to say why.
-                BenchList.Frame(frameRadius, cam.fieldOfView, Screen.width, Screen.height,
+                BenchList.Frame(frameRadius, cam.fieldOfView, BenchScale.W, BenchScale.H,
                                 PanelWidth,
-                                BenchList.StripReserve(Screen.width, Screen.height, PanelWidth),
+                                BenchList.StripReserve(BenchScale.W, BenchScale.H, PanelWidth),
                                 view.Zoom, out distance, out lateral, out vertical);
 
                 // THE ORBIT. The bay's authored look direction is still the starting point - the angle
@@ -1228,7 +1228,7 @@ namespace Morgott.ContentTool.Dev
             if (cam == null || !framed) return;
             float mpp = 2f * Mathf.Max(0.01f, frameDist) *
                         Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) /
-                        Mathf.Max(1f, Screen.height);
+                        Mathf.Max(1f, BenchScale.H);
             pan -= (frameRot * Vector3.right) * (dxPixels * mpp) +
                    (frameRot * Vector3.up) * (dyPixels * mpp);
             Reframe();
@@ -1250,7 +1250,7 @@ namespace Morgott.ContentTool.Dev
             if (cam == null || !framed || Math.Abs(after - before) < 1e-6f) return;
             float right, up;
             OrbitCamera.ZoomShift(before, after, view.AnchorX, view.AnchorY,
-                                  frameDist, cam.fieldOfView, Screen.height, out right, out up);
+                                  frameDist, cam.fieldOfView, BenchScale.H, out right, out up);
             pan += (frameRot * Vector3.right) * right + (frameRot * Vector3.up) * up;
         }
 
@@ -1901,7 +1901,7 @@ namespace Morgott.ContentTool.Dev
         {
             const float pad = 12f;
             float x = PanelWidth + pad;
-            var r = new Rect(x, pad, Screen.width - x - pad, Screen.height - 2f * pad);
+            var r = new Rect(x, pad, BenchScale.W - x - pad, BenchScale.H - 2f * pad);
             if (t == TabSounds) TaskScreens.SoundsPane(r);
             else if (t == TabVideos) TaskScreens.VideosPane(r);
             else if (t == TabLifecycle) LifecycleDashboard.Pane(r);
@@ -1950,10 +1950,10 @@ namespace Morgott.ContentTool.Dev
             // ground, the top row, the crumbs and the title on its own canvas, UNDER IMGUI - so IMGUI lays no
             // backdrop over it and starts its area below the shell's band.
             bool shell = BenchShell.Live;
-            if (!shell) GUI.DrawTexture(new Rect(x, 0f, w, Screen.height), backdrop);
+            if (!shell) GUI.DrawTexture(new Rect(x, 0f, w, BenchScale.H), backdrop);
 
             float top = shell ? BenchShell.BandHeight : BenchList.PanelInset;
-            float viewportH = Screen.height - top - BenchList.PanelInset;
+            float viewportH = BenchScale.H - top - BenchList.PanelInset;
             var area = new Rect(x + BenchList.PanelInset, top, BenchList.ContentWidth(w), viewportH);
             GUILayout.BeginArea(area);
             // Native slots (main button, badges) inside this scroll view are clipped to it.
@@ -2611,8 +2611,8 @@ namespace Morgott.ContentTool.Dev
             /// </summary>
             private void Mouse()
             {
-                float mx = Input.mousePosition.x, my = Input.mousePosition.y;
-                bool over = OrbitCamera.InViewport(mx, my, Screen.width, Screen.height, PanelWidth) &&
+                float mx = BenchScale.Mouse.x, my = BenchScale.Mouse.y;
+                bool over = OrbitCamera.InViewport(mx, my, BenchScale.W, BenchScale.H, PanelWidth) &&
                             !FitAnim.OverList(mx, my) && !guiHot;
 
                 float wheel = Input.mouseScrollDelta.y;
@@ -2623,9 +2623,9 @@ namespace Morgott.ContentTool.Dev
                     // exactly what puts the aim point in the middle of the part of the screen the panel
                     // and the strip do not cover.
                     view.WheelAt(wheel,
-                                 mx - (PanelWidth + Screen.width) * 0.5f,
-                                 my - (BenchList.StripReserve(Screen.width, Screen.height, PanelWidth) +
-                                       Screen.height) * 0.5f);
+                                 mx - (PanelWidth + BenchScale.W) * 0.5f,
+                                 my - (BenchList.StripReserve(BenchScale.W, BenchScale.H, PanelWidth) +
+                                       BenchScale.H) * 0.5f);
                 }
 
                 if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(2))
@@ -2638,7 +2638,7 @@ namespace Morgott.ContentTool.Dev
                         over, Input.GetMouseButton(0), Input.GetMouseButton(2),
                         Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt),
                         Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift),
-                        FitGizmo.WouldGrab(mx, my));
+                        FitGizmo.WouldGrab(BenchScale.Real(mx), BenchScale.Real(my)));
                     // Clicking the model is how a user says "I am done typing" - IMGUI will not work
                     // that out on its own, and a filter that keeps the keyboard keeps the fly keys.
                     if (over) dropFocus = true;
@@ -2728,48 +2728,61 @@ namespace Morgott.ContentTool.Dev
                              (focused != null && focused.StartsWith(TypingPrefix, StringComparison.Ordinal));
                     // FIRST, and unconditionally: it allocates a control id from this pass's counter,
                     // and an id that is only sometimes allocated is a different id every frame.
-                    FitGizmo.Gui(PanelWidth,
-                                 BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
-                    if (FitGizmo.Last != null) { message = FitGizmo.Last; FitGizmo.Last = null; }
-                    // The tab THIS pass was laid out for: Draw moves `tab` after its EndArea, and what is
-                    // drawn after it must match this pass's Layout, not the next one's.
-                    // NAVIGATION FIRST, on Layout only and before anything is drawn: the last pass's
-                    // Home/Back/crumb/step request runs here, so the tab never moves mid-event.
-                    BenchNav.BeginFrame();
-                    if (BenchNav.Apply(NavFree)) tab = TabHome;
-                    // The native shell: a card press, then Live decided for this whole frame.
-                    ShellFrame();
-                    BenchNav.Screen(tab == TabHome ? null : TabTitle());
-                    int shown = tab;
-                    // No 3D on this screen: the camera is off, so the ground is laid first and opaque (the
-                    // native shell lays its own, under its canvas, when it is up).
-                    if (!ModelScreen(shown) && !BenchShell.Live) BenchUi.Ground(new Rect(0f, 0f, Screen.width, Screen.height));
-                    Draw();
-                    BenchSlots.PanelEnd();
-                    if (ModelScreen(shown))
+                    // The gizmo works in REAL pixels (WorldToScreenPoint, GL): identity matrix, real numbers.
+                    // Everything after it is the bench's own IMGUI, in virtual pixels (BenchScale).
+                    GUI.matrix = Matrix4x4.identity;
+                    FitGizmo.Gui(BenchScale.Real(PanelWidth),
+                                 BenchScale.Real(BenchList.StripTop(BenchScale.W, BenchScale.H, PanelWidth)));
+                    GUI.matrix = BenchScale.Matrix;
+                    // The game's look on every IMGUI control of the bench (NativeSkin), while the native
+                    // shell is up; the stock skin otherwise. Put back in the finally below.
+                    GUISkin skinWas = GUI.skin;
+                    try
                     {
-                        // AFTER the panel, and outside its area: the strip is its own region and IMGUI
-                        // areas do not nest.
-                        // The Doctor goes with it ONLY on its own tab: the strip's header row carries §6's
-                        // [Skeleton] toggle there, and nothing at all on FIT.
-                        FitAnim.Draw(PanelWidth, shown == TabDoctor ? doctor : null);
-                        // AFTER the strip, so the strip's own pixels are already the strip's, and after the
-                        // panel, so the inspector it draws sits on top of the scene rather than under it.
-                        // It takes no hotControl: a joint pick is a click, and a bare left press is
-                        // ViewGesture.None anyway, so there is nothing for the orbit to stand down from.
-                        if (shown == TabDoctor)
-                            doctor.Overlay(cam, PanelWidth,
-                                           BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
+                        if (FitGizmo.Last != null) { message = FitGizmo.Last; FitGizmo.Last = null; }
+                        // The tab THIS pass was laid out for: Draw moves `tab` after its EndArea, and what is
+                        // drawn after it must match this pass's Layout, not the next one's.
+                        // NAVIGATION FIRST, on Layout only and before anything is drawn: the last pass's
+                        // Home/Back/crumb/step request runs here, so the tab never moves mid-event.
+                        BenchNav.BeginFrame();
+                        if (BenchNav.Apply(NavFree)) tab = TabHome;
+                        // The native shell: a card press, then Live decided for this whole frame.
+                        ShellFrame();
+                        // Decided right after Live is (at Layout), so every event of the frame has the same skin.
+                        if (BenchShell.Live && NativeSkin.Skin != null) GUI.skin = NativeSkin.Skin;
+                        BenchNav.Screen(tab == TabHome ? null : TabTitle());
+                        int shown = tab;
+                        // No 3D on this screen: the camera is off, so the ground is laid first and opaque (the
+                        // native shell lays its own, under its canvas, when it is up).
+                        if (!ModelScreen(shown) && !BenchShell.Live) BenchUi.Ground(new Rect(0f, 0f, BenchScale.W, BenchScale.H));
+                        Draw();
+                        BenchSlots.PanelEnd();
+                        if (ModelScreen(shown))
+                        {
+                            // AFTER the panel, and outside its area: the strip is its own region and IMGUI
+                            // areas do not nest.
+                            // The Doctor goes with it ONLY on its own tab: the strip's header row carries §6's
+                            // [Skeleton] toggle there, and nothing at all on FIT.
+                            FitAnim.Draw(PanelWidth, shown == TabDoctor ? doctor : null);
+                            // AFTER the strip, so the strip's own pixels are already the strip's, and after the
+                            // panel, so the inspector it draws sits on top of the scene rather than under it.
+                            // It takes no hotControl: a joint pick is a click, and a bare left press is
+                            // ViewGesture.None anyway, so there is nothing for the orbit to stand down from.
+                            if (shown == TabDoctor)
+                                doctor.Overlay(cam, PanelWidth,
+                                               BenchList.StripTop(BenchScale.W, BenchScale.H, PanelWidth));
+                        }
+                        else Pane(shown);
+                        // Esc = Back, LAST: the gizmo and the bone inspector take Esc first when they want it.
+                        BenchNav.Escape(NavFree);
+                        // The hovered control's tooltip, on top of everything.
+                        BenchUi.Tooltip();
+                        // The native slots onto the rects this Repaint recorded.
+                        BenchSlots.EndRepaint();
+                        // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.
+                        guiHot = GUIUtility.hotControl != 0;
                     }
-                    else Pane(shown);
-                    // Esc = Back, LAST: the gizmo and the bone inspector take Esc first when they want it.
-                    BenchNav.Escape(NavFree);
-                    // The hovered control's tooltip, on top of everything.
-                    BenchUi.Tooltip();
-                    // The native slots onto the rects this Repaint recorded.
-                    BenchSlots.EndRepaint();
-                    // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.
-                    guiHot = GUIUtility.hotControl != 0;
+                    finally { GUI.skin = skinWas; GUI.matrix = Matrix4x4.identity; }
                 }
                 catch (Exception ex)
                 {
