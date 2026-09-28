@@ -243,6 +243,9 @@ namespace Morgott.ContentTool.Project
                 __state = Reconciled(log, __instance.ID, __instance.Directory, true,
                                      "is being switched ON in the mod manager, so its live registrations " +
                                      "were installed before it started.");
+                // THE ONE ENABLE STEP for this mod: the postfix no longer repeats it and the startup
+                // Reconcile skips it, so a refusal (NOT RE-BAKED, REFUSED, FAILED) is said once, not 3x.
+                lock (PublishedEarly) PublishedEarly.Add(Key(__instance.Directory));
                 if (log.Length > 0) Dev.ChunkedLog.Say(log.ToString().TrimEnd());
             }
             catch (Exception ex) { Dev.ChunkedLog.Fail("ct_content pre-enable: " + ex); }
@@ -268,6 +271,7 @@ namespace Morgott.ContentTool.Project
                 if (!__state || __instance == null || __instance.Enabled) return;
                 StringBuilder log = new StringBuilder();
                 Reconciled(log, __instance.ID, __instance.Directory, false, null);
+                lock (PublishedEarly) PublishedEarly.Remove(Key(__instance.Directory));
                 Dev.ChunkedLog.Say("ct_content: '" + __instance.ID + "' FAILED to enable (its own load or " +
                                    "OnModEnabled threw - see the mod manager's error above), so the content " +
                                    "published for it ahead of that was taken back." +
@@ -317,6 +321,7 @@ namespace Morgott.ContentTool.Project
                     // ppcontent.json cannot swallow the sound and video lines above.
                     try { what = Join(what, Bake.Route7.Toggle(dir, false)); }
                     catch (Exception ex) { what = Join(what, "ct_route7 toggle FAILED: " + ex.Message); }
+                    lock (PublishedEarly) PublishedEarly.Remove(Key(dir));
                 }
 
                 if (what != null)
@@ -364,7 +369,13 @@ namespace Morgott.ContentTool.Project
 
             int skipped;
             foreach (string dir in ContentMods.Enabled(modDir, ContentMods.Manifest, roster, null, out skipped))
+            {
+                // Already put ON by the prefix this session - and already reported, refusal included.
+                bool early;
+                lock (PublishedEarly) early = PublishedEarly.Contains(Key(dir));
+                if (early) continue;
                 Reconciled(log, new DirectoryInfo(dir).Name, dir, true, AtStartup(true));
+            }
 
             if (m != null && m.CanUseMods)
                 foreach (ModEntry e in m.Mods)
@@ -373,6 +384,17 @@ namespace Morgott.ContentTool.Project
                     Reconciled(log, e.ID, e.Directory, false, AtStartup(false));
                 }
             return log.Length == 0 ? null : log.ToString().TrimEnd();
+        }
+
+        /// <summary>Mod folders the enable PREFIX already put ON this session, so the startup Reconcile
+        /// does not run (and report) the same step a second time.</summary>
+        private static readonly HashSet<string> PublishedEarly = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private static string Key(string dir)
+        {
+            if (string.IsNullOrEmpty(dir)) return "";
+            try { dir = Path.GetFullPath(dir); } catch (Exception) { }
+            return dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
         private static string AtStartup(bool on)
