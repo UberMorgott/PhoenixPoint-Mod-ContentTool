@@ -913,20 +913,12 @@ namespace Morgott.ContentTool.Tactical
             string bashPoint = bashDef == null ? null
                 : (bashDef.BashWith == BashAbilityDef.BashingWith.SourceWeapon
                        ? bashDef.BashPoint : bashDef.NoEquipmentBashPoint);
-            // ...AND SYNTHESISING ONE HERE IS NOT YET THE ANSWER. MEASURED, this exact run: giving the
-            // melee weapon a SynthSkin carrying 'EXT_ShootPoint' builds clean and the donor-free audit
-            // stays green (the audit already exempts our own ShootPointSkinDataDef), but the TACTICAL
-            // SAVE THEN FAILS TO LOAD - "Serializing destroyed unity object at: List`1" twice, and the
-            // game stops before the gate's first arm. The ranged weapon gets away with the same trick,
-            // so the difference is not the helper; something on the melee item's path serializes its
-            // SkinData graph, and a runtime GameObject in Visuals cannot survive that.
-            //
-            // A creature that cannot load a save is strictly worse than one whose melee button is grey,
-            // so this stays null until the serialization path is understood. The defect is not hidden:
-            // C1-offered asserts the ability is OFFERED and fails loudly, naming the state, the
-            // BashWith mode and the missing transform.
-            // ponytail: the ceiling is named rather than papered over - next step is to find who walks
-            // BodypartItems' SkinData during save serialization, not to retry the same assignment.
+            // So the melee weapon gets a SynthSkin carrying exactly that name, like the ranged muzzle.
+            // SAVE-SAFE, MEASURED 2026-09-28 (Instance2, dev SaveProbe on the serializer): two built
+            // creatures spawned into a tactical save, saved, reloaded - both back, zero "Serializing
+            // destroyed" lines, C1-offered/attack PASS. The "List`1" errors once blamed on this were
+            // the PROFILE's unlocked-cinematics list holding QuitCutscene's runtime video defs
+            // (AchievementTracker "Cinematics"), written on every options save, tactical or not.
             melee.SkinData = string.IsNullOrEmpty(bashPoint) ? null
                 : CreatureRanged.SynthSkin(repo, c, "BashPoint", "MeleeSkinDataDef", bashPoint);
             c.Say("ct_creature " + (string.IsNullOrEmpty(bashPoint) ? "WARN" : "PASS") + " melee bash point " +
