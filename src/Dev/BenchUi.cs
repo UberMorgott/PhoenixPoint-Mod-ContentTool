@@ -74,11 +74,16 @@ namespace Morgott.ContentTool.Dev
         {
             Init();
             Color c = g == Grade.Pass ? PassC : g == Grade.Warn ? WarnC : FailC;
-            badge.normal.textColor = c;
+            string word = g == Grade.Pass ? "PASS" : g == Grade.Warn ? "WARN" : "FAIL";
+            bool native = BenchSlots.Active;
+            badge.normal.textColor = native ? Color.clear : c;
             GUILayout.BeginHorizontal();
-            GUILayout.Label(new GUIContent(g == Grade.Pass ? "PASS" : g == Grade.Warn ? "WARN" : "FAIL", tooltip),
-                            badge, GUILayout.Width(46f));
-            GUILayout.Label(new GUIContent(sentence, tooltip), text);
+            GUILayout.Label(new GUIContent(word, tooltip), badge, GUILayout.Width(46f));
+            if (native) BenchSlots.Text(GUILayoutUtility.GetLastRect(), word, c, 14, TextAnchor.MiddleCenter);
+            // Native: the IMGUI sentence is laid out INVISIBLE (it still reserves its wrapped height and keeps
+            // its tooltip) and the game's font draws it under that rect.
+            GUILayout.Label(new GUIContent(sentence, tooltip), native ? Invisible(text) : text);
+            if (native) BenchSlots.Text(GUILayoutUtility.GetLastRect(), sentence, Color.white, 12, TextAnchor.UpperLeft);
             GUILayout.EndHorizontal();
         }
 
@@ -87,8 +92,24 @@ namespace Morgott.ContentTool.Dev
         internal static void Mark(string word, Grade? g, string tooltip, float width)
         {
             Init();
-            badge.normal.textColor = g == null ? Grey : g == Grade.Pass ? PassC : g == Grade.Warn ? WarnC : FailC;
+            Color c = g == null ? Grey : g == Grade.Pass ? PassC : g == Grade.Warn ? WarnC : FailC;
+            bool native = BenchSlots.Active;
+            badge.normal.textColor = native ? Color.clear : c;
             GUILayout.Label(new GUIContent(word, tooltip), badge, GUILayout.Width(width));
+            if (native) BenchSlots.Text(GUILayoutUtility.GetLastRect(), word, c, 13, TextAnchor.MiddleCenter);
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<GUIStyle, GUIStyle> invisible =
+            new System.Collections.Generic.Dictionary<GUIStyle, GUIStyle>();
+        /// <summary>A copy of <paramref name="s"/> that lays out the same but paints no glyphs.</summary>
+        private static GUIStyle Invisible(GUIStyle s)
+        {
+            GUIStyle v;
+            if (invisible.TryGetValue(s, out v)) return v;
+            v = new GUIStyle(s);
+            v.normal.textColor = v.hover.textColor = v.active.textColor = v.focused.textColor = Color.clear;
+            invisible[s] = v;
+            return v;
         }
 
         /// <summary>"1 Model  2 Target  3 Check  4 Build" with the current one lit.</summary>
@@ -121,6 +142,16 @@ namespace Morgott.ContentTool.Dev
         internal static bool Main(string label, string refusal, string tooltip = null)
         {
             Init();
+            if (BenchSlots.Active)
+            {
+                // The game's own button under the rect the IMGUI one would have taken (BenchSlots).
+                var content = new GUIContent(label, tooltip);
+                Rect r = GUILayoutUtility.GetRect(content, main, GUILayout.ExpandWidth(true));
+                GUI.Label(r, new GUIContent("", tooltip), GUIStyle.none);   // keeps the IMGUI tooltip
+                bool hit = BenchSlots.Main(r, label, GUI.enabled && refusal == null, tooltip);
+                Hint(refusal);
+                return hit && refusal == null;
+            }
             bool was = GUI.enabled;
             GUI.enabled = was && refusal == null;
             bool pressed = GUILayout.Button(new GUIContent(label, tooltip), main);

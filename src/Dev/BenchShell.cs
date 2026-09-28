@@ -70,6 +70,9 @@ namespace Morgott.ContentTool.Dev
 
         internal static string Failure { get { return failure; } }
 
+        /// <summary>The shell's canvas root (null while it is down) - BenchSlots parents its layer here.</summary>
+        internal static Transform Root { get { return root != null ? root.transform : null; } }
+
         /// <summary>Builds the shell. Called by FitBench.Open AFTER it hid the game's canvases.</summary>
         internal static void Open(Func<float> panelWidth)
         {
@@ -103,16 +106,17 @@ namespace Morgott.ContentTool.Dev
             if (root != null) UnityEngine.Object.Destroy(root);
             root = null;
             cardTabs.Clear(); cardTexts.Clear();
+            BenchSlots.Reset();
             crumbKey = stepKey = null;
         }
 
-        private static void Fail(string why)
+        internal static void Fail(string why)
         {
             failed = true;
             Live = false;
             failure = why;
             try { Teardown(); } catch (Exception) { root = null; }
-            ContentToolMain.Say("ct_bench: native frame OFF for this session - " + why);
+            ContentToolMain.Say("ct_bench: native frame OFF for this bench visit - " + why);
         }
 
         internal static bool TakeTab(out int t) { t = wantTab; wantTab = -1; return t >= 0; }
@@ -152,11 +156,12 @@ namespace Morgott.ContentTool.Dev
             back = NativeKit.Button(band, "Back", "< BACK", BenchNav.RequestBack);
             reset = NativeKit.Button(band, "Reset", "RESET VIEW", () => wantReset = true);
             close = NativeKit.Button(band, "Close", "CLOSE", () => wantClose = true);
-            const float pad = 8f, row = 28f, closeW = 176f;
-            NativeKit.Place(home, pad, pad, 76f, row);
-            NativeKit.Place(back, pad + 80f, pad, 84f, row);
+            // 8 | Home 66 | 4 | Back 76 | ... | Reset 104 | 4 | Close 168 | 8 - fits the 448 px panel with room.
+            const float pad = 8f, row = 28f, closeW = 168f, resetW = 104f;
+            NativeKit.Place(home, pad, pad, 66f, row);
+            NativeKit.Place(back, pad + 70f, pad, 76f, row);
             NativeKit.Place(close, w - pad - closeW, pad, closeW, row);
-            NativeKit.Place(reset, w - pad - closeW - 4f - 112f, pad, 112f, row);
+            NativeKit.Place(reset, w - pad - closeW - 4f - resetW, pad, resetW, row);
             NativeKit.Tip(home, "back to the task list (nothing you picked is lost)");
             NativeKit.Tip(back, "one step back - closes the open picker, else Home (Esc)");
             NativeKit.Tip(reset, "camera back to the start (Home key)");

@@ -1954,7 +1954,10 @@ namespace Morgott.ContentTool.Dev
 
             float top = shell ? BenchShell.BandHeight : BenchList.PanelInset;
             float viewportH = Screen.height - top - BenchList.PanelInset;
-            GUILayout.BeginArea(new Rect(x + BenchList.PanelInset, top, BenchList.ContentWidth(w), viewportH));
+            var area = new Rect(x + BenchList.PanelInset, top, BenchList.ContentWidth(w), viewportH);
+            GUILayout.BeginArea(area);
+            // Native slots (main button, badges) inside this scroll view are clipped to it.
+            if (shell) BenchSlots.PanelBegin(area);
             panelScroll = GUILayout.BeginScrollView(panelScroll);
 
             BenchUi.Frame();
@@ -2717,6 +2720,7 @@ namespace Morgott.ContentTool.Dev
                 if (!open) return;
                 try
                 {
+                    BenchSlots.BeginPass();
                     if (dropFocus) { GUI.FocusControl(null); dropFocus = false; }
                     string focused = GUI.GetNameOfFocusedControl();
                     typing = focused == UnitFilterName || focused == WeaponFilterName ||
@@ -2741,6 +2745,7 @@ namespace Morgott.ContentTool.Dev
                     // native shell lays its own, under its canvas, when it is up).
                     if (!ModelScreen(shown) && !BenchShell.Live) BenchUi.Ground(new Rect(0f, 0f, Screen.width, Screen.height));
                     Draw();
+                    BenchSlots.PanelEnd();
                     if (ModelScreen(shown))
                     {
                         // AFTER the panel, and outside its area: the strip is its own region and IMGUI
@@ -2761,6 +2766,8 @@ namespace Morgott.ContentTool.Dev
                     BenchNav.Escape(NavFree);
                     // The hovered control's tooltip, on top of everything.
                     BenchUi.Tooltip();
+                    // The native slots onto the rects this Repaint recorded.
+                    BenchSlots.EndRepaint();
                     // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.
                     guiHot = GUIUtility.hotControl != 0;
                 }
