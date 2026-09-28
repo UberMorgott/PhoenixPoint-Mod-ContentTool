@@ -101,9 +101,13 @@ namespace Morgott.ContentTool.Bake
         /// <param name="onPhase">where the run has got to: phase name, phases done, phases total. Counts
         /// ONLY with a real denominator - serialization and the Unity gates publish the phase and a zero
         /// total, because an invented percentage is a worse answer than none (design section 5).</param>
+        /// <param name="patchOnly">the mod-manager checkbox's bake (PERF.md design 1): import only the sources
+        /// the "replace" rows name, patch, publish with the same receipt rule - and skip the read-back gates,
+        /// the video-row check and the mod's own Dist bundle, which are the AUTHOR'S proofs and ship
+        /// prebuilt. Every author door (ct_project, the dashboard, ct_route7 apply) keeps the full run.</param>
         internal static BakeResult Bake(string projectRoot, bool claimHeld,
                                         CancellationToken cancel = default(CancellationToken),
-                                        Action<string, int, int> onPhase = null)
+                                        Action<string, int, int> onPhase = null, bool patchOnly = false)
         {
             // ALWAYS a pump, never null downstream: with no token and no callback its checkpoints are two
             // no-ops, so the console verb and the checkbox take exactly the path they took before.
@@ -122,7 +126,8 @@ namespace Morgott.ContentTool.Bake
             // that is the only way out of a nested importer; reporting it as "ct_project THREW" would tell
             // the author their project is broken when they are the one who pressed stop. The id is not read
             // yet, so the line names the folder they picked.
-            try { p = ContentProject.Load(projectRoot, pump); }
+            System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
+            try { p = ContentProject.Load(projectRoot, pump, patchOnly); }
             catch (OperationCanceledException)
             {
                 return new BakeResult(0, 0, StageText.BakeCancelled(
@@ -140,6 +145,7 @@ namespace Morgott.ContentTool.Bake
             // AFTER Load, because p.Id is what names the patched directory - and Load writes nothing, so
             // every byte this run produces is still covered. A project that fails to load never took a
             // claim and needs no release.
+            Dev.Perf.Line("bake.load", p.Id, sw);
             string[] dirs = OutputDirs(p.Root, p.Id);
             string contended;
             if (!claimHeld && !OutputClaim.Take(dirs, out contended))
@@ -149,7 +155,9 @@ namespace Morgott.ContentTool.Bake
             // that session would be refused for a run that is long over.
             try
             {
-                BakeResult r = Baked(p, pump, cacheKey);
+                sw = Dev.Perf.Start();
+                BakeResult r = Baked(p, pump, cacheKey, patchOnly);
+                Dev.Perf.Line("bake.baked", p.Id, sw);
                 // A CLEAN PATCH ROUTE IS THE FIX R29 ASKS FOR, from whichever door baked it - the console
                 // verb, the dashboard's Bake, or Apply's own re-bake.
                 Route7.BakeCleared(p.Id, r);
@@ -201,7 +209,7 @@ namespace Morgott.ContentTool.Bake
         /// the directories this writes into, and a caller that reached here directly would own none.</summary>
         /// <param name="cacheKey">B1's receipt, taken by <see cref="Bake"/> before the sources were
         /// imported and passed down UNCHANGED - never recomputed here.</param>
-        private static BakeResult Baked(ContentProject p, LoadPump pump, string cacheKey)
+        private static BakeResult Baked(ContentProject p, LoadPump pump, string cacheKey, bool patchOnly)
         {
             StringBuilder log = new StringBuilder();
             // The FIRST cooperative boundary, before a byte is written: a run cancelled while it was still
@@ -258,7 +266,7 @@ namespace Morgott.ContentTool.Bake
                 // failures, disposition Refused, and Apply reads the disposition rather than the counts.
                 string live;
                 PublishOutcome published;
-                int refused = Patch(p, log, pump, cacheKey, out live, out published, out warnings);
+                int refused = Patch(p, log, pump, cacheKey, !patchOnly, out live, out published, out warnings);
                 if (live != null) return new BakeResult(0, 0, log.Append(live).ToString(), BakeDisposition.Refused);
                 // R38 AT B5 IS THE SAME ANSWER AS R38 AT ENTRY - a claim can arrive while the bake runs, and
                 // the boundary asks again with the temps already written. Nothing was published either way.
@@ -268,8 +276,15 @@ namespace Morgott.ContentTool.Bake
                     return new BakeResult(0, 0, log.Append(StageText.BakeCancelled(p.Id)).ToString(),
                                           BakeDisposition.Cancelled);
                 patchFailed += refused; failures += refused;
-                failures += VideoRows(p, log);
+                if (!patchOnly) failures += VideoRows(p, log);
             }
+            // THE CHECKBOX STOPS HERE: the copies and their receipt are published, which is all route vii
+            // installs. The own bundle below is the author's output and already ships in Dist.
+            if (patchOnly)
+                return new BakeResult(failures, patchFailed, log.Append(failures != 0
+                        ? StageText.S5(failures) : StageText.BakePatchOnly())
+                    .Append(StageText.BakeWarnings(warnings)).ToString(),
+                    failures != 0 ? BakeDisposition.Failed : BakeDisposition.Success);
             // WHAT WAS PATCHED, not how many rows were declared. A "video" row is a replacement that
             // needs no patched bundle at all - Bundles(p) skips it, because the clip is a loose file
             // served live by ct_video - so keying the success line on p.Replace.Count made a
@@ -1718,7 +1733,10 @@ namespace Morgott.ContentTool.Bake
         /// line already says "Baked anyway; nothing was skipped". Counting it as a failure made
         /// route vii refuse the apply and block the mod for the session (Route7.cs:491) over a copy that
         /// carried every row it declared - 2026-09-06, chr_px_hvy_ts_m_v01. A warning never fails a run.</param>
-        private static int Patch(ContentProject p, StringBuilder log, LoadPump pump, string key,
+        /// <param name="readBack">false on the checkbox's patch-only bake: the read-back gates re-open the
+        /// copy and the shipped file 2-7 times per row (~2-3 s per bundle mod, PERF.md hotspot 4) to prove
+        /// what the author's bake already proved over the same code. Row refusals are unaffected.</param>
+        private static int Patch(ContentProject p, StringBuilder log, LoadPump pump, string key, bool readBack,
                                  out string liveRefusal, out PublishOutcome published, out int warned)
         {
             int failures = 0;
@@ -1771,6 +1789,7 @@ namespace Morgott.ContentTool.Bake
                     List<KeyValuePair<string, ImportedMesh>> meshes = new List<KeyValuePair<string, ImportedMesh>>();
                     List<KeyValuePair<string, ShippedReplacement>> clips =
                         new List<KeyValuePair<string, ShippedReplacement>>();
+                    System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
                     using (BundleBaker baker = new BundleBaker(shipped, p.Id))
                     {
                         // EVERY REFUSAL BELOW IS `failures++; continue;`, NEVER A RETURN. Returning out of
@@ -1921,7 +1940,13 @@ namespace Morgott.ContentTool.Bake
                     // one worth measuring, and nothing has been replaced yet. The one visible consequence is the
                     // P4-bytes VOID diagnostic (ReadBack.cs:121), which names the file it could not read
                     // buffers in: on that arm alone it now prints the temp's path instead of the copy's.
-                    failures += ReadBack.Run(log, bundleFile, shipped, copyTmp, want, mats, meshes, clips).Failed;
+                    Dev.Perf.Line("bake.patch " + bundleFile, p.Id, sw);
+                    if (readBack)
+                    {
+                        sw = Dev.Perf.Start();
+                        failures += ReadBack.Run(log, bundleFile, shipped, copyTmp, want, mats, meshes, clips).Failed;
+                        Dev.Perf.Line("bake.readback " + bundleFile, p.Id, sw);
+                    }
                     copies.Add(new KeyValuePair<string, string>(bundleFile, copy.Replace('\\', '/')));
                 }
             }
@@ -1958,6 +1983,16 @@ namespace Morgott.ContentTool.Bake
             // the receipt, and Route7 must not install over it. Refused and Cancelled published NOTHING and
             // are dispositions, never counts - the caller returns on them before this count is read.
             if (published == PublishOutcome.Failed) failures++;
+            // THE NEGATIVE RECEIPT, only when the whole set was PUBLISHED: then an unvouched run failed on its
+            // rows or its inputs, which the same key reproduces, and the checkbox need not bake it again
+            // (Route7.Applied). A Failed publication is I/O and a Refused/Cancelled one is contention or a
+            // press - none of them is recorded. NOR IS A RUN WITH A SOURCE THE IMPORTER REFUSED: a locked or
+            // half-written .png reads as "no such texture" to its row, and the key (size + mtime) would not
+            // move once the lock lifts. Only row-parse refusals are counted in ImportFailures without being an
+            // import. A clean run clears the record.
+            if (published == PublishOutcome.Published)
+                Project.PatchCache.MarkFailed(outDir, vouched ? null
+                    : p.ImportFailures - p.ReplaceRefusals == 0 ? key : null);
             // Nothing at all was written on these two, so none of the advice below applies.
             if (published == PublishOutcome.Refused || published == PublishOutcome.Cancelled) return failures;
 

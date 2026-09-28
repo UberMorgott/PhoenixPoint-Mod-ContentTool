@@ -78,7 +78,7 @@ namespace Morgott.ContentTool
         }
 
         /// <summary>
-        /// Every project id whose patched copies are still someone's: the ENABLED content mods, via
+        /// Every project id whose patched copies are still someone's: the INSTALLED content mods, via
         /// the one discovery every route shares (Project.ContentMods.Enabled - never a second one),
         /// plus ContentTool's own subprojects, which no mod manager lists and `ct_route7 apply
         /// &lt;name&gt;` bakes. Throwing rather than guessing is deliberate: the caller's catch turns
@@ -88,8 +88,13 @@ namespace Morgott.ContentTool
         {
             List<string> ids = new List<string>();
             int skipped;
+            // ALL-ON: an INSTALLED mod merely switched off keeps its copies, so switching it back on is not
+            // a full re-bake (PERF.md hotspot 3). Only a mod no longer installed is swept.
+            IDictionary<string, bool> roster = Project.ModRoster.Build();
+            if (roster != null)
+                foreach (string k in new List<string>(roster.Keys)) roster[k] = true;
             foreach (string dir in Project.ContentMods.Enabled(ModDir, Project.ContentMods.Manifest,
-                                                               Project.ModRoster.Build(), null, out skipped))
+                                                               roster, null, out skipped))
                 ids.Add(Project.ContentProject.LoadDeclared(dir).Id);
 
             DirectoryInfo own = string.IsNullOrEmpty(ModDir) ? null : new DirectoryInfo(ModDir);
@@ -153,10 +158,15 @@ namespace Morgott.ContentTool
             // Both routes read the SAME roster in the SAME frame. The video pass used to run inside
             // OnModEnabled, where every dependent mod still reads Enabled=false - it could not be
             // gated there at all.
+            System.Diagnostics.Stopwatch total = Dev.Perf.Start(), sw = Dev.Perf.Start();
             try { log?.LogInfo(Bake.VideoCatalog.LiveAll()); }
             catch (Exception ex) { log?.LogError("ct_video LiveAll THREW " + ex); }
+            Dev.Perf.Line("load.video", null, sw);
+            sw = Dev.Perf.Start();
             try { log?.LogInfo(Bake.SoundLoad.LoadAll(ModDir)); }
             catch (Exception ex) { log?.LogError("ct_sound load THREW " + ex); }
+            Dev.Perf.Line("load.sound", null, sw);
+            sw = Dev.Perf.Start();
             // The Addressables routes' half of the same roster read, in BOTH directions: the live
             // redirections and published keys are session-only, so every ENABLED content mod has to
             // have them installed again on this launch, and a mod switched off BEFORE launch never
@@ -170,14 +180,20 @@ namespace Morgott.ContentTool
                 if (swept != null) log?.LogInfo(swept);
             }
             catch (Exception ex) { log?.LogError("ct_cache prune THREW " + ex); }
+            Dev.Perf.Line("load.prune", null, sw);
+            sw = Dev.Perf.Start();
             try { string moved = Project.ModRoster.Reconcile(ModDir); if (moved != null) log?.LogInfo(moved); }
             catch (Exception ex) { log?.LogError("ct_content reconcile THREW " + ex); }
+            Dev.Perf.Line("load.reconcile", null, sw);
+            sw = Dev.Perf.Start();
             // The creature route's half of the same roster read. A content mod that declares a
             // "creature" block and ships no C# has nobody else to build it - the only caller of
             // CreatureBuild.Build was a mod's own DLL, so such a mod loaded and minted nothing,
             // silently. AFTER the reconcile: the bundle it loads is the one the reconcile installed.
             try { string born = Tactical.CreatureBuild.BuildAll(ModDir); if (born != null) log?.LogInfo(born); }
             catch (Exception ex) { log?.LogError("ct_creature BuildAll THREW " + ex); }
+            Dev.Perf.Line("load.creature", null, sw);
+            Dev.Perf.Line("load.total", null, total);
             // The startup pass is over - the roster above was read from its final flags. From here
             // the mod manager's checkbox is the only thing that decides, so the dependency keep-alive
             // (ModRoster.BeforeDisable) must stop having an opinion: a mod the player switches OFF

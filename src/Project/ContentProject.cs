@@ -372,7 +372,11 @@ namespace Morgott.ContentTool.Project
         /// BETWEEN existing statements - see <see cref="LoadPump"/> for why that is the whole discipline.
         /// A cancelled load throws <c>OperationCanceledException</c>, which the job turns into
         /// <c>BakeDisposition.Cancelled</c>; nothing has been written at that point.</param>
-        internal static ContentProject Load(string root, LoadPump pump)
+        /// <param name="patchOnly">the mod-manager checkbox's load: import ONLY the textures and meshes a
+        /// "replace" row names, and no models or audio - route vii patches shipped bundles and needs nothing
+        /// else, while decoding every source cost the player seconds per mod on every stale enable (PERF.md
+        /// hotspot 2). Every other caller - the author's bake, Verify, the dashboard - gets the full import.</param>
+        internal static ContentProject Load(string root, LoadPump pump, bool patchOnly = false)
         {
             const int phases = 7;
             if (pump != null) pump.At("manifest", 0, phases);
@@ -380,6 +384,7 @@ namespace Morgott.ContentTool.Project
             if (!File.Exists(metaPath)) throw new FileNotFoundException("no ppcontent.json in " + root, metaPath);
             // JsonUtility: Unity's own reader, so no JSON dependency enters the tool.
             Meta m = MetaOrRefuse(FromJson(File.ReadAllText(metaPath)));
+            HashSet<string> rowSources = patchOnly ? RowSources(File.ReadAllText(metaPath)) : null;
 
             ContentProject p = new ContentProject
             {
@@ -399,13 +404,14 @@ namespace Morgott.ContentTool.Project
             // counted once, in ONE place, at the end of this method. Adding it twice would report two
             // failures for one unreadable .glb.
             if (pump != null) pump.At("textures", 1, phases);
-            SourceImport.Each(Sources(root, "Textures", p.SourceRefusals, ContentMods.TexturePatterns),
+            SourceImport.Each(Only(Sources(root, "Textures", p.SourceRefusals, ContentMods.TexturePatterns), rowSources),
                               p.Textures, p.SourceRefusals, ImportTexture);
             if (pump != null) pump.At("meshes", 2, phases);
-            SourceImport.Each(Sources(root, "Meshes", p.SourceRefusals, ContentMods.MeshPatterns),
+            SourceImport.Each(Only(Sources(root, "Meshes", p.SourceRefusals, ContentMods.MeshPatterns), rowSources),
                               p.Meshes, p.SourceRefusals, ImportMesh);
             if (pump != null) pump.At("models", 3, phases);
-            SourceImport.Each(Sources(root, "Models", p.SourceRefusals, "*.glb"),
+            SourceImport.Each(Only(Sources(root, "Models", p.SourceRefusals, "*.glb"),
+                                   patchOnly ? new HashSet<string>() : null),
                               p.Models, p.SourceRefusals, ImportModel);
             if (pump != null) pump.At("videos", 4, phases);
             p.Videos.AddRange(ImportVideos(root, p.SourceRefusals));
@@ -445,7 +451,9 @@ namespace Morgott.ContentTool.Project
             // never finished. It is short, it writes nothing, and it is not worth a torn count.
             if (pump != null) pump.At("audio", 6, phases);
             uint next = MediaIdBase(p.Id);
-            foreach (string f in Sources(root, "Audio", p.SourceRefusals, "*.wav", "*.ogg", "*.mp3"))
+            // patchOnly: no "replace" row names a sound, so an empty set imports none.
+            foreach (string f in Only(Sources(root, "Audio", p.SourceRefusals, "*.wav", "*.ogg", "*.mp3"),
+                                      patchOnly ? new HashSet<string>() : null))
             {
                 string why;
                 ImportedAudio a = p.ImportAudio(f, ref next, out why);
@@ -701,6 +709,32 @@ namespace Morgott.ContentTool.Project
         /// that matters: Validate PASSed swatch.png beside swatch.jpg and the bake then refused the row
         /// at P1, because only this one dropped both files.
         /// </summary>
+        /// <summary>The stems a "replace" row names as its source - texture or mesh - which is all Patch looks
+        /// up (ProjectBake.Find / FindMesh, by stem, case-blind). A manifest that does not parse yields none;
+        /// the full ParseReplace below refuses it by name as it always did.</summary>
+        private static HashSet<string> RowSources(string json)
+        {
+            HashSet<string> stems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (ShippedReplacement r in ParseReplace(json, new List<string>()))
+                {
+                    if (!string.IsNullOrEmpty(r.texture)) stems.Add(r.texture);
+                    if (!string.IsNullOrEmpty(r.mesh)) stems.Add(r.mesh);
+                }
+            }
+            catch (InvalidDataException) { }
+            return stems;
+        }
+
+        /// <summary>The files whose stem is in <paramref name="stems"/>, or all of them when it is null.
+        /// Filtered AFTER Sources, so its refusals (stem collisions, unsupported formats) are unchanged.</summary>
+        private static string[] Only(string[] files, HashSet<string> stems)
+        {
+            if (stems == null) return files;
+            return Array.FindAll(files, f => stems.Contains(Path.GetFileNameWithoutExtension(f)));
+        }
+
         private static string[] Sources(string root, string folder, List<string> refusals,
                                         params string[] patterns)
         {

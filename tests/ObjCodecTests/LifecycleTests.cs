@@ -1424,7 +1424,8 @@ internal static class LifecycleTests
             string text = file != null && File.Exists(file) ? File.ReadAllText(file) : null;
             int taken = text == null ? -1 : text.IndexOf("string cacheKey = CacheKey(projectRoot);",
                                                          StringComparison.Ordinal);
-            int imported = text == null ? -1 : text.IndexOf("ContentProject.Load(projectRoot, pump)",
+            // No closing paren: the checkbox passes patchOnly (PERF step 3).
+            int imported = text == null ? -1 : text.IndexOf("ContentProject.Load(projectRoot, pump",
                                                             StringComparison.Ordinal);
             checks += Check(taken >= 0 && imported > taken,
                             "and B1 is taken BEFORE the import in ProjectBake.Bake - the capture order " +

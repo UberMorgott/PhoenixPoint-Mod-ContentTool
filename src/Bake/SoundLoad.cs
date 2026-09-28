@@ -52,7 +52,12 @@ namespace Morgott.ContentTool.Bake
             // folder path case-insensitively: "B.mod" and "a.mod" sorted the other way round here, so the
             // sound route could crown a different winner than the bundle and key routes for one pair.
             enabled.Sort((a, b) => string.CompareOrdinal(ModId(a), ModId(b)));
-            foreach (string mod in enabled) LoadMod(mod, log, ref failed);
+            foreach (string mod in enabled)
+            {
+                System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
+                LoadMod(mod, log, ref failed);
+                Dev.Perf.Line("sound", Path.GetFileName(mod), sw);
+            }
             // Counts including 0, always: a loader that found nothing must say so rather than print
             // an empty block that reads like success. The bank count is read from the LEDGER, not
             // from this loop - the runtime toggle loads banks through the same LoadMod, and a local

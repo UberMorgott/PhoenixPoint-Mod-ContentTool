@@ -180,6 +180,7 @@ namespace Morgott.ContentTool.Bake
         {
             if (string.IsNullOrEmpty(modDir) ||
                 !File.Exists(Path.Combine(modDir, Project.ContentMods.Manifest))) return null;
+            System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
             Project.ContentProject.Declared project = Project.ContentProject.LoadDeclared(modDir);
             // VIDEO rows are not the replace route's work - :288 skips them when it builds `declared`,
             // so counting them here sent a video-only mod through a full blocking ProjectBake.Run that
@@ -216,7 +217,10 @@ namespace Morgott.ContentTool.Bake
                 else
                 {
                     ApplyDisposition how;
-                    log.AppendLine(ApplyProject(name, null, out how));
+                    IList<TargetInstall> ignored;
+                    // checkbox: the patch-only bake and the negative receipt (Applied) - this is the
+                    // player's enable path, not an author's.
+                    log.AppendLine(ApplyRoot(ContentToolMain.ProjectDir(name), null, out ignored, out how, true));
                     // THE PATCH ROUTE FAILED - the one outcome worth not repeating on the postfix pass.
                     // A refusal (R37/R38, a contended claim) is a race, not a broken project.
                     if (how == ApplyDisposition.BakeFailed) Failed.Add(project.Id);
@@ -230,10 +234,17 @@ namespace Morgott.ContentTool.Bake
                 string legacy = LegacyPub(project.Id);
                 if (legacy != null) log.AppendLine(legacy);
                 else if (BundleClaims.RouteMoves(true, KeysLive.Holds(project.Id), on))
+                {
+                    System.Diagnostics.Stopwatch pub = Dev.Perf.Start();
                     log.AppendLine(on ? CatalogApply(name) : KeysLive.Uninstall(project.Id));
+                    Dev.Perf.Line("route3." + (on ? "on" : "off"), project.Id, pub);
+                }
             }
 
             string what = log.ToString().TrimEnd();
+            // Only a toggle that DID something: the prefix, postfix and reconcile repeat the call per mod,
+            // and the no-op repeats are not what a slow startup is made of.
+            if (what.Length > 0) Dev.Perf.Line("toggle." + (on ? "on" : "off"), project.Id, sw);
             return what.Length == 0 ? null : what;
         }
 
@@ -430,8 +441,12 @@ namespace Morgott.ContentTool.Bake
         /// duplicate name would answer with the wrong folder. Same claim, taken once, in the same place:
         /// there is no second apply path here, only a second door onto this one.
         /// </summary>
+        /// <param name="checkbox">the mod-manager checkbox (<see cref="Toggle"/>): a stale copy is re-baked
+        /// patch-only, and a bake that already failed deterministically on these exact inputs is not re-run.
+        /// Every author door leaves it false and gets the full bake, receipt or not - that is the retry.</param>
         internal static string ApplyRoot(string projectRoot, string forBundle,
-                                         out IList<TargetInstall> targets, out ApplyDisposition how)
+                                         out IList<TargetInstall> targets, out ApplyDisposition how,
+                                         bool checkbox = false)
         {
             targets = new List<TargetInstall>();
             how = ApplyDisposition.Refused;
@@ -445,7 +460,7 @@ namespace Morgott.ContentTool.Bake
             string[] owned = ProjectBake.OutputDirs(projectRoot, project.Id);
             string contended;
             if (!OutputClaim.Take(owned, out contended)) return contended;
-            try { return Applied(project, projectRoot, forBundle, out targets, out how); }
+            try { return Applied(project, projectRoot, forBundle, out targets, out how, checkbox); }
             finally { OutputClaim.Release(owned); }
         }
 
@@ -453,7 +468,7 @@ namespace Morgott.ContentTool.Bake
         /// <c>ProjectBake.Baked</c> is: a caller that reached here directly would own nothing.</summary>
         private static string Applied(Morgott.ContentTool.Project.ContentProject project, string projectRoot,
                                       string forBundle, out IList<TargetInstall> targets,
-                                      out ApplyDisposition how)
+                                      out ApplyDisposition how, bool checkbox)
         {
             targets = new List<TargetInstall>();
             how = ApplyDisposition.Refused;
@@ -464,8 +479,24 @@ namespace Morgott.ContentTool.Bake
             // The declared targets and the freshness verdict are ONE observation now (Observe above), so
             // the panel and this checkbox read the same `haveAll` rather than each computing it. The census
             // and its case-blindness moved with it, comments and all.
+            System.Diagnostics.Stopwatch sw = Dev.Perf.Start();
             FreshnessObservation seen = Observe(project, projectRoot);
+            Dev.Perf.Line("route7.observe" + (seen.HaveAll ? " fresh" : " stale"), modId, sw);
             List<string> declared = new List<string>(seen.Declared);
+            // A BAKE THAT ALREADY FAILED ON EXACTLY THESE INPUTS is not re-run by the checkbox: it failed every
+            // launch before, blocking startup each time for the same refusal. `how` stays Refused, NOT
+            // BakeFailed: Toggle must not arm the session block (R29) over it, because this check costs one key
+            // hash and re-asking it is what lets an edit made mid-session bake on the very next press. Any
+            // change to the manifest, a source, the shipped bundle or the ContentTool build changes the answer;
+            // an author door always bakes.
+            if (!seen.HaveAll && checkbox && Project.PatchCache.FailedBefore(patched, seen.Key))
+            {
+                return pre.AppendLine("NOT RE-BAKED: '" + modId + "' failed its last bake of exactly these " +
+                                      "files and would fail the same way - nothing was installed. Fix the rows " +
+                                      "that bake named (any edit re-bakes), or delete " +
+                                      Path.Combine(patched, "ct-cache.failed") + " and switch the mod on again " +
+                                      "to retry unchanged.").ToString();
+            }
             if (!seen.HaveAll)
             {
                 pre.AppendLine(seen.CacheDirExists && !seen.KeyMatches
@@ -500,7 +531,11 @@ namespace Morgott.ContentTool.Bake
                 // and install the STALE copies as if this bake had produced them. Counting a refusal as a
                 // patch failure instead is no better: that reaches the checkbox's Failed.Add (Toggle) and
                 // blocks the mod for the rest of the session over a race nobody caused.
-                BakeResult baked = ProjectBake.Bake(projectRoot, true);   // claimHeld: this apply owns it
+                sw = Dev.Perf.Start();
+                // claimHeld: this apply owns it. patchOnly for the checkbox (PERF.md design 1).
+                BakeResult baked = ProjectBake.Bake(projectRoot, true, default(System.Threading.CancellationToken),
+                                                    null, checkbox);
+                Dev.Perf.Line("route7.bake", modId, sw);
                 pre.AppendLine(baked.Terminal);
                 if (baked.How == BakeDisposition.Refused || baked.How == BakeDisposition.Cancelled)
                     return pre.ToString();                                // `how` stays Refused; Failed untouched
@@ -563,12 +598,14 @@ namespace Morgott.ContentTool.Bake
                 pre.AppendLine("REFUSED: " + forBundle + " is not declared by this project - its " +
                                Project.ContentMods.Manifest + " names " + declared.Count + " \"replace\" " +
                                "target(s)" + (declared.Count == 0 ? "" : ": " + string.Join(", ", declared.ToArray())));
+            sw = Dev.Perf.Start();
             pre.Append("installing " + copies.Count + " patched copy(ies) as '" + modId + "'\n")
                // THE PER-TARGET ANSWER COMES OUT OF THE INSTALL LOOP, not from a second sample around it.
                // The `wasResident`/`Find` pair that used to sit here measured ONE bundle either side of a
                // loop that installs several; inside, each target is sampled at its own Register, which is
                // the same rule applied per target instead of per press.
                .Append(BundleLive.Install(modId, copies, out targets));
+            Dev.Perf.Line("route7.install", modId, sw);
             // UNCONDITIONALLY, once the copies are in. It sat inside the `!haveAll` branch, so the
             // press that arrived with a FRESH patched folder - the common case after a fix elsewhere -
             // installed the copies and left the session's "this one failed" flag standing, and the
