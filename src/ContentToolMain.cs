@@ -549,8 +549,18 @@ namespace Morgott.ContentTool
             {
                 try
                 {
+                    const string usage = "usage: ct_project [<project> [twice]] - bake a content " +
+                                         "project from its ppcontent.json; no project = the generated sample";
+                    string first = args != null && args.Length > 0 && !string.IsNullOrEmpty(args[0]) ? args[0] : null;
+                    if (first != null && (first == "?" || first.TrimStart('-', '/').ToLowerInvariant() == "help" ||
+                                          first == "-h" || first == "/?"))
+                    { Out(console, usage); return; }
                     // A NAME under the mod folder, never a path - see ProjectDir.
-                    string root = ProjectDir(args != null && args.Length > 0 ? args[0] : null);
+                    string root = ProjectDir(first);
+                    // A named project must exist: baking a folder with no manifest threw a stack trace
+                    // (`ct_project help` read "help" as a project name).
+                    if (first != null && !File.Exists(Path.Combine(root, "ppcontent.json")))
+                    { Out(console, "no content project '" + first + "' (no ppcontent.json in " + root + ")" + Environment.NewLine + usage); return; }
                     if (args == null || args.Length == 0)
                     {
                         // Rewritten whenever it predates the current sample, so an older generated
