@@ -79,7 +79,7 @@ the live shader does not have that property, so writing it is silently ineffecti
 Everything important is in the single `"material"` row in `ppcontent.json`. The README explains why
 the property must exist on the material's shader. Read the [material recipe](guides/materials.md).
 
-## [NoDepTexture](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/NoDepTexture)
+## [NoDepTexture](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/tests/fixtures/NoDepTexture)
 
 Replaces the Acidworm albedo with a checker, but deliberately omits the ContentTool dependency. This
 is a measurement fixture, not a recommended template: it demonstrates why every real content mod

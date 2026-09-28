@@ -1,12 +1,15 @@
 # NoDepTexture — the fixture that leaves the dependency out
 
-Not a demo of a feature. A **measurement fixture** for one question the other eight demos can never
+Not a demo of a feature. A **measurement fixture** for one question the demos can never
 ask, because every one of them declares `"Dependencies": [ "com.morgott.ContentTool" ]`:
 
 > what does a content mod that declares NO dependency actually do?
 
+It lives under `tests\fixtures\` (not `demos\`) so `deploy.ps1` does not install it and it is never
+packaged. To run it, copy this folder into the game's `Mods\` folder by hand.
+
 ```
-demos\NoDepTexture\
+tests\fixtures\NoDepTexture\
   meta.json                the mod manager entry, with the Dependencies field OMITTED ENTIRELY
   meta.deps-empty.json     the same entry with "Dependencies": [] written out explicitly
   ppcontent.json           one texture replacement
@@ -34,5 +37,5 @@ would have one of them refused by name.
 ## The result
 
 The four-cell measurement — `{Dependencies omitted, Dependencies: []}` x `{ContentTool ON, OFF}` —
-is recorded in `docs\SHIPPING-A-CONTENT-MOD.md`, together with the prediction that was written down
+is recorded in `internal-docs\legacy-pages\SHIPPING-A-CONTENT-MOD.md`, together with the prediction that was written down
 before the runs.
