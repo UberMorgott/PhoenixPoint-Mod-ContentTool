@@ -2,6 +2,16 @@
 
 Serve a WEBM, MP4 or MOV from your mod folder through the game’s live video catalog. A Replace row redirects a shipped clip; an Add row creates a new key that your behaviour must use.
 
+## The quick way: the bench
+
+![Choosing a game video in the bench](../images/bench/videos.png)
+
+1. Open the [bench](../bench/index.md) and choose `Videos`. Type your mod’s name in `Your mod` (**1**) and pick your `.webm`, `.mp4` or `.mov` clip (**2**).
+2. Keep `Replace a game video` (**3**), search for the shipped clip, press `Play` to watch it, and click its name to pick it (**4**). `Replaces` (**5**) confirms your pick. For a new clip, choose `Add as a new video` (**3**) instead.
+3. Press `Add to mod & apply` (**6**). The bench copies the clip into `Content\Videos`, writes the row below for you, and serves it with `ct_video live`. `Videos in <mod>` (**8**) shows `OK` for each clip that is in place; watch it in the player (**9**).
+
+[Videos](../bench/videos.md) explains the screen in full. For Add, your mod’s code must still start the new key (step 5 below). The steps below are the console and manual way to make the same video row.
+
 ## You need
 
 - One `.webm`, `.mp4` or `.mov` directly under `Content\Videos`.

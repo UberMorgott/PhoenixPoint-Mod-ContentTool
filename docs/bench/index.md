@@ -1,49 +1,39 @@
 # The in-game bench
 
-!!! note "Screenshots updating"
-    The bench was redesigned. New screenshots will follow.
-
-The bench lets you check a model, fit a weapon in a soldier’s hand, and build a mod while seeing the result in game.
+The bench walks you through making and testing a ContentTool mod inside the running game. The left side shows your task. The right side shows what that task needs: a live model, a sound or video player, or build progress and a log.
 
 ## Open the bench
 
-1. Load or start a campaign and wait for the geoscape to finish loading. The bench uses its squad bay.
-2. Open the developer console and enter:
+1. Load or start a campaign. Wait for the geoscape to finish loading. The bench uses the squad bay, so it cannot open from the main menu.
+2. Enter `ct_bench open` in the console, or press `Ctrl+Alt+B`.
 
-    ```text
-    ct_bench open
-    ```
+`ct_bench` on its own toggles the bench. If opening is refused, check that a geoscape campaign has finished loading.
 
-    You can also press `Ctrl+Alt+B`. If that hotkey is unavailable, use the console command.
-3. Choose a task card. `ct_bench` with no argument toggles the bench.
-
-!!! note "Screenshot updating"
-    The new screenshot will show the task-card home screen with its available and unavailable cards.
+![The bench home screen](../images/bench/home.png)
 
 ## Choose a task
 
-| Card | What it opens |
+Choose one of the six task cards (**3**):
+
+| Card | What you can do |
 |---|---|
-| `Replace a model` | Check a GLB against a soldier or creature part, then build a replacement. Follow [Model Doctor](model-doctor.md). |
-| `Fit a weapon` | Position a weapon your mod adds in a soldier’s hand, then save its fit. |
-| `Build & share` | Build, install, test, and package a selected mod. Follow [Build & share](lifecycle-tab.md). |
+| [`Replace a model`](model-doctor.md) | Put your `.glb` on a soldier or creature part and check its bones. |
+| [`Fit a weapon`](fit-weapon.md) | Position a weapon your mod adds in a soldier’s hand, then save. |
+| [`Build & share`](lifecycle-tab.md) | Build, install and test your mod, then package it for sharing. |
+| [`Add a weapon`](add-weapon.md) | Pick its kind, add your `.glb`, fit it in the hand, and check its moves. |
+| [`Sounds`](sounds.md) | Replace a game sound with your own `.wav`, `.ogg` or `.mp3`. |
+| [`Videos`](videos.md) | Replace a game cutscene with your own clip, or add a new one. |
 
-The `Add a weapon`, `Sounds`, and `Videos` cards explain that those tasks currently use console commands. Use [Find game content](../find-content/index.md) to locate shipped assets.
+Every card opens a real screen with its own steps. Where a task also has a console route, its recipe describes both.
 
-## Fit a weapon
+## Pick the mod you work on
 
-1. Choose `Fit a weapon`. The step bar reads `Soldier`, `Weapon`, `Adjust`, `Save`.
-2. Open `Soldier` and choose who will hold the weapon. Open `Weapon` and choose a weapon. The list marks weapons made by your mod with `*`; `* live` means their fit is loaded in this session.
-3. Inspect the weapon on the model. Drag its arrows to move it or its rings to turn it. Middle-drag to orbit, use the wheel to zoom, and press `F` to frame the view.
-4. Use `Save to file` to write a mod weapon’s fit. The line beneath a disabled button says what is missing. A shipped game weapon can be held for comparison, but has no mod file to save into.
+`Your mods` (**4**) lists the folders beside ContentTool that contain a `ppcontent.json`. Clicking one makes it the mod that `Sounds`, `Videos` and `Add a weapon` write into. Press `Look again` (**5**) if you created a mod folder after opening the bench.
 
-The badge says `Changed - not saved yet.` or `Saved - the file matches what you see.` Use `Revert` to return to the file’s values or `Reset to automatic` to return to the measured fit. Both leave the file untouched until you save. Open `Details` for the full result of the last action.
+For example, click `MenuMusic` in `Your mods` (**4**), then open `Sounds` (**3**) to add a replacement sound to that mod.
 
-!!! note "Screenshot updating"
-    The new screenshot will show `Fit a weapon` with a selected soldier, a mod weapon marked `* live`, the step bar, and the changed fit badge above `Save to file`.
+## Move around and leave
 
-## Leave or reset the view
+`Home` and `< Back` (**1**) sit at the top of every screen. [Moving around and reading logs](navigation.md) explains them, the 3D camera and the log controls that every task shares.
 
-Use `< Tasks` to return to the cards. Use `Reset view` or press `Home` to reset the camera. Use `Close (Ctrl+Alt+B)`, the hotkey, or `ct_bench close` to leave.
-
-If opening is refused, check that a geoscape campaign has finished loading; the main menu does not have the squad bay.
+To leave the bench, press `Close (Ctrl+Alt+B)` (**2**), press `Ctrl+Alt+B`, or enter `ct_bench close`.

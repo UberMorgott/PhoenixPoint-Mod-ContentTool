@@ -2,6 +2,17 @@
 
 Replace audio that Phoenix Point already plays. ContentTool bakes your file into a bank in your mod; the player needs no DLL.
 
+## The quick way: the bench
+
+![Choosing a game sound in the bench](../images/bench/sounds.png)
+
+1. Open the [bench](../bench/index.md) and choose `Sounds`. Type your mod’s name in `Your mod` (**1**).
+2. Under `1  Your sound file` (**4**), pick your `.wav`, `.ogg` or `.mp3`. Press `Play` (**4**) to hear it.
+3. Search for the game sound (**5**). Press `Play` beside a match (**6**) to hear it, then click its name to pick it. `Replaces` (**7**) confirms your pick.
+4. Press `Add to mod & build` (**8**). The bench copies your file to `Content\Audio\Replace\<mediaId>.<ext>`, runs `ct_sound bake`, and loads the bank. Check the mark under `Sounds in <mod>` (**11**): `LIVE` means you can hear it now; otherwise restart the game.
+
+[Sounds](../bench/sounds.md) explains the screen in full. The steps below are the console and manual way to make the same replacement.
+
 ## You need
 
 - An installed, enabled ContentTool and a WAV, OGG or MP3 file with mono or stereo audio.

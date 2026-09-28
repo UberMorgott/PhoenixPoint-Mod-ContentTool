@@ -73,7 +73,7 @@ Start the game with ContentTool enabled. Use either route:
     ct_bench open
     ```
 
-    Choose `Build & share`, pick `MyTextureMod`, open `Details and log`, then press `Run` on **Check files** followed by `Run` on **Build**. You should see **Check files** pass and the Build log end with the `ct_project: ALL PASS` line below. Keep the panel open while its steps run. See [Build & share](bench/lifecycle-tab.md).
+    Choose `Build & share`, pick `MyTextureMod` with `<` / `>` beside `Mod`, open `Details - run one step`, then press `Run` on **Check files** followed by `Run` on **Build**. You should see **Check files** pass and the `Log` on the right end with the `ct_project: ALL PASS` line below. Keep the screen open while its steps run. See [Build & share](bench/lifecycle-tab.md).
 
 === "Console"
 
