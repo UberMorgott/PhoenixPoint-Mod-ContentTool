@@ -49,42 +49,38 @@ markdown_extensions:
 
 nav:
   - Start here: index.md
-  - Your first working mod:
-      - First green bake: getting-started/first-mod.md
-      - Choose Replace, Add or Build: getting-started/choose-a-route.md
-      - Bake, test, package: getting-started/lifecycle.md
-  - In-game bench:
-      - The in-game bench: bench/index.md
-      - "Model Doctor: check a mesh before you bake": bench/model-doctor.md
-      - "Lifecycle tab: validate, bake, apply, verify, package": bench/lifecycle-tab.md
-  - Project files: reference/project-files.md
-  - Find game content: find-content/index.md
-  - Read bake failures: troubleshooting/bake-errors.md
+  - 10-minute quickstart: quickstart.md
+  - Concepts:
+      - Replace, Add or Build: concepts/routes.md
+      - "The lifecycle: validate, bake, apply, verify, package": concepts/lifecycle.md
   - Recipes:
       - Recipe index: recipes/index.md
       - Textures and icons: recipes/textures.md
       - Material property values: recipes/material-properties.md
       - Meshes: recipes/meshes.md
       - Animated models: recipes/animated-models.md
-      - Sounds: recipes/sounds.md
+      - Animation contract: recipes/animation-contract.md
+      - Replace sounds: recipes/sounds-replace.md
+      - Add new sounds: recipes/sounds-add.md
       - Videos: recipes/videos.md
+      - Behaviour DLL: recipes/behavior-dll.md
       - Creatures: recipes/creature.md
       - Humanoid soldiers: recipes/humanoid-soldier.md
       - Replace a character body: recipes/replace-character-body.md
-      - Weapons: recipes/weapon.md
-      - Behaviour DLL: recipes/behavior-dll.md
-      - Animation contract: recipes/animation-contract.md
-  - Worked examples:
-      - Choose a demo: examples/index.md
-      - MaterialTweak: examples/material-tweak.md
-      - WeaponMesh: examples/weapon-mesh.md
-      - ReplaceUiSounds: examples/replace-ui-sounds.md
-      - MenuMusic: examples/menu-music.md
-      - AddUiSounds: examples/add-ui-sounds.md
-      - IntroVideo: examples/intro-video.md
-      - QuitCutscene: examples/quit-cutscene.md
-      - CustomCreature: examples/custom-creature.md
-      - HumanoidSoldier: examples/humanoid-soldier.md
-      - ReplaceCharacterBody: examples/replace-character-body.md
-      - "Worked example: a PX Heavy armour set from a Blender export": examples/replace-armour-set.md
-      - WeaponAdd: examples/weapon-add.md
+      - Replace a weapon's art: recipes/weapon-replace.md
+      - Add new weapons: recipes/weapon-add.md
+      - Replace an armour set: recipes/armour-set.md
+  - Tools:
+      - The in-game bench: bench/index.md
+      - Model Doctor: bench/model-doctor.md
+      - "Build & share tab": bench/lifecycle-tab.md
+      - Find game content: find-content/index.md
+  - Reference:
+      - Console commands: reference/console-commands.md
+      - ppcontent.json: reference/ppcontent-json.md
+      - meta.json: reference/meta-json.md
+      - Project folder and file rules: reference/project-files.md
+      - Messages by stage: reference/messages.md
+  - Examples: examples/index.md
+  - Known limitations: known-limitations.md
+  - What's new: whats-new.md

@@ -1,70 +1,26 @@
 # Start here
 
-ContentTool is an engine for Phoenix Point content mods. It changes nothing by itself. A content mod
-tells it what to replace or add.
+ContentTool lets Phoenix Point mods replace shipped content, add new content, and build game objects from content and shipped definitions. It is the engine those mods use; installing ContentTool alone does not change the game.
 
-## Players
+## Players: install in four steps
 
-1. Download `ContentTool-*.zip` from the [latest release](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/releases/latest).
-2. Extract the `ContentTool` folder into `<Phoenix Point>\Mods\`.
-3. Check that this file exists:
-
-```text
-Phoenix Point\
-  Mods\
-    ContentTool\
-      meta.json              <- the mod manager finds ContentTool here
-```
-
-4. Start the game, open **Mods**, and tick **Content Tool**.
-
-If another mod declares ContentTool as a dependency, the mod manager can enable ContentTool for it.
-You do not need the authoring commands below just to play with a mod.
+1. Download `ContentTool-*.zip` from the [latest release](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/releases/latest). You should have a ZIP containing a `ContentTool` folder.
+2. Extract that folder into `<Phoenix Point>\Mods\`. You should now have `<Phoenix Point>\Mods\ContentTool\meta.json`, with no second `ContentTool` folder in between.
+3. Start Phoenix Point and open **Mods**. You should see **Content Tool** listed.
+4. Tick **Content Tool**. You should see it enabled. Mods that declare ContentTool as a dependency can also enable it through the mod manager.
 
 ## Modders
 
-Use [the in-game bench](bench/index.md) to inspect meshes and run project stages from a loaded geoscape.
+Start with the [10-minute quickstart](quickstart.md). It gives you a complete, copy-paste texture replacement and shows what each step should produce.
 
-Follow this route once before you pick a specialised recipe:
+Then use this map:
 
-1. [Make your first green bake](getting-started/first-mod.md). This proves that your folder, manifests,
-   console and installation agree.
-2. [Choose Replace, Add or Build](getting-started/choose-a-route.md).
-3. [Learn the project layout and file rules](reference/project-files.md).
-4. [Find the bundle, asset or media you need](find-content/index.md).
-5. [Bake, test and package](getting-started/lifecycle.md).
-6. [Read a failed bake](troubleshooting/bake-errors.md) before moving files at random.
-7. [Pick a recipe](recipes/index.md).
-8. [Open the closest worked demo](examples/index.md) and compare its manifest to yours.
+- [Replace, Add or Build](concepts/routes.md) helps you choose the right kind of mod.
+- [The lifecycle](concepts/lifecycle.md) explains baking, redirects, testing and packaging.
+- [Recipes](recipes/index.md) give steps for individual content types.
+- [Find game content](find-content/index.md) helps you identify shipped targets.
+- [The in-game bench](bench/index.md) and its [Lifecycle tab](bench/lifecycle-tab.md) provide visual tools for authoring.
+- [Project files](reference/project-files.md), [console commands](reference/console-commands.md) and [messages](reference/messages.md) explain the exact inputs and results.
+- [Examples](examples/index.md) show complete projects; [known limitations](known-limitations.md) records current boundaries.
 
-The first five pages are the golden path. They use one vocabulary throughout:
-
-- **source**: a file you made, such as a PNG, GLB or WAV;
-- **target**: shipped content named by a replacement row;
-- **bake**: `ct_project` imports sources and produces or checks game-ready output;
-- **package**: `ct_package` stages the folder you may distribute. It does not bake.
-
-## The texture rule
-
-Put texture sources directly under `Content\Textures\`.
-
-```text
-MyMod\
-  meta.json
-  ppcontent.json
-  Content\
-    Textures\              <- .png, .jpg and .jpeg are scanned here
-      soldier_albedo.png   <- the manifest names this as "soldier_albedo"
-    Meshes\
-      materials\           <- old Resource Replacer layout; ContentTool does not scan textures here
-```
-
-`Content\Meshes\materials\` is not a ContentTool texture folder. A texture left there may still be
-copied by the packager, but `ct_project` will not import it. See
-[Textures versus materials](troubleshooting/bake-errors.md#textures-versus-materials).
-
-## Worked demos
-
-The site documents all [11 public demo projects](examples/index.md), including the route, targets,
-folder tree, authoring commands, success output and measured status of each. `NoDepTexture` is an
-internal fixture and is deliberately not presented as a modding example.
+ContentTool’s diagnostic developer commands require an empty `ct-dev` file beside `ContentTool.dll`; nothing on this site needs it.

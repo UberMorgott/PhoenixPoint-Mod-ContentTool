@@ -1,33 +1,29 @@
 # Build a behaviour DLL
 
-A DLL supplies decisions that content cannot express: a hotkey, a definition edit or an explicit
-builder call such as `WeaponBuild.Build`. Do not add one to a content-only replacement.
+Use a DLL when your mod must decide *when* something happens: post a new sound event, start a new video, edit a def or call a builder. A content-only replacement needs no DLL.
 
-## What you need before you start
+## You need
 
-- The .NET SDK capable of targeting .NET Framework 4.7.2.
-- Phoenix Point's `ModSDK` folder and an installed ContentTool DLL.
+- A .NET SDK that targets .NET Framework 4.7.2.
+- Phoenix Point’s `ModSDK` and an installed ContentTool.
 - A project folder whose `meta.json` names the DLL exactly.
-- Only the assembly references your source actually uses. Set game and ContentTool references to
-  `Private=false`; the release must not carry rival copies.
 
-## Folder tree
+## Folder layout
 
 ```text
 MyCodeMod\
-  meta.json                    <- AssemblyName must be MyCodeMod.dll
+  meta.json
   ppcontent.json
-  MyCodeMod.csproj             <- net472 build
+  MyCodeMod.csproj
   src\
-    MyCodeModMain.cs           <- ModMain entry point
+    MyCodeModMain.cs
   bin\
     Release\
       MyCodeMod\
-        MyCodeMod.dll          <- newest matching DLL is picked up by ct_package
+        MyCodeMod.dll     <- preferred by ct_package; obj\ is never used
 ```
 
-`ct_package` searches the project recursively for the newest file with the declared assembly name.
-It does not compile it.
+`ct_package` picks the DLL named in `AssemblyName`. It prefers `bin\Release`, then other project folders, then `bin\Debug`; the newest copy wins within a rank. It does not compile.
 
 ## Steps
 
@@ -43,7 +39,7 @@ It does not compile it.
    }
    ```
 
-2. Create a minimal `ppcontent.json` even if the behaviour has no content row:
+2. Create `ppcontent.json`, even if this DLL has no content row:
 
    ```json
    {
@@ -52,19 +48,17 @@ It does not compile it.
    }
    ```
 
-3. Create `MyCodeMod.csproj`. Change the default `PPRoot` if your game is elsewhere:
+3. Create `MyCodeMod.csproj`. Pass your game directory as `PPRoot` when building:
 
    ```xml
    <Project Sdk="Microsoft.NET.Sdk">
      <PropertyGroup>
        <AssemblyName>MyCodeMod</AssemblyName>
-       <RootNamespace>Example.MyCodeMod</RootNamespace>
        <TargetFramework>net472</TargetFramework>
        <LangVersion>latest</LangVersion>
        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
        <OutputPath>bin\$(Configuration)\MyCodeMod\</OutputPath>
-       <PPRoot Condition="'$(PPRoot)' == ''">D:\Steam\steamapps\common\Phoenix Point</PPRoot>
        <ModSDK>$(PPRoot)\ModSDK</ModSDK>
      </PropertyGroup>
      <ItemGroup>
@@ -81,8 +75,9 @@ It does not compile it.
    </Project>
    ```
 
-4. Create `src\MyCodeModMain.cs`. This complete example calls the public weapon builder; replace
-   that one call only when your route needs different behaviour:
+   Add only the assembly references your source uses. Keep game and ContentTool references at `Private=false` so the release does not carry rival copies.
+
+4. Create `src\MyCodeModMain.cs`. This example calls ContentTool’s public weapon builder when the mod is enabled; replace that call for your own behaviour:
 
    ```csharp
    using Morgott.ContentTool.Tactical;
@@ -102,61 +97,42 @@ It does not compile it.
    }
    ```
 
-   Creature mods with a `creature` block do **not** need this call in 1.1.2. ContentTool scans enabled
-   content mods and calls `CreatureBuild.BuildAll` one frame after startup. `startingRoster: true`
-   also handles their new-campaign placement.
+   A `creature` manifest block needs no explicit builder call: ContentTool calls `CreatureBuild.BuildAll` for enabled content mods after startup.
 
-5. Build from the project folder. Quote the property because the path contains a space:
+5. Build from the project folder, substituting the location of your installation:
 
    ```text
-   dotnet build MyCodeMod.csproj -c Release -p:PPRoot="D:\Steam\steamapps\common\Phoenix Point"
+   dotnet build MyCodeMod.csproj -c Release -p:PPRoot="<Phoenix Point>"
    ```
 
-6. Confirm `bin\Release\MyCodeMod\MyCodeMod.dll` exists. Do not copy ContentTool.dll or game DLLs
-   beside it.
-
-7. Package:
+   Check that `bin\Release\MyCodeMod\MyCodeMod.dll` exists. Then package:
 
    ```text
    ct_package MyCodeMod
    ```
 
-## What success looks like
+## Check it worked
 
-The compiler ends with:
-
-```text
-Build succeeded.
-    0 Error(s)
-```
-
-The packager then includes `MyCodeMod.dll` and ends with:
+The build must succeed and produce `MyCodeMod.dll`. The package should finish with:
 
 ```text
 PACKAGED <n> file(s), <bytes> B into <persistentDataPath>\ContentTool\Packaged\MyCodeMod
-Zip the FOLDER itself, so the archive holds MyCodeMod\meta.json, and upload it. The player unzips it into Mods\ (ending up with Mods\<YourMod>\meta.json) or subscribes on the Workshop; the mod manager enables ContentTool for them because meta.json declares it.
 ```
 
-If you used the sample builder call with a valid `weapons` entry, `Player.log` also contains one
-`ct_weapon PASS` line for that entry.
+Check that the packaged folder contains `MyCodeMod.dll` and `meta.json`. Zip the **folder**, so extracting the archive into `Mods\` creates `Mods\MyCodeMod\meta.json`. If this example has valid `weapons` entries, check its `ct_weapon PASS` lines in `Player.log`.
 
-## When it fails
+## Common errors
 
-| Exact output | Meaning | Fix |
+| What you see | Why | Fix |
 |---|---|---|
-| `  REFUSED: meta.json declares "AssemblyName": "MyCodeMod.dll" but the package does not contain that file - the game refuses to load the mod. Build it, or set "AssemblyName": "" for a content-only mod.` | The named DLL was not found under the project. | Run the build, correct `AssemblyName`, or remove it for a content-only mod. |
-| `  REFUSED: meta.json does not declare "Dependencies": [ "com.morgott.ContentTool" ] - without it the player can install this mod with the engine switched off and it will silently do nothing. With it, Phoenix Point enables ContentTool for them.` | The dependency is missing. | Add the exact dependency string and package again. |
-| `ct_weapon VOID no ppcontent.json in '<dir>'` | The builder was called with a folder that has no manifest. | Pass `Instance.Entry.Directory` and keep `ppcontent.json` at the mod root. |
-| `ct_weapon VOID ppcontent.json declares no "weapons" block` | The sample builder call has no work. | Add a valid `weapons` array, or remove the call and implement the behaviour your mod needs. |
+| `REFUSED: meta.json declares "AssemblyName": "MyCodeMod.dll" but the package does not contain that file` | The DLL was not built or found. | Build it, or correct `AssemblyName`. |
+| `REFUSED: meta.json does not declare "Dependencies": [ "com.morgott.ContentTool" ]` | The package does not declare its engine dependency. | Add that dependency and package again. |
+| `ct_weapon VOID no ppcontent.json in '<dir>'` | The builder received a folder without the manifest. | Keep `ppcontent.json` at the mod root and pass `Instance.Entry.Directory`. |
+| `ct_weapon VOID ppcontent.json declares no "weapons" block` | The sample builder call has no entries to build. | Add valid `weapons` entries or use the behaviour your mod needs. |
+| `ct_weapon FAIL '<id>' threw <Type>: <message>` | One declared weapon failed while building. | Read its named error in `Player.log`; see [messages](../reference/messages.md). |
 
-Read [the status glossary](../troubleshooting/bake-errors.md). A compiler error is neither a bake
-failure nor a package refusal; fix it before running `ct_package`.
+A refused package begins `REFUSED - this package is NOT publishable`; do not distribute that output.
 
-## Worked demos
+## Example
 
-- [WeaponMesh](../examples/weapon-mesh.md) writes two icon fields after replacing content.
-- [AddUiSounds](../examples/add-ui-sounds.md) loads an added bank and supplies an Alt+B trigger.
-- [IntroVideo](../examples/intro-video.md) assigns a subtitle `TextAsset` to a cutscene def.
-- [QuitCutscene](../examples/quit-cutscene.md) adds a runtime def and intercepts main-menu quit.
-- [CustomCreature](../examples/custom-creature.md) adds the built unit through both new-game paths.
-- [WeaponAdd](../examples/weapon-add.md) delegates three manifest entries to the shared weapon builder.
+[WeaponAdd](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/WeaponAdd) calls the shared builder. [AddUiSounds](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/AddUiSounds) loads an added bank and posts its events. [QuitCutscene](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/QuitCutscene) supplies a video trigger.

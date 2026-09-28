@@ -1,74 +1,54 @@
 # Find game content
 
-Run discovery commands in Phoenix Point with ContentTool enabled. Start broad, then add filters. The
-filters are case-insensitive substrings; the final asset name you copy into `ppcontent.json` is still
-case-sensitive.
+Use the developer console in Phoenix Point with ContentTool enabled. Start with a broad list, then narrow it with a name filter. Copy the final asset names exactly.
 
-Long reports also appear in:
+## Find a bundled asset
 
-```text
-%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\Player.log
-```
+1. Find a likely bundle:
 
-## Find a texture, mesh or material
+    ```text
+    ct_list bundles [nameFilter]
+    ```
 
-Find likely bundles:
+2. List assets in it. The type and name filters are optional:
 
-```text
-ct_list bundles fireworm
-```
+    ```text
+    ct_list assets <bundleFile> [typeFilter] [nameFilter]
+    ```
 
-List one class of asset inside a bundle:
+    Use `Texture2D`, `Mesh`, or `Material` as the type filter when you know what you need. A filter with no matches reports zero matches; it does not choose a different asset.
+3. For a material’s properties, a rigged mesh’s bones, or an animation clip’s fields, use:
 
-```text
-ct_list assets aln_fireworm_assets_all.bundle Texture2D fireworm
-ct_list assets aln_fireworm_assets_all.bundle Mesh fireworm
-ct_list assets aln_fireworm_assets_all.bundle Material fireworm
-```
+    ```text
+    ct_list props <bundleFile> <materialName>
+    ct_list bones <bundleFile> <meshName> [nameFilter]
+    ct_list clip <bundleFile> <clipName>
+    ```
 
-The type and name filters are optional. Narrow them when the report says more matches were omitted.
-Copy the bundle filename and asset name exactly from the result.
-
-For a material, list the properties that a `material` row can set:
+You can also search live game definitions:
 
 ```text
-ct_list props aln_fireworm_assets_all.bundle ALN_Fireworm_DMG
-```
-
-For a rigged mesh, list the shipped bone names and their bind-pose order:
-
-```text
-ct_list bones <bundleFile> <meshName>
-```
-
-For one animation clip, inspect its serialised fields:
-
-```text
-ct_list clip <bundleFile> <clipName>
-```
-
-## Find media or definitions
-
-```text
-ct_list videos <nameFilter>
-ct_list audio [filter]
 ct_list defs <nameFilter> [typeFilter]
 ```
 
-Use `ct_list audio [filter]` to find media by name, ID or bank; the filter is a case-insensitive
-substring. ContentTool 1.2.1 reads names from the game's `SoundbanksInfo.xml` and lists
-`<id>  <name>  <bank>  loose|in-bank`. You can extract `loose` media; you can only list `in-bank` media.
-The pane shows the first 10 rows and then names a file; the WHOLE list is always written to ContentTool\Logs\ct_list-audio-<stamp>.txt, and a capture such as PPCLI still receives every row.
-The pane shows the header before those rows. The complete file includes the header and every row:
-`<persistentDataPath>\ContentTool\Logs\ct_list-audio-<stamp>.txt`.
-For 70 matches, the trailer is `... 60 more - the whole list is in <path>`;
-for 10 or fewer, it is `... the whole list is in <path>`.
-For a bank filter, use `ct_list audio Barks`.
+## Find a video or sound
 
-Videos are loose files; Wwise media can also live inside soundbanks. Definitions are live game defs.
-Do not put a video name into a bundle field because no such bundle exists.
+```text
+ct_list videos [nameFilter]
+ct_list audio [filter]
+```
 
-## Extract an editable starting point
+Videos are loose files. `ct_list videos` shows a clip’s name and its path relative to `StreamableCopiedAssets`; a video replacement can use that listed path as its `asset` value. See [Replace a video](../recipes/videos.md).
+
+For audio, filter by name, media ID, or bank. The console pane shows the first rows of a long list; the complete report is written to:
+
+```text
+<persistentDataPath>\ContentTool\Logs\ct_list-audio-<stamp>.txt
+```
+
+Use the media ID from the list to extract a loose sound. Media inside a soundbank can be listed but cannot be extracted by this command.
+
+## Extract an editable copy
 
 ```text
 ct_extract tex <bundleFile> <assetName>
@@ -78,32 +58,25 @@ ct_extract audio <mediaId>
 ct_extract audio --all [filter]
 ```
 
-Use the media ID from a `.wem` filename, not an `AK.Wwise.Event` ID; see [find a sound](../recipes/sounds.md#steps).
-Extract one audio file as the numeric `.wem` byte for byte plus a `.wav` named after the sound.
-Use `--all [filter]` to decode matching loose media to `<ShortName>__<id>.wav` and write `index.csv` for all media, including in-bank entries. Its `loose` column holds `yes`/`no`.
+A texture is written as PNG, a mesh as GLB, and a video as a copied WEBM. Extracting one loose audio item writes its numeric WEM and a named WAV when decoding succeeds.
 
-A successful texture or mesh extraction starts with `ct_extract wrote <path>`. Extracted files go
-under:
+`ct_extract audio --all [filter]` decodes matching loose media in the background. It writes `index.csv` for all listed media, including entries inside soundbanks. Only one `audio --all` run can decode at a time; wait for its closing `extracted <n> of <m>` line before starting another.
+
+The files go under `<persistentDataPath>\ContentTool\Extracted\`:
 
 ```text
-%USERPROFILE%\AppData\LocalLow\Snapshot Games Inc\Phoenix Point\ContentTool\
-  Extracted\
-    <bundle-name>\            <- texture PNGs and mesh GLBs
-    videos\                   <- copied WEBM files
-    audio\                    <- numeric WEM, named WAV; index.csv with --all
+Extracted\
+  <bundle-stem>\    <- texture PNGs and mesh GLBs
+  videos\           <- copied WEBM files
+  audio\            <- WEM and WAV files; index.csv from --all
 ```
 
-Extraction does not put the file into a project. Copy the edited result into the source folder named
-by your route. For a texture replacement, that is directly under `Content\Textures\`.
+Extraction does not add files to a mod project. Copy the edited file into the source folder required by its route; see [Project files](../reference/project-files.md).
 
-## When discovery refuses
+## If a name is refused
 
-- `ct_list VOID - no bundle at <path>` means the bundle filename is wrong. Return to
-  `ct_list bundles <filter>`.
-- `ct_list REFUSED - no <class> named '<name>' in <bundle>` means the target name does not match
-  exactly.
-- `<n> <class>s are named '<name>' (pathIds <ids>) - refusing to guess which one to use` means the
-  name is ambiguous. Choose another target; ContentTool will not pick the first object silently.
+- `ct_list VOID - no bundle at <path>` or `ct_extract VOID - no bundle at <path>` means the bundle filename is wrong. Return to `ct_list bundles [nameFilter]`.
+- A misspelled or ambiguous texture, mesh, video, or audio name produces a `ct_extract REFUSED -` line that points to the relevant listing command. List the names, then copy the exact one.
+- `ct_extract REFUSED - an 'audio --all' run is already decoding` means the first batch is still running. Wait for its closing log line.
 
-Next: [place the source in a supported folder](../reference/project-files.md), then
-[bake and test](../getting-started/lifecycle.md).
+Next, [build and test the project](../concepts/lifecycle.md).

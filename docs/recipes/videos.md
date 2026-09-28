@@ -1,27 +1,22 @@
 # Add or replace a video
 
-This serves a WEBM, MP4 or MOV from your mod folder through Phoenix Point's live streamable catalog.
-Name `asset` to replace a shipped clip; omit it to add a new runtime key. A DLL is needed only for
-the behaviour that starts the new clip or changes subtitles, sound or flow.
+Serve a WEBM, MP4 or MOV from your mod folder through the game’s live video catalog. A Replace row redirects a shipped clip; an Add row creates a new key that your behaviour must use.
 
-## What you need before you start
+## You need
 
-- A WEBM, MP4 or MOV directly under `Content\Videos`.
-- For Replace: the shipped streaming path or filename printed by `ct_list videos`.
-- For Add: code that uses the runtime key printed by `ct_video live`.
-- Separate audio/subtitle work if the cutscene needs it. A video row changes only the video file.
+- One `.webm`, `.mp4` or `.mov` directly under `Content\Videos`.
+- For Replace, a path from `ct_list videos`. For Add, a [behaviour DLL](behavior-dll.md) that starts the new clip.
+- Separate sound or subtitle work if the cutscene needs it; a video row changes only the video file.
 
-## Folder tree
+## Folder layout
 
 ```text
 MyVideoMod\
-  meta.json                    <- AssemblyName only when a trigger/def edit needs code
-  ppcontent.json               <- video source stem and optional shipped asset path
+  meta.json
+  ppcontent.json
   Content\
     Videos\
-      campaign_intro.webm      <- direct child; source "campaign_intro"
-  Dist\
-    Sounds\                    <- optional separate sound replacement banks
+      campaign_intro.webm    <- source stem is campaign_intro
 ```
 
 ## Steps
@@ -32,17 +27,11 @@ MyVideoMod\
    ct_list videos PP_Intro
    ```
 
-2. Optionally extract it:
+   Copy the path printed for the clip. `asset` accepts that path relative to `StreamableCopiedAssets`, the full catalog path, or a unique filename. A whole-segment tail of the catalog path also matches; ambiguous tails are refused. To inspect a shipped clip, run `ct_extract video PP_Intro` and look under `<persistentDataPath>\ContentTool\Extracted\videos`.
 
-   ```text
-   ct_extract video PP_Intro
-   ```
+2. Put one file named `campaign_intro.webm` directly in `Content\Videos`. Keep only one supported file per stem.
 
-   The command prints the output path under `ContentTool\Extracted\videos`.
-
-3. Put your edited file directly in `Content\Videos` and rename it `campaign_intro.webm`.
-
-4. Create `meta.json`:
+3. Create `meta.json`:
 
    ```json
    {
@@ -54,7 +43,9 @@ MyVideoMod\
    }
    ```
 
-5. For Replace, create `ppcontent.json` with the shipped catalog path in `asset`:
+   Set `AssemblyName` to your DLL filename if this mod needs its own trigger or def edit.
+
+4. Create `ppcontent.json`. To **replace** the shipped clip, give the row an `asset`:
 
    ```json
    {
@@ -69,76 +60,49 @@ MyVideoMod\
    }
    ```
 
-   For Add, omit `asset`:
+   To **add** a clip instead, use `{ "video": "campaign_intro" }` as the row and omit `asset`. The added RuntimeKey is stable: lower-case MD5 hex of `"<id>/<stem>"`, where `<stem>` is the clip's filename stem in lower case.
 
-   ```json
-   {
-     "id": "example.myvideomod",
-     "bundle": "MyVideoMod.bundle",
-     "replace": [
-       { "video": "campaign_intro" }
-     ]
-   }
-   ```
-
-6. Run `ct_project` to validate the declaration, then serve it live:
+5. Validate, serve and inspect the row in the game console:
 
    ```text
    ct_project MyVideoMod
    ct_video live MyVideoMod
+   ct_video status
    ```
 
-7. For Add, copy the runtime key from `ct_video live` into the code that starts the clip. Follow
-   [Build a behaviour DLL](behavior-dll.md). For Replace, enabling the mod serves the row
-   automatically; `ct_video live` is also the author's refresh command.
+   Enabling the packaged mod also serves its rows, Replace and Add alike. `ct_video live` refreshes it while you author. `ct_video status` reports how many content projects currently serve clips in memory. For Add, take the RuntimeKey from the live output and use it in the code that starts your clip.
 
-8. Package after `ct_project` passes:
+6. Package after validation passes:
 
    ```text
    ct_package MyVideoMod
    ```
 
-## What success looks like
+## Check it worked
 
-Replace validation ends with:
+A valid Replace row reports:
 
 ```text
 video 'StreamableCopiedAssets/Videos/Factions/Phoenix/PP_Intro.webm' <- campaign_intro - serve it with: ct_video live MyVideoMod
 ct_project: ALL PASS - nothing needed patching: none of this project's 1 replacement(s) names a shipped bundle, so no copy was written - the video row(s) above are served live by ct_video
 ```
 
-The live command then prints:
+An Add row reports `video ADD 'campaign_intro' (its RuntimeKey is printed by the command) - serve it with: ct_video live MyVideoMod`. The live output shows the key, its `before` and `after` paths, and a `registered` or `QUEUED` result. Play the relevant scene to check the clip itself.
 
-```text
-  MyVideoMod: 1 clip(s) served in memory from <project path>; nothing in the install was written
-  <runtime key>
-    before: <shipped path or current value>
-    after:  <your source path>
-    <registration result>
-```
+Only one owner serves a RuntimeKey at a time. If two mods claim it, the lower ordinal mod ID serves it; the other clip is `QUEUED` and takes over if that owner lets go.
 
-An Add row starts with `video ADD 'campaign_intro' (its RuntimeKey is printed by the command)` and
-uses the same final summary.
+## Common errors
 
-## When it fails
-
-| Exact output | Meaning | Fix |
+| What you see | Why | Fix |
 |---|---|---|
-| `SKIP 'campaign_intro' is not a .webm/.mp4/.mov under Content\Videos\` | The source stem was not imported. | Move the file directly into `Content\Videos`, use a supported extension, or correct `video`. |
-| `SKIP no catalog row names '<asset>'` | A Replace row names no shipped path or filename. | Run `ct_list videos <filter>` and copy the returned path or unique filename. |
-| `SKIP '<asset>' is ambiguous, <n> rows match:` | A filename matches several catalog rows. | Replace `asset` with the full streaming path printed below the refusal. |
-| `REFUSED: no ppcontent.json in <root>` | `ct_video live` resolved a folder without a manifest. | Put `ppcontent.json` at the project root and remove a stale fallback copy. |
+| `VIDEO FAIL 'campaign_intro' is not a .webm/.mp4/.mov under Content\Videos\ - ct_video would skip this row` | The source stem has no supported clip in the folder. | Move or rename one clip, then run `ct_project` again. |
+| `VIDEO FAIL '<asset>' <- campaign_intro: no catalog row names '<asset>' - ct_video would skip this row` | The Replace path matches no catalog row. | Copy a path from `ct_list videos`. |
+| `VIDEO FAIL '<asset>' <- campaign_intro: '<asset>' is ambiguous, <n> rows match:` | More than one shipped row matches. | Use the full catalog path printed with the failure. |
+| `SOURCE SKIPPED: Content\Videos\ holds two files with the same name: <files>` | Two extensions share one stem. | Keep one clip per stem and validate again. |
+| `REFUSED: the "video" row '<stem>' names no .webm/.mp4/.mov under Content\Videos\` or `REFUSED: the "video" row '<stem>' is answered by <a> and <b>` | Packaging found a missing clip or same-stem pair. | Correct the folder and package again. |
 
-Read [the status glossary](../troubleshooting/bake-errors.md). Video live output uses `SKIP`, not a
-P-number, because no shipped Unity bundle is patched.
+See [messages](../reference/messages.md) for the remaining diagnostics.
 
-## Quit-cutscene status
+## Example
 
-The main-menu exit path in `demos\QuitCutscene` has been measured: on 2026-09-01 it closed in 3.0
-seconds against a 13.0-second deadline. The ESC-keypress skip path has not been run. That is the only
-remaining unmeasured path; do not treat the normal exit as pending.
-
-## Worked demos
-
-- [IntroVideo](../examples/intro-video.md) replaces an existing streamed catalog row.
-- [QuitCutscene](../examples/quit-cutscene.md) adds a new row and supplies its own trigger.
+[IntroVideo](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/IntroVideo) replaces a shipped catalog row. [QuitCutscene](https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/tree/main/demos/QuitCutscene) adds a clip and supplies its trigger.
