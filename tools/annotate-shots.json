@@ -1,5 +1,5 @@
 {
-  "_doc": "Callouts for tools/annotate-shots.py. rect = [x0, y0, x1, y1] in the 1280x720 source; at = where the number sits (l r t b tl tr bl br, or [x, y]); mask paints over a control the current build no longer draws.",
+  "_doc": "Callouts for tools/annotate-shots.py. rect = [x0, y0, x1, y1] in the 1280x720 source; at = where the number sits (l r t b tl tr bl br, or [x, y]).",
   "images": {
     "home.png": {
       "callouts": [
@@ -77,7 +77,6 @@
       ]
     },
     "build-done.png": {
-      "mask": [{ "rect": [194, 10, 294, 36], "sample": [150, 22] }],
       "callouts": [
         { "n": 1, "rect": [462, 38, 1266, 224], "at": "tr" },
         { "n": 2, "rect": [10, 208, 438, 280], "at": "r" },
@@ -85,13 +84,12 @@
       ]
     },
     "build-failed.png": {
-      "mask": [{ "rect": [194, 10, 294, 36], "sample": [150, 22] }],
       "callouts": [
         { "n": 1, "rect": [462, 86, 1266, 130], "at": "r" },
         { "n": 2, "rect": [10, 263, 438, 287], "at": "r" },
         { "n": 3, "rect": [10, 289, 376, 520], "at": "b" },
         { "n": 4, "rect": [378, 336, 438, 358], "at": [452, 326] },
-        { "n": 5, "rect": [462, 230, 1266, 262], "at": "r" },
+        { "n": 5, "rect": [462, 246, 1266, 274], "at": "r" },
         { "n": 6, "rect": [462, 685, 802, 710], "at": "r" }
       ]
     },

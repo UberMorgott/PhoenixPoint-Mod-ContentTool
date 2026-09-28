@@ -37,11 +37,11 @@ While a run is going, `Cancel` asks it to stop. Steps already finished keep thei
 
 In this example the `GlossTweak` mod names a material with a typo.
 
-1. `Progress` shows `FAIL*` at `Build` (**1**); `Install` and `Verify install` never ran.
+1. `Progress` shows `FAIL` at `Build` (**1**); `Install` and `Verify install` never ran.
 2. Open `Details - run one step` (**2**). Every stage has a row (**3**) with its state, such as `Bake: stale, fail`, and its own `Run` button (**4**) that runs only that step.
 3. Find the refusal in the log (**5**): `P3 REFUSED target 'ALN_Firewrom_DMG' is not a Material in aln_fireworm_assets_all.bundle`. The line also names the command that lists the real names: `ct_list assets aln_fireworm_assets_all.bundle Material`.
 4. Correct the name in `ppcontent.json` (`ALN_Fireworm_DMG`), then press `Run` beside `Build` (**4**), or `Build & test` to run everything again.
-5. If you need help, press `Copy log` (**6**); the bench confirms `Copied 1363 characters`. Paste it into your message.
+5. If you need help, press `Copy log` (**6**); the bench confirms `Copied 1456 characters`. Paste it into your message.
 
 ## Restart cases
 
@@ -54,8 +54,8 @@ In this example the `GlossTweak` mod names a material with a typo.
 
 1. Check that all four steps show `PASS` (**1**).
 2. Under `Share` (**2**), press `Package for sharing`. `Build, test & package` runs all five steps in one go instead.
-3. The `Package for sharing` row turns `PASS` and shows where the package went (**2**), for example `PACKAGED 3 file(s), 4934 B into ...\ContentTool\Packages\morgott.demo.materialtweak\20260928-135305-7`.
-4. Read the log (**3**): zip the **folder itself**, so the archive holds `20260928-135305-7\meta.json`, and upload it. A player unzips it into `Mods\` or subscribes on the Workshop; the mod manager enables ContentTool for them because `meta.json` declares it.
+3. The `Package for sharing` row turns `PASS` and shows where the package went (**2**), for example `PACKAGED 3 file(s), 4934 B into ...\ContentTool\Packages\morgott.demo.materialtweak\20260928-164013-7`.
+4. Read the log (**3**): zip the **folder itself**, so the archive holds `20260928-164013-7\meta.json`, and upload it. A player unzips it into `Mods\` or subscribes on the Workshop; the mod manager enables ContentTool for them because `meta.json` declares it.
 
 Every bench package gets its own new folder:
 

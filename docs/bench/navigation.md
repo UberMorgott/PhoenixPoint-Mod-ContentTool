@@ -51,7 +51,7 @@ Open `Your other mods (<n>)` to pick an existing mod, and press `Look again` to 
 
 `Replace a model`, `Sounds`, `Videos` and `Add a weapon` keep their log in a `Details and log` fold. `Build & share` shows its `Log` on the right. The log text is selectable.
 
-- `Copy log` (**6**) puts the whole log on the clipboard, not only the visible part. The bench confirms it with a line such as `Copied 1363 characters` (**6**).
+- `Copy log` (**6**) puts the whole log on the clipboard, not only the visible part. The bench confirms it with a line such as `Copied 1456 characters` (**6**).
 - `Open log folder` (**6**) opens the folder of the game’s own log file (`Player.log`) in Explorer, with the file selected.
 
 When you ask someone for help, say which task, file and game target you chose, paste the copied log, and quote the line under any grey button. In the picture, the refusal line in the log (**5**) explains the failure; the `FAIL*` mark alone (**1**) does not.

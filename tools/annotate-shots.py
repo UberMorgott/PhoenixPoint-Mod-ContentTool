@@ -4,13 +4,12 @@
     python tools/annotate-shots.py sounds     only images whose name contains 'sounds'
 
 Reads   docs/images/bench/src/<name>.png   (clean 1280x720 shots, never edited by hand)
-        tools/annotate-shots.json          (per image: callouts and masks)
+        tools/annotate-shots.json          (per image: callouts)
 Writes  docs/images/bench/<name>.png       (annotated, palette-quantized)
 
 A callout = a box around a UI element plus a numbered circle beside it. The page text refers to
-the numbers, so keep them in the order the text reads. A mask paints over a control the current
-build no longer draws (e.g. the old grey 'Reset view' on screens without a 3D view) with the colour
-sampled at 'sample'. When the UI changes: re-shoot into src/, fix the rectangles, run this again.
+the numbers, so keep them in the order the text reads. When the UI changes: re-shoot into src/,
+fix the rectangles, run this again.
 Needs Pillow.
 """
 import json
@@ -66,9 +65,6 @@ def edge_point(rect, p):
 def annotate(name, spec, num_font):
     img = Image.open(SRC / name).convert("RGB")
     d = ImageDraw.Draw(img)
-    for m in spec.get("mask", []):
-        colour = img.getpixel(tuple(m["sample"]))
-        d.rectangle(m["rect"], fill=colour)
     callouts = spec.get("callouts", [])
     for c in callouts:
         x0, y0, x1, y1 = c["rect"]
