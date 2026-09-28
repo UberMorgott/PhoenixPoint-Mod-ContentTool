@@ -1,5 +1,18 @@
 # What’s new
 
+## 1.4.0 (released 2026-09-28)
+
+### New
+
+- The [bench](bench/index.md) looks like the game: its font (Purista), buttons, frames, cards, step bar, main buttons and `PASS` / `WARN` / `FAIL` badges come from the game's own widgets and sprites, and every field, toggle, slider and scroll bar wears the same look.
+- The bench scales to any resolution and window mode (windowed, borderless, fullscreen): the whole layout, the 3D gizmo, the Model Doctor's bone inspector, skeleton markers and legend grow and shrink with the window height, also while the window is resized.
+- [Add a weapon](bench/add-weapon.md) starts with an Assault soldier holding a Phoenix assault rifle and playing the game's idle, instead of whatever the previous screen left on the platform.
+
+### Fixed
+
+- A content mod's very long build line no longer reaches the game's own log sink in one piece, which caused the startup error `Mesh can not have more than 65000 vertices`.
+- The bundled demo mods are re-baked with the current ContentTool (their `Dist` bundles were baked by 1.0.0).
+
 ## 1.3.0 (released 2026-09-28)
 
 ### New

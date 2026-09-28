@@ -23,11 +23,11 @@ If `Add to mod & apply` is grey, the line under it says what is missing: `pick y
 
 ## The player
 
-The `Player` (**9**) shows the picture as large as the pane allows. Under it (**10**) are `Pause` (then `Resume`), `Stop`, a seek bar, and the time. The line under the transport says what is playing, for example `playing campaign_intro.webm (1280x720, no sound - the game plays cutscene sound separately)`. Leaving the screen stops playback.
+The `Player` (**8**) shows the picture as large as the pane allows. Under it (**9**) are `Pause` (then `Resume`), `Stop`, a seek bar, and the time. The line under the transport says what is playing, for example `playing campaign_intro.webm (1280x720, no sound - the game plays cutscene sound separately)`. Leaving the screen stops playback.
 
 ## Check or apply again
 
-`Videos in IntroVideo` (**8**) lists every video row of the mod as `<your clip>  ->  <game video>` (or `new video`):
+Scroll the panel down to `Videos in IntroVideo`. It lists every video row of the mod as `<your clip>  ->  <game video>` (or `new video`):
 
 | Mark | Meaning |
 |---|---|

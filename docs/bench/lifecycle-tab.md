@@ -55,7 +55,7 @@ In this example the `GlossTweak` mod names a material with a typo.
 1. Check that all four steps show `PASS` (**1**).
 2. Under `Share` (**2**), press `Package for sharing`. `Build, test & package` runs all five steps in one go instead.
 3. The `Package for sharing` row turns `PASS` and shows where the package went (**2**), for example `PACKAGED 3 file(s), 4934 B into ...\ContentTool\Packages\morgott.demo.materialtweak\20260928-164013-7`.
-4. Read the log (**3**): zip the **folder itself**, so the archive holds `20260928-164013-7\meta.json`, and upload it. A player unzips it into `Mods\` or subscribes on the Workshop; the mod manager enables ContentTool for them because `meta.json` declares it.
+4. Read the end of the log (**3**): zip the **folder itself**, so the archive holds `20260928-164013-7\meta.json`, and upload it. A player unzips it into `Mods\` or subscribes on the Workshop; the mod manager enables ContentTool for them because `meta.json` declares it.
 
 Every bench package gets its own new folder:
 

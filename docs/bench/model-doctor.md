@@ -28,8 +28,8 @@ The check starts on its own as soon as both are picked. Wait while the panel say
 - The step bar (**1**) now marks `4 Build`.
 - `Your model` (**2**) shows your file; `Browse...` picks another. `Replaces` (**3**) shows the game part; `Change...` picks another.
 - The badge (**5**) gives the verdict in one sentence. Here: `PASS` `Bones match - your model moves with the game's skeleton.`
-- `Details and log` (**9**) shows the counts (vertices, triangles, joints, influences per vertex), the binding, here `BY NAME - your weights will be used`, and every warning or note. Here it says `No warnings or notes - nothing to fix.` `Copy log` and `Open log folder` (**10**) sit under it.
-- On the model, bone markers (**11**) show how your bones bind. The line in the corner of the view says `skeleton: by name`.
+- `Details and log` (**9**) shows the counts (vertices, triangles, joints, influences per vertex), the binding, here `BY NAME - your weights will be used`, and every warning or note. Here it says `No warnings or notes - nothing to fix.` `Copy log` and `Open log folder` sit under it; scroll the panel down to reach them.
+- On the model, bone markers (**10**) show how your bones bind. The line in the corner of the view says `skeleton: by name`.
 
 | Badge | Meaning | What to do |
 |---|---|---|

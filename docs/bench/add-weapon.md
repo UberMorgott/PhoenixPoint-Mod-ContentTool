@@ -2,7 +2,7 @@
 
 `Add a weapon` makes a new weapon from your `.glb` without writing JSON or code. The new weapon copies a shipped weapon of its kind (how it is held, fired and reloaded) and wears your model. Whatever you pick stands in the soldier’s hand on the right, so you see the result before you build.
 
-The step bar reads `1 Class > 2 Model & name > 3 Fit in hand > 4 Check moves`.
+The step bar reads `1 Class > 2 Model & name > 3 Fit in hand > 4 Check moves`. Until you pick a kind, an Assault soldier holding a Phoenix assault rifle stands on the platform, playing the game's idle.
 
 ## Example: make a "Test Blaster" pistol
 

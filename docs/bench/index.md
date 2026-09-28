@@ -9,6 +9,8 @@ The bench walks you through making and testing a ContentTool mod inside the runn
 
 `ct_bench` on its own toggles the bench. If opening is refused, check that a geoscape campaign has finished loading.
 
+The bench looks like the game (its font, buttons and frames) and scales with the game window: at any resolution, in windowed, borderless or fullscreen mode, it keeps the same layout and grows or shrinks with the window height, also while you resize the window.
+
 ![The bench home screen](../images/bench/home.png)
 
 ## Choose a task
