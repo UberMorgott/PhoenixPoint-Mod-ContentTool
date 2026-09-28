@@ -6,10 +6,12 @@ using System.Text;
 using Base.Assets.StreamableSystem;
 using Base.Core;
 using Base.Defs;
+using Base.UI;
 using Base.UI.VideoPlayback;
 using HarmonyLib;
 using PhoenixPoint.Common.Game;
 using PhoenixPoint.Home.View;
+using PhoenixPoint.Home.View.ViewStates;
 using PhoenixPoint.Modding;
 using UnityEngine;
 
@@ -294,6 +296,31 @@ namespace Morgott.QuitCutscene
                 : "Q1-play the clip never came up within 8s; quitting anyway rather than hanging the game");
         }
 
+        /// <summary>
+        /// HomeScreenView.ToCutsceneState (HomeScreenView.cs:182-185) minus one side effect: it builds
+        /// UIStateHomeScreenCutscene with unlockCinematic=true, and that ctor
+        /// (UIStateHomeScreenCutscene.cs:30-36) adds the def to AchievementTracker's "Cinematics" list,
+        /// which lives in the PROFILE (Options.jopt). Our def is a runtime def with a fresh Guid every
+        /// run, so next launch that Guid resolves to nothing and every options save logs
+        /// "Serializing destroyed unity object at: List`1" - one line per quit, forever (measured
+        /// 2026-09-28: 4 dangling entries, 4 errors per save). Same state, same stack action, no unlock.
+        /// Falls back to the public call if the private field ever moves.
+        /// </summary>
+        internal static void Play(HomeScreenView view, VideoPlaybackSourceDef def, Action done)
+        {
+            StateStack<HomeScreenViewContext> stack =
+                AccessTools.Field(typeof(HomeScreenView), "_statesStack")?.GetValue(view) as StateStack<HomeScreenViewContext>;
+            if (stack == null)
+            {
+                Say("Q1-play WARN HomeScreenView._statesStack not found - playing through ToCutsceneState, " +
+                    "which also unlocks this runtime def in the profile's cinematics list");
+                view.ToCutsceneState(def, done);
+                return;
+            }
+            stack.SwitchToState(new UIStateHomeScreenCutscene(def, done, unlockCinematic: false),
+                                StateStackAction.ClearStackAndPush);
+        }
+
         internal static void Say(string msg)
         {
             if (self != null) self.Logger.LogInfo(msg);
@@ -339,8 +366,9 @@ namespace Morgott.QuitCutscene
             }
 
             QuitCutsceneMain.Say("Q1-trigger the quit was intercepted; handing the clip to the game's own " +
-                                 "HomeScreenView.ToCutsceneState, which quits for real when it ends or when ESC skips it");
-            view.ToCutsceneState(def, delegate
+                                 "home-screen cutscene state (not unlocked in the profile's cinematics), which quits for real " +
+                                 "when it ends or when ESC skips it");
+            QuitCutsceneMain.Play(view, def, delegate
             {
                 QuitCutsceneMain.Quit(__instance, "Q1-exit the cutscene finished or was skipped; quitting for real now");
             });
