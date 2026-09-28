@@ -20,7 +20,7 @@ namespace Morgott.ContentTool.Bake
     /// </summary>
     internal static class MeshFields
     {
-        private const int ChannelVertex = 0, ChannelNormal = 1, ChannelUv0 = 4;
+        private const int ChannelVertex = 0, ChannelNormal = 1, ChannelTangent = 2, ChannelUv0 = 4;
         private const int FormatFloat32 = 0;
         /// <summary>Slots a 2019.4.31f1 Mesh carries, measured; the index carries the semantic.</summary>
         internal const int ChannelCount = 14;
@@ -65,8 +65,10 @@ namespace Morgott.ContentTool.Bake
                 switch (i)
                 {
                     case ChannelVertex: c["offset"].AsInt = 0; c["dimension"].AsInt = 3; break;
-                    case ChannelNormal: c["offset"].AsInt = 12; c["dimension"].AsInt = 3; break;
-                    case ChannelUv0: c["offset"].AsInt = 24; c["dimension"].AsInt = 2; break;
+                    case ChannelNormal: c["offset"].AsInt = BakedMesh.OffsetNormal; c["dimension"].AsInt = 3; break;
+                    // Without it the donor material's _BumpMap is sampled against no basis at all.
+                    case ChannelTangent: c["offset"].AsInt = BakedMesh.OffsetTangent; c["dimension"].AsInt = 4; break;
+                    case ChannelUv0: c["offset"].AsInt = BakedMesh.OffsetUv0; c["dimension"].AsInt = 2; break;
                     default: c["offset"].AsInt = 0; c["dimension"].AsInt = 0; break;
                 }
             }

@@ -84,17 +84,23 @@ namespace Morgott.ContentTool.Dev
             int n = b.VertexCount;
             Vector3[] pos = new Vector3[n], nor = new Vector3[n];
             Vector2[] uv = new Vector2[n];
+            Vector4[] tan = new Vector4[n];
             for (int i = 0; i < n; i++)
             {
                 int at = i * BakedMesh.Stride;
                 pos[i] = new Vector3(BitConverter.ToSingle(b.VertexData, at),
                                      BitConverter.ToSingle(b.VertexData, at + 4),
                                      BitConverter.ToSingle(b.VertexData, at + 8));
-                nor[i] = new Vector3(BitConverter.ToSingle(b.VertexData, at + 12),
-                                     BitConverter.ToSingle(b.VertexData, at + 16),
-                                     BitConverter.ToSingle(b.VertexData, at + 20));
-                uv[i] = new Vector2(BitConverter.ToSingle(b.VertexData, at + 24),
-                                    BitConverter.ToSingle(b.VertexData, at + 28));
+                int no = at + BakedMesh.OffsetNormal, to = at + BakedMesh.OffsetTangent, uo = at + BakedMesh.OffsetUv0;
+                nor[i] = new Vector3(BitConverter.ToSingle(b.VertexData, no),
+                                     BitConverter.ToSingle(b.VertexData, no + 4),
+                                     BitConverter.ToSingle(b.VertexData, no + 8));
+                tan[i] = new Vector4(BitConverter.ToSingle(b.VertexData, to),
+                                     BitConverter.ToSingle(b.VertexData, to + 4),
+                                     BitConverter.ToSingle(b.VertexData, to + 8),
+                                     BitConverter.ToSingle(b.VertexData, to + 12));
+                uv[i] = new Vector2(BitConverter.ToSingle(b.VertexData, uo),
+                                    BitConverter.ToSingle(b.VertexData, uo + 4));
             }
 
             int[] tri = new int[b.IndexCount];
@@ -106,6 +112,7 @@ namespace Morgott.ContentTool.Dev
             if (b.Index32) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             m.vertices = pos;
             m.normals = nor;
+            m.tangents = tan;
             m.uv = uv;
             m.triangles = tri;
             m.RecalculateBounds();

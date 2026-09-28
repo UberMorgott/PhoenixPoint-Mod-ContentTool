@@ -102,8 +102,9 @@ namespace Morgott.ContentTool.Bake
             }
 
             // Tangents and UV1 are optional and likewise all-or-nothing, but they DEGRADE rather than
-            // refuse: dropping them costs normal-map handedness and a lightmap channel, neither of
-            // which the baked Standard material binds today. Say so rather than dropping in silence.
+            // refuse: missing tangents are regenerated from the UVs by ModelBuild.Tangents (the
+            // file's own basis is lost, not the channel), and UV1 is a lightmap channel the baked
+            // Standard material does not bind. Say so rather than dropping in silence.
             bool allTangents = true, allUv1 = true;
             for (int i = 0; i < parts.Count; i++)
             {
@@ -239,7 +240,7 @@ namespace Morgott.ContentTool.Bake
             if (Math.Abs(normalise - 1f) > 1e-6f)
                 said.Append("; NORMALISED from ").Append(longest.ToString("0.###", CultureInfo.InvariantCulture))
                     .Append(" units on its longest axis to 1.0 - the exporter's scale, not the game's");
-            if (!allTangents) said.Append("; NO tangents (not every piece had them) - normal-map handedness is lost");
+            if (!allTangents) said.Append("; tangents regenerated from the UVs (not every piece carried its own)");
             if (anyUv && !allUv1) said.Append("; no UV1");
             note = said.ToString();
             return merged;

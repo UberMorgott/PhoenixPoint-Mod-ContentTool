@@ -1712,8 +1712,16 @@ namespace Morgott.ContentTool.Import
             }
             if (model.Normals != null)
                 for (int i = 0; i < model.Normals.Length; i++) model.Normals[i] = GlbCodec.Convert(model.Normals[i]);
+            // x mirrors with the axis, and so does the HANDEDNESS: a reflection turns cross(n, t)
+            // around while the bitangent (the image's up) stays put, so w flips too - UnityGLTF's
+            // (-1, 1, 1, -1). MEASURED on Khronos' Avocado: x-only left all 406 vertices with the
+            // opposite handedness to the one Unity derives from the same UVs (ObjCodecTests).
             if (model.Tangents != null)
-                for (int i = 0; i < model.Positions.Length; i++) model.Tangents[i * 4] = -model.Tangents[i * 4];
+                for (int i = 0; i < model.Positions.Length; i++)
+                {
+                    model.Tangents[i * 4] = -model.Tangents[i * 4];
+                    model.Tangents[i * 4 + 3] = -model.Tangents[i * 4 + 3];
+                }
             if (model.Uv0 != null)
                 for (int i = 0; i < model.Uv0.Length; i++) model.Uv0[i] = GlbCodec.ConvertUv(model.Uv0[i]);
             if (model.Uv1 != null)
@@ -1788,12 +1796,14 @@ namespace Morgott.ContentTool.Import
                 if (morph.Normals == null) continue;
                 for (int i = 0; i < morph.Normals.Length; i++) morph.Normals[i] = Unit(m, morph.Normals[i]);
             }
-            // The tangent's w is its handedness, not a coordinate, so only xyz turn.
+            // The tangent's w is its handedness, not a coordinate, so only xyz turn - except under a
+            // MIRROR, which reverses cross(n, t) while the UVs (and so the bitangent) stay put.
             if (model.Tangents != null)
                 for (int i = 0; i * 4 + 3 < model.Tangents.Length; i++)
                 {
                     ObjVector3 t = Unit(m, new ObjVector3(model.Tangents[i * 4], model.Tangents[i * 4 + 1], model.Tangents[i * 4 + 2]));
                     model.Tangents[i * 4] = t.X; model.Tangents[i * 4 + 1] = t.Y; model.Tangents[i * 4 + 2] = t.Z;
+                    if (determinant < 0.0) model.Tangents[i * 4 + 3] = -model.Tangents[i * 4 + 3];
                 }
             if (model.Normals == null) return;
             for (int i = 0; i < model.Normals.Length; i++) model.Normals[i] = Unit(m, model.Normals[i]);

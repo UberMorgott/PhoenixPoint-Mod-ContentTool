@@ -286,13 +286,15 @@ namespace Morgott.ContentTool.Import
                 var data = new float[count * 4];
                 for (int i = 0; i < count; i++)
                 {
-                    // xyz is a true vector; w is the bitangent sign and is deliberately NOT flipped.
-                    // The basis reflection alone would demand -w, but mirroring V reverses the
-                    // bitangent a second time, so the two cancel. Do not "fix" one without the other.
+                    // xyz mirrors with the axis AND w flips - the inverse of GlbReader.ToUnity.
+                    // The bitangent is the IMAGE's up in both conventions, so flipping V relabels the
+                    // coordinate without turning it; only the reflection counts, and it reverses
+                    // cross(n, t). The old "the two flips cancel" reading was MEASURED wrong on
+                    // Khronos' Avocado (every vertex's handedness inverted, ObjCodecTests).
                     data[i * 4] = -model.Tangents[i * 4];
                     data[i * 4 + 1] = model.Tangents[i * 4 + 1];
                     data[i * 4 + 2] = model.Tangents[i * 4 + 2];
-                    data[i * 4 + 3] = model.Tangents[i * 4 + 3];
+                    data[i * 4 + 3] = -model.Tangents[i * 4 + 3];
                 }
                 tangent = buffer.Accessor(buffer.View(Bytes(data), Gltf.ArrayBuffer), Gltf.Float, count, "VEC4", null, null);
             }

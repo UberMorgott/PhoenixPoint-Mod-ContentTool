@@ -298,8 +298,8 @@ internal static class Program
         Check(baked.VertexData.Length == 4 * BakedMesh.Stride, "vertex stream is stride x count");
         Check(!baked.Index32 && baked.IndexData.Length == 12, "small mesh stays UInt16");
         Check(Math.Abs(baked.ExtentX - 0.5f) < 1e-6 && Math.Abs(baked.CenterX - 0.5f) < 1e-6, "bounds are centre and HALF extent");
-        Check(BitConverter.ToSingle(baked.VertexData, 20) == 1f, "normal reaches its channel offset");
-        Check(BitConverter.ToSingle(baked.VertexData, 24 + BakedMesh.Stride) == 1f, "uv reaches its channel offset");
+        Check(BitConverter.ToSingle(baked.VertexData, BakedMesh.OffsetNormal + 8) == 1f, "normal reaches its channel offset");
+        Check(BitConverter.ToSingle(baked.VertexData, BakedMesh.OffsetUv0 + BakedMesh.Stride) == 1f, "uv reaches its channel offset");
         // Two faces sharing a corner must SHARE the vertex, or a mesh doubles in size per submesh.
         Check(MeshBuild.From(ObjCodec.Parse("v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n")).VertexCount == 4,
               "vertices are de-duplicated across faces");
@@ -307,16 +307,49 @@ internal static class Program
         Check(MeshBuild.From(ObjCodec.Parse("v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 1\nf 1/1 2/1 3/1\nf 1/2 2/1 3/1\n")).VertexCount == 4,
               "the uv is part of the vertex key");
         BakedMesh noNormals = MeshBuild.From(ObjCodec.Parse("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"));
-        Check(Math.Abs(BitConverter.ToSingle(noNormals.VertexData, 20) - 1f) < 1e-6,
+        Check(Math.Abs(BitConverter.ToSingle(noNormals.VertexData, BakedMesh.OffsetNormal + 8) - 1f) < 1e-6,
               "a .obj with no vn gets computed normals, not zeroes");
         // ONE face without vn recomputes only ITS vertices: the stated (1,0,0) - deliberately not the
         // face normal - survives on the face that states it.
         BakedMesh mixed = MeshBuild.From(ObjCodec.Parse(
             "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nvn 1 0 0\nf 1//1 2//1 3//1\nf 2 4 3\n"));
-        Check(BitConverter.ToSingle(mixed.VertexData, 12) == 1f,
+        Check(BitConverter.ToSingle(mixed.VertexData, BakedMesh.OffsetNormal) == 1f,
               "a stated vn is kept when another face lacks one");
-        Check(Math.Abs(BitConverter.ToSingle(mixed.VertexData, 3 * BakedMesh.Stride + 20) - 1f) < 1e-6,
+        Check(Math.Abs(BitConverter.ToSingle(mixed.VertexData, 3 * BakedMesh.Stride + BakedMesh.OffsetNormal + 8) - 1f) < 1e-6,
               "and the face without vn still gets its computed normal");
+
+        // ---- tangents: the channel the donor material's _BumpMap is sampled against
+        Func<BakedMesh, int, int, float> tan = (m, v, k) =>
+            BitConverter.ToSingle(m.VertexData, v * BakedMesh.Stride + BakedMesh.OffsetTangent + k * 4);
+        bool alongU = true;
+        for (int v = 0; v < 4; v++)
+            alongU &= Math.Abs(tan(baked, v, 0) - 1f) < 1e-6 && Math.Abs(tan(baked, v, 1)) < 1e-6 &&
+                      Math.Abs(tan(baked, v, 2)) < 1e-6 && tan(baked, v, 3) == 1f;
+        Check(alongU, "quad tangent is +X (the direction u grows) with w = +1");
+        // The same quad with its texture MIRRORED in u: tangent flips to -X and the basis turns
+        // left-handed, which only w can say - the case every mirrored-half character hits.
+        BakedMesh mirrored = MeshBuild.From(ObjCodec.Parse(
+            "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 1 0\nvt 0 0\nvt 0 1\nvt 1 1\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1 4/4/1\n"));
+        Check(Math.Abs(tan(mirrored, 0, 0) + 1f) < 1e-6 && tan(mirrored, 0, 3) == -1f,
+              "a u-mirrored quad gets tangent -X and w = -1");
+        // No vt at all: nothing to derive from, but the tangent must still be a unit vector in the
+        // surface rather than zero - a zero tangent NaNs a normal-mapped shader.
+        float nx = tan(noNormals, 0, 0), ny = tan(noNormals, 0, 1), nz = tan(noNormals, 0, 2);
+        Check(Math.Abs(nx * nx + ny * ny + nz * nz - 1f) < 1e-5 && Math.Abs(nz) < 1e-6 && tan(noNormals, 0, 3) == 1f,
+              "a .obj with no vt still gets a unit tangent perpendicular to the normal, w = +1");
+        // The .glb route: the FILE's tangent wins over the generated one, w snapped to +-1.
+        SkinnedModel withTan = new SkinnedModel
+        {
+            Positions = new[] { new ObjVector3(0f, 0f, 0f), new ObjVector3(1f, 0f, 0f), new ObjVector3(0f, 1f, 0f) },
+            Normals = new[] { new ObjVector3(0f, 0f, 1f), new ObjVector3(0f, 0f, 1f), new ObjVector3(0f, 0f, 1f) },
+            Uv0 = new[] { new ObjVector2(0f, 0f), new ObjVector2(1f, 0f), new ObjVector2(0f, 1f) },
+            Tangents = new[] { 0f, 2f, 0f, -0.5f, 0f, 0f, 0f, 1f, 0f, 1f, 0f, 1f }
+        };
+        withTan.Submeshes.Add(new[] { 0, 1, 2 });
+        float[] t2 = ModelBuild.Tangents(withTan);
+        Check(t2[1] == 1f && t2[3] == -1f, "a file TANGENT is kept (normalised) and its w snapped to -1");
+        Check(t2[4] == 1f && t2[7] == 1f, "a zero-length file tangent is replaced by the generated one");
+        Console.WriteLine(TangentConvention());
 
         Console.WriteLine("OBJ: ALL PASS, " + checks + " check(s)");
         Console.WriteLine(MeshMergeTests.Run());
@@ -382,6 +415,37 @@ internal static class Program
         Console.WriteLine(banks);
         return wav.Contains("FAILURE") || src.Contains("FAILURE") || dec.Contains("FAILURE") ||
                loop.Contains("FAILURE") || banks.Contains("FAILURE") ? 1 : 0;
+    }
+
+    /// <summary>
+    /// The glTF -&gt; Unity tangent CONVENTION, proved on a real file instead of argued: Khronos'
+    /// CC0 Avocado (lib\u12_uv_plain.glb, see u12_uv-SOURCE.md) ships reference tangents. After
+    /// GlbReader's axis + UV conversion they must agree - direction AND handedness - with the
+    /// tangents MeshBuild.Tangents derives in Unity's own convention from the converted UVs. A
+    /// wrong sign on x or w shows up as near-total disagreement, not as noise.
+    /// </summary>
+    private static string TangentConvention()
+    {
+        string path = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                                    @"..\..\..\..\..\lib\u12_uv_plain.glb"));
+        if (!File.Exists(path)) return "TANGENT convention VOID - no lib\\u12_uv_plain.glb";
+        SkinnedModel m = GlbReader.Read(File.ReadAllBytes(path));
+        Check(m.Tangents != null, "the Avocado fixture carries TANGENT");
+        var indices = new System.Collections.Generic.List<int>();
+        foreach (int[] s in m.Submeshes) indices.AddRange(s);
+        float[] made = MeshBuild.Tangents(m.Positions, m.Normals, m.Uv0, indices);
+        int n = m.Positions.Length, dirOk = 0, wOk = 0;
+        for (int v = 0; v < n; v++)
+        {
+            double dot = 0;
+            for (int k = 0; k < 3; k++) dot += made[v * 4 + k] * m.Tangents[v * 4 + k];
+            if (dot > 0.5) dirOk++;
+            if (Math.Sign(made[v * 4 + 3]) == Math.Sign(m.Tangents[v * 4 + 3])) wOk++;
+        }
+        string line = "TANGENT convention on Avocado: " + n + " verts, direction agrees " + dirOk +
+                      ", handedness agrees " + wOk;
+        Check(dirOk >= n * 9 / 10 && wOk >= n * 9 / 10, line);
+        return line + " - PASS";
     }
 
     private static void Check(bool condition, string name)

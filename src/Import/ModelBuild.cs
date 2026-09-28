@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 
@@ -160,24 +161,17 @@ namespace Morgott.ContentTool.Import
             BakedSkin skin = new BakedSkin { Name = name, BaseColor = model.BaseColor };
             BakedMesh baked = new BakedMesh { VertexCount = n };
 
-            using (MemoryStream vs = new MemoryStream(n * BakedMesh.Stride))
-            using (BinaryWriter vw = new BinaryWriter(vs))
             {
                 float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
                 float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
                 for (int i = 0; i < n; i++)
                 {
-                    ObjVector3 p = model.Positions[i], nr = model.Normals[i];
-                    ObjVector2 uv = model.Uv0 == null ? new ObjVector2(0f, 0f) : model.Uv0[i];
-                    vw.Write(p.X); vw.Write(p.Y); vw.Write(p.Z);
-                    vw.Write(nr.X); vw.Write(nr.Y); vw.Write(nr.Z);
-                    vw.Write(uv.X); vw.Write(uv.Y);
+                    ObjVector3 p = model.Positions[i];
                     if (p.X < minX) minX = p.X; if (p.X > maxX) maxX = p.X;
                     if (p.Y < minY) minY = p.Y; if (p.Y > maxY) maxY = p.Y;
                     if (p.Z < minZ) minZ = p.Z; if (p.Z > maxZ) maxZ = p.Z;
                 }
-                vw.Flush();
-                baked.VertexData = vs.ToArray();
+                baked.VertexData = MeshBuild.Vertices(model.Positions, model.Normals, Tangents(model), model.Uv0);
                 baked.CenterX = (minX + maxX) * 0.5f; baked.ExtentX = (maxX - minX) * 0.5f;
                 baked.CenterY = (minY + maxY) * 0.5f; baked.ExtentY = (maxY - minY) * 0.5f;
                 baked.CenterZ = (minZ + maxZ) * 0.5f; baked.ExtentZ = (maxZ - minZ) * 0.5f;
@@ -257,6 +251,31 @@ namespace Morgott.ContentTool.Import
             skin.Bones = new uint[n * skin.Influences];
             for (int v = 0; v < n; v++) Strongest(model, v, skin);
             return skin;
+        }
+
+        /// <summary>
+        /// The model's tangents, 4 per vertex: the FILE's own TANGENT where it carries a usable one
+        /// (an artist's baked normal map was made against exactly that basis), else generated from
+        /// the UVs by <see cref="MeshBuild.Tangents"/>. A file tangent that is zero-length or not
+        /// finite is replaced vertex by vertex rather than trusted, and w is snapped to +-1.
+        /// </summary>
+        internal static float[] Tangents(SkinnedModel model)
+        {
+            int n = model.Positions.Length;
+            List<int> indices = new List<int>();
+            foreach (int[] s in model.Submeshes) indices.AddRange(s);
+            float[] made = MeshBuild.Tangents(model.Positions, model.Normals, model.Uv0, indices);
+            float[] file = model.Tangents;
+            if (file == null || file.Length != n * 4) return made;
+            for (int v = 0; v < n; v++)
+            {
+                float x = file[v * 4], y = file[v * 4 + 1], z = file[v * 4 + 2], w = file[v * 4 + 3];
+                double len = Math.Sqrt((double)x * x + (double)y * y + (double)z * z);
+                if (len < 1e-6 || double.IsNaN(len) || double.IsInfinity(len) || float.IsNaN(w)) continue;
+                made[v * 4] = (float)(x / len); made[v * 4 + 1] = (float)(y / len);
+                made[v * 4 + 2] = (float)(z / len); made[v * 4 + 3] = w < 0f ? -1f : 1f;
+            }
+            return made;
         }
 
         /// <summary>
