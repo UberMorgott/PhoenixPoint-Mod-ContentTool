@@ -423,7 +423,9 @@ namespace Morgott.ContentTool.Dev
                 row.Installation = restart ? StageText.RestartRequired : null;
                 // `Starts` stays 0 on purpose: it counts the times THIS panel entered a stage, and the
                 // panel entered none. The row is a receipt of an apply that happened elsewhere.
-                row.Freshness = LifecycleState.Fresh(LifecycleJob.Look(captured));
+                FreshnessObservation shipped = LifecycleJob.Look(captured);
+                row.Freshness = LifecycleState.Fresh(shipped);
+                row.RanKey = shipped == null ? null : shipped.Key;
                 // S1 IS A FACT ABOUT THE SESSION, so it is set here for the same reason the pump sets it:
                 // a Verify after this press must be refused R30, whichever door the apply came through -
                 // and for ANY target that needs it, not only the slot SHIP named.
@@ -552,13 +554,15 @@ namespace Morgott.ContentTool.Dev
             // observation of one project's copies, not a per-row receipt, and writing it on the finishing
             // row alone left the others reporting an age that was measured stages ago - W16 read `fresh`
             // while admission refused Verify as stale.
-            Freshen(LifecycleState.Fresh(LifecycleJob.Seen));
+            FreshnessObservation seen = LifecycleJob.Seen;
+            Freshen(seen);
 
             LifecycleView.Row row = view.Of(now.Stage);
             if (row != null)
             {
                 row.Verdict = now.Result;
                 row.Outcome = LifecycleState.Outcome(now.Outcome, now.How);
+                row.RanKey = seen == null ? null : seen.Key;
                 // THE INSTALLATION COLUMN, and the whole of it: S1 is the only thing an author has to ACT
                 // on, and it is a carrier value (`RestartRequired`), never a word read off the verdict. A
                 // stage that did not report it clears the column rather than inheriting the last one's.
@@ -853,11 +857,12 @@ namespace Morgott.ContentTool.Dev
             GUILayout.BeginHorizontal(); openGroups++;
             string mark = r.Outcome == GateOutcome.Pass ? "PASS" : r.Outcome == GateOutcome.Fail ? "FAIL"
                         : r.Outcome == GateOutcome.Void ? "VOID" : "-";
-            if (r.Freshness == Freshness.Stale && r.Outcome != GateOutcome.None) mark += "*";
+            bool outOfDate = OutOfDate(r);
+            if (outOfDate) mark += "*";
             BenchUi.Mark(mark, r.Outcome == GateOutcome.Pass ? Doctor.Grade.Pass
                              : r.Outcome == GateOutcome.Fail ? Doctor.Grade.Fail
                              : r.Outcome == GateOutcome.Void ? (Doctor.Grade?)Doctor.Grade.Warn : null,
-                         r.Freshness == Freshness.Stale ? "* out of date - inputs changed since this ran"
+                         outOfDate ? "* out of date - inputs changed since this ran"
                                                         : LifecycleView.Word(r.Freshness), 44f);
             GUILayout.Label(new GUIContent(BenchList.StageWord(r.Stage), "technical name: " + r.Stage),
                             GUILayout.Width(140f));
@@ -1007,7 +1012,7 @@ namespace Morgott.ContentTool.Dev
             foreach (LifecycleView.Row r in view.Rows)
             {
                 r.Verdict = null; r.Installation = null; r.Starts = 0;
-                r.Outcome = GateOutcome.None; r.Freshness = Freshness.Never;
+                r.Outcome = GateOutcome.None; r.Freshness = Freshness.Never; r.RanKey = null;
             }
             ctx.InRunAll = false;
             ctx.ValidateOutcome = ctx.BakeOutcome = ctx.ApplyOutcome = GateOutcome.None;
@@ -1060,7 +1065,7 @@ namespace Morgott.ContentTool.Dev
             ctx.ProjectId = id;
             ctx.RetryHint = Route7.IsFailed(id) ? Route7.RetryHint(root) : null;
             captured = ctx.Selection == LifecycleState.Selection.Ok ? LifecycleJob.Capture(root) : null;
-            Freshen(LifecycleState.Fresh(LifecycleJob.Look(captured)));
+            Freshen(LifecycleJob.Look(captured));
             ctx.LegacyDiskActive = Route7.LegacyDiskActive(id);
             ctx.WriteOutsideRoots = OutsideRoots();
             ctx.InRunAll = inChain;
@@ -1103,10 +1108,27 @@ namespace Morgott.ContentTool.Dev
         /// refresh, at stage start and after completion, never in OnGUI). It is a measurement of the
         /// selected project's copies, so a row cannot hold an older answer than the one admission acts on:
         /// W16 refused Verify as stale while all five rows still read `fresh`.</summary>
-        private static void Freshen(Freshness f)
+        private static void Freshen(FreshnessObservation o)
         {
+            Freshness f = LifecycleState.Fresh(o);
             ctx.Copies = f;
+            nowKey = o == null ? null : o.Key;
             foreach (LifecycleView.Row r in view.Rows) r.Freshness = f;
+        }
+
+        /// <summary>The project key of the last measurement - what a row's <c>RanKey</c> is compared with.</summary>
+        private static string nowKey;
+
+        /// <summary>
+        /// "Out of date" is about THE ROW: its outcome was produced against inputs that have changed since.
+        /// Row.Freshness is the project's COPIES (one value on every row), and a failed bake leaves those
+        /// stale by construction - reading that as the row's age starred every step right after a failed
+        /// build, over results that had just been produced against the current inputs.
+        /// </summary>
+        private static bool OutOfDate(LifecycleView.Row r)
+        {
+            return r.Outcome != GateOutcome.None && r.RanKey != null && nowKey != null &&
+                   !string.Equals(r.RanKey, nowKey, StringComparison.Ordinal);
         }
 
         /// <summary>MAIN. Hands the stage - and the capture `Refresh` just took - to the one dispatcher the

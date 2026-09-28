@@ -237,6 +237,10 @@ namespace Morgott.ContentTool.Bake
         {
             internal string Stage, Verdict, Installation;
             internal Freshness Freshness;
+            /// <summary>The project key (FreshnessObservation.Key) this row's outcome was produced against. The
+            /// row reads "out of date" only when the key measured NOW differs - a failed bake leaves the copies
+            /// stale, but the rows that just ran are about the current inputs, not out of date.</summary>
+            internal string RanKey { get; set; }
             internal GateOutcome Outcome;
             /// <summary>How many times THIS run entered this stage. W11 asserts the later stages' counts stay
             /// zero when the chain stopped early, which a verdict of "-" cannot express.</summary>
