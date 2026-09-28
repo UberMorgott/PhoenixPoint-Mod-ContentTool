@@ -69,11 +69,81 @@ internal static class Program
         BenchHolesArm();
         TransportArm();
         RingArm();
+        WeaponFlowArm();
 
         Console.WriteLine(failures == 0 ? "R0: ALL PASS" : "R0: " + failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
 
+    /// <summary>The guided Add-a-weapon flow's engine-free rules: classes by tag precedence, the default
+    /// template, the clip filter that never empties the strip, the steps and the one main button.</summary>
+    private static void WeaponFlowArm()
+    {
+        Check("WF-pistol", WeaponFlow.Classify(new[] { "HandgunItem_TagDef", "GunWeapon_TagDef" }).Id == "pistol", "handgun tag");
+        Check("WF-heavy-last", WeaponFlow.Classify(new[] { "HeavyItem_TagDef", "AssaultRifleItem_TagDef" }).Id == "rifle",
+              "heavy + AR -> AR");
+        Check("WF-launcher-first", WeaponFlow.Classify(new[] { "HeavyItem_TagDef", "GrenadeLauncherItem_TagDef" }).Id == "grenadelauncher",
+              "heavy + GL -> GL");
+        Check("WF-heavy", WeaponFlow.Classify(new[] { "HeavyItem_TagDef" }).Id == "heavy", "heavy alone");
+        Check("WF-other", WeaponFlow.Classify(new string[0]) == WeaponFlow.Other && WeaponFlow.Classify(null) == WeaponFlow.Other,
+              "untagged -> Other");
+        Check("WF-byid", WeaponFlow.ById("pdw").Tag == "PDWItem_TagDef" && WeaponFlow.ById("other") == WeaponFlow.Other &&
+              WeaponFlow.ById("nope") == null, "ById");
+        var ids = new HashSet<string>();
+        bool unique = true;
+        foreach (WeaponFlow.WeaponClass c in WeaponFlow.All) unique &= ids.Add(c.Id) && c.Tag != null && c.Moves.Length > 0;
+        Check("WF-unique", unique && WeaponFlow.All.Length == 12, WeaponFlow.All.Length + " classes");
+
+        WeaponFlow.WeaponClass ar = WeaponFlow.ById("rifle");
+        Check("WF-template-pref", WeaponFlow.DefaultTemplate(ar, new[] { "X_WeaponDef", "PX_AssaultRifle_WeaponDef" }) ==
+              "PX_AssaultRifle_WeaponDef", "preferred shipped def wins");
+        Check("WF-template-first", WeaponFlow.DefaultTemplate(ar, new[] { "X_WeaponDef", "Y_WeaponDef" }) == "X_WeaponDef", "else first");
+        Check("WF-template-none", WeaponFlow.DefaultTemplate(ar, new string[0]) == null &&
+              WeaponFlow.DefaultTemplate(null, new[] { "A" }) == null, "none");
+
+        var clips = new List<string> { "Soldier_AR_Idle", "Climb_Ladder", "AR_Reload", "Jump_Down", "Run_Forward" };
+        List<int> v = WeaponFlow.Visible(ar, clips, false);
+        Check("WF-filter", v.Count == 3 && v[0] == 0 && v[1] == 2 && v[2] == 4, string.Join(",", v));
+        Check("WF-filter-all", WeaponFlow.Visible(ar, clips, true).Count == 5 && WeaponFlow.Visible(null, clips, false).Count == 5,
+              "all / no class");
+        Check("WF-filter-never-empty", WeaponFlow.Visible(ar, new[] { "Climb", "Jump" }, false).Count == 2, "no match -> all");
+        Check("WF-melee", WeaponFlow.Relevant(WeaponFlow.ById("melee"), "Sword_Attack_01") &&
+              !WeaponFlow.Relevant(WeaponFlow.ById("melee"), "Reload_AR"), "melee words");
+
+        var s = new WeaponFlow.State();
+        string label, why;
+        Check("WF-main-class", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why.Contains("kind") &&
+              WeaponFlow.Step(s) == 0, why);
+        s.ClassPicked = s.TemplatePicked = true;
+        s.ModRefusal = "type a mod name first";
+        Check("WF-main-mod", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why == s.ModRefusal, why);
+        s.ModRefusal = null;
+        Check("WF-main-model", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why.Contains(".glb") &&
+              WeaponFlow.Step(s) == 1, why);
+        s.HaveModel = true;
+        Check("WF-main-name", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why.Contains("name"), why);
+        s.HaveName = true;
+        Check("WF-main-create", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.Create && why == null &&
+              label == "Create weapon", label);
+        s.Created = true;
+        Check("WF-main-build", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.Build && why == null &&
+              WeaponFlow.Step(s) == 2, label);
+        s.Live = true;
+        Check("WF-main-hold", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.Hold, label);
+        s.InHand = true;
+        Check("WF-main-wait", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why.Contains("wait"), why);
+        s.Fitted = true; s.Dirty = true;
+        Check("WF-main-save", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.Save && label == "Save fit *" &&
+              WeaponFlow.Step(s) == 2, label);
+        s.Dirty = false;
+        Check("WF-step-moves", WeaponFlow.Step(s) == 3 && WeaponFlow.Steps.Length == 4, "saved fit -> moves");
+
+        float f;
+        Check("WF-parse", WeaponFlow.Parse(" -0.25 ", out f) && Math.Abs(f + 0.25f) < 1e-6f && !WeaponFlow.Parse("0,5", out f) &&
+              !WeaponFlow.Parse("NaN", out f) && !WeaponFlow.Parse("", out f), "invariant, finite");
+        Check("WF-wrap", Math.Abs(WeaponFlow.Wrap(270f) + 90f) < 1e-4f && Math.Abs(WeaponFlow.Wrap(-180f) - 180f) < 1e-4f &&
+              Math.Abs(WeaponFlow.Wrap(45f) - 45f) < 1e-4f, "(-180,180]");
+    }
     /// <summary>Every form the plan writes down, plus the edge cases the grammar allows.</summary>
     private static void RoundTrip()
     {
