@@ -121,7 +121,8 @@ namespace Morgott.ContentTool.Tactical
         /// </summary>
         public static TacCharacterDef Build(string modDir, Action<string> log)
         {
-            Action<string> say = log ?? (m => ContentToolMain.Say(m));
+            // The mod's own sink goes through the same bound as ours (Dev.ChunkedLog.Bounded).
+            Action<string> say = Dev.ChunkedLog.Bounded(log) ?? (m => ContentToolMain.Say(m));
             Mount mount = new Mount();
             TacCharacterDef made = null;
             try { return made = BuildOrThrow(modDir, say, mount); }

@@ -1116,6 +1116,11 @@ namespace Morgott.ContentTool.Dev
                 }
 
                 if (!skeleton || cam == null) return;
+                // THE SKELETON WORKS IN REAL PIXELS (WorldToScreenPoint, GL.LoadPixelMatrix): identity matrix,
+                // real panel width and strip top - the finally below puts the bench's scale back (BenchScale).
+                GUI.matrix = Matrix4x4.identity;
+                panelWidth = BenchScale.Real(panelWidth);
+                stripTopGui = BenchScale.Real(stripTopGui);
                 bool press = e.type == EventType.MouseDown && e.button == 0;
                 if (e.type != EventType.Repaint && !press) return;
                 // BACKBUFFER PIXELS, never the camera's own render target. With an upscaler in front of
@@ -1146,6 +1151,7 @@ namespace Morgott.ContentTool.Dev
                                     "skipped each frame): " + ex);
                 }
             }
+            finally { GUI.matrix = BenchScale.Matrix; }
         }
 
         /// <summary>The overlay's first failure has been logged - see its catch.</summary>
@@ -1372,7 +1378,7 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         private void Inspector(float panelWidth, float stripTopGui)
         {
-            float w = Screen.width, h = Screen.height;
+            float w = BenchScale.W, h = BenchScale.H;
             float wide = Mathf.Min(InspectorWidth, w - panelWidth - 16f);
             if (wide < 160f) return;
             // 20 px a row, not 18: IMGUI puts the style's own vertical margin BETWEEN stacked controls,

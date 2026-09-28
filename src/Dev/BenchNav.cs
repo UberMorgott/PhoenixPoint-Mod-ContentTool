@@ -73,6 +73,24 @@ namespace Morgott.ContentTool.Dev
         internal static bool CanJump(int i) { return shown.Jump != null && i >= 0 && i < shown.Current && i <= shown.MaxJump; }
         internal static void RequestJump(int i) { ask = Ask.Jump; askStep = i; }
         internal static void RequestBack() { ask = Ask.Back; }
+        /// <summary>The native shell's Home and task-crumb presses - the same requests the IMGUI row makes,
+        /// run by the same <see cref="Apply"/> with the same NavFree gate.</summary>
+        internal static void RequestHome() { ask = Ask.Home; }
+        internal static void RequestTask() { ask = Ask.Task; }
+
+        // ---- the snapshot on show, read by the native shell (BenchShell) to draw the same row and crumbs.
+        internal static string ShownTitle { get { return shown.Title; } }
+        internal static string[] ShownSteps { get { return shown.Steps; } }
+        internal static int ShownCurrent { get { return shown.Current; } }
+        /// <summary>The crumb after the task's: the open sub-view, else the step the author is on, else null.</summary>
+        internal static string ShownLast
+        {
+            get
+            {
+                return shown.Sub ?? (shown.Steps != null && shown.Current >= 0 && shown.Current < shown.Steps.Length
+                                     ? shown.Steps[shown.Current] : null);
+            }
+        }
 
         /// <summary>
         /// Start of the frame's Layout pass, before anything draws: runs the last pass's request and returns

@@ -349,6 +349,8 @@ namespace Morgott.ContentTool.Dev
         private static int Home()
         {
             int wanted = TabHome;
+            // The native shell draws the cards itself; its press comes back through BenchShell.TakeTab.
+            if (BenchShell.Live) return wanted;
             bool free = !doctor.ShipPending && !LifecycleDashboard.Busy;
             GUI.enabled = free;
             if (BenchUi.Card("Replace a model", "Put your .glb on a soldier or creature part and check its bones"))
@@ -367,9 +369,51 @@ namespace Morgott.ContentTool.Dev
                 wanted = TabVideos;
             GUI.enabled = true;
             GUILayout.Space(6f);
-            BenchUi.Hint("The right side shows what the task needs: your model live, a sound player, a video " +
-                         "player, or the build's progress and log.");
+            BenchUi.Hint(HomeHint);
             return wanted;
+        }
+
+        private const string HomeHint = "The right side shows what the task needs: your model live, a sound player, " +
+                                        "a video player, or the build's progress and log.";
+
+        /// <summary>The Home cards for the native shell - the same six, the same gates as <see cref="Home"/>,
+        /// with the gate's reason as the card's line (a dead card says why it is dead).</summary>
+        private static BenchShell.Card[] ShellCards()
+        {
+            string busy = doctor.ShipPending ? "the Model Doctor has a press waiting - finish it first"
+                        : LifecycleDashboard.Busy ? "a build is running - open Build & share to follow it" : null;
+            string ship = doctor.ShipPending ? busy : null;   // arriving at a busy run is always allowed
+            return new[]
+            {
+                new BenchShell.Card { Name = "Replace a model", Line = "Put your .glb on a soldier or creature part and check its bones", Refusal = busy, Tab = TabDoctor },
+                new BenchShell.Card { Name = "Fit a weapon", Line = "Position a weapon your mod adds in a soldier's hand, then save", Refusal = busy, Tab = TabFit },
+                new BenchShell.Card { Name = "Build & share", Line = "Build, install and test your mod, then package it for sharing", Refusal = ship, Tab = TabLifecycle },
+                new BenchShell.Card { Name = "Add a weapon", Line = "Pick its kind, add your .glb, fit it in the hand, check its moves", Refusal = busy, Tab = TabWeapon },
+                new BenchShell.Card { Name = "Sounds", Line = "Replace a game sound with your own .wav, .ogg or .mp3", Refusal = busy, Tab = TabSounds },
+                new BenchShell.Card { Name = "Videos", Line = "Replace a game cutscene with your own clip, or add a new one", Refusal = busy, Tab = TabVideos },
+            };
+        }
+
+        /// <summary>Layout only, right after BenchNav's own step: a native card press (if its gate still
+        /// allows it), then the shell brought up to date for this frame.</summary>
+        private static void ShellFrame()
+        {
+            if (Event.current.type != EventType.Layout) return;
+            BenchShell.Card[] cards = ShellCards();
+            int t;
+            if (BenchShell.TakeTab(out t) && tab == TabHome)
+                foreach (BenchShell.Card c in cards) if (c.Tab == t && c.Refusal == null) tab = t;
+            BenchShell.BeginFrame(new BenchShell.Frame
+            {
+                Title = TabTitle(),
+                CloseLabel = "CLOSE (" + HotkeyLabel.ToUpperInvariant() + ")",
+                HomeHint = HomeHint,
+                Home = tab == TabHome,
+                Free = NavFree,
+                ModelScreen = ModelScreen(tab),
+                PanelWidth = BenchList.PanelWidth,
+                Cards = cards,
+            });
         }
         /// <summary>The file utilities that sit under the Doctor's Advanced toggle (design §6). It
         /// owns no Unity object, so unlike <see cref="doctor"/> it survives a close untouched apart
@@ -601,6 +645,9 @@ namespace Morgott.ContentTool.Dev
                                   new CameraDirectorParams { Origin = bay.CameraLookFrom });
                 TakeCamera();
                 Hide();
+                // AFTER the sweep, on its own canvas: the frame drawn with the game's own widgets. It never
+                // throws - a missing template leaves the plain IMGUI frame, and says so in the log.
+                BenchShell.Open(() => BenchList.PanelWidth);
 
                 Catalog();
                 open = true;
@@ -686,6 +733,8 @@ namespace Morgott.ContentTool.Dev
             foreach (Canvas c in UnityEngine.Object.FindObjectsOfType<Canvas>())
             {
                 if (c == null || !c.enabled || !c.isRootCanvas || hidden.Contains(c)) continue;
+                // The bench's OWN canvas, by reference: Reset view re-runs this sweep with it up.
+                if (BenchShell.Owns(c)) continue;
                 foreach (Behaviour b in c.GetComponentsInChildren<Behaviour>(true))
                 {
                     if (b == null || !b.enabled || masks.Contains(b)) continue;
@@ -1130,9 +1179,9 @@ namespace Morgott.ContentTool.Dev
                 // The transport strip eats the bottom of the free region exactly as the panel eats its
                 // left, and BOTH come out of BenchList's own constants - a second idea of how tall the
                 // strip is would be a unit standing behind it with nothing on screen to say why.
-                BenchList.Frame(frameRadius, cam.fieldOfView, Screen.width, Screen.height,
+                BenchList.Frame(frameRadius, cam.fieldOfView, BenchScale.W, BenchScale.H,
                                 PanelWidth,
-                                BenchList.StripReserve(Screen.width, Screen.height, PanelWidth),
+                                BenchList.StripReserve(BenchScale.W, BenchScale.H, PanelWidth),
                                 view.Zoom, out distance, out lateral, out vertical);
 
                 // THE ORBIT. The bay's authored look direction is still the starting point - the angle
@@ -1179,7 +1228,7 @@ namespace Morgott.ContentTool.Dev
             if (cam == null || !framed) return;
             float mpp = 2f * Mathf.Max(0.01f, frameDist) *
                         Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) /
-                        Mathf.Max(1f, Screen.height);
+                        Mathf.Max(1f, BenchScale.H);
             pan -= (frameRot * Vector3.right) * (dxPixels * mpp) +
                    (frameRot * Vector3.up) * (dyPixels * mpp);
             Reframe();
@@ -1201,7 +1250,7 @@ namespace Morgott.ContentTool.Dev
             if (cam == null || !framed || Math.Abs(after - before) < 1e-6f) return;
             float right, up;
             OrbitCamera.ZoomShift(before, after, view.AnchorX, view.AnchorY,
-                                  frameDist, cam.fieldOfView, Screen.height, out right, out up);
+                                  frameDist, cam.fieldOfView, BenchScale.H, out right, out up);
             pan += (frameRot * Vector3.right) * right + (frameRot * Vector3.up) * up;
         }
 
@@ -1287,6 +1336,8 @@ namespace Morgott.ContentTool.Dev
             List<string> failed = new List<string>();
             // Nothing the bench started may keep playing after it: the sound and the clip previews.
             Step(failed, "the sound and video previews", TaskScreens.ShutdownPreviews);
+            // The bench's own canvas goes BEFORE the game's come back.
+            Step(failed, "the bench's native frame", BenchShell.Close);
 
             // The masks BEFORE the canvases, so nothing is ever drawn with a mask still switched off.
             // Each list keeps whatever failed, so a retry retries only that.
@@ -1850,32 +1901,17 @@ namespace Morgott.ContentTool.Dev
         {
             const float pad = 12f;
             float x = PanelWidth + pad;
-            var r = new Rect(x, pad, Screen.width - x - pad, Screen.height - 2f * pad);
+            var r = new Rect(x, pad, BenchScale.W - x - pad, BenchScale.H - 2f * pad);
             if (t == TabSounds) TaskScreens.SoundsPane(r);
             else if (t == TabVideos) TaskScreens.VideosPane(r);
             else if (t == TabLifecycle) LifecycleDashboard.Pane(r);
             else TaskScreens.HomePane(r);
         }
 
-        private static void Draw()
+        /// <summary>The IMGUI frame header, drawn when the native shell is not up: [Home] [Back] ... [Reset view]
+        /// [Close], the crumbs and the title. Presses come back as flags, applied after EndArea.</summary>
+        private static void ImguiHeader(out bool resetting, out bool leaving)
         {
-            // LEFT edge. GeoscapeSoldierEditCenter stands the unit right of screen centre, so a panel
-            // on the right sat on top of him; the character is the instrument here, not the buttons.
-            float w = PanelWidth, x = 0f;
-            if (backdrop == null)
-            {
-                backdrop = new Texture2D(1, 1);
-                backdrop.SetPixel(0, 0, new Color(0.04f, 0.05f, 0.07f, 0.94f));
-                backdrop.Apply();
-            }
-            GUI.DrawTexture(new Rect(x, 0f, w, Screen.height), backdrop);
-
-            float viewportH = Screen.height - 2f * BenchList.PanelInset;
-            GUILayout.BeginArea(new Rect(x + BenchList.PanelInset, BenchList.PanelInset,
-                                         BenchList.ContentWidth(w), viewportH));
-            panelScroll = GUILayout.BeginScrollView(panelScroll);
-
-            BenchUi.Frame();
             // THE ONE TOP ROW: back to the task cards, the view reset, and the way out.
             // DEAD WHILE THE DOCTOR HAS A PRESS ARMED or a lifecycle run owns the job - see the tab note
             // below: leaving the tab mid-press or mid-run is what those gates forbid.
@@ -1890,13 +1926,50 @@ namespace Morgott.ContentTool.Dev
             // exception every frame - i.e. exactly the wedged screen this button exists to escape.
             // Only screens with the 3D view get the button at all (a dead grey one read as broken). `tab` never
             // changes mid-event (every move is deferred past EndArea), so the control count stays stable.
-            bool resetting = ModelScreen(tab) &&
-                             GUILayout.Button(new GUIContent("Reset view", "camera back to the start (Home key)"),
-                                              GUILayout.Width(96f));
-            bool leaving = GUILayout.Button("Close (" + HotkeyLabel + ")", GUILayout.Width(140f));
+            resetting = ModelScreen(tab) &&
+                        GUILayout.Button(new GUIContent("Reset view", "camera back to the start (Home key)"),
+                                         GUILayout.Width(96f));
+            leaving = GUILayout.Button("Close (" + HotkeyLabel + ")", GUILayout.Width(140f));
             GUILayout.EndHorizontal();
             BenchNav.Crumbs(NavFree);
             BenchUi.Title(TabTitle());
+        }
+
+        private static void Draw()
+        {
+            // LEFT edge. GeoscapeSoldierEditCenter stands the unit right of screen centre, so a panel
+            // on the right sat on top of him; the character is the instrument here, not the buttons.
+            float w = PanelWidth, x = 0f;
+            if (backdrop == null)
+            {
+                backdrop = new Texture2D(1, 1);
+                backdrop.SetPixel(0, 0, new Color(0.04f, 0.05f, 0.07f, 0.94f));
+                backdrop.Apply();
+            }
+            // THE NATIVE SHELL, when it is up (decided once for the frame at Layout): it draws the panel's
+            // ground, the top row, the crumbs and the title on its own canvas, UNDER IMGUI - so IMGUI lays no
+            // backdrop over it and starts its area below the shell's band.
+            bool shell = BenchShell.Live;
+            if (!shell) GUI.DrawTexture(new Rect(x, 0f, w, BenchScale.H), backdrop);
+
+            float top = shell ? BenchShell.BandHeight : BenchList.PanelInset;
+            float viewportH = BenchScale.H - top - BenchList.PanelInset;
+            var area = new Rect(x + BenchList.PanelInset, top, BenchList.ContentWidth(w), viewportH);
+            GUILayout.BeginArea(area);
+            // Native slots (main button, badges) inside this scroll view are clipped to it.
+            if (shell) BenchSlots.PanelBegin(area);
+            panelScroll = GUILayout.BeginScrollView(panelScroll);
+
+            BenchUi.Frame();
+            bool resetting, leaving;
+            if (shell)
+            {
+                // The shell's presses, taken on Layout like every other move.
+                bool layout = Event.current.type == EventType.Layout;
+                resetting = layout && BenchShell.TakeReset() && ModelScreen(tab);
+                leaving = layout && BenchShell.TakeClose();
+            }
+            else ImguiHeader(out resetting, out leaving);
 
             // TASK CARDS, ONE COLUMN. Each card opens one screen; "< Tasks" comes back. The rules below
             // were written for the old tab strip and still hold for the cards:
@@ -2538,8 +2611,8 @@ namespace Morgott.ContentTool.Dev
             /// </summary>
             private void Mouse()
             {
-                float mx = Input.mousePosition.x, my = Input.mousePosition.y;
-                bool over = OrbitCamera.InViewport(mx, my, Screen.width, Screen.height, PanelWidth) &&
+                float mx = BenchScale.Mouse.x, my = BenchScale.Mouse.y;
+                bool over = OrbitCamera.InViewport(mx, my, BenchScale.W, BenchScale.H, PanelWidth) &&
                             !FitAnim.OverList(mx, my) && !guiHot;
 
                 float wheel = Input.mouseScrollDelta.y;
@@ -2550,9 +2623,9 @@ namespace Morgott.ContentTool.Dev
                     // exactly what puts the aim point in the middle of the part of the screen the panel
                     // and the strip do not cover.
                     view.WheelAt(wheel,
-                                 mx - (PanelWidth + Screen.width) * 0.5f,
-                                 my - (BenchList.StripReserve(Screen.width, Screen.height, PanelWidth) +
-                                       Screen.height) * 0.5f);
+                                 mx - (PanelWidth + BenchScale.W) * 0.5f,
+                                 my - (BenchList.StripReserve(BenchScale.W, BenchScale.H, PanelWidth) +
+                                       BenchScale.H) * 0.5f);
                 }
 
                 if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(2))
@@ -2565,7 +2638,7 @@ namespace Morgott.ContentTool.Dev
                         over, Input.GetMouseButton(0), Input.GetMouseButton(2),
                         Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt),
                         Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift),
-                        FitGizmo.WouldGrab(mx, my));
+                        FitGizmo.WouldGrab(BenchScale.Real(mx), BenchScale.Real(my)));
                     // Clicking the model is how a user says "I am done typing" - IMGUI will not work
                     // that out on its own, and a filter that keeps the keyboard keeps the fly keys.
                     if (over) dropFocus = true;
@@ -2647,6 +2720,7 @@ namespace Morgott.ContentTool.Dev
                 if (!open) return;
                 try
                 {
+                    BenchSlots.BeginPass();
                     if (dropFocus) { GUI.FocusControl(null); dropFocus = false; }
                     string focused = GUI.GetNameOfFocusedControl();
                     typing = focused == UnitFilterName || focused == WeaponFilterName ||
@@ -2654,42 +2728,61 @@ namespace Morgott.ContentTool.Dev
                              (focused != null && focused.StartsWith(TypingPrefix, StringComparison.Ordinal));
                     // FIRST, and unconditionally: it allocates a control id from this pass's counter,
                     // and an id that is only sometimes allocated is a different id every frame.
-                    FitGizmo.Gui(PanelWidth,
-                                 BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
-                    if (FitGizmo.Last != null) { message = FitGizmo.Last; FitGizmo.Last = null; }
-                    // The tab THIS pass was laid out for: Draw moves `tab` after its EndArea, and what is
-                    // drawn after it must match this pass's Layout, not the next one's.
-                    // NAVIGATION FIRST, on Layout only and before anything is drawn: the last pass's
-                    // Home/Back/crumb/step request runs here, so the tab never moves mid-event.
-                    BenchNav.BeginFrame();
-                    if (BenchNav.Apply(NavFree)) tab = TabHome;
-                    BenchNav.Screen(tab == TabHome ? null : TabTitle());
-                    int shown = tab;
-                    // No 3D on this screen: the camera is off, so the ground is laid first and opaque.
-                    if (!ModelScreen(shown)) BenchUi.Ground(new Rect(0f, 0f, Screen.width, Screen.height));
-                    Draw();
-                    if (ModelScreen(shown))
+                    // The gizmo works in REAL pixels (WorldToScreenPoint, GL): identity matrix, real numbers.
+                    // Everything after it is the bench's own IMGUI, in virtual pixels (BenchScale).
+                    GUI.matrix = Matrix4x4.identity;
+                    FitGizmo.Gui(BenchScale.Real(PanelWidth),
+                                 BenchScale.Real(BenchList.StripTop(BenchScale.W, BenchScale.H, PanelWidth)));
+                    GUI.matrix = BenchScale.Matrix;
+                    // The game's look on every IMGUI control of the bench (NativeSkin), while the native
+                    // shell is up; the stock skin otherwise. Put back in the finally below.
+                    GUISkin skinWas = GUI.skin;
+                    try
                     {
-                        // AFTER the panel, and outside its area: the strip is its own region and IMGUI
-                        // areas do not nest.
-                        // The Doctor goes with it ONLY on its own tab: the strip's header row carries §6's
-                        // [Skeleton] toggle there, and nothing at all on FIT.
-                        FitAnim.Draw(PanelWidth, shown == TabDoctor ? doctor : null);
-                        // AFTER the strip, so the strip's own pixels are already the strip's, and after the
-                        // panel, so the inspector it draws sits on top of the scene rather than under it.
-                        // It takes no hotControl: a joint pick is a click, and a bare left press is
-                        // ViewGesture.None anyway, so there is nothing for the orbit to stand down from.
-                        if (shown == TabDoctor)
-                            doctor.Overlay(cam, PanelWidth,
-                                           BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
+                        if (FitGizmo.Last != null) { message = FitGizmo.Last; FitGizmo.Last = null; }
+                        // The tab THIS pass was laid out for: Draw moves `tab` after its EndArea, and what is
+                        // drawn after it must match this pass's Layout, not the next one's.
+                        // NAVIGATION FIRST, on Layout only and before anything is drawn: the last pass's
+                        // Home/Back/crumb/step request runs here, so the tab never moves mid-event.
+                        BenchNav.BeginFrame();
+                        if (BenchNav.Apply(NavFree)) tab = TabHome;
+                        // The native shell: a card press, then Live decided for this whole frame.
+                        ShellFrame();
+                        // Decided right after Live is (at Layout), so every event of the frame has the same skin.
+                        if (BenchShell.Live && NativeSkin.Skin != null) GUI.skin = NativeSkin.Skin;
+                        BenchNav.Screen(tab == TabHome ? null : TabTitle());
+                        int shown = tab;
+                        // No 3D on this screen: the camera is off, so the ground is laid first and opaque (the
+                        // native shell lays its own, under its canvas, when it is up).
+                        if (!ModelScreen(shown) && !BenchShell.Live) BenchUi.Ground(new Rect(0f, 0f, BenchScale.W, BenchScale.H));
+                        Draw();
+                        BenchSlots.PanelEnd();
+                        if (ModelScreen(shown))
+                        {
+                            // AFTER the panel, and outside its area: the strip is its own region and IMGUI
+                            // areas do not nest.
+                            // The Doctor goes with it ONLY on its own tab: the strip's header row carries §6's
+                            // [Skeleton] toggle there, and nothing at all on FIT.
+                            FitAnim.Draw(PanelWidth, shown == TabDoctor ? doctor : null);
+                            // AFTER the strip, so the strip's own pixels are already the strip's, and after the
+                            // panel, so the inspector it draws sits on top of the scene rather than under it.
+                            // It takes no hotControl: a joint pick is a click, and a bare left press is
+                            // ViewGesture.None anyway, so there is nothing for the orbit to stand down from.
+                            if (shown == TabDoctor)
+                                doctor.Overlay(cam, PanelWidth,
+                                               BenchList.StripTop(BenchScale.W, BenchScale.H, PanelWidth));
+                        }
+                        else Pane(shown);
+                        // Esc = Back, LAST: the gizmo and the bone inspector take Esc first when they want it.
+                        BenchNav.Escape(NavFree);
+                        // The hovered control's tooltip, on top of everything.
+                        BenchUi.Tooltip();
+                        // The native slots onto the rects this Repaint recorded.
+                        BenchSlots.EndRepaint();
+                        // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.
+                        guiHot = GUIUtility.hotControl != 0;
                     }
-                    else Pane(shown);
-                    // Esc = Back, LAST: the gizmo and the bone inspector take Esc first when they want it.
-                    BenchNav.Escape(NavFree);
-                    // The hovered control's tooltip, on top of everything.
-                    BenchUi.Tooltip();
-                    // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.
-                    guiHot = GUIUtility.hotControl != 0;
+                    finally { GUI.skin = skinWas; GUI.matrix = Matrix4x4.identity; }
                 }
                 catch (Exception ex)
                 {

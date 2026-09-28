@@ -11,6 +11,7 @@ namespace Morgott.ContentTool.Dev
     /// </summary>
     internal static class BenchUi
     {
+        private static GUISkin builtFor;
         private static GUIStyle title, hint, text, badge, step, stepOn, stepDone, main, card, cardSub, tip, head, none;
         private static readonly Color Grey = new Color(0.62f, 0.66f, 0.72f);
         private static readonly Color PassC = new Color(0.35f, 0.82f, 0.45f);
@@ -20,7 +21,11 @@ namespace Morgott.ContentTool.Dev
 
         private static void Init()
         {
-            if (title != null) return;
+            // Rebuilt when the skin changes: the bench draws with the game's skin while its native shell is up
+            // (NativeSkin) and with the stock one otherwise.
+            if (title != null && builtFor == GUI.skin) return;
+            builtFor = GUI.skin;
+            left = null; logArea = null;
             title = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, wordWrap = true };
             text = new GUIStyle(GUI.skin.label) { wordWrap = true };
             head = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 13 };
@@ -74,11 +79,16 @@ namespace Morgott.ContentTool.Dev
         {
             Init();
             Color c = g == Grade.Pass ? PassC : g == Grade.Warn ? WarnC : FailC;
-            badge.normal.textColor = c;
+            string word = g == Grade.Pass ? "PASS" : g == Grade.Warn ? "WARN" : "FAIL";
+            bool native = BenchSlots.Active;
+            badge.normal.textColor = native ? Color.clear : c;
             GUILayout.BeginHorizontal();
-            GUILayout.Label(new GUIContent(g == Grade.Pass ? "PASS" : g == Grade.Warn ? "WARN" : "FAIL", tooltip),
-                            badge, GUILayout.Width(46f));
-            GUILayout.Label(new GUIContent(sentence, tooltip), text);
+            GUILayout.Label(new GUIContent(word, tooltip), badge, GUILayout.Width(46f));
+            if (native) BenchSlots.Text(GUILayoutUtility.GetLastRect(), word, c, 14, TextAnchor.MiddleCenter);
+            // Native: the IMGUI sentence is laid out INVISIBLE (it still reserves its wrapped height and keeps
+            // its tooltip) and the game's font draws it under that rect.
+            GUILayout.Label(new GUIContent(sentence, tooltip), native ? Invisible(text) : text);
+            if (native) BenchSlots.Text(GUILayoutUtility.GetLastRect(), sentence, Color.white, 12, TextAnchor.UpperLeft);
             GUILayout.EndHorizontal();
         }
 
@@ -87,8 +97,24 @@ namespace Morgott.ContentTool.Dev
         internal static void Mark(string word, Grade? g, string tooltip, float width)
         {
             Init();
-            badge.normal.textColor = g == null ? Grey : g == Grade.Pass ? PassC : g == Grade.Warn ? WarnC : FailC;
+            Color c = g == null ? Grey : g == Grade.Pass ? PassC : g == Grade.Warn ? WarnC : FailC;
+            bool native = BenchSlots.Active;
+            badge.normal.textColor = native ? Color.clear : c;
             GUILayout.Label(new GUIContent(word, tooltip), badge, GUILayout.Width(width));
+            if (native) BenchSlots.Text(GUILayoutUtility.GetLastRect(), word, c, 13, TextAnchor.MiddleCenter);
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<GUIStyle, GUIStyle> invisible =
+            new System.Collections.Generic.Dictionary<GUIStyle, GUIStyle>();
+        /// <summary>A copy of <paramref name="s"/> that lays out the same but paints no glyphs.</summary>
+        private static GUIStyle Invisible(GUIStyle s)
+        {
+            GUIStyle v;
+            if (invisible.TryGetValue(s, out v)) return v;
+            v = new GUIStyle(s);
+            v.normal.textColor = v.hover.textColor = v.active.textColor = v.focused.textColor = Color.clear;
+            invisible[s] = v;
+            return v;
         }
 
         /// <summary>"1 Model  2 Target  3 Check  4 Build" with the current one lit.</summary>
@@ -96,6 +122,9 @@ namespace Morgott.ContentTool.Dev
         {
             Init();
             BenchNav.StepsSeen(names, current);
+            // The native shell draws the bar in its band from what StepsSeen just reported; here it is ONE
+            // zero-height control, so the screen's control count does not depend on which frame is up.
+            if (BenchShell.Live) { Hint(null); return; }
             GUILayout.BeginHorizontal();
             for (int i = 0; i < names.Length; i++)
             {
@@ -118,6 +147,16 @@ namespace Morgott.ContentTool.Dev
         internal static bool Main(string label, string refusal, string tooltip = null)
         {
             Init();
+            if (BenchSlots.Active)
+            {
+                // The game's own button under the rect the IMGUI one would have taken (BenchSlots).
+                var content = new GUIContent(label, tooltip);
+                Rect r = GUILayoutUtility.GetRect(content, main, GUILayout.ExpandWidth(true));
+                GUI.Label(r, new GUIContent("", tooltip), GUIStyle.none);   // keeps the IMGUI tooltip
+                bool hit = BenchSlots.Main(r, label, GUI.enabled && refusal == null, tooltip);
+                Hint(refusal);
+                return hit && refusal == null;
+            }
             bool was = GUI.enabled;
             GUI.enabled = was && refusal == null;
             bool pressed = GUILayout.Button(new GUIContent(label, tooltip), main);
@@ -182,6 +221,7 @@ namespace Morgott.ContentTool.Dev
         private static GUIStyle left;
         private static GUIStyle Left()
         {
+            Init();
             if (left == null) left = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
             return left;
         }
@@ -300,7 +340,7 @@ namespace Morgott.ContentTool.Dev
             Vector2 m = Event.current.mousePosition;
             var content = new GUIContent(GUI.tooltip);
             float w = 320f, h = tip.CalcHeight(content, w);
-            float x = Mathf.Min(m.x + 16f, Screen.width - w - 4f), y = Mathf.Min(m.y + 18f, Screen.height - h - 4f);
+            float x = Mathf.Min(m.x + 16f, BenchScale.W - w - 4f), y = Mathf.Min(m.y + 18f, BenchScale.H - h - 4f);
             GUI.Box(new Rect(x, y, w, h), content, tip);
         }
     }
