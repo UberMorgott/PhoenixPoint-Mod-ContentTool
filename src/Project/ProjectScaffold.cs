@@ -26,7 +26,7 @@ namespace Morgott.ContentTool.Project
     /// UnityEngine-free on purpose: the whole disk half is proven in tests\ObjCodecTests instead of by pressing
     /// a button in a running game.
     /// </summary>
-    internal static class ProjectScaffold
+    internal static partial class ProjectScaffold
     {
         /// <summary>What one press produced, so the panel can name the folder it wrote and the bake can be
         /// handed the ABSOLUTE root rather than a name the console parser would have to re-resolve.</summary>

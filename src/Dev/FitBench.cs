@@ -257,7 +257,8 @@ namespace Morgott.ContentTool.Dev
         internal static bool DoctorShowing { get { return open && tab == TabDoctor; } }
         /// <summary>Which of the three columns is drawn. ONE int, not two bools: two flags can both be
         /// true, and "the Doctor and the Lifecycle at once" is a layout stack nobody balances.</summary>
-        private const int TabHome = 0, TabFit = 1, TabDoctor = 2, TabLifecycle = 3;
+        private const int TabHome = 0, TabFit = 1, TabDoctor = 2, TabLifecycle = 3,
+                          TabSounds = 4, TabVideos = 5, TabWeapon = 6;
         private static int tab;
 
         /// <summary>Opens a screen by its plain name ("home", "fit", "doctor", "build") - the seam an
@@ -272,7 +273,10 @@ namespace Morgott.ContentTool.Dev
                 case "fit": tab = TabFit; break;
                 case "doctor": tab = TabDoctor; break;
                 case "build": tab = TabLifecycle; break;
-                default: return "unknown screen '" + name + "' - home, fit, doctor or build";
+                case "sounds": tab = TabSounds; break;
+                case "videos": tab = TabVideos; break;
+                case "weapon": tab = TabWeapon; break;
+                default: return "unknown screen '" + name + "' - home, fit, doctor, build, sounds, videos or weapon";
             }
             return "screen " + name;
         }
@@ -286,6 +290,22 @@ namespace Morgott.ContentTool.Dev
             return w;
         }
         private static readonly Dictionary<string, string> words = new Dictionary<string, string>();
+
+        /// <summary>The shipped weapons a new one may be cloned from, by def name - the catalogue's weapons
+        /// minus those a content mod built and those with no view (WeaponBuild refuses a donor without one).
+        /// Rebuilt when the catalogue is.</summary>
+        private static List<string> Donors()
+        {
+            if (donors != null && donorsOf == weapons) return donors;
+            var fitted = new HashSet<string>(WeaponBuild.FittedKeys);
+            donors = new List<string>();
+            foreach (WeaponDef d in weapons)
+                if (d.ViewElementDef != null && !fitted.Contains(d.name)) donors.Add(d.name);
+            donorsOf = weapons;
+            return donors;
+        }
+        private static List<string> donors;
+        private static List<WeaponDef> donorsOf;
         private static readonly string[] FitSteps = { "Soldier", "Weapon", "Adjust", "Save" };
 
         private static string TabTitle()
@@ -295,12 +315,15 @@ namespace Morgott.ContentTool.Dev
                 case TabFit: return "Fit a weapon in the hand";
                 case TabDoctor: return "Replace a model";
                 case TabLifecycle: return "Build & share";
+                case TabSounds: return "Sounds";
+                case TabVideos: return "Videos";
+                case TabWeapon: return "Add a weapon";
                 default: return "What do you want to do?";
             }
         }
 
         /// <summary>The home screen: one card per task. Returns the tab a card asked for (or home).
-        /// Sounds, videos and new weapons have no screen yet - their cards say so instead of vanishing.</summary>
+        /// Sounds, videos and new weapons open the task screens in <see cref="TaskScreens"/>.</summary>
         private static int Home()
         {
             int wanted = TabHome;
@@ -313,10 +336,14 @@ namespace Morgott.ContentTool.Dev
             GUI.enabled = !doctor.ShipPending;      // arriving at a busy run is always allowed
             if (BenchUi.Card("Build & share", "Build, install and test your mod, then package it for sharing"))
                 wanted = TabLifecycle;
+            GUI.enabled = free;
+            if (BenchUi.Card("Add a weapon", "Make a new weapon from a game weapon and your .glb model"))
+                wanted = TabWeapon;
+            if (BenchUi.Card("Sounds", "Replace a game sound with your own .wav, .ogg or .mp3"))
+                wanted = TabSounds;
+            if (BenchUi.Card("Videos", "Replace a game cutscene with your own clip, or add a new one"))
+                wanted = TabVideos;
             GUI.enabled = true;
-            BenchUi.Card("Add a weapon", null, "coming in the next update - for now use the ct_project console command");
-            BenchUi.Card("Sounds", null, "coming in the next update - for now use ct_sound in the console");
-            BenchUi.Card("Videos", null, "coming in the next update - for now use ct_video in the console");
             GUILayout.Space(6f);
             BenchUi.Hint("The model on the right is a live preview: middle-drag to orbit, wheel to zoom, F to frame.");
             return wanted;
@@ -1861,6 +1888,20 @@ namespace Morgott.ContentTool.Dev
                 GUILayout.EndArea();
                 // BEFORE the close, never after: `Close` puts the tab back to FIT (its Model Doctor step), and applying a
                 // toggle press on top of that would land the reopened bench on a tab nobody asked for.
+                tab = wanted;
+                if (leaving) message = Close();
+                else if (resetting) message = ResetView();
+                return;
+            }
+            if (tab == TabSounds || tab == TabVideos || tab == TabWeapon)
+            {
+                float cw = BenchList.ContentWidth(w);
+                if (tab == TabSounds) TaskScreens.Sounds(cw);
+                else if (tab == TabVideos) TaskScreens.Videos(cw);
+                // The same deferral as every tab move: Build & share is entered after EndArea.
+                else if (TaskScreens.Weapon(cw, Donors(), Word)) wanted = TabLifecycle;
+                GUILayout.EndScrollView();
+                GUILayout.EndArea();
                 tab = wanted;
                 if (leaving) message = Close();
                 else if (resetting) message = ResetView();

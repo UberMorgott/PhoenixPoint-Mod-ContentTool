@@ -356,6 +356,27 @@ namespace Morgott.ContentTool.Dev
         ///
         /// Returns a refusal, or null when the panel took it.
         /// </summary>
+        internal static string Select(string projectRoot)
+        {
+            // The bench's task screens (Add a weapon) hand over the project they wrote, and nothing else:
+            // Handoff's first half - refuse while a run owns the job, capture before the binding moves.
+            try
+            {
+                if (string.IsNullOrEmpty(projectRoot) || !Directory.Exists(projectRoot))
+                    return "there is no project root to select.";
+                LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
+                if (now.Busy || Pending(now)) return StageText.R26(now.Stage);
+                string full = Path.GetFullPath(projectRoot);
+                string modId = ContentProject.LoadDeclared(projectRoot).Id;
+                LifecycleJob.Captured taken = LifecycleJob.Capture(full);
+                Bind(full, modId);
+                captured = taken;
+                rescan = true;
+                return null;
+            }
+            catch (Exception ex) { return ex.GetType().Name + ": " + ex.Message; }
+        }
+
         internal static string Handoff(string producedRoot, string applyLine,
                                        IList<Route7.TargetInstall> targets, Route7.ApplyDisposition how)
         {
@@ -734,6 +755,20 @@ namespace Morgott.ContentTool.Dev
                              "Validate -> Bake -> Apply -> Verify, stopping at the first failure"))
                 intent = BuildTest;
 
+            // THE PROGRESS ROW EXISTS ONLY WHILE A RUN OWNS THE JOB - idle it was an empty track beside a
+            // grey Cancel. Decided on the LAYOUT pass and reused by the events after it: `now` is published
+            // by a worker, and a row that appeared between Layout and Repaint is IMGUI's control-count throw.
+            if (UnityEngine.Event.current.type == UnityEngine.EventType.Layout) progressShown = owned;
+            if (progressShown) ProgressRow(now);
+            string said = owned && !now.Busy ? StageText.CancelUnavailable(now.Stage) : message;
+            BenchUi.Hint(LifecycleView.OneLine(said), said);
+            DrawShare(owned, blocked, none);
+        }
+
+        private static bool progressShown;
+
+        private static void ProgressRow(LifecycleRun.Snapshot now)
+        {
             SlimProgress p = now.Progress;
             GUILayout.BeginHorizontal(); openGroups++;
             // A FIXED TRACK with the fill inside it, so the phase label beside it does not walk left and
@@ -754,9 +789,10 @@ namespace Morgott.ContentTool.Dev
             if (GUILayout.Button("Cancel", GUILayout.Width(80f))) intent = "Cancel";
             GUI.enabled = true;
             openGroups--; GUILayout.EndHorizontal();
-            string said = owned && !now.Busy ? StageText.CancelUnavailable(now.Stage) : message;
-            BenchUi.Hint(LifecycleView.OneLine(said), said);
+        }
 
+        private static void DrawShare(bool owned, bool blocked, bool none)
+        {
             // SHARING, apart from the stepper.
             BenchUi.Section("Share");
             foreach (LifecycleView.Row r in view.Rows)

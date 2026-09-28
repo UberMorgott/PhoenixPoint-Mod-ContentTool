@@ -200,6 +200,19 @@ namespace Morgott.ContentTool.Wwise
             return false;
         }
 
+        /// <summary>The NAMED media the filter matches (the <see cref="Matches"/> rule), sorted by name, at most
+        /// <paramref name="max"/> - what the bench's sound picker lists. <paramref name="total"/> is every match.</summary>
+        internal List<uint> Search(string filter, int max, out int total)
+        {
+            var hits = new List<uint>();
+            foreach (uint id in byId.Keys)
+                if (Matches(id, id.ToString(CultureInfo.InvariantCulture), filter)) hits.Add(id);
+            total = hits.Count;
+            hits.Sort((a, b) => string.Compare(Name(a), Name(b), StringComparison.OrdinalIgnoreCase));
+            if (hits.Count > max) hits.RemoveRange(max, hits.Count - max);
+            return hits;
+        }
+
         /// <summary>
         /// A file name for the decoded .wav: "&lt;ShortName&gt;__&lt;id&gt;", sanitised, or bare
         /// "&lt;id&gt;" when nothing names the media. The id stays on the end on purpose - two Wwise

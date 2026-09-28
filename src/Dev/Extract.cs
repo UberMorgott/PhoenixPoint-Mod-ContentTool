@@ -310,6 +310,19 @@ namespace Morgott.ContentTool.Dev
 
         private static SoundbankNames Names { get { return SoundbankNames.Cached(SoundbanksXml); } }
 
+        /// <summary>The game's sound name map - the one `ct_list audio` reads - for the bench's sound picker.</summary>
+        internal static SoundbankNames SoundNames { get { return Names; } }
+
+        /// <summary>Every shipped cutscene whose name holds the filter, spelled the way a "replace" row's
+        /// "asset" names it ("StreamableCopiedAssets/Videos/..."; `ct_video` matches it by tail).</summary>
+        internal static List<string> ShippedVideos(string filter)
+        {
+            var list = new List<string>();
+            foreach (string rel in LooseFiles.Find(VideoRoot, ".webm", filter))
+                list.Add("StreamableCopiedAssets/" + rel);
+            return list;
+        }
+
         /// <summary>
         /// The loose .wem as bare file names - which, for these, is their media id. The paths stay
         /// relative to the root because the shipped files sit under GeneratedSoundBanks\Windows\, not
