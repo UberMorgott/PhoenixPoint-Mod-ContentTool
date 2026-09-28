@@ -561,13 +561,17 @@ namespace Morgott.ContentTool.Bake
             served = 0;
             if (!File.Exists(Path.Combine(root, Project.ContentMods.Manifest)))
                 return "REFUSED: no ppcontent.json in " + root;
-            ContentProject.Declared p = ContentProject.LoadDeclared(root);
+            // The bake's sink, not the throw: two clips sharing a stem (intro.mp4 + intro.webm) or one
+            // half-typed row is a SOURCE SKIPPED line on this mod, and its other clips are still served.
+            List<string> sourceRefusals = new List<string>();
+            ContentProject.Declared p = ContentProject.LoadDeclared(root, sourceRefusals);
             string json = File.Exists(Catalog) ? File.ReadAllText(Catalog) : "";
             string name = new DirectoryInfo(root).Name;
             owners[Project.ModGate.Key(root)] = p.Id;
 
             StringBuilder log = new StringBuilder();
-            int n = 0, queued = 0, refused = 0;
+            int n = 0, queued = 0, refused = sourceRefusals.Count;
+            foreach (string refusal in sourceRefusals) log.AppendLine("SOURCE SKIPPED: " + refusal);
             foreach (ShippedReplacement r in p.Replace)
             {
                 if (string.IsNullOrEmpty(r.video)) continue;
