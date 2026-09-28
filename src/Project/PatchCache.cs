@@ -98,6 +98,44 @@ namespace Morgott.ContentTool.Project
             return string.IsNullOrEmpty(patchedDir) ? null : Path.Combine(patchedDir, KeyFile);
         }
 
+        /// <summary>The NEGATIVE receipt: the key of the last bake whose patch route failed DETERMINISTICALLY
+        /// (a refused row, a missing shipped bundle, a failed read-back) - never an I/O, contention or
+        /// residency outcome, which do not reach <see cref="MarkFailed"/>. Before it, a broken mod re-baked
+        /// and failed again on every launch (PERF.md section 1).</summary>
+        private const string FailedFile = "ct-cache.failed";
+
+        /// <summary>Did a bake of exactly these inputs already fail? Same key = same manifest, sources,
+        /// shipped bundles and ContentTool format, so the same bake would fail the same way.</summary>
+        internal static bool FailedBefore(string patchedDir, string key)
+        {
+            if (string.IsNullOrEmpty(patchedDir) || string.IsNullOrEmpty(key)) return false;
+            string file = Path.Combine(patchedDir, FailedFile);
+            try { return File.Exists(file) && File.ReadAllText(file).Trim() == FailedStamp(key); }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>The key PLUS this build's module id: FormatVersion only moves when the output's shape
+        /// does, and a ContentTool update that FIXES the failing bake must retry it.</summary>
+        private static string FailedStamp(string key)
+        {
+            return key + " " + typeof(PatchCache).Assembly.ManifestModule.ModuleVersionId.ToString("N");
+        }
+
+        /// <summary>Records a failed bake's key, or clears the record (<paramref name="key"/> null) after a
+        /// clean one. Best effort: a record that cannot be written only costs the old behaviour, one
+        /// re-bake on the next launch.</summary>
+        internal static void MarkFailed(string patchedDir, string key)
+        {
+            if (string.IsNullOrEmpty(patchedDir)) return;
+            string file = Path.Combine(patchedDir, FailedFile);
+            try
+            {
+                if (key == null) { if (File.Exists(file)) File.Delete(file); }
+                else File.WriteAllText(file, FailedStamp(key), new UTF8Encoding(false));
+            }
+            catch (Exception) { }
+        }
+
         /// <summary>
         /// Which GAME INSTALLATION a patched copy belongs to, as a folder name.
         ///
@@ -135,8 +173,8 @@ namespace Morgott.ContentTool.Project
         /// rather than fought. Callers run this BEFORE any bundle is installed for this session, so
         /// nothing that is deleted here can be loaded.
         ///
-        /// ponytail: a mod merely switched OFF in the manager is not live and pays one re-bake when
-        /// it comes back. Discover with an all-ON roster if that ever bites.
+        /// A mod merely switched OFF in the manager IS live here: the caller discovers with an all-ON
+        /// roster (ContentToolMain.LiveProjectIds), so re-enabling it costs no re-bake (PERF.md 3).
         /// </summary>
         internal static string Prune(string patchedRoot, string tag, ICollection<string> liveModIds)
         {

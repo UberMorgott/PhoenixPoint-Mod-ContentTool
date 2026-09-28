@@ -78,7 +78,7 @@ namespace Morgott.ContentTool
         }
 
         /// <summary>
-        /// Every project id whose patched copies are still someone's: the ENABLED content mods, via
+        /// Every project id whose patched copies are still someone's: the INSTALLED content mods, via
         /// the one discovery every route shares (Project.ContentMods.Enabled - never a second one),
         /// plus ContentTool's own subprojects, which no mod manager lists and `ct_route7 apply
         /// &lt;name&gt;` bakes. Throwing rather than guessing is deliberate: the caller's catch turns
@@ -88,8 +88,13 @@ namespace Morgott.ContentTool
         {
             List<string> ids = new List<string>();
             int skipped;
+            // ALL-ON: an INSTALLED mod merely switched off keeps its copies, so switching it back on is not
+            // a full re-bake (PERF.md hotspot 3). Only a mod no longer installed is swept.
+            IDictionary<string, bool> roster = Project.ModRoster.Build();
+            if (roster != null)
+                foreach (string k in new List<string>(roster.Keys)) roster[k] = true;
             foreach (string dir in Project.ContentMods.Enabled(ModDir, Project.ContentMods.Manifest,
-                                                               Project.ModRoster.Build(), null, out skipped))
+                                                               roster, null, out skipped))
                 ids.Add(Project.ContentProject.LoadDeclared(dir).Id);
 
             DirectoryInfo own = string.IsNullOrEmpty(ModDir) ? null : new DirectoryInfo(ModDir);

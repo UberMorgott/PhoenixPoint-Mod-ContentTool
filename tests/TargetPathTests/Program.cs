@@ -1704,6 +1704,16 @@ internal static class Program
             Check("S15-manifest", afterManifest != baseline && !PatchCache.Fresh(patched, afterManifest),
                 "an edited ppcontent.json - a MOD UPDATE - misses -> " + afterManifest);
 
+            // PERF 4: the NEGATIVE receipt answers only to the exact key it was written for, and a clean
+            // bake clears it.
+            PatchCache.MarkFailed(patched, baseline);
+            bool failedSame = PatchCache.FailedBefore(patched, baseline);
+            bool failedOther = PatchCache.FailedBefore(patched, afterManifest);
+            PatchCache.MarkFailed(patched, null);
+            Check("S15-negative-receipt", failedSame && !failedOther && !PatchCache.FailedBefore(patched, baseline),
+                "a failed bake's key blocks that key only (same=" + failedSame + ", edited=" + failedOther +
+                "), and clearing it lets the next enable bake");
+
             File.WriteAllBytes(Path.Combine(tex, "scope.png"), new byte[] { 9 });
             string afterSource = PatchCache.Key(project, sources);
             Check("S15-source", afterSource != afterManifest,

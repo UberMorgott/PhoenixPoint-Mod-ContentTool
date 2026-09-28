@@ -483,6 +483,20 @@ namespace Morgott.ContentTool.Bake
             FreshnessObservation seen = Observe(project, projectRoot);
             Dev.Perf.Line("route7.observe" + (seen.HaveAll ? " fresh" : " stale"), modId, sw);
             List<string> declared = new List<string>(seen.Declared);
+            // A BAKE THAT ALREADY FAILED ON EXACTLY THESE INPUTS is not re-run by the checkbox: it failed every
+            // launch before, blocking startup each time for the same refusal. `how` stays Refused, NOT
+            // BakeFailed: Toggle must not arm the session block (R29) over it, because this check costs one key
+            // hash and re-asking it is what lets an edit made mid-session bake on the very next press. Any
+            // change to the manifest, a source, the shipped bundle or the ContentTool build changes the answer;
+            // an author door always bakes.
+            if (!seen.HaveAll && checkbox && Project.PatchCache.FailedBefore(patched, seen.Key))
+            {
+                return pre.AppendLine("NOT RE-BAKED: '" + modId + "' failed its last bake of exactly these " +
+                                      "files and would fail the same way - nothing was installed. Fix the rows " +
+                                      "that bake named (any edit re-bakes), or delete " +
+                                      Path.Combine(patched, "ct-cache.failed") + " and switch the mod on again " +
+                                      "to retry unchanged.").ToString();
+            }
             if (!seen.HaveAll)
             {
                 pre.AppendLine(seen.CacheDirExists && !seen.KeyMatches

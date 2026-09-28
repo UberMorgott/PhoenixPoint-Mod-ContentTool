@@ -1983,6 +1983,16 @@ namespace Morgott.ContentTool.Bake
             // the receipt, and Route7 must not install over it. Refused and Cancelled published NOTHING and
             // are dispositions, never counts - the caller returns on them before this count is read.
             if (published == PublishOutcome.Failed) failures++;
+            // THE NEGATIVE RECEIPT, only when the whole set was PUBLISHED: then an unvouched run failed on its
+            // rows or its inputs, which the same key reproduces, and the checkbox need not bake it again
+            // (Route7.Applied). A Failed publication is I/O and a Refused/Cancelled one is contention or a
+            // press - none of them is recorded. NOR IS A RUN WITH A SOURCE THE IMPORTER REFUSED: a locked or
+            // half-written .png reads as "no such texture" to its row, and the key (size + mtime) would not
+            // move once the lock lifts. Only row-parse refusals are counted in ImportFailures without being an
+            // import. A clean run clears the record.
+            if (published == PublishOutcome.Published)
+                Project.PatchCache.MarkFailed(outDir, vouched ? null
+                    : p.ImportFailures - p.ReplaceRefusals == 0 ? key : null);
             // Nothing at all was written on these two, so none of the advice below applies.
             if (published == PublishOutcome.Refused || published == PublishOutcome.Cancelled) return failures;
 
