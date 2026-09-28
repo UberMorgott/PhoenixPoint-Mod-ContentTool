@@ -338,7 +338,11 @@ namespace Morgott.ContentTool.Tactical
             // THE ANIMATION: ours listed beside the donor's wherever a filter names it (prints its
             // own PASS/FAIL), then - if the manifest maps a "ranged" clip - a clone filtered to ONLY
             // our weapon, inserted BEFORE the general action because match order decides.
-            CreatureBuild.AlsoAccept(repo, c, anims, donorItem, ranged);
+            // AlsoAccept clones a shipped action before writing to it, so `general` - found above -
+            // may no longer be the one in the list; SpitClip inserts BEFORE it by index.
+            TacActorAnimActionBaseDef swapped;
+            if (CreatureBuild.AlsoAccept(repo, c, anims, donorItem, ranged).TryGetValue(general, out swapped))
+                general = (TacActorShootAnimActionDef)swapped;
             SpitClip(repo, c, anims, general, ranged);
 
             // THE AI: clone the template AND the actor def (both shared with the whole shipped

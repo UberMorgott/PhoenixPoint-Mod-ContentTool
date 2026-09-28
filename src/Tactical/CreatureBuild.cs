@@ -979,38 +979,118 @@ namespace Morgott.ContentTool.Tactical
         /// BashAbility.BashCrt:423-426 then dereferences the missing action with no null check: the bash
         /// coroutine dies on its first frame - no swing, no damage, and the ability never finishes.
         ///
-        /// So: WHEREVER THE DONOR'S ITEM IS LISTED, LIST OURS BESIDE IT. The shared EquipmentListDef is
-        /// CLONED before it is appended to - it is a def the shipped unit reads too.
+        /// So: WHEREVER THE DONOR'S ITEM IS LISTED, LIST OURS BESIDE IT - and CLONE ON WRITE. Every
+        /// action, EquipmentListDef and BaseAnimActions level that has to change is cloned first
+        /// unless it is already this creature's own: the default (key-set) actions, the ability
+        /// actions WireClips leaves alone and the whole "useGameAnimations" route still hold the
+        /// SHIPPED defs, which every unit of the donor's family reads. The BaseAnimActions chain is
+        /// walked too (TacActorAnimActions.SearchAnimActionInDef:144-147 falls through to it), and a
+        /// level is cloned only when something beneath it changed, so match order stays exact.
         /// ponytail: additive, never a replacement - the donor's own entries stay.
         /// </summary>
-        internal static void AlsoAccept(DefRepository repo, Creature c, TacActorAnimActionsDef anims,
-                                       EquipmentDef donorItem, EquipmentDef ours)
+        /// <returns>shipped action -&gt; the clone that replaced it in this creature's lists, so a
+        /// caller holding a reference found BEFORE the call can follow it.</returns>
+        internal static Dictionary<TacActorAnimActionBaseDef, TacActorAnimActionBaseDef> AlsoAccept(
+            DefRepository repo, Creature c, TacActorAnimActionsDef anims, EquipmentDef donorItem, EquipmentDef ours)
         {
             int taught = 0;
-            foreach (TacActorAnimActionBaseDef a in anims.AnimActions ?? new TacActorAnimActionBaseDef[0])
-            {
-                TacActorAnimActionEquipmentFilteredDef f = a as TacActorAnimActionEquipmentFilteredDef;
-                if (f == null) continue;
-                if (f.Equipments != null && f.Equipments.Contains(donorItem) && !f.Equipments.Contains(ours))
-                { f.Equipments = f.Equipments.Concat(new[] { ours }).ToArray(); taught++; }
-                if (f.EquipmentList != null && f.EquipmentList.Equipments != null &&
-                    f.EquipmentList.Equipments.Contains(donorItem))
-                {
-                    EquipmentListDef list = Clone(repo, c, f.EquipmentList, f.EquipmentList.name);
-                    if (!list.Equipments.Contains(ours))
-                        list.Equipments = list.Equipments.Concat(new[] { ours }).ToArray();
-                    f.EquipmentList = list;
-                    taught++;
-                }
-                TacticalItemDef mine = ours as TacticalItemDef, theirs = donorItem as TacticalItemDef;
-                if (f.Bodyparts != null && mine != null && theirs != null &&
-                    f.Bodyparts.Contains(theirs) && !f.Bodyparts.Contains(mine))
-                { f.Bodyparts = Enumerable.Concat(f.Bodyparts, new[] { mine }).ToArray(); taught++; }
-            }
+            var replaced = new Dictionary<TacActorAnimActionBaseDef, TacActorAnimActionBaseDef>();
+            Taught(repo, c, anims, donorItem, ours, replaced, ref taught, 0);
             c.Say("ct_creature " + (taught > 0 ? "PASS" : "FAIL") + " '" + ours.name + "' added beside '" +
-                  donorItem.name + "' in " + taught + " equipment filter(s) - an anim action matches " +
-                  "equipment by DEF IDENTITY, so a clone the lists do not name gets NO anim action and " +
-                  "BashAbility.BashCrt:425 dereferences null");
+                  donorItem.name + "' in " + taught + " equipment filter(s), " + replaced.Count +
+                  " shipped action(s) cloned first - an anim action matches equipment by DEF IDENTITY, " +
+                  "so a clone the lists do not name gets NO anim action and BashAbility.BashCrt:425 " +
+                  "dereferences null");
+            return replaced;
+        }
+
+        /// <summary>
+        /// One level of <see cref="AlsoAccept"/>: returns the def to use in place of
+        /// <paramref name="level"/> - itself when nothing under it changed or it is already ours,
+        /// else its clone. The top level passed in is always the creature's own clone.
+        /// </summary>
+        private static TacActorAnimActionsDef Taught(DefRepository repo, Creature c, TacActorAnimActionsDef level,
+            EquipmentDef donorItem, EquipmentDef ours,
+            Dictionary<TacActorAnimActionBaseDef, TacActorAnimActionBaseDef> replaced, ref int taught, int depth)
+        {
+            if (level == null || depth > 16) return level;       // 16: a cycle the data let through
+            TacActorAnimActionBaseDef[] actions = level.AnimActions ?? new TacActorAnimActionBaseDef[0];
+            TacActorAnimActionBaseDef[] next = null;
+            for (int i = 0; i < actions.Length; i++)
+            {
+                TacActorAnimActionEquipmentFilteredDef f = actions[i] as TacActorAnimActionEquipmentFilteredDef;
+                if (f == null || !Wants(f, donorItem, ours)) continue;
+                TacActorAnimActionEquipmentFilteredDef mine = Owns(c, f) ? f : Clone(repo, c, f, f.name);
+                taught += Teach(repo, c, mine, donorItem, ours);
+                if (ReferenceEquals(mine, f)) continue;
+                replaced[f] = mine;
+                if (next == null) next = (TacActorAnimActionBaseDef[])actions.Clone();
+                next[i] = mine;
+            }
+            TacActorAnimActionsDef below = Taught(repo, c, level.BaseAnimActions, donorItem, ours,
+                                                  replaced, ref taught, depth + 1);
+            bool baseMoved = !ReferenceEquals(below, level.BaseAnimActions);
+            if (next == null && !baseMoved) return level;
+            TacActorAnimActionsDef target = Owns(c, level) || depth == 0 ? level : Clone(repo, c, level, level.name);
+            if (next != null) target.AnimActions = next;
+            if (baseMoved) target.BaseAnimActions = below;
+            return target;
+        }
+
+        /// <summary>Does this filter name the donor's item somewhere ours is not yet beside it?</summary>
+        private static bool Wants(TacActorAnimActionEquipmentFilteredDef f, EquipmentDef donorItem, EquipmentDef ours)
+        {
+            TacticalItemDef mine = ours as TacticalItemDef, theirs = donorItem as TacticalItemDef;
+            return (f.Equipments != null && f.Equipments.Contains(donorItem) && !f.Equipments.Contains(ours))
+                || (f.EquipmentList != null && f.EquipmentList.Equipments != null &&
+                    f.EquipmentList.Equipments.Contains(donorItem) && !f.EquipmentList.Equipments.Contains(ours))
+                || (f.Bodyparts != null && mine != null && theirs != null &&
+                    f.Bodyparts.Contains(theirs) && !f.Bodyparts.Contains(mine));
+        }
+
+        /// <summary>The appends themselves, on a filter this creature already owns. Both caches the
+        /// engine builds lazily off these lists (_equipmentIds on the filter and on the list,
+        /// TacActorAnimActionEquipmentFilteredDef.Contains:79-91, EquipmentListDef.Contains) are
+        /// dropped, so a re-entrant build whose clone already answered a lookup does not keep the
+        /// old answer.</summary>
+        private static int Teach(DefRepository repo, Creature c, TacActorAnimActionEquipmentFilteredDef f,
+                                 EquipmentDef donorItem, EquipmentDef ours)
+        {
+            int taught = 0;
+            if (f.Equipments != null && f.Equipments.Contains(donorItem) && !f.Equipments.Contains(ours))
+            { f.Equipments = f.Equipments.Concat(new[] { ours }).ToArray(); taught++; }
+            if (f.EquipmentList != null && f.EquipmentList.Equipments != null &&
+                f.EquipmentList.Equipments.Contains(donorItem))
+            {
+                EquipmentListDef list = Owns(c, f.EquipmentList) ? f.EquipmentList
+                    : Clone(repo, c, f.EquipmentList, f.EquipmentList.name);
+                if (!list.Equipments.Contains(ours))
+                    list.Equipments = list.Equipments.Concat(new[] { ours }).ToArray();
+                ForgetIds(list);
+                f.EquipmentList = list;
+                taught++;
+            }
+            TacticalItemDef mine = ours as TacticalItemDef, theirs = donorItem as TacticalItemDef;
+            if (f.Bodyparts != null && mine != null && theirs != null &&
+                f.Bodyparts.Contains(theirs) && !f.Bodyparts.Contains(mine))
+            { f.Bodyparts = Enumerable.Concat(f.Bodyparts, new[] { mine }).ToArray(); taught++; }
+            ForgetIds(f);
+            return taught;
+        }
+
+        /// <summary>A def this creature's <see cref="Clone"/> made - the only kind written in place.</summary>
+        private static bool Owns(Creature c, BaseDef def)
+        {
+            return def != null && def.name != null &&
+                   def.name.StartsWith(Prefix + c.Id + "_", StringComparison.Ordinal);
+        }
+
+        /// <summary>Drops the private lazy `_equipmentIds` cache (decompiled field name) so the next
+        /// Contains rebuilds it from the list as it is now.</summary>
+        private static void ForgetIds(object def)
+        {
+            System.Reflection.FieldInfo ids = AccessTools.Field(def.GetType(), "_equipmentIds");
+            if (ids != null) ids.SetValue(def, null);
         }
 
         /// <summary>The donor's bodypart weapon that IS its melee attack - the def the AI's attack
