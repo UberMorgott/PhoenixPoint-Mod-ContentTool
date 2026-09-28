@@ -17,7 +17,7 @@ Open Phoenix Point's game console and type a command on one line. `<project>` me
 | `ct_mission` | everyone (`gate` needs `ct-dev`) | `list \| gate <savename>` |
 | `ct_package` | everyone | `<project>` |
 | `ct_project` | everyone | `<project> [twice] - 'twice' runs gate B1, re-baking while the project's bundle is held open the way an enabled mod holds it. With no project, a generated sample under the mod folder is used` |
-| `ct_route7` | everyone | `apply <project> \| status` |
+| `ct_route7` | everyone | `apply <project> \| verify <project> \| status` |
 | `ct_sound` | everyone | `bake [project] \| selftest \| probe <mediaId> \| probe event <eventId> \| shapec [mediaId] \| status [mediaId]` |
 | `ct_version` | everyone | - |
 | `ct_video` | everyone | `live [project] \| status \| defs \| resolve <key> \| open <key> \| play <defname> \| quit` |

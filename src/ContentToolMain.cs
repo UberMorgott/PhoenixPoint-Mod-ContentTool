@@ -623,7 +623,7 @@ namespace Morgott.ContentTool
                 Out(console, b.ToString());
             }
 
-            [ConsoleCommand(Command = "ct_route7", Description = "ContentTool: route vii - replacement of a shipped bundle, LIVE. Bakes a patched private copy into the mod's own AppData folder and redirects the game's live Addressables locations at it; nothing is written into the game installation. Args: apply <project> | status.")]
+            [ConsoleCommand(Command = "ct_route7", Description = "ContentTool: route vii - replacement of a shipped bundle, LIVE. Bakes a patched private copy into the mod's own AppData folder and redirects the game's live Addressables locations at it; nothing is written into the game installation. Args: apply <project> | verify <project> | status.")]
             public static void CtRoute7(IConsole console, params string[] args)
             {
                 try { Out(console, Bake.Route7.Run(args)); }
