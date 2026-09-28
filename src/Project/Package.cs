@@ -159,6 +159,12 @@ namespace Morgott.ContentTool.Project
             // not, and the preamble that explains redistribution would be a lie in front of them alone.
             bool redistribution = refusals.Count > 0;
 
+            // A "video" ROW WHOSE CLIP IS NOT IN THE PACKAGE SHIPS DEAD: ct_video serves a row only from
+            // Content\Videos\<stem>.webm/.mp4/.mov (VideoCatalog.LiveAt), so a typo or a same-stem pair
+            // installs a mod whose row is skipped on the player's machine. The Lifecycle stage checks
+            // this (StageValidate); a bare 'ct_package' did not.
+            refusals.AddRange(VideoRefusals(outDir, manifestText));
+
             // A SOUND REPLACEMENT THAT WAS NEVER BAKED SHIPS DEAD, AND SILENTLY.
             //
             // The player's game reads exactly one thing for a replacement: Dist\Sounds\<mediaId>.bnk,
@@ -648,6 +654,39 @@ namespace Morgott.ContentTool.Project
             }
             catch (InvalidDataException) { }
             return targets;
+        }
+
+        /// <summary>Every "video" row whose clip stem the staged Content\Videos\ does not answer with
+        /// exactly one .webm/.mp4/.mov - the same top-level, extension-checked read ContentMods.SourceFile
+        /// does, restated because this file compiles alone.</summary>
+        internal static List<string> VideoRefusals(string outDir, string manifestText)
+        {
+            List<string> said = new List<string>();
+            IReadOnlyList<ReplaceRow> rows;
+            try { rows = Manifest.Parse(manifestText).Replace; }
+            catch (InvalidDataException) { return said; }
+            string dir = Path.Combine(Path.Combine(outDir, "Content"), "Videos");
+            foreach (ReplaceRow row in rows)
+            {
+                if (string.IsNullOrEmpty(row.Video)) continue;
+                List<string> hits = new List<string>();
+                if (Directory.Exists(dir))
+                    foreach (string f in Directory.GetFiles(dir))
+                    {
+                        string ext = Path.GetExtension(f).ToLowerInvariant();
+                        if ((ext == ".webm" || ext == ".mp4" || ext == ".mov") &&
+                            string.Equals(Path.GetFileNameWithoutExtension(f), row.Video, StringComparison.OrdinalIgnoreCase))
+                            hits.Add(Path.GetFileName(f));
+                    }
+                if (hits.Count == 1) continue;
+                hits.Sort(StringComparer.OrdinalIgnoreCase);
+                said.Add(hits.Count == 0
+                    ? "the \"video\" row '" + row.Video + "' names no .webm/.mp4/.mov under Content\\Videos\\ - " +
+                      "ct_video skips that row on the player's machine. Fix the name or add the clip, then package again."
+                    : "the \"video\" row '" + row.Video + "' is answered by " + hits[0] + " and " + hits[1] +
+                      " in Content\\Videos\\ - both are SKIPPED, so the row plays nothing. Keep one, then package again.");
+            }
+            return said;
         }
 
         /// <summary>

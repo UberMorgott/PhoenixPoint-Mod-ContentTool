@@ -86,6 +86,21 @@ internal static class PackageGate
                             Package.MetaRefusal("{ \"ID\": [ \"x\",, ] }", new List<string>()) != null,
                 "a missing comma, an unclosed comment and a doubled comma still refuse");
 
+            // A "video" row packages only when Content\Videos\ answers its stem with exactly one clip.
+            const string video = "{ \"replace\": [ { \"video\": \"intro\" } ] }";
+            string missing = Refusal(root, "video", video, null);
+            checks += Check(missing != null && missing.IndexOf("'intro' names no .webm/.mp4/.mov", StringComparison.Ordinal) >= 0,
+                "a video row with no clip is refused, not packaged: " + (missing ?? "it PACKAGED"));
+            string videos = Path.Combine(root, "clips", "Content", "Videos");
+            Directory.CreateDirectory(videos);
+            File.WriteAllText(Path.Combine(videos, "Intro.webm"), "x");
+            checks += Check(Package.VideoRefusals(Path.Combine(root, "clips"), video).Count == 0,
+                "one clip whose stem matches (case-blind) satisfies the row");
+            File.WriteAllText(Path.Combine(videos, "intro.mp4"), "x");
+            List<string> pair = Package.VideoRefusals(Path.Combine(root, "clips"), video);
+            checks += Check(pair.Count == 1 && pair[0].IndexOf("both are SKIPPED", StringComparison.Ordinal) >= 0,
+                "a same-stem pair is refused as the collision the runtime skips: " + string.Join(" | ", pair.ToArray()));
+
             return "PACKAGE-GATE PASS, " + checks + " check(s)";
         }
         finally
