@@ -175,14 +175,26 @@ namespace Morgott.ContentTool.Bake
         /// So the engine DOES convert material colours on upload and the encode belongs here.
         /// IEC 61966-2-1 transfer function.
         /// </summary>
-        internal static float[] Srgb(float[] linear)
+        internal static float[] Srgb(float[] linear) { return Srgb(linear, false); }
+
+        /// <summary>
+        /// <see cref="Srgb(float[])"/> for an HDR colour - _EmissionColor, which glTF states as a
+        /// LINEAR emissiveFactor (times KHR_materials_emissive_strength, so above 1 is legal). The
+        /// engine treats a serialized colour as sRGB and linearises it on upload in Linear colour
+        /// space, HDR ones included, so the raw linear value was decoded a second time: 0.5 drew as
+        /// ~0.21, a strength-2.11 white as ~5.2. RGB goes through the same curve, extended past 1
+        /// (the inverse of the one the engine applies) instead of clamped; alpha is untouched.
+        /// </summary>
+        internal static float[] SrgbHdr(float[] linear) { return Srgb(linear, true); }
+
+        private static float[] Srgb(float[] linear, bool hdr)
         {
             if (linear == null) return null;
             float[] c = new float[4];
             for (int i = 0; i < 4; i++)
             {
                 float v = i < linear.Length ? linear[i] : 1f;
-                if (v < 0f) v = 0f; else if (v > 1f) v = 1f;
+                if (v < 0f) v = 0f; else if (v > 1f && !(hdr && i < 3)) v = 1f;
                 // Alpha is never encoded - it is coverage, not light.
                 c[i] = i == 3 ? v
                      : v <= 0.0031308f ? v * 12.92f

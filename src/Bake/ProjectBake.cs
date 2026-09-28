@@ -441,7 +441,7 @@ namespace Morgott.ContentTool.Bake
                             withGlow = colors == null
                                 ? new Dictionary<string, float[]>()
                                 : new Dictionary<string, float[]>(colors);
-                            withGlow[MaterialFields.EmissionColorProperty] = emissive;
+                            withGlow[MaterialFields.EmissionColorProperty] = MaterialFields.SrgbHdr(emissive);
                         }
                         matKeys[s] = baker.AddMaterial(assetName, tex, null,
                                                        shaderExt, BakeSelfCheck.StandardShaderPathId, withGlow,

@@ -114,6 +114,14 @@ internal static class MaterialBake
                Rgba(darkLinear) + " -> " + Rgba(encoded));
         Assert(encoded[3] == darkLinear[3],
                "alpha is NOT an sRGB channel and must be left alone: " + Rgba(encoded));
+        // EMISSION is HDR: the same curve, NOT clamped at 1. glTF's strength-2.11 white must encode
+        // to the value the engine's own linearisation turns back into 2.11 - not 1, and not 2.11
+        // raw (which it would decode to ~5.2).
+        float[] glow = MaterialFields.SrgbHdr(new[] { 0.5f, 2.11f, 0f, 1f });
+        double back = Math.Pow((glow[1] + 0.055) / 1.055, 2.4);
+        Assert(Math.Abs(glow[0] - 0.7354f) < 0.001f && Math.Abs(back - 2.11) < 0.001 && glow[2] == 0f &&
+               glow[3] == 1f,
+               "emission encodes sRGB without an upper clamp and round-trips to its linear value: " + Rgba(glow));
 
         float[] paint = MaterialFields.Srgb(skin.BaseColor);
 
