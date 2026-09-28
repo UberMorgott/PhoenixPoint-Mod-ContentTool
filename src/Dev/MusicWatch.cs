@@ -34,7 +34,8 @@ namespace Morgott.ContentTool.Dev
         internal static string Run(string[] args)
         {
             int seconds = 20;
-            if (args != null && args.Length > 1) int.TryParse(args[1], out seconds);
+            if (args != null && args.Length > 1 && !int.TryParse(args[1], out seconds))
+                return "ct_voices: '" + args[1] + "' is not a whole number of seconds - usage: ct_voices watch [seconds]";
             if (seconds < 2) seconds = 2;
 
             if (harmony != null) return "ct_voices: already watching";

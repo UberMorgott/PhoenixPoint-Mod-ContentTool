@@ -511,9 +511,9 @@ namespace Morgott.ContentTool.Tactical
 
         private static float Number(string obj, string name)
         {
-            float v;
-            float.TryParse(Field(obj, name), NumberStyles.Float, CultureInfo.InvariantCulture, out v);
-            return v;
+            // Absent or malformed field: 0, the default every caller treats as "not set".
+            return float.TryParse(Field(obj, name), NumberStyles.Float, CultureInfo.InvariantCulture, out float v)
+                ? v : 0f;
         }
 
         /// <summary>"0,1,0" -&gt; three floats, or null when the key is absent or malformed.</summary>

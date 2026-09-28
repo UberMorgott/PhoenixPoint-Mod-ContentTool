@@ -109,18 +109,18 @@ internal static class Program
         // would pass every check above.
         TargetPath q;
         string why;
-        TargetPath.TryParse(forms[2], out q, out why);
+        bool parsed = TargetPath.TryParse(forms[2], out q, out why);
         Check("R0-fields",
-            q != null && q.Anchor == AnchorKind.Guid && q.Transform == "Root/Chest/Arm_R" &&
+            parsed && q != null && q.Anchor == AnchorKind.Guid && q.Transform == "Root/Chest/Arm_R" &&
             q.Component == "Renderer" && q.Field == "materials" && q.Index == 1 &&
             q.Qualifier == "tex" && q.Member == "_MainTex",
-            q == null ? "did not parse" : q.Anchor + " transform=" + q.Transform + " comp=" + q.Component +
+            !parsed || q == null ? "did not parse: " + why : q.Anchor + " transform=" + q.Transform + " comp=" + q.Component +
             " field=" + q.Field + " idx=" + q.Index + " qual=" + q.Qualifier + " member=" + q.Member);
 
         TargetPath root;
-        TargetPath.TryParse(forms[3], out root, out why);
-        Check("R0-emptytransform", root != null && root.Transform == "" && root.Member == "Idle_Rifle",
-            root == null ? "did not parse" : "transform='" + root.Transform + "' member=" + root.Member);
+        parsed = TargetPath.TryParse(forms[3], out root, out why);
+        Check("R0-emptytransform", parsed && root != null && root.Transform == "" && root.Member == "Idle_Rifle",
+            !parsed || root == null ? "did not parse: " + why : "transform='" + root.Transform + "' member=" + root.Member);
     }
 
     /// <summary>A malformed path is refused BY NAME - never a silent skip, never a fuzzy match.</summary>
