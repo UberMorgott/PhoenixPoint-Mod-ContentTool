@@ -6,16 +6,18 @@ The step bar reads `Soldier`, `Weapon`, `Adjust`, `Save`.
 
 ## Example: adjust your mod weapon in a soldier’s hand
 
+![The Fit a weapon screen](../images/bench/fit-weapon.png)
+
 1. Open the [bench](index.md) and choose `Fit a weapon`.
-2. Click the button beside `Soldier` to open the soldier list with its find box. Pick the soldier who will hold the weapon. A `*` marks a unit built by a content mod. Press `rescan` if you enabled a mod while the bench was open.
-3. Click the button beside `Weapon` to open the weapon list. Type part of your weapon’s name. The hint reads `<n> of <m> weapons fit this soldier   * = made by your mod (<k>)`. A `*` marks a weapon your mod made; `* live` means its fit is loaded this session, so it can be adjusted. Tick `all` to also list weapons this soldier cannot equip.
-4. Look at the weapon in the hand. Drag the arrows on the weapon to move it and the rings to turn it about that axis. A dimmed handle is edge-on to the camera; turn the camera to use it. `Esc` cancels a drag. The [camera controls](navigation.md#use-the-3d-view) work as on every 3D screen.
-5. `Unequip` takes the weapon out of the hand and `Re-equip` puts it back, so you can compare.
-6. When the badge says `Changed - not saved yet.`, press `Save to file *`. It writes the fit into your mod’s `ppcontent.json`; the path is in `Details`. The badge then says `Saved - the file matches what you see.`
+2. Click the button beside `Soldier` (**1**) to open the soldier list with its find box. Pick the soldier who will hold the weapon. A `*` marks a unit built by a content mod. Press `rescan` if you enabled a mod while the bench was open.
+3. Click the button beside `Weapon` (**2**) to open the weapon list. Type part of your weapon’s name. The hint reads `<n> of <m> weapons fit this soldier   * = made by your mod (<k>)`. A `*` marks a weapon your mod made; `* live` means its fit is loaded this session, so it can be adjusted. Tick `all` to also list weapons this soldier cannot equip.
+4. Look at the weapon in the hand. Drag the arrows on the weapon (**3**) to move it and the rings to turn it about that axis. A dimmed handle is edge-on to the camera; turn the camera to use it. `Esc` cancels a drag. The [camera controls](navigation.md#use-the-3d-view) work as on every 3D screen.
+5. `Unequip` (**4**) takes the weapon out of the hand and `Re-equip` puts it back, so you can compare.
+6. When the badge (**5**) says `Changed - not saved yet.`, press `Save to file *` (**6**). It writes the fit into your mod’s `ppcontent.json`; the path is in `Details` (**8**). The badge then says `Saved - the file matches what you see.`
 
 ## Undo
 
-- `Revert` goes back to what the file says. It does not touch the disk.
+- `Revert` (**7**) goes back to what the file says. It does not touch the disk.
 - `Reset to automatic` goes back to the measured fit and drops every override. It does not touch the disk either; press `Save to file` to keep it.
 
 ## When Save is grey
