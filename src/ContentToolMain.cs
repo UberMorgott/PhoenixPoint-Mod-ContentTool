@@ -144,6 +144,11 @@ namespace Morgott.ContentTool
             // view itself allocates nothing until it is opened.
             try { Dev.FitBench.Install(); }
             catch (Exception ex) { log?.LogError("ct_bench install THREW " + ex); }
+            if (Dev.DevGate.Armed(ModDir))
+            {
+                try { log?.LogInfo(Dev.SaveProbe.Install()); }
+                catch (Exception ex) { log?.LogError("ct_saveprobe install THREW " + ex); }
+            }
             Dev.AutoRun.MaybeStart(ModDir, m => log?.LogInfo(m));
         }
 
