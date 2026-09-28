@@ -5,6 +5,9 @@ Add an event that Phoenix Point does not already have, then make your mod post i
 !!! warning "Known limitation"
     `ct_project` bakes added sounds into your mod bundle and self-checks the bank, but ContentTool does **not** load that bank when players run the mod. Your own DLL must load it; otherwise the new sounds are silent. Files named `<name>.stream.wav`, `<name>.stream.ogg` or `<name>.stream.mp3` are treated as streamed sounds during baking, but their extracted `.wem` files are **not packaged** for players. Use embedded sounds for this recipe.
 
+!!! tip "Finding a sound to match"
+    The bench’s [Sounds](../bench/sounds.md) screen replaces existing sounds only, so it cannot add an event. Its search and `Play` buttons are still the quickest way to find and hear a shipped sound before you make your own.
+
 ## You need
 
 - Mono or stereo WAV, OGG or MP3 files that you may distribute.

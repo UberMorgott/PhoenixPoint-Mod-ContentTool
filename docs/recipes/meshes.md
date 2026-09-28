@@ -2,6 +2,18 @@
 
 Replace the geometry of a shipped Unity `Mesh`. A static prop or weapon can use OBJ or GLB. A rigged character needs a GLB with an armature and weights compatible with the shipped skeleton.
 
+## The quick way: the bench
+
+For a `.glb` that replaces a soldier or creature part, the bench checks the bones and builds the mod for you.
+
+![Checking a rigged model before replacement](../images/bench/replace-model-pass.png)
+
+1. Open the [bench](../bench/index.md) and choose `Replace a model`. Press `Choose your model file (.glb)...`, then `Choose the game part it replaces...` and find the part. `Your model` (**2**) and `Replaces` (**3**) show your picks.
+2. Read the badge (**5**) and open `Details and log` (**9**). Fix a `FAIL` before building; read a `WARN` before deciding to build.
+3. Press `Preview on the model` (**6**) to see it on the live soldier. Keep `Mode` on `Replace the part` (**4**), check `Mod name` (**7**), then press `Build mod & apply` (**8**).
+
+[Replace a model](../bench/model-doctor.md) explains every badge and fix. The steps below are the console and manual way. Use them for OBJ files, static props and weapons, or a mesh you want to name directly.
+
 ## You need
 
 - An OBJ or GLB directly in `Content\Meshes`.

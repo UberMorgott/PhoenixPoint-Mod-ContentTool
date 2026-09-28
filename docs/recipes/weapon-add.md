@@ -2,12 +2,23 @@
 
 Create a new `WeaponDef` beside a shipped weapon. The player can keep the original and obtain the new weapon as a separate inventory item.
 
+## The quick way: the bench
+
+![Creating a weapon in the bench](../images/bench/weapon-create.png)
+
+1. Open the [bench](../bench/index.md) and choose `Add a weapon`. Type your mod’s name in `Your mod`, click a weapon kind, and check the shipped weapon it copies (**1**).
+2. Pick your `.glb` (**2**), type a name (**3**), then press `Create weapon` (**4**). The bench copies the model and writes the `publish` and `weapons` rows shown below; no DLL is needed.
+3. Press `Next: Build & share`, then `Build & test`. Enable the mod in `Mods` and restart the game.
+4. Return to `Add a weapon`, click the weapon under `Weapons in <mod>` (**5**), press `Put it in the hand`, fit it with the sliders, and press `Save fit`. Check its moves on the strip under the soldier (**7**).
+
+[Add a weapon](../bench/add-weapon.md) walks through every step with screenshots. The steps below are the manual way to make the same weapon, and the way to add a DLL of your own.
+
 ## You need
 
 - ContentTool installed and enabled.
 - A shipped `WeaponDef` of the same weapon class to clone.
 - A fixed, unique GUID for each new weapon.
-- A DLL that calls `WeaponBuild.Build`. Follow [Build a behaviour DLL](behavior-dll.md).
+- Either no DLL at all (`"AssemblyName": ""`): ContentTool then builds the mod’s `weapons` rows when the mod is enabled. Or your own DLL, which must call `WeaponBuild.Build` itself; follow [Build a behaviour DLL](behavior-dll.md). The steps below use a DLL.
 - For a new model, a GLB under `Content\Models`, a published key, and either `"fit": "auto"` or a declared `"shoot"` socket. `aim` and `shell` are optional.
 - A new campaign if you use `count` and `clips` to seed starting storage.
 
@@ -119,7 +130,7 @@ MyAddedWeapon\
    ct_package MyAddedWeapon
    ```
 
-6. Enable the mod and start a **new** campaign. Equip the new weapon. If its model needs visual adjustment, load a geoscape campaign and open the weapon bench with `ct_bench open`. Select the new weapon, adjust it and save, or inspect and save its fit in the console:
+6. Enable the mod and start a **new** campaign. Equip the new weapon. If its model needs visual adjustment, load a geoscape campaign, open the bench with `ct_bench open`, and use [Fit a weapon](../bench/fit-weapon.md) (or `Add a weapon` with the weapon picked under `Weapons in <mod>`). Select the new weapon, adjust it and save, or inspect and save its fit in the console:
 
    ```text
    ct_fit Example_AR_WeaponDef

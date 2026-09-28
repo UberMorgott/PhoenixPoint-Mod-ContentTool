@@ -19,7 +19,7 @@ Then use this map:
 - [The lifecycle](concepts/lifecycle.md) explains baking, redirects, testing and packaging.
 - [Recipes](recipes/index.md) give steps for individual content types.
 - [Find game content](find-content/index.md) helps you identify shipped targets.
-- [The in-game bench](bench/index.md) and its [Lifecycle tab](bench/lifecycle-tab.md) provide visual tools for authoring.
+- [The in-game bench](bench/index.md) does the common jobs on screen, step by step: [replace a model](bench/model-doctor.md), [add a weapon](bench/add-weapon.md) and [fit it](bench/fit-weapon.md), replace [sounds](bench/sounds.md) and [videos](bench/videos.md), then [build & share](bench/lifecycle-tab.md) the mod.
 - [Project files](reference/project-files.md), [console commands](reference/console-commands.md) and [messages](reference/messages.md) explain the exact inputs and results.
 - [Examples](examples/index.md) show complete projects; [known limitations](known-limitations.md) records current boundaries.
 

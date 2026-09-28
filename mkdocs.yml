@@ -7,6 +7,9 @@ copyright: CC BY-NC 4.0 - Morgott
 
 docs_dir: docs
 site_dir: site
+# clean screenshots that tools/annotate-shots.py draws the callouts onto - sources, not pages
+exclude_docs: |
+  images/bench/src/
 
 theme:
   name: material
@@ -70,10 +73,16 @@ nav:
       - Replace a weapon's art: recipes/weapon-replace.md
       - Add new weapons: recipes/weapon-add.md
       - Replace an armour set: recipes/armour-set.md
+  - The in-game bench:
+      - Open the bench: bench/index.md
+      - Moving around and reading logs: bench/navigation.md
+      - Replace a model: bench/model-doctor.md
+      - Fit a weapon: bench/fit-weapon.md
+      - Add a weapon: bench/add-weapon.md
+      - Sounds: bench/sounds.md
+      - Videos: bench/videos.md
+      - "Build & share": bench/lifecycle-tab.md
   - Tools:
-      - The in-game bench: bench/index.md
-      - Model Doctor: bench/model-doctor.md
-      - "Build & share tab": bench/lifecycle-tab.md
       - Find game content: find-content/index.md
   - Reference:
       - Console commands: reference/console-commands.md
