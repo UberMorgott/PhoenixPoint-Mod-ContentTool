@@ -11,7 +11,7 @@ namespace Morgott.ContentTool.Dev
     /// </summary>
     internal static class BenchUi
     {
-        private static GUIStyle title, hint, text, badge, step, stepOn, main, card, cardSub, tip, head;
+        private static GUIStyle title, hint, text, badge, step, stepOn, main, card, cardSub, tip, head, none;
         private static readonly Color Grey = new Color(0.62f, 0.66f, 0.72f);
         private static readonly Color PassC = new Color(0.35f, 0.82f, 0.45f);
         private static readonly Color WarnC = new Color(0.95f, 0.75f, 0.25f);
@@ -27,6 +27,7 @@ namespace Morgott.ContentTool.Dev
             head.normal.textColor = Accent;
             hint = new GUIStyle(GUI.skin.label) { wordWrap = true, fontSize = 11 };
             hint.normal.textColor = Grey;
+            none = new GUIStyle { margin = new RectOffset(0, 0, 0, 0), padding = new RectOffset(0, 0, 0, 0) };
             badge = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             step = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleCenter };
             step.normal.textColor = Grey;
@@ -53,12 +54,15 @@ namespace Morgott.ContentTool.Dev
         internal static void Section(string s) { Init(); GUILayout.Space(6f); GUILayout.Label(s, head); }
         /// <summary>A grey hint line. ALWAYS lays out one control, even for an empty string: a line that
         /// appears only when its text is non-empty appears mid-event when a press or a keystroke sets that
-        /// text, and IMGUI answers a pass with a different control count than its Layout by throwing.</summary>
-        internal static void Hint(string s) { Init(); GUILayout.Label(string.IsNullOrEmpty(s) ? " " : s, hint); }
+        /// text, and IMGUI answers a pass with a different control count than its Layout by throwing.
+        /// An EMPTY line is still that one control, but zero pixels tall (<see cref="none"/>), so a button with
+        /// nothing to explain has no blank gap under it.</summary>
+        internal static void Hint(string s) { Hint(s, null); }
         internal static void Hint(string s, string tooltip)
         {
             Init();
-            GUILayout.Label(new GUIContent(string.IsNullOrEmpty(s) ? " " : s, tooltip), hint);
+            if (string.IsNullOrEmpty(s)) GUILayout.Label(GUIContent.none, none, GUILayout.Height(0f));
+            else GUILayout.Label(new GUIContent(s, tooltip), hint);
         }
 
         /// <summary>A coloured PASS / WARN / FAIL tag and one wrapped sentence beside it. The tooltip keeps

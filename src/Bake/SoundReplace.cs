@@ -708,6 +708,27 @@ namespace Morgott.ContentTool.Bake
 
         private static List<Bank> banks;
 
+        /// <summary>The shipped loose .wem of that media, or null (embedded in a bank) - for the bench's
+        /// sound preview, which decodes it.</summary>
+        internal static string LooseWem(uint mediaId)
+        {
+            string why;
+            return Directory.Exists(AudioRoot) ? WemPath(mediaId, out why) : null;
+        }
+
+        /// <summary>The shipped event that plays the sound called <paramref name="soundName"/> and a bank
+        /// declaring it, by <see cref="EventFor"/>'s naming rule over the shipped &lt;bank&gt;.txt listings -
+        /// the preview path for a sound that has no loose file. False when no bank names one.</summary>
+        internal static bool EventForSound(string soundName, out string bank, out uint eventId)
+        {
+            bank = null; eventId = 0;
+            if (string.IsNullOrEmpty(soundName)) return false;
+            foreach (Bank b in Banks())
+                if (EventFor(b, soundName, out eventId) != null) { bank = b.Name; return true; }
+            eventId = 0;
+            return false;
+        }
+
         /// <summary>The bank whose STREAMED media list contains that ID, or null.</summary>
         private static Bank BankOf(uint mediaId)
         {

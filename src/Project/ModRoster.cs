@@ -444,6 +444,22 @@ namespace Morgott.ContentTool.Project
         /// </summary>
         private sealed class ContentMod : ModMain
         {
+            /// <summary>A code-free mod's "weapons" rows (what the bench's Add-a-weapon screen writes) get the
+            /// ONE call a weapon mod's own DLL makes (demos\WeaponAdd\src\WeaponAddMain.cs). Asked only when
+            /// the manifest declares "weapons", so every other content mod stays silent. WeaponBuild.Build
+            /// never throws and answers a second call with "already built this session".</summary>
+            public override void OnModEnabled()
+            {
+                try
+                {
+                    string dir = Instance.Entry.Directory;
+                    string manifest = Path.Combine(dir, "ppcontent.json");
+                    if (!File.Exists(manifest) ||
+                        !Manifest.Tree(File.ReadAllText(manifest), "ppcontent.json").ContainsKey("weapons")) return;
+                    Tactical.WeaponBuild.Build(dir, m => Dev.ChunkedLog.Say(m));
+                }
+                catch (Exception ex) { Dev.ChunkedLog.Fail("ct_content weapons: " + ex); }
+            }
         }
     }
 }

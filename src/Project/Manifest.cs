@@ -318,6 +318,33 @@ namespace Morgott.ContentTool.Project
             return added;
         }
 
+        /// <summary>Queue ONE video row: <paramref name="asset"/> names the shipped clip it replaces, or null
+        /// to ADD a new clip. "video" is the stem of the file under Content\Videos\.</summary>
+        internal ReplaceRow AddVideoReplacement(string video, string asset)
+        {
+            var tree = new Dictionary<string, object>(StringComparer.Ordinal) { { "video", video } };
+            if (!string.IsNullOrEmpty(asset)) tree["asset"] = asset;
+            var added = new ReplaceRow(tree);
+            rows.Add(added);
+            pending.Add(added);
+            return added;
+        }
+
+        private readonly List<KeyValuePair<string, Dictionary<string, object>>> pendingOther =
+            new List<KeyValuePair<string, Dictionary<string, object>>>();
+
+        /// <summary>Rows queued for root arrays OTHER than "replace" ("publish", "weapons"), in queue order.</summary>
+        internal IReadOnlyList<KeyValuePair<string, Dictionary<string, object>>> PendingOther => pendingOther;
+
+        /// <summary>Queue ONE flat row for the root array <paramref name="array"/> - any array but
+        /// "replace", whose rows go through the typed adders above. Spliced by ManifestFile.Save exactly
+        /// like a "replace" row: the author's other bytes stay as they are.</summary>
+        internal void AddRow(string array, Dictionary<string, object> row)
+        {
+            if (array == "replace") throw new ArgumentException("\"replace\" rows use the typed adders");
+            pendingOther.Add(new KeyValuePair<string, Dictionary<string, object>>(array, row));
+        }
+
         /// <summary>V4/V5/V6/V7 over every row, existing and pending, before a byte moves. V4 and V5 are
         /// today's rule at ContentProject.cs:404-416 unchanged; V6 is new only because the read side can
         /// afford to treat `"mesh": 5` as an absent mesh and the WRITE side cannot hand the author back a
@@ -460,8 +487,28 @@ namespace Morgott.ContentTool.Project
         internal void Save()
         {
             Manifest.Validate();
-            if (Manifest.Pending.Count == 0) return;
-            string produced = Splice();
+            if (Manifest.Pending.Count == 0 && Manifest.PendingOther.Count == 0) return;
+            string produced = text;
+            if (Manifest.Pending.Count > 0)
+            {
+                var replaceRows = new List<Dictionary<string, object>>();
+                foreach (ReplaceRow row in Manifest.Pending) replaceRows.Add(row.Tree);
+                produced = Splice(produced, members, rootClose, "replace", replaceRows);
+            }
+            // ONE ARRAY AT A TIME, the spans re-measured on the text the previous splice produced: every
+            // offset after a splice has moved, and Members is the one reader that knows where they went.
+            var done = new List<string>();
+            foreach (KeyValuePair<string, Dictionary<string, object>> first in Manifest.PendingOther)
+            {
+                if (done.Contains(first.Key)) continue;
+                done.Add(first.Key);
+                var same = new List<Dictionary<string, object>>();
+                foreach (KeyValuePair<string, Dictionary<string, object>> e in Manifest.PendingOther)
+                    if (e.Key == first.Key) same.Add(e.Value);
+                int close;
+                Dictionary<string, Span> spans = Members(produced, Path, out close);
+                produced = Splice(produced, spans, close, first.Key, same);
+            }
 
             // E6: re-read what is about to be written, through the same reader and the same rules.
             try { Manifest.ParseFor(produced, "'" + Path + "'").Validate(); }
@@ -496,23 +543,27 @@ namespace Morgott.ContentTool.Project
             AtomicFile.Write(Path, bytes, Path + ".bak");
         }
 
-        private string Splice()
+        /// <summary>Splice <paramref name="rows"/> into the root array <paramref name="key"/> of
+        /// <paramref name="text"/>, whose root members were measured as <paramref name="members"/>.</summary>
+        private string Splice(string text, Dictionary<string, Span> members, int rootClose, string key,
+                              List<Dictionary<string, object>> rows)
         {
             var added = new StringBuilder();
-            foreach (ReplaceRow row in Manifest.Pending)
+            foreach (Dictionary<string, object> row in rows)
             {
                 if (added.Length > 0) added.Append(',').Append(newline);
-                added.Append(new JsonWriter().Val(row.Tree).ToString());
+                added.Append(new JsonWriter().Val(row).ToString());
             }
 
             Span span;
-            if (!members.TryGetValue("replace", out span))
+            if (!members.TryGetValue(key, out span))
             {
                 // (c) no "replace" at all: as the LAST root member, inserted just past the last thing the
                 // author wrote, so the comma lands on THEIR line rather than on one of its own. A file
                 // with no final newline therefore ends "...]}" - accepted as written.
                 int at = Trim(text, 0, rootClose);
-                return text.Substring(0, at) + "," + newline + "  \"replace\": [" + newline + "    " +
+                return text.Substring(0, at) + "," + newline + "  " + new JsonWriter().Val(key).ToString() +
+                       ": [" + newline + "    " +
                        added.ToString().Replace(newline, newline + "    ") + newline + "  ]" +
                        text.Substring(at);
             }

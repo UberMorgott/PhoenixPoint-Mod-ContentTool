@@ -114,7 +114,8 @@ namespace Morgott.ContentTool.Doctor
                 case Outcome.ByName:
                     return "Bones match - your model moves with the game's skeleton." + also;
                 case Outcome.NearestBone:
-                    return "Bone names don't match - it will import, but your skin weights are replaced." + also;
+                    return "Bone names don't match - you can build it, but your skin weights are replaced by the " +
+                           "nearest game bone. Rename the bones (or map them in Details) to keep them." + also;
                 case Outcome.NotRigged:
                     return "The game part has no skeleton to bind to - it can't be previewed or built here. " +
                            "Pick a part that moves with the body." + also;

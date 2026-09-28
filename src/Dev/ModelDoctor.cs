@@ -673,9 +673,12 @@ namespace Morgott.ContentTool.Dev
                 if (Path == null || !File.Exists(Path) ||
                     !Path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase))
                     return "pick your .glb model file first";
-                if (Ready == null || Ready.Outcome != Outcome.ByName ||
-                    Ready.Report.Count(Severity.Blocking) != 0)
-                    return "the check must pass first - every bone has to match the game's by name";
+                // ONE TRUTH WITH THE BADGE: the bake refuses only what the badge calls FAIL (a skinless file
+                // onto a rigged part, or a blocking row); a NEAREST-BONE verdict bakes (BundleBaker's
+                // nearest-bone arm), so its WARN badge builds too.
+                if (Ready == null) return "wait - the check has not run yet";
+                if (Ready.Report.Level() == Grade.Fail)
+                    return "the check found problems - fix what Details lists, then pick the file again";
                 if (Prototype == null || Prototype.Mode != VerifyMode.Replace || Prototype.Live == null)
                     return "pick a game part to replace (Replace mode)";
                 if (Prototype.TargetRefusal != null) return Prototype.TargetRefusal;
@@ -747,7 +750,7 @@ namespace Morgott.ContentTool.Dev
                 // them. Judging those is judging what is on disk, without re-opening the question.
                 ReplacementPreflightResult copied =
                     ReplacementPreflight.Run(made.MeshBytes, made.MeshPath, shipProto);
-                if (copied.Outcome != Outcome.ByName || copied.Report.Count(Severity.Blocking) != 0)
+                if (copied.Report.Level() == Grade.Fail)
                 {
                     shipResult = "the COPIED glb did not re-read green (" + copied.Outcome + "), so nothing was " +
                                  "baked - the project on disk is complete, fix the file and press Ship again";

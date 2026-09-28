@@ -27,7 +27,17 @@ namespace Morgott.ContentTool.Dev
     internal sealed class GlbFileBrowser
     {
         private const int Recents = 5;
-        private const string Extension = ".glb";
+        private readonly string[] extensions;
+        private readonly string title, recentName;
+
+        internal GlbFileBrowser() : this(new[] { ".glb" }, "Pick your .glb file", "doctor-recent.txt") { }
+
+        /// <summary>The same browser for another kind of file (the Sounds and Videos screens): its own
+        /// extensions, heading and recents file.</summary>
+        internal GlbFileBrowser(string[] extensions, string title, string recentName)
+        {
+            this.extensions = extensions; this.title = title; this.recentName = recentName;
+        }
 
         private string dir;
         private string pending;
@@ -71,7 +81,7 @@ namespace Morgott.ContentTool.Dev
             string picked = null;
             GUILayout.BeginVertical(GUI.skin.box);
 
-            BenchUi.Title("Pick your .glb file");
+            BenchUi.Title(title);
             GUILayout.BeginHorizontal();
             GUILayout.Label(new GUIContent(BenchList.Elide(dir, BenchList.NameChars - 18), dir));
             if (GUILayout.Button("Up", GUILayout.Width(44f))) Up();
@@ -90,7 +100,7 @@ namespace Morgott.ContentTool.Dev
 
             if (problem != null) BenchUi.Hint(problem);
 
-            BenchUi.Hint("This folder - .glb files and sub-folders (>); other drives at the bottom");
+            BenchUi.Hint("This folder - " + string.Join(" ", extensions) + " files and sub-folders (>); other drives at the bottom");
             scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(height));
             foreach (string sub in subs)
                 if (GUILayout.Button("> " + BenchList.Elide(Leaf(sub), BenchList.NameChars - 2),
@@ -150,13 +160,15 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         private string[] Files()
         {
-            string[] all;
-            try { all = Directory.GetFiles(dir, "*" + Extension); }
-            catch (Exception ex) { problem = Unreadable(ex); return new string[0]; }
-
-            List<string> keep = new List<string>(all.Length);
-            foreach (string f in all)
-                if (f.EndsWith(Extension, StringComparison.OrdinalIgnoreCase)) keep.Add(f);
+            List<string> keep = new List<string>();
+            foreach (string extension in extensions)
+            {
+                string[] all;
+                try { all = Directory.GetFiles(dir, "*" + extension); }
+                catch (Exception ex) { problem = Unreadable(ex); return new string[0]; }
+                foreach (string f in all)
+                    if (f.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) keep.Add(f);
+            }
             return Sorted(keep.ToArray());
         }
 
@@ -207,10 +219,9 @@ namespace Morgott.ContentTool.Dev
         /// <summary>The mod has no settings store, so this is a plain text file beside everything else
         /// ContentTool writes (<see cref="ContentToolMain.PatchedRoot"/>). One path per line, newest
         /// first.</summary>
-        private static string RecentFile()
+        private string RecentFile()
         {
-            return Path.Combine(Path.Combine(Application.persistentDataPath, "ContentTool"),
-                                "doctor-recent.txt");
+            return Path.Combine(Path.Combine(Application.persistentDataPath, "ContentTool"), recentName);
         }
 
         /// <summary>Reads the recents, dropping any that have since been deleted or renamed: a button
