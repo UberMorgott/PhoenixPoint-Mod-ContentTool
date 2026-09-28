@@ -2120,6 +2120,15 @@ internal static class Program
             "B1, Observe and Capture take the SAME census - ProjectBake.Targets, video rows skipped, " +
             "bundles deduped case-blind - and B1 hands LoadDeclared a refusal sink, so the rows Load " +
             "counts do not kill the key -> " + bake);
+
+        // LoadDeclared's VIDEO import always gets a sink: a same-stem clip pair is a skipped source for
+        // every caller, never a throw out of the null-sink ones (Route7.Toggle printed "toggle FAILED").
+        string cp = src == null ? null : Path.Combine(src, "Project", "ContentProject.cs");
+        string cpText = cp != null && File.Exists(cp) ? Strip(File.ReadAllText(cp)) : null;
+        Check("S41-video-sink",
+            cpText != null && Regex.IsMatch(cpText, @"ImportVideos\(root,\s*refusals\s*\?\?\s*new List<string>\(\)\)"),
+            "LoadDeclared imports Content\\Videos\\ with refusals ?? a local list, so no caller throws on " +
+            "twin.mp4 + twin.webm -> " + cp);
     }
 
     private static void StopEventArm()

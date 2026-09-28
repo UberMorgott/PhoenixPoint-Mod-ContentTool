@@ -357,7 +357,12 @@ namespace Morgott.ContentTool.Project
             // named no shipped bundle, Route7.Observe's named them all, and every ApplyProject re-baked.
             d.Publish.AddRange(ParsePublish(text, refusals));
             d.Replace.AddRange(ParseReplace(text, refusals));
-            d.Videos.AddRange(ImportVideos(root, refusals));
+            // A same-stem clip pair NEVER throws out of here, sink or not. The null-sink callers (Route7.Toggle,
+            // ModRoster, the dashboard, LiveProjectIds) want the rows and the id, not the clips - and the
+            // throw made the mod-manager checkbox print "ct_route7 toggle FAILED" for a mod whose only
+            // defect was twin.mp4 + twin.webm (measured in-game 2026-09-28). Both clips are still skipped;
+            // the video callers pass their own sink and print it as SOURCE SKIPPED.
+            d.Videos.AddRange(ImportVideos(root, refusals ?? new List<string>()));
             return d;
         }
 
