@@ -143,6 +143,10 @@ internal static class Program
               !WeaponFlow.Parse("NaN", out f) && !WeaponFlow.Parse("", out f), "invariant, finite");
         Check("WF-wrap", Math.Abs(WeaponFlow.Wrap(270f) + 90f) < 1e-4f && Math.Abs(WeaponFlow.Wrap(-180f) - 180f) < 1e-4f &&
               Math.Abs(WeaponFlow.Wrap(45f) - 45f) < 1e-4f, "(-180,180]");
+        Check("WF-soldier", WeaponFlow.SoldiersFor(WeaponFlow.ById("heavy"))[0] == "PX_HeavyStarting_TacCharacterDef" &&
+              WeaponFlow.SoldiersFor(WeaponFlow.ById("sniper"))[0] == "PX_SniperStarting_TacCharacterDef" &&
+              WeaponFlow.SoldiersFor(WeaponFlow.ById("pistol"))[0] == "PX_AssaultStarting_TacCharacterDef" &&
+              WeaponFlow.SoldiersFor(null)[0] == "PX_AssaultStarting_TacCharacterDef", "class -> soldier on the platform");
     }
     /// <summary>Every form the plan writes down, plus the edge cases the grammar allows.</summary>
     private static void RoundTrip()

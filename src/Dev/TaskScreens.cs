@@ -571,14 +571,14 @@ namespace Morgott.ContentTool.Dev
             template = WeaponFlow.DefaultTemplate(c, FitBench.TemplatesOf(c));
             templateFilterShown = null;
             classOpen = false;
-            if (current == null && template != null) FitBench.Hold(template);
+            if (current == null && template != null) FitBench.Hold(template, c);
         }
 
         private static void PickTemplate(string d)
         {
             template = d;
             templateOpen = false;
-            if (current == null) FitBench.Hold(d);
+            if (current == null) FitBench.Hold(d, flowClass);
         }
 
         /// <summary>Carry on with a weapon the mod already has: its class and template come off its clone,
@@ -590,7 +590,7 @@ namespace Morgott.ContentTool.Dev
             flowClass = FitBench.ClassOf(row[2]) ?? WeaponFlow.Other;
             classOpen = templateOpen = false;
             createdRoot = Root;
-            FitBench.Hold(FitBench.Loaded(row[0]) ? row[0] : row[2]);
+            FitBench.Hold(FitBench.Loaded(row[0]) ? row[0] : row[2], flowClass);
         }
 
         /// <summary>Returns true when the author asked to go on to Build &amp; share with the project just
@@ -778,7 +778,7 @@ namespace Morgott.ContentTool.Dev
                         }
                         break;
                     case WeaponFlow.Act.Build: onward = true; break;
-                    case WeaponFlow.Act.Hold: { string id = current[0]; next = () => FitBench.Hold(id); } break;
+                    case WeaponFlow.Act.Hold: { string id = current[0]; next = () => FitBench.Hold(id, flowClass); } break;
                     case WeaponFlow.Act.Save:
                         log = FitBench.SaveFit(fitKey);
                         message = log != null && log.IndexOf("ct_fit saved", StringComparison.Ordinal) >= 0

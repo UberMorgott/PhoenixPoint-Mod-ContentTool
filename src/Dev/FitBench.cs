@@ -312,7 +312,9 @@ namespace Morgott.ContentTool.Dev
             var fitted = new HashSet<string>(WeaponBuild.FittedKeys);
             donors = new List<string>();
             foreach (WeaponDef d in weapons)
-                if (d.ViewElementDef != null && !fitted.Contains(d.name)) donors.Add(d.name);
+                // Mine(d) too: a mod weapon that was never fitted is not in FittedKeys, and the flow's
+                // class list counted it as a shipped template ("Pistol (9)" with one mod pistol enabled).
+                if (d.ViewElementDef != null && !fitted.Contains(d.name) && !Mine(d)) donors.Add(d.name);
             donorsOf = weapons;
             return donors;
         }

@@ -40,10 +40,10 @@ namespace Morgott.ContentTool.Dev
         }
 
         private static readonly string[] GunMoves =
-            { "idle", "aim", "shoot", "fire", "reload", "run", "walk", "sprint", "overwatch", "draw", "holster",
+            { "idle", "aim", "shoot", "shot", "fire", "reload", "run", "walk", "sprint", "overwatch", "draw", "holster",
               "ready", "crouch" };
         private static readonly string[] MeleeMoves =
-            { "idle", "attack", "strike", "swing", "melee", "bash", "slash", "run", "walk", "sprint", "draw",
+            { "idle", "attack", "strike", "swing", "melee", "bash", "slash", "shot", "whip", "buttstroke", "run", "walk", "sprint", "draw",
               "holster", "ready" };
 
         /// <summary>
@@ -53,13 +53,15 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal static readonly WeaponClass[] All =
         {
-            new WeaponClass("melee", "Melee", "MeleeWeapon_TagDef", new string[0], MeleeMoves),
+            new WeaponClass("melee", "Melee", "MeleeWeapon_TagDef",
+                            new[] { "PX_StunRod_WeaponDef", "SY_LaserBlade_WeaponDef", "AN_Blade_WeaponDef" }, MeleeMoves),
             new WeaponClass("grenadelauncher", "Grenade launcher", "GrenadeLauncherItem_TagDef",
                             new[] { "PX_GrenadeLauncher_WeaponDef" }, GunMoves),
-            new WeaponClass("dronelauncher", "Drone launcher", "DroneLauncherItem_TagDef", new string[0], GunMoves),
+            new WeaponClass("dronelauncher", "Drone launcher", "DroneLauncherItem_TagDef",
+                            new[] { "SY_SpiderDroneLauncher_WeaponDef" }, GunMoves),
             new WeaponClass("flamethrower", "Flamethrower", "FlamethrowerItem_TagDef", new string[0], GunMoves),
-            new WeaponClass("viral", "Viral weapon", "ViralItem_TagDef", new string[0], GunMoves),
-            new WeaponClass("crossbow", "Crossbow", "CrossbowItem_TagDef", new string[0], GunMoves),
+            new WeaponClass("viral", "Viral weapon", "ViralItem_TagDef", new[] { "AN_Redemptor_WeaponDef" }, GunMoves),
+            new WeaponClass("crossbow", "Crossbow", "CrossbowItem_TagDef", new[] { "SY_Crossbow_WeaponDef" }, GunMoves),
             new WeaponClass("pistol", "Pistol", "HandgunItem_TagDef",
                             new[] { "PX_Pistol_WeaponDef", "AN_HandCannon_WeaponDef" }, GunMoves),
             new WeaponClass("pdw", "PDW / SMG", "PDWItem_TagDef", new[] { "PX_LaserPDW_WeaponDef" }, GunMoves),
@@ -76,6 +78,28 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>A weapon that wears none of the tags above.</summary>
         internal static readonly WeaponClass Other = new WeaponClass("other", "Other", null, new string[0], GunMoves);
+
+        private static readonly string[] AssaultSoldier = { "PX_AssaultStarting_TacCharacterDef", "PX_Assault_TacCharacterDef" };
+        private static readonly string[] HeavySoldier = { "PX_HeavyStarting_TacCharacterDef", "PX_Heavy_TacCharacterDef" };
+        private static readonly string[] SniperSoldier = { "PX_SniperStarting_TacCharacterDef", "PX_Sniper_TacCharacterDef" };
+
+        /// <summary>
+        /// WHO STANDS ON THE PLATFORM for a class, best first. The bench's default unit is simply the first
+        /// template by name - a Hoplite (a shield-bearing guardian) whose clips are HumanGuard_* and whose
+        /// hands hold nothing a soldier holds - so the flow's "moves of this class" strip would list a
+        /// creature's moves. A Phoenix soldier of the class that carries the weapon plays the soldier clips
+        /// the weapon is really seen with. A list, because a mod may remove a template.
+        /// </summary>
+        internal static string[] SoldiersFor(WeaponClass c)
+        {
+            if (c == null) return AssaultSoldier;
+            switch (c.Id)
+            {
+                case "heavy": case "grenadelauncher": case "dronelauncher": case "flamethrower": return HeavySoldier;
+                case "sniper": case "crossbow": return SniperSoldier;
+                default: return AssaultSoldier;
+            }
+        }
 
         /// <summary>The class of a weapon with these tag names - the first in <see cref="All"/> it wears.</summary>
         internal static WeaponClass Classify(IEnumerable<string> tagNames)

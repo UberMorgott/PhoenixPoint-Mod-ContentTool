@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using PhoenixPoint.Common.Entities.GameTags;
+using PhoenixPoint.Tactical.Entities;
 using PhoenixPoint.Tactical.Entities.Weapons;
 using Morgott.ContentTool.Tactical;
 using UnityEngine;
@@ -87,8 +88,22 @@ namespace Morgott.ContentTool.Dev
         }
 
         /// <summary>Put the def in the soldier's hand - the same Show() the Fit screen uses. A no-op when
-        /// the game has no such weapon.</summary>
-        internal static void Hold(string defName) { ShowDonor(defName); }
+        /// the game has no such weapon. The class's soldier steps onto the platform first
+        /// (<see cref="WeaponFlow.SoldiersFor"/>) when the unit there is not already one of them.</summary>
+        internal static void Hold(string defName, WeaponFlow.WeaponClass c)
+        {
+            string[] wanted = WeaponFlow.SoldiersFor(c);
+            if (unit == null || Array.IndexOf(wanted, unit.name) < 0)
+                foreach (string name in wanted)
+                {
+                    TacCharacterDef d = units.Find(x => x.name == name);
+                    if (d == null) continue;
+                    unit = d;
+                    Offer();
+                    break;
+                }
+            ShowDonor(defName);
+        }
 
         internal static bool Holding(string defName) { return weapon != null && weapon.name == defName; }
 
