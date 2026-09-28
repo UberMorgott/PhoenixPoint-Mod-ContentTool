@@ -327,6 +327,57 @@ namespace Morgott.ContentTool.Project
             return list;
         }
 
+        // ------------------------------------------------------------------ other mods
+
+        /// <summary>The files OTHER installed mods ship under <paramref name="sub"/> (e.g. Content\Videos,
+        /// Content\Audio\Replace, Dist\Sounds) with one of <paramref name="extensions"/>, as (mod folder name,
+        /// full path) sorted by mod then file - what the bench offers to preview beside the game's own. Every
+        /// sibling of ContentTool except <paramref name="exceptName"/> is asked; ContentTool itself is not a
+        /// content mod. Never throws.</summary>
+        internal static List<KeyValuePair<string, string>> OtherModFiles(string modDir, string exceptName, string sub,
+                                                                          string[] extensions)
+        {
+            var found = new List<KeyValuePair<string, string>>();
+            try
+            {
+                DirectoryInfo mods = Directory.GetParent(Normalized(modDir));
+                if (mods == null) return found;
+                string self = Path.GetFileName(Normalized(modDir));
+                var dirs = new List<string>(Directory.GetDirectories(mods.FullName));
+                dirs.Sort(StringComparer.OrdinalIgnoreCase);
+                foreach (string d in dirs)
+                {
+                    string name = Path.GetFileName(d);
+                    if (string.Equals(name, self, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, exceptName, StringComparison.OrdinalIgnoreCase)) continue;
+                    string at = Path.Combine(d, sub);
+                    if (!Directory.Exists(at)) continue;
+                    var files = new List<string>(Directory.GetFiles(at));
+                    files.Sort(StringComparer.OrdinalIgnoreCase);
+                    foreach (string f in files)
+                        if (Array.IndexOf(extensions, Path.GetExtension(f).ToLowerInvariant()) >= 0)
+                            found.Add(new KeyValuePair<string, string>(name, f));
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                                       ex is ArgumentException || ex is NotSupportedException)
+            { }
+            return found;
+        }
+
+        /// <summary>The clip file a video row's stem names under the project's Content\Videos, or null.</summary>
+        internal static string VideoFile(string root, string stem)
+        {
+            if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(stem)) return null;
+            string dir = Path.Combine(Path.Combine(root, "Content"), "Videos");
+            foreach (string ext in VideoExtensions)
+            {
+                string p = Path.Combine(dir, stem + ext);
+                if (File.Exists(p)) return p;
+            }
+            return null;
+        }
+
         // ------------------------------------------------------------------ shared
 
         /// <summary>The file's extension, lower-case, when it is one of <paramref name="allowed"/> and the

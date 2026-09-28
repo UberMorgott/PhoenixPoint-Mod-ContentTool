@@ -304,6 +304,14 @@ namespace Morgott.ContentTool.Dev
             donorsOf = weapons;
             return donors;
         }
+        /// <summary>The picked donor in the soldier's hand on the preview - the Fit screen's own Show().</summary>
+        private static void ShowDonor(string defName)
+        {
+            WeaponDef d = weapons.Find(x => x.name == defName);
+            if (d == null) return;
+            weapon = d;
+            Show();
+        }
         private static List<string> donors;
         private static List<WeaponDef> donorsOf;
         private static readonly string[] FitSteps = { "Soldier", "Weapon", "Adjust", "Save" };
@@ -1257,6 +1265,8 @@ namespace Morgott.ContentTool.Dev
             if (!entered) { open = false; return "ct_bench: nothing to close - nothing was changed."; }
             open = false;
             List<string> failed = new List<string>();
+            // Nothing the bench started may keep playing after it: the sound and the clip previews.
+            Step(failed, "the sound and video previews", TaskScreens.ShutdownPreviews);
 
             // The masks BEFORE the canvases, so nothing is ever drawn with a mask still switched off.
             // Each list keeps whatever failed, so a retry retries only that.
@@ -1871,6 +1881,9 @@ namespace Morgott.ContentTool.Dev
             // `ArgumentException`, and OnGUI's own catch answers that by closing the bench. `Update`'s
             // SHIP landing (Arm.Update, TakeShipLanding) moves the tab the same way: outside a GUI event.
             int wanted = homing ? TabHome : tab;
+            // A preview belongs to the screen it was started on: leaving the screen stops it.
+            if (tab != TabSounds && tab != TabVideos && Event.current.type == EventType.Layout)
+                TaskScreens.StopPreviews();
             if (tab == TabHome)
             {
                 wanted = Home();
@@ -1899,7 +1912,7 @@ namespace Morgott.ContentTool.Dev
                 if (tab == TabSounds) TaskScreens.Sounds(cw);
                 else if (tab == TabVideos) TaskScreens.Videos(cw);
                 // The same deferral as every tab move: Build & share is entered after EndArea.
-                else if (TaskScreens.Weapon(cw, Donors(), Word)) wanted = TabLifecycle;
+                else if (TaskScreens.Weapon(cw, Donors(), Word, ShowDonor)) wanted = TabLifecycle;
                 GUILayout.EndScrollView();
                 GUILayout.EndArea();
                 tab = wanted;

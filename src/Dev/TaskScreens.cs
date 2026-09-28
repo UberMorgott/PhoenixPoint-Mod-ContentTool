@@ -34,7 +34,19 @@ namespace Morgott.ContentTool.Dev
         private static void Drain()
         {
             if (Event.current.type != EventType.Layout) return;
+            SoundPreview.Tick();
+            VideoPreview.Tick();
             if (modsStale) { mods = ScanMods(); modsStale = false; }
+            if (Name != shownName || othersStale)
+            {
+                othersStale = false;
+                otherSounds = ProjectScaffold.OtherModFiles(ContentToolMain.ModDir, Name,
+                    Path.Combine(Path.Combine("Content", "Audio"), "Replace"), ProjectScaffold.AudioExtensions);
+                otherSounds.AddRange(ProjectScaffold.OtherModFiles(ContentToolMain.ModDir, Name,
+                    Path.Combine("Dist", "Sounds"), new[] { ".bnk" }));
+                otherVideos = ProjectScaffold.OtherModFiles(ContentToolMain.ModDir, Name,
+                    Path.Combine("Content", "Videos"), ProjectScaffold.VideoExtensions);
+            }
             if (Name != shownName)
             {
                 shownName = Name;
@@ -103,15 +115,48 @@ namespace Morgott.ContentTool.Dev
                 GUILayout.Label(string.IsNullOrEmpty(log) ? "(nothing has run yet)" : StageResult.Tail(log, 30));
         }
 
-        /// <summary>A picked file's line: its name, or a dash, plus the button that opens the browser.</summary>
-        private static bool FileRow(string label, string path)
+        /// <summary>A picked file's line: its name, or a dash, its Play/Stop (grey until there is a file), and the
+        /// button that opens the browser. <paramref name="play"/> comes back true when Play/Stop was pressed.</summary>
+        private static bool FileRow(string label, string path, Func<string, string, bool> button, out bool play)
         {
             GUILayout.BeginHorizontal();
             GUILayout.Label(new GUIContent(path == null ? label + ": (none yet)" : label + ": " +
-                                           BenchList.Elide(Path.GetFileName(path), BenchList.NameChars - 20), path));
+                                           BenchList.Elide(Path.GetFileName(path), BenchList.NameChars - 26), path));
+            play = false;
+            if (button != null)
+            {
+                GUI.enabled = path != null;
+                play = button(path == null ? null : "file:" + path, "hear / watch your file") && path != null;
+                GUI.enabled = true;
+            }
             bool press = GUILayout.Button(path == null ? "Pick..." : "Change...", GUILayout.Width(80f));
             GUILayout.EndHorizontal();
             return press;
+        }
+
+        /// <summary>Stops both previews - the bench left the Sounds/Videos screens.</summary>
+        internal static void StopPreviews() { SoundPreview.Stop(); VideoPreview.Stop(); }
+
+        /// <summary>The bench closed: stop and hand back everything the previews hold.</summary>
+        internal static void ShutdownPreviews() { SoundPreview.Shutdown(); VideoPreview.Stop(); }
+
+        private static List<KeyValuePair<string, string>> otherSounds = new List<KeyValuePair<string, string>>(),
+                                                          otherVideos = new List<KeyValuePair<string, string>>();
+        private static bool othersStale = true;
+
+        /// <summary>A shipped sound by media id, through the best path the game offers: its loose .wem decoded
+        /// into the preview bank, else its own event in its own bank; said out loud when there is neither.</summary>
+        private static void PlayGameSound(uint id)
+        {
+            string key = "media:" + id;
+            if (SoundPreview.Active(key)) { SoundPreview.Stop(); return; }
+            string wem = SoundReplace.LooseWem(id);
+            if (wem != null) { SoundPreview.ToggleFile(key, wem); return; }
+            string name = Extract.SoundNames.Name(id), bank;
+            uint ev;
+            if (SoundReplace.EventForSound(name, out bank, out ev)) SoundPreview.ToggleEvent(key, bank, ev, name);
+            else SoundPreview.Say("no preview for '" + name + "': it lives inside a game bank and no event of its " +
+                                  "own name plays it");
         }
 
         private static string Dir(string path)
@@ -160,18 +205,29 @@ namespace Morgott.ContentTool.Dev
             BenchUi.Hint("Replace one of the game's sounds with your own .wav, .ogg or .mp3. The mod ships the " +
                          "new sound; no game file is changed.");
 
+            VideoPreview.Stop();
+            BenchUi.Hint(SoundPreview.Said);
+
             BenchUi.Section("1  Your sound file");
-            if (FileRow("File", audioFile)) audioBrowserWanted = true;
+            bool play;
+            if (FileRow("File", audioFile, SoundPreview.Button, out play)) audioBrowserWanted = true;
+            if (play) { string f = audioFile; next = () => SoundPreview.ToggleFile("file:" + f, f); }
 
             BenchUi.Section("2  Which game sound it replaces");
             soundFilter = GUILayout.TextField(soundFilter ?? "", 80);
             BenchUi.Hint(names.Count == 0 ? "the game's sound list could not be read - " + (names.Why ?? "no reason given")
-                         : soundTotal + " match(es) - type part of a name, a bank or an id"
+                         : soundTotal + " match(es) - type part of a name, a bank or an id; Play to hear it"
                            + (soundTotal > soundHits.Count ? "; showing " + soundHits.Count : ""));
             foreach (uint id in soundHits)
+            {
+                GUILayout.BeginHorizontal();
+                uint row = id;
+                if (SoundPreview.Button("media:" + id, "hear the game's sound")) next = () => PlayGameSound(row);
                 if (BenchUi.Pick(new GUIContent((id == media ? "> " : "") + names.Name(id) + "   (" + names.Bank(id) + ")",
                                                 "media id " + id)))
-                { uint pick = id; next = () => media = pick; }
+                    next = () => media = row;
+                GUILayout.EndHorizontal();
+            }
             BenchUi.Field("Replaces", media == 0 ? "-" : names.Name(media), media == 0 ? null : "media id " + media);
 
             GUILayout.Space(4f);
@@ -194,12 +250,33 @@ namespace Morgott.ContentTool.Dev
                 BenchUi.Mark(live ? "LIVE" : s.State == "built" ? "BUILT" : s.State == "out of date" ? "OLD" : "-",
                              live || s.State == "built" ? Grade.Pass : s.State == "out of date" ? (Grade?)Grade.Warn : null,
                              live ? "loaded in this game session" : s.State, 50f);
+                string src = Path.Combine(ProjectScaffold.SoundDir(Root ?? ""), s.File);
+                if (SoundPreview.Button("file:" + src, "hear your file (built or not)"))
+                    next = () => SoundPreview.ToggleFile("file:" + src, src);
                 GUILayout.Label(new GUIContent(names.Name(s.Media) + "  <-  " + s.File, "media id " + s.Media));
                 GUILayout.EndHorizontal();
             }
             if (soundItems.Count > 0 && GUILayout.Button(new GUIContent("Build all again", "ct_sound bake " + Name),
                                                          GUILayout.Width(140f)))
             { string name = Name; next = () => BuildSounds(name); }
+
+            if (BenchUi.Fold("sounds/others", "Sounds other installed mods ship (" + otherSounds.Count + ")"))
+                foreach (KeyValuePair<string, string> o in otherSounds)
+                {
+                    GUILayout.BeginHorizontal();
+                    string path = o.Value;
+                    bool bank = path.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase);
+                    uint id;
+                    uint.TryParse(Path.GetFileNameWithoutExtension(path), out id);
+                    // A built bank with no source beside it: the game's own event, which plays whatever
+                    // serves that sound now - the mod's version when that mod is switched on.
+                    if (SoundPreview.Button(bank ? "media:" + id : "file:" + path,
+                                            bank ? "the game's event for this sound, as it plays now" : "hear the file"))
+                        next = bank ? (Action)(() => PlayGameSound(id)) : () => SoundPreview.ToggleFile("file:" + path, path);
+                    GUILayout.Label(new GUIContent(o.Key + ": " + (id != 0 && names.Name(id).Length > 0
+                                                   ? names.Name(id) : Path.GetFileName(path)), path));
+                    GUILayout.EndHorizontal();
+                }
         }
 
         private static bool IsLive(uint id)
@@ -280,20 +357,34 @@ namespace Morgott.ContentTool.Dev
             BenchUi.Hint("Replace one of the game's cutscenes with your own clip, or add a new one. It is served " +
                          "from your mod's folder; no game file is changed.");
 
+            SoundPreview.Stop();
+            VideoPreview.Box(width - 8f);
+            BenchUi.Hint(VideoPreview.Said);
+
             BenchUi.Section("1  Your clip (.webm, .mp4 or .mov)");
-            if (FileRow("Clip", videoFile)) videoBrowserWanted = true;
+            bool play;
+            if (FileRow("Clip", videoFile, VideoPreview.Button, out play)) videoBrowserWanted = true;
+            if (play) { string f = videoFile; next = () => VideoPreview.Toggle("file:" + f, f); }
 
             BenchUi.Section("2  Which game video it replaces");
             int mode = GUILayout.Toolbar(addNew ? 1 : 0, new[] { "Replace a game video", "Add as a new video" });
             if ((mode == 1) != addNew) { bool want = mode == 1; next = () => addNew = want; }
-            // BOTH arms lay out the same controls; the new-video arm only greys the list out.
-            GUI.enabled = !addNew;
+            // BOTH arms lay out the same controls; the new-video arm only greys the picks out (Play stays).
             videoFilter = GUILayout.TextField(videoFilter ?? "", 80);
-            BenchUi.Hint(videoTotal + " game video(s) match" + (videoTotal > videoHits.Count ? "; showing " + videoHits.Count : ""));
+            BenchUi.Hint(videoTotal + " game video(s) match; Play to watch" +
+                         (videoTotal > videoHits.Count ? "; showing " + videoHits.Count : ""));
             foreach (string v in videoHits)
+            {
+                GUILayout.BeginHorizontal();
+                string asset = v, file = Path.Combine(Application.streamingAssetsPath, v.Replace('/', Path.DirectorySeparatorChar));
+                if (VideoPreview.Button("game:" + asset, "watch the game's clip"))
+                    next = () => VideoPreview.Toggle("game:" + asset, file);
+                GUI.enabled = !addNew;
                 if (BenchUi.Pick(new GUIContent((v == shippedVideo ? "> " : "") + Path.GetFileNameWithoutExtension(v), v)))
-                { string pick = v; next = () => shippedVideo = pick; }
-            GUI.enabled = true;
+                    next = () => shippedVideo = asset;
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
+            }
             BenchUi.Field(addNew ? "Adds" : "Replaces",
                           addNew ? "a new video (your mod's code plays it)" : shippedVideo == null ? "-"
                                  : Path.GetFileNameWithoutExtension(shippedVideo), shippedVideo);
@@ -316,6 +407,11 @@ namespace Morgott.ContentTool.Dev
                 GUILayout.BeginHorizontal();
                 BenchUi.Mark(there ? "OK" : "MISSING", there ? Grade.Pass : Grade.Fail,
                              there ? "the clip is in Content\\Videos" : "no clip of that name in Content\\Videos", 60f);
+                string clip = ProjectScaffold.VideoFile(Root, videoRows[i].Key);
+                GUI.enabled = clip != null;
+                if (VideoPreview.Button("file:" + clip, "watch your clip") && clip != null)
+                    next = () => VideoPreview.Toggle("file:" + clip, clip);
+                GUI.enabled = true;
                 GUILayout.Label(new GUIContent(videoRows[i].Key + "  ->  " +
                                                (videoRows[i].Value == null ? "new video"
                                                 : Path.GetFileNameWithoutExtension(videoRows[i].Value)), videoRows[i].Value));
@@ -324,6 +420,16 @@ namespace Morgott.ContentTool.Dev
             if (videoRows.Count > 0 && GUILayout.Button(new GUIContent("Apply again", "ct_video live " + Name),
                                                         GUILayout.Width(140f)))
             { string name = Name; next = () => ApplyVideos(name); }
+
+            if (BenchUi.Fold("videos/others", "Videos other installed mods ship (" + otherVideos.Count + ")"))
+                foreach (KeyValuePair<string, string> o in otherVideos)
+                {
+                    GUILayout.BeginHorizontal();
+                    string path = o.Value;
+                    if (VideoPreview.Button("file:" + path, "watch the clip")) next = () => VideoPreview.Toggle("file:" + path, path);
+                    GUILayout.Label(new GUIContent(o.Key + ": " + Path.GetFileName(path), path));
+                    GUILayout.EndHorizontal();
+                }
         }
 
         private static void AddVideo(string file, string name, string asset)
@@ -357,7 +463,7 @@ namespace Morgott.ContentTool.Dev
 
         /// <summary>Returns true when the author asked to go on to Build &amp; share with the project just
         /// written (already bound there) - the bench moves the tab after EndArea.</summary>
-        internal static bool Weapon(float width, IList<string> donors, Func<string, string> word)
+        internal static bool Weapon(float width, IList<string> donors, Func<string, string> word, Action<string> showDonor)
         {
             Drain();
             if (Event.current.type == EventType.Layout)
@@ -396,11 +502,13 @@ namespace Morgott.ContentTool.Dev
             BenchUi.Hint(donorTotal + " weapon(s) match" + (donorTotal > donorHits.Count ? "; showing " + donorHits.Count : ""));
             foreach (string d in donorHits)
                 if (BenchUi.Pick(new GUIContent((d == donor ? "> " : "") + word(d), d)))
-                { string pick = d; next = () => donor = pick; }
+                { string pick = d; next = () => { donor = pick; showDonor(pick); }; }
             BenchUi.Field("Start from", donor == null ? "-" : word(donor), donor);
 
             BenchUi.Section("2  Your model");
-            if (FileRow("Model", modelFile)) modelBrowserWanted = true;
+            bool unused;
+            if (FileRow("Model", modelFile, null, out unused)) modelBrowserWanted = true;
+            BenchUi.Hint("to check your model itself, open it in Replace a model - its preview shows any .glb");
 
             BenchUi.Section("3  Its name in the game");
             weaponName = GUILayout.TextField(weaponName ?? "", 40);

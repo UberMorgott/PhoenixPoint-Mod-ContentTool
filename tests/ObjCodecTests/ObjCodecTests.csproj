@@ -46,6 +46,7 @@
     <Compile Include="..\..\src\Project\ProjectScaffold.cs" Link="ProjectScaffold.cs" />
     <Compile Include="ProjectScaffoldTests.cs" />
     <Compile Include="..\..\src\Project\ProjectScaffold.Tasks.cs" Link="ProjectScaffold.Tasks.cs" />
+    <Compile Include="..\..\src\Wwise\PreviewBank.cs" Link="PreviewBank.cs" />
     <Compile Include="TaskScaffoldTests.cs" />
     <!-- The lifecycle CARRIER and the one verdict formatter carry no UnityEngine type on purpose (the
          dashboard's producers run on a worker), so "an all-VOID read-back is not a PASS" and every

@@ -135,6 +135,33 @@ internal static class TaskScaffoldTests
                             Manifest.Rows(Manifest.Tree(after, "x"), "weapons", new List<object>()).Count == 2 &&
                             Manifest.Rows(Manifest.Tree(after, "x"), "publish", new List<object>()).Count == 1,
                             "an authored manifest keeps its bytes; weapons gains a row, publish is added: " + after);
+
+            // ---- previews: what other mods ship, found beside ours; the clip a row names.
+            string otherMod = Path.Combine(mods, "OtherMod");
+            Write(Path.Combine(otherMod, "Content", "Videos"), "boss.webm", new byte[] { 1 });
+            Write(Path.Combine(otherMod, "Content", "Videos"), "notes.txt", new byte[] { 1 });
+            Write(Path.Combine(otherMod, "Dist", "Sounds"), "633458426.bnk", new byte[] { 1 });
+            List<KeyValuePair<string, string>> vids = ProjectScaffold.OtherModFiles(modDir, "MyVideos",
+                Path.Combine("Content", "Videos"), ProjectScaffold.VideoExtensions);
+            checks += Check(vids.Count == 1 && vids[0].Key == "OtherMod" && vids[0].Value.EndsWith("boss.webm"),
+                            "another mod's clip is offered, its .txt is not, and our own mod is left out: " + vids.Count);
+            checks += Check(ProjectScaffold.OtherModFiles(modDir, "OtherMod", Path.Combine("Content", "Videos"),
+                                                          ProjectScaffold.VideoExtensions).Count == 2,
+                            "with OtherMod as the current mod, MyVideos' two clips are the others (its .bak is not a clip)");
+            checks += Check(ProjectScaffold.OtherModFiles(modDir, "MySounds", Path.Combine("Dist", "Sounds"), new[] { ".bnk" }).Count == 1,
+                            "a built sound bank of another mod is offered");
+            checks += Check(ProjectScaffold.VideoFile(vroot, "intro") == clip && ProjectScaffold.VideoFile(vroot, "nope") == null,
+                            "a video row's stem resolves to its clip, or to nothing");
+
+            // ---- the preview bank: our own ids, one embedded sound, a bank the loader walks cleanly, capped.
+            var pcm = new byte[44100 * 2 * 2 * (Morgott.ContentTool.Wwise.PreviewBank.MaxSeconds + 5)];
+            byte[] bnk = Morgott.ContentTool.Wwise.PreviewBank.Build(pcm, 2, 44100);
+            checks += Check(Morgott.ContentTool.Wwise.BankGen.SelfCheck(bnk) == null, "the preview bank walks cleanly");
+            checks += Check(bnk.Length < pcm.Length, "and a long source is cut to " +
+                            Morgott.ContentTool.Wwise.PreviewBank.MaxSeconds + " s: " + bnk.Length + " < " + pcm.Length);
+            checks += Check(Morgott.ContentTool.Wwise.PreviewBank.MediaId != 633458426 &&
+                            Morgott.ContentTool.Wwise.PreviewBank.MediaId != Morgott.ContentTool.Wwise.PreviewBank.BankId,
+                            "its ids are the tool's own hashes");
         }
         finally
         {
