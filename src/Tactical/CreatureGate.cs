@@ -962,9 +962,17 @@ namespace Morgott.ContentTool.Tactical
                             List<string> crossed = new List<string>();
                             List<string> playedT = new List<string>();
                             float tookT = 0f;
+                            // WITHIN THIS CREATURE'S OWN MOVE RANGE, not just the 26-tile radius: the engine
+                            // caps every path at TacticalActor.MaxMoveRange (TacticalNavigationComponent.
+                            // CalculatePath:925, LimitPathLength), so an offer beyond it is walked only part
+                            // way - measured 2026-09-28 as "climb UP ends 10.97 tiles short". Asked after
+                            // RestartAbilities, i.e. with full action points.
+                            float reach = Reach;
                             for (int attempt = 0; attempt < 3; attempt++)
                             {
-                                try { all = move.GetTargetsDataInRange(null, Reach).ToArray(); }
+                                float range = move.MaxMoveRange;
+                                if (range > 0f && range < reach) reach = range;
+                                try { all = move.GetTargetsDataInRange(null, reach).ToArray(); }
                                 catch (Exception ex)
                                 {
                                     all = new MoveAbilityTargetData[0];
@@ -972,7 +980,7 @@ namespace Morgott.ContentTool.Tactical
                                 }
                                 Vector3 at = actor.Pos;
                                 MoveAbilityTargetData pick = all
-                                    .Where(s => (s.Position.y - at.y) * want > 0.5f &&
+                                    .Where(s => (s.Position.y - at.y) * want > 0.5f && s.PathLength <= reach &&
                                                 !tried.Any(t => Vector3.Distance(t, s.Position) < 1.5f))
                                     .OrderByDescending(s => (s.Position.y - at.y) * want)
                                     .FirstOrDefault();
@@ -988,9 +996,17 @@ namespace Morgott.ContentTool.Tactical
 
                                 // Sampled WHILE it runs: the path is built at activation and cleared when
                                 // the move ends, so the link count has to be read during the walk.
-                                while (blewT == null && move.IsExecuting &&
-                                       Time.realtimeSinceStartup - tt < 30f)
+                                // FINISHED = the ability AND the navigation action are both done, after
+                                // either was seen running: IsExecuting alone can read false on the first
+                                // frame (the move is still being queued) or before the walk's last
+                                // segment ends, and either way the arm measured a creature still walking.
+                                bool started = false;
+                                while (blewT == null && Time.realtimeSinceStartup - tt < 30f)
                                 {
+                                    bool busy = move.IsExecuting ||
+                                                (actor.TacticalNav != null && actor.TacticalNav.IsNavigating);
+                                    if (busy) started = true;
+                                    else if (started || Time.realtimeSinceStartup - tt > 2f) break;
                                     try
                                     {
                                         TacticalPathRequest p = actor.TacticalNav == null
@@ -1044,7 +1060,7 @@ namespace Morgott.ContentTool.Tactical
                                 // NOT a failure: a flat map genuinely cannot pose this half. It is said
                                 // out loud so a green run can never be mistaken for a proven one.
                                 reports.Add(dir + ": VOID - no tile more than 0,5 " + dir + " within " +
-                                            Reach.ToString("F0") + " tile(s), this save cannot pose it");
+                                            reach.ToString("F0") + " tile(s), this save cannot pose it");
                                 continue;
                             }
                             posed++;
@@ -1068,7 +1084,7 @@ namespace Morgott.ContentTool.Tactical
                                 (blewT != null ? "THREW " + blewT + "; " : "") + "ordered " +
                                 dyWant.ToString("F2") + " " + dir + " (" +
                                 high.PathLength.ToString("F2") + " tile(s) of path, " + all.Length +
-                                " offer(s) within " + Reach.ToString("F0") + "), ended " +
+                                " offer(s) within " + reach.ToString("F0") + "), ended " +
                                 left.ToString("F2") + " tile(s) short having changed height by " +
                                 dyGot.ToString("F2") + " in " + tookT.ToString("F2") + "s over " + links +
                                 " LINK segment(s) of " + segs +
