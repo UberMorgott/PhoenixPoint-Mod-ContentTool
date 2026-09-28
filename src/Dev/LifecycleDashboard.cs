@@ -108,6 +108,7 @@ namespace Morgott.ContentTool.Dev
                 if (stage == "All")
                 {
                     chain = new LifecycleState.Sequence(last);
+                    log = null;   // a new chain's log starts empty; each finished stage appends to it
                     ctx.InRunAll = true;
                     ctx.ValidateOutcome = ctx.BakeOutcome = ctx.ApplyOutcome = GateOutcome.None;
                     string next = chain.Next(ctx);
@@ -575,7 +576,11 @@ namespace Morgott.ContentTool.Dev
             // The producer's gate log when it published one - Verify's FAIL/VOID lines are what its
             // verdict points at - and the verdict itself for every stage whose verdict is the whole of
             // what it measured.
-            log = now.Log ?? now.Result;
+            // An EMPTY gate log is no log: `??` let a stage that published "" (Verify with nothing to verify)
+            // blank the pane, which then read "(nothing has run yet)" under four finished rows. Inside a
+            // chain every stage's text is KEPT, in order - the pane is the whole Build & test, not its tail.
+            string said = string.IsNullOrEmpty(now.Log) ? now.Result : now.Log;
+            log = chain != null && !string.IsNullOrEmpty(log) ? log + "\n" + said : said;
 
             // S1 IS A FACT ABOUT THE SESSION, NOT ABOUT A CHAIN (LifecycleState.cs:443). A STANDALONE Apply
             // never reaches `Sequence.Report`, so setting it only there left the button path's Verify
