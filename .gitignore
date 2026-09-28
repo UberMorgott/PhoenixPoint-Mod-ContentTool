@@ -47,7 +47,7 @@ tools/pp-clips.json
 tools/ppretarget-report.json
 
 # Test content that must never ship - scratch models of unknown licence, bench subjects.
-# deploy.ps1 installs it like a demo; package.ps1 and sync-standalone.ps1 never look at it.
+# deploy.ps1 installs it like a demo; package.ps1 never looks at it.
 local/
 
 # Secrets
