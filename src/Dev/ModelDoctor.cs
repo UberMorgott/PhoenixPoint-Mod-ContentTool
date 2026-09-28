@@ -919,7 +919,6 @@ namespace Morgott.ContentTool.Dev
         // ------------------------------------------------------------------ the panel
 
         private readonly GlbFileBrowser browser = new GlbFileBrowser();
-        private Vector2 rowScroll;
         private bool mapOpen;
         private string boneOpen;
 
@@ -1532,6 +1531,9 @@ namespace Morgott.ContentTool.Dev
         internal void Draw(float width)
         {
             if (Event.current.type == EventType.Layout) Refresh();
+            // BenchNav: Back closes the open picker; a done step re-opens its picker. Run by the frame at
+            // the start of a Layout pass, before this draws - nothing picked is cleared.
+            BenchNav.Handlers(NavBack, NavJump, 1, browser.Open ? "Pick your model file" : browserOpen ? "Pick the game part" : null);
 
             // Open is tested BEFORE Draw and the frame ends there: the browser reorders its own recents
             // during the mouse pass, so a second Draw in the same frame lays out a different list.
@@ -1627,20 +1629,53 @@ namespace Morgott.ContentTool.Dev
                              " tris, " + (Ready.Model == null ? 0 : Ready.Model.JointNames.Count) + " joints, " +
                              Ready.Baked.Influences + " influence(s)/vertex");
             BenchUi.Hint(Ready.Report.Header());
-            rowScroll = GUILayout.BeginScrollView(rowScroll, GUILayout.Height(200f));
-            Rows(Severity.Blocking, "CAN'T BE USED");
-            Rows(Severity.Downgrade, "LOSES YOUR SKIN WEIGHTS");
+            // ONE selectable, copyable text (BenchUi.LogView): the rows as the author reads them, then the
+            // build's result. Copy log takes the plain report (PlainTextOf) plus the same build lines.
+            if (Event.current.type == EventType.Layout) DetailsText();
+            BenchUi.LogView("doctor/report", detailsShown, detailsFull, 220f);
+        }
+
+        private string detailsShown = "", detailsFull = "";
+        private ReplacementPreflightResult detailsFor;
+        private string detailsShip;
+
+        /// <summary>The Details text, rebuilt only when the verdict or the build lines changed.</summary>
+        private void DetailsText()
+        {
+            string ship = shipPath + "\n" + shipResult + "\n" + shipTail;
+            if (ReferenceEquals(detailsFor, Ready) && detailsShip == ship) return;
+            detailsFor = Ready; detailsShip = ship;
+            var b = new System.Text.StringBuilder();
+            Rows(b, Severity.Blocking, "CAN'T BE USED");
+            Rows(b, Severity.Downgrade, "LOSES YOUR SKIN WEIGHTS");
             // "WARNING", not "IGNORED": a sidecar row IS ignored, a suspect part mapping is not - it bakes,
             // prints as "P4 WARN" and is counted as a warning, never a failure ("N warning(s), baked
             // anyway", StageText.BakeWarnings).
-            Rows(Severity.Warning, "WARNING");
-            Rows(Severity.Info, "NOTE");
-            GUILayout.EndScrollView();
-            if (GUILayout.Button("Copy report", GUILayout.Width(110f)))
-                GUIUtility.systemCopyBuffer = PlainTextOf(Ready, Path, Target);
-            if (shipPath.Length > 0) BenchUi.Hint("mod folder " + shipPath);
-            if (shipResult.Length > 0) BenchUi.Hint(shipResult);
-            if (shipTail.Length > 0) BenchUi.Hint(shipTail);
+            Rows(b, Severity.Warning, "WARNING");
+            Rows(b, Severity.Info, "NOTE");
+            var s = new System.Text.StringBuilder();
+            if (shipPath.Length > 0) s.Append("mod folder ").Append(shipPath).Append('\n');
+            if (shipResult.Length > 0) s.Append(shipResult).Append('\n');
+            if (shipTail.Length > 0) s.Append(shipTail).Append('\n');
+            string build = s.Length > 0 ? "\nBUILD\n" + s : "";
+            detailsShown = b.ToString().TrimEnd('\n') + build;
+            detailsFull = PlainTextOf(Ready, Path, Target) + build;
+        }
+
+        private bool NavBack()
+        {
+            if (shipPending) return false;
+            if (browser.Open) { browser.Hide(); return true; }
+            if (browserOpen) { browserOpen = false; return true; }
+            return false;
+        }
+
+        private bool NavJump(int step)
+        {
+            if (shipPending) return false;
+            if (step == 0) { browser.Show(Path == null ? "" : System.IO.Path.GetDirectoryName(Path)); return true; }
+            if (step == 1) { browserOpen = true; return true; }
+            return false;
         }
 
         private static readonly string[] StepNames = { "Model file", "Game part", "Check", "Build" };
@@ -1850,8 +1885,8 @@ namespace Morgott.ContentTool.Dev
         {
             BenchUi.Title("Which game part does it replace?");
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("< Back", GUILayout.Width(BenchList.DocBackW)))
-                edits.Enqueue(delegate { browserOpen = false; });
+            // No "< Back" of its own any more: the bench's shared Back (BenchNav, top left, and Esc) closes
+            // this browser through NavBack - two buttons with one label were one too many.
             GUILayout.Label("Find", GUILayout.Width(BenchList.DocSearchLabelW));
             query = GUILayout.TextField(query ?? "", GUILayout.Width(BenchList.DocSearchFieldW));
             GUILayout.EndHorizontal();
@@ -2193,7 +2228,7 @@ namespace Morgott.ContentTool.Dev
         /// <summary>One severity group. The game's own model is drawn APART and last: "this is not your
         /// file" is the difference between a fix and a dead end, and a target row mixed in with the
         /// author's own reads as one more thing they exported wrong.</summary>
-        private void Rows(Severity severity, string heading)
+        private void Rows(System.Text.StringBuilder b, Severity severity, string heading)
         {
             bool any = false, theirs = false;
             for (int pass = 0; pass < 2; pass++)
@@ -2201,15 +2236,16 @@ namespace Morgott.ContentTool.Dev
                 {
                     if (d.Severity != severity) continue;
                     if ((d.Side == DiagnosticSide.Target) != (pass == 1)) continue;
-                    if (!any) { GUILayout.Label(heading); any = true; }
+                    if (!any) { b.Append(heading).Append('\n'); any = true; }
                     if (pass == 1 && !theirs)
                     {
-                        GUILayout.Label("  -- the game's model, not your file --");
+                        b.Append("  -- the game's model, not your file --\n");
                         theirs = true;
                     }
-                    GUILayout.Label("  " + (d.Side == DiagnosticSide.Sidecar ? "[aliases] " : "") + d.Message);
-                    if (d.Remedy.Length > 0) GUILayout.Label("      " + d.Remedy);
+                    b.Append("  ").Append(d.Side == DiagnosticSide.Sidecar ? "[aliases] " : "").Append(d.Message).Append('\n');
+                    if (d.Remedy.Length > 0) b.Append("      ").Append(d.Remedy).Append('\n');
                 }
+            if (any) b.Append('\n');
         }
 
         /// <summary>

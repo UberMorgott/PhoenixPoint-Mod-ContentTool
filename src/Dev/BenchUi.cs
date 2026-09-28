@@ -11,7 +11,7 @@ namespace Morgott.ContentTool.Dev
     /// </summary>
     internal static class BenchUi
     {
-        private static GUIStyle title, hint, text, badge, step, stepOn, main, card, cardSub, tip, head, none;
+        private static GUIStyle title, hint, text, badge, step, stepOn, stepDone, main, card, cardSub, tip, head, none;
         private static readonly Color Grey = new Color(0.62f, 0.66f, 0.72f);
         private static readonly Color PassC = new Color(0.35f, 0.82f, 0.45f);
         private static readonly Color WarnC = new Color(0.95f, 0.75f, 0.25f);
@@ -33,6 +33,9 @@ namespace Morgott.ContentTool.Dev
             step.normal.textColor = Grey;
             stepOn = new GUIStyle(step) { fontStyle = FontStyle.Bold };
             stepOn.normal.textColor = Accent;
+            stepDone = new GUIStyle(step);
+            stepDone.normal.textColor = PassC;
+            stepDone.hover.textColor = Color.white;
             main = new GUIStyle(GUI.skin.button) { fontSize = 14, fontStyle = FontStyle.Bold, fixedHeight = 32f };
             card = new GUIStyle(GUI.skin.button)
             {
@@ -92,10 +95,20 @@ namespace Morgott.ContentTool.Dev
         internal static void Steps(string[] names, int current)
         {
             Init();
+            BenchNav.StepsSeen(names, current);
             GUILayout.BeginHorizontal();
             for (int i = 0; i < names.Length; i++)
-                GUILayout.Label((i + 1) + " " + names[i] + (i < names.Length - 1 ? "   >" : ""),
-                                i == current ? stepOn : step);
+            {
+                string label = (i + 1) + " " + names[i] + (i < names.Length - 1 ? "   >" : "");
+                // A DONE step the screen can re-open is a button (same one control as the label it replaces):
+                // the press is a request BenchNav runs on the next Layout; nothing picked is cleared.
+                if (BenchNav.CanJump(i))
+                {
+                    if (GUILayout.Button(new GUIContent(label, "go back to this step - nothing you picked is lost"), stepDone))
+                        BenchNav.RequestJump(i);
+                }
+                else GUILayout.Label(label, i == current ? stepOn : step);
+            }
             GUILayout.EndHorizontal();
         }
 
@@ -181,6 +194,101 @@ namespace Morgott.ContentTool.Dev
             GUILayout.Label(label, hint, GUILayout.Width(84f));
             GUILayout.Label(new GUIContent(value, tooltip), text);
             GUILayout.EndHorizontal();
+        }
+
+        /// <summary>A progress track with its fill: ONE rect of fixed height whatever the fraction, so a
+        /// playback that starts or ends never changes the control count.</summary>
+        internal static void Bar(float fraction, float height = 8f)
+        {
+            Rect r = GUILayoutUtility.GetRect(10f, height, GUILayout.ExpandWidth(true), GUILayout.Height(height));
+            if (Event.current.type != EventType.Repaint) return;
+            GUI.DrawTexture(r, Solid(ref trackTex, new Color(0.2f, 0.23f, 0.28f, 1f)));
+            float f = Mathf.Clamp01(fraction);
+            if (f > 0f) GUI.DrawTexture(new Rect(r.x, r.y, r.width * f, r.height), Solid(ref fillTex, Accent));
+        }
+
+        /// <summary>An opaque fill - the right-hand pane's ground on screens that show no 3D scene. OPAQUE
+        /// because the scene camera is off there: nothing clears the frame under IMGUI any more, and a
+        /// translucent panel would blend over its own last frame.</summary>
+        internal static void Ground(Rect r)
+        {
+            if (Event.current.type != EventType.Repaint) return;
+            GUI.DrawTexture(r, Solid(ref groundTex, new Color(0.055f, 0.065f, 0.085f, 1f)));
+        }
+
+        private static Texture2D trackTex, fillTex, groundTex;
+        private static Texture2D Solid(ref Texture2D t, Color c)
+        {
+            if (t != null) return t;
+            t = new Texture2D(1, 1);
+            t.SetPixel(0, 0, c);
+            t.Apply();
+            return t;
+        }
+
+        // ---- THE ONE LOG VIEW. Every log / Details text on the bench is shown through it, so an author can
+        // select it with the mouse, Ctrl+C it, or press Copy log for the WHOLE text and paste it to whoever
+        // helps them. Read-only: a TextArea whose edited value is dropped every pass.
+        private static GUIStyle logArea;
+        private static readonly System.Collections.Generic.Dictionary<string, Vector2> logScrolls =
+            new System.Collections.Generic.Dictionary<string, Vector2>();
+        private static readonly System.Collections.Generic.Dictionary<string, float> copiedAt =
+            new System.Collections.Generic.Dictionary<string, float>();
+        /// <summary>What IMGUI can draw in one text control: past ~16k characters the text mesh runs out of
+        /// vertices and nothing renders. The view shows the END of a longer text; Copy log still takes all.</summary>
+        internal const int LogShownChars = 12000;
+
+        /// <summary>A selectable, copyable log: the text in a read-only scrolling box (<paramref name="height"/>
+        /// px, or the rest of the area when 0), then [Copy log] [Open log folder] and a short "Copied" note.
+        /// <paramref name="full"/> is what Copy log puts on the clipboard; null copies what is shown.</summary>
+        internal static void LogView(string key, string shown, string full, float height)
+        {
+            Init();
+            if (logArea == null)
+                logArea = new GUIStyle(GUI.skin.textArea) { wordWrap = true, fontSize = 11, richText = false };
+            string text = string.IsNullOrEmpty(shown) ? "(nothing has run yet)" : shown;
+            if (text.Length > LogShownChars) text = "...\n" + text.Substring(text.Length - LogShownChars);
+            Vector2 s;
+            logScrolls.TryGetValue(key, out s);
+            s = height > 0f ? GUILayout.BeginScrollView(s, GUILayout.Height(height))
+                            : GUILayout.BeginScrollView(s, GUILayout.ExpandHeight(true));
+            GUILayout.TextArea(text, logArea, GUILayout.ExpandHeight(true));
+            GUILayout.EndScrollView();
+            logScrolls[key] = s;
+
+            GUILayout.BeginHorizontal();
+            string all = full ?? shown ?? "";
+            if (GUILayout.Button(new GUIContent("Copy log", "puts the WHOLE text on the clipboard - paste it to " +
+                                                "whoever helps you"), GUILayout.Width(90f)))
+            {
+                GUIUtility.systemCopyBuffer = all;
+                copiedAt[key] = Time.realtimeSinceStartup;
+            }
+            if (GUILayout.Button(new GUIContent("Open log folder", "the folder of the game's own log: " +
+                                                Application.consoleLogPath), GUILayout.Width(120f)))
+                OpenLogFolder();
+            float at;
+            bool fresh = copiedAt.TryGetValue(key, out at) && Time.realtimeSinceStartup - at < 3f;
+            GUILayout.Label(fresh ? "Copied " + all.Length + " characters" : "", hint);
+            GUILayout.EndHorizontal();
+        }
+
+        private static void OpenLogFolder()
+        {
+            try
+            {
+                string log = Application.consoleLogPath;
+                if (string.IsNullOrEmpty(log)) return;
+                System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + log + "\"");
+            }
+            catch (System.Exception) { }
+        }
+
+        /// <summary>A duration as m:ss.t, or "--" when unknown (negative).</summary>
+        internal static string Clock(int ms)
+        {
+            if (ms < 0) return "--";
+            return (ms / 60000) + ":" + (ms / 1000 % 60).ToString("00") + "." + (ms / 100 % 10);
         }
 
         /// <summary>Draws GUI.tooltip beside the mouse. Called once per pass, after every panel has drawn

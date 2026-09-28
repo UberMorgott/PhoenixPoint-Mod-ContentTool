@@ -85,15 +85,40 @@ namespace Morgott.ContentTool.Dev
             playingKey = null;
         }
 
-        /// <summary>The preview box: ALWAYS one rect of the same height, so starting or stopping a clip never
-        /// changes the control count; the picture is drawn in it only while one is playing.</summary>
-        internal static void Box(float width)
+        /// <summary>The picture: ALWAYS one rect of the given size, so starting or stopping a clip never
+        /// changes the control count; the frame is drawn in it only while one is playing.</summary>
+        internal static void Box(float width, float height)
         {
-            float h = Mathf.Round(width * 9f / 16f);
-            Rect r = GUILayoutUtility.GetRect(width, h, GUILayout.Width(width), GUILayout.Height(h));
+            Rect r = GUILayoutUtility.GetRect(width, height, GUILayout.Width(width), GUILayout.Height(height));
             if (Event.current.type != EventType.Repaint) return;
             GUI.Box(r, texture == null ? "press Play on a clip to watch it here" : "");
             if (texture != null) GUI.DrawTexture(r, texture, ScaleMode.ScaleToFit, false);
         }
+
+        /// <summary>The player's transport: Pause/Resume, Stop, a seek bar and the clock. The same four
+        /// controls whether a clip is loaded or not (greyed without one); a seek or a pause changes no
+        /// layout, so it is applied at once.</summary>
+        internal static void Transport()
+        {
+            VideoPlayer p = player;
+            GUILayout.BeginHorizontal();
+            bool was = GUI.enabled;
+            GUI.enabled = was && p != null;
+            bool paused = p != null && p.isPaused;
+            if (GUILayout.Button(paused ? "Resume" : "Pause", GUILayout.Width(70f)) && p != null)
+            { if (paused) p.Play(); else p.Pause(); }
+            if (GUILayout.Button("Stop", GUILayout.Width(60f)) && p != null) Stop();
+            double len = p == null ? 0 : p.length;
+            float t = p == null ? 0f : (float)p.time;
+            float seek = GUILayout.HorizontalSlider(t, 0f, Mathf.Max((float)len, 0.01f), GUILayout.ExpandWidth(true));
+            if (p != null && p.canSetTime && Mathf.Abs(seek - t) > 0.01f) p.time = seek;
+            GUILayout.Label(BenchUi.Clock((int)(t * 1000f)) + " / " + BenchUi.Clock(p == null ? -1 : (int)(len * 1000)),
+                            GUILayout.Width(110f));
+            GUI.enabled = was;
+            GUILayout.EndHorizontal();
+        }
+
+        /// <summary>The clip on screen, by file name, or null.</summary>
+        internal static string Playing { get { return playingKey == null ? null : label; } }
     }
 }

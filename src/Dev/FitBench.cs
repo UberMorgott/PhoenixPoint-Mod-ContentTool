@@ -255,6 +255,18 @@ namespace Morgott.ContentTool.Dev
         /// </summary>
         internal static ModelDoctor Doctor { get { return doctor; } }
         internal static bool DoctorShowing { get { return open && tab == TabDoctor; } }
+        /// <summary>
+        /// WHAT THE RIGHT-HAND SIDE SHOWS, the one switch: the live 3D preview only on the screens about a
+        /// model (Replace a model, Fit a weapon, Add a weapon). Everywhere else the scene camera is OFF (no
+        /// GPU spent on a unit nobody looks at), the transport strip, gizmo and orbit stand down, and the
+        /// screen draws its own pane there instead (<see cref="Pane"/>). Entering a model screen switches the
+        /// camera back on; Close restores whatever it was found as (Held.enabled).
+        /// </summary>
+        /// <summary>May the author leave this screen now? Not while the Doctor has a press armed, nor while a
+        /// lifecycle run owns the job on its own tab - the same rule the old "&lt; Tasks" button had.</summary>
+        private static bool NavFree { get { return !doctor.ShipPending && !(LifecycleDashboard.Busy && tab == TabLifecycle); } }
+
+        private static bool ModelScreen(int t) { return t == TabFit || t == TabDoctor || t == TabWeapon; }
         /// <summary>Which of the three columns is drawn. ONE int, not two bools: two flags can both be
         /// true, and "the Doctor and the Lifecycle at once" is a layout stack nobody balances.</summary>
         private const int TabHome = 0, TabFit = 1, TabDoctor = 2, TabLifecycle = 3,
@@ -353,7 +365,8 @@ namespace Morgott.ContentTool.Dev
                 wanted = TabVideos;
             GUI.enabled = true;
             GUILayout.Space(6f);
-            BenchUi.Hint("The model on the right is a live preview: middle-drag to orbit, wheel to zoom, F to frame.");
+            BenchUi.Hint("The right side shows what the task needs: your model live, a sound player, a video " +
+                         "player, or the build's progress and log.");
             return wanted;
         }
         /// <summary>The file utilities that sit under the Doctor's Advanced toggle (design §6). It
@@ -447,6 +460,9 @@ namespace Morgott.ContentTool.Dev
             /// The geoscape's own near plane is authored for a planet, and at the close range the zoom
             /// clamp now allows it clipped the weapon away.</summary>
             internal float near;
+            /// <summary>Camera.enabled as found: the bench switches the camera OFF on screens with no 3D
+            /// preview (<see cref="ModelScreen"/>) and Close puts this back.</summary>
+            internal bool enabled;
         }
         private static readonly List<Held> cameras = new List<Held>();
         private static Vector3 framePos; private static Quaternion frameRot;
@@ -1017,7 +1033,8 @@ namespace Morgott.ContentTool.Dev
                 camera = cam,
                 position = cam.transform.position,
                 rotation = cam.transform.rotation,
-                near = cam.nearClipPlane
+                near = cam.nearClipPlane,
+                enabled = cam.enabled
             };
             try
             {
@@ -1059,6 +1076,7 @@ namespace Morgott.ContentTool.Dev
                         h.camera.transform.position = h.position;
                         h.camera.transform.rotation = h.rotation;
                         h.camera.nearClipPlane = h.near;
+                        h.camera.enabled = h.enabled;
                     }
                 }
                 catch (Exception) { ok = false; }
@@ -1824,6 +1842,19 @@ namespace Morgott.ContentTool.Dev
         /// Closed - which is how they sit the moment something has been picked - they cost two rows,
         /// so the dial block is exactly where S29 left it.
         /// </summary>
+        /// <summary>The right-hand pane of a screen with no 3D preview (<see cref="ModelScreen"/>): the Sounds
+        /// player and list, the Videos player, Build &amp; share's progress and log, or Home's help and mods.</summary>
+        private static void Pane(int t)
+        {
+            const float pad = 12f;
+            float x = PanelWidth + pad;
+            var r = new Rect(x, pad, Screen.width - x - pad, Screen.height - 2f * pad);
+            if (t == TabSounds) TaskScreens.SoundsPane(r);
+            else if (t == TabVideos) TaskScreens.VideosPane(r);
+            else if (t == TabLifecycle) LifecycleDashboard.Pane(r);
+            else TaskScreens.HomePane(r);
+        }
+
         private static void Draw()
         {
             // LEFT edge. GeoscapeSoldierEditCenter stands the unit right of screen centre, so a panel
@@ -1847,19 +1878,21 @@ namespace Morgott.ContentTool.Dev
             // DEAD WHILE THE DOCTOR HAS A PRESS ARMED or a lifecycle run owns the job - see the tab note
             // below: leaving the tab mid-press or mid-run is what those gates forbid.
             GUILayout.BeginHorizontal();
-            // A busy lifecycle run forbids LEAVING its tab, never arriving - so from FIT or the Doctor the
-            // way home (and on to the Lifecycle card) stays open while a run started elsewhere is busy.
-            GUI.enabled = !doctor.ShipPending && !(LifecycleDashboard.Busy && tab == TabLifecycle);
-            bool homing = tab != TabHome && GUILayout.Button("< Tasks", GUILayout.Width(80f));
-            GUI.enabled = true;
+            // [Home] [< Back] - BenchNav, the one navigation every screen shares. A busy lifecycle run
+            // forbids LEAVING its tab, never arriving - so from FIT or the Doctor the way home (and on to
+            // the Lifecycle card) stays open while a run started elsewhere is busy (NavFree).
+            BenchNav.Row(NavFree);
             GUILayout.FlexibleSpace();
             // The close is deferred to AFTER EndArea on purpose: returning out of the middle of a
             // GUILayout block leaves the layout stack unbalanced, and IMGUI answers that with an
             // exception every frame - i.e. exactly the wedged screen this button exists to escape.
+            GUI.enabled = ModelScreen(tab);
             bool resetting = GUILayout.Button(new GUIContent("Reset view", "camera back to the start (Home key)"),
                                               GUILayout.Width(96f));
+            GUI.enabled = true;
             bool leaving = GUILayout.Button("Close (" + HotkeyLabel + ")", GUILayout.Width(140f));
             GUILayout.EndHorizontal();
+            BenchNav.Crumbs(NavFree);
             BenchUi.Title(TabTitle());
 
             // TASK CARDS, ONE COLUMN. Each card opens one screen; "< Tasks" comes back. The rules below
@@ -1880,7 +1913,7 @@ namespace Morgott.ContentTool.Dev
             // out a different number of controls than the Layout pass had cached - IMGUI's
             // `ArgumentException`, and OnGUI's own catch answers that by closing the bench. `Update`'s
             // SHIP landing (Arm.Update, TakeShipLanding) moves the tab the same way: outside a GUI event.
-            int wanted = homing ? TabHome : tab;
+            int wanted = tab;
             // A preview belongs to the screen it was started on: leaving the screen stops it.
             if (tab != TabSounds && tab != TabVideos && Event.current.type == EventType.Layout)
                 TaskScreens.StopPreviews();
@@ -2447,7 +2480,7 @@ namespace Morgott.ContentTool.Dev
                         if (doctor.TakeShipLanding()) tab = TabLifecycle;
                     }
                     if (!open || bay == null || bay.SceneRoot == null) return;
-                    if (!inputBroken)
+                    if (!inputBroken && ModelScreen(tab))
                     {
                         Mouse();
                         Fly();
@@ -2555,6 +2588,11 @@ namespace Morgott.ContentTool.Dev
             private void LateUpdate()
             {
                 if (!open) { FitGizmo.Aim(null, null, null); return; }
+                // THE RIGHT-SIDE SWITCH (ModelScreen): no 3D preview on this screen -> the camera renders
+                // nothing and the handles aim at nothing; back on the moment a model screen is entered.
+                bool model = ModelScreen(tab);
+                if (cam != null && cam.enabled != model) cam.enabled = model;
+                if (!model) { FitGizmo.Aim(null, null, null); return; }
                 // BEFORE the camera: a scrubbed frame changes where the hand is, and the handles are
                 // sized and picked against the pose the camera is about to be written to.
                 FitAnim.Tick();
@@ -2613,19 +2651,35 @@ namespace Morgott.ContentTool.Dev
                     FitGizmo.Gui(PanelWidth,
                                  BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
                     if (FitGizmo.Last != null) { message = FitGizmo.Last; FitGizmo.Last = null; }
+                    // The tab THIS pass was laid out for: Draw moves `tab` after its EndArea, and what is
+                    // drawn after it must match this pass's Layout, not the next one's.
+                    // NAVIGATION FIRST, on Layout only and before anything is drawn: the last pass's
+                    // Home/Back/crumb/step request runs here, so the tab never moves mid-event.
+                    BenchNav.BeginFrame();
+                    if (BenchNav.Apply(NavFree)) tab = TabHome;
+                    BenchNav.Screen(tab == TabHome ? null : TabTitle());
+                    int shown = tab;
+                    // No 3D on this screen: the camera is off, so the ground is laid first and opaque.
+                    if (!ModelScreen(shown)) BenchUi.Ground(new Rect(0f, 0f, Screen.width, Screen.height));
                     Draw();
-                    // AFTER the panel, and outside its area: the strip is its own region and IMGUI
-                    // areas do not nest.
-                    // The Doctor goes with it ONLY on its own tab: the strip's header row carries §6's
-                    // [Skeleton] toggle there, and nothing at all on FIT.
-                    FitAnim.Draw(PanelWidth, tab == TabDoctor ? doctor : null);
-                    // AFTER the strip, so the strip's own pixels are already the strip's, and after the
-                    // panel, so the inspector it draws sits on top of the scene rather than under it.
-                    // It takes no hotControl: a joint pick is a click, and a bare left press is
-                    // ViewGesture.None anyway, so there is nothing for the orbit to stand down from.
-                    if (tab == TabDoctor)
-                        doctor.Overlay(cam, PanelWidth,
-                                       BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
+                    if (ModelScreen(shown))
+                    {
+                        // AFTER the panel, and outside its area: the strip is its own region and IMGUI
+                        // areas do not nest.
+                        // The Doctor goes with it ONLY on its own tab: the strip's header row carries §6's
+                        // [Skeleton] toggle there, and nothing at all on FIT.
+                        FitAnim.Draw(PanelWidth, shown == TabDoctor ? doctor : null);
+                        // AFTER the strip, so the strip's own pixels are already the strip's, and after the
+                        // panel, so the inspector it draws sits on top of the scene rather than under it.
+                        // It takes no hotControl: a joint pick is a click, and a bare left press is
+                        // ViewGesture.None anyway, so there is nothing for the orbit to stand down from.
+                        if (shown == TabDoctor)
+                            doctor.Overlay(cam, PanelWidth,
+                                           BenchList.StripTop(Screen.width, Screen.height, PanelWidth));
+                    }
+                    else Pane(shown);
+                    // Esc = Back, LAST: the gizmo and the bone inspector take Esc first when they want it.
+                    BenchNav.Escape(NavFree);
                     // The hovered control's tooltip, on top of everything.
                     BenchUi.Tooltip();
                     // AFTER everything has drawn: whoever took the mouse this pass has taken it by now.

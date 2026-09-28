@@ -631,7 +631,6 @@ namespace Morgott.ContentTool.Dev
         private static string intent;
         private static int select = int.MinValue;
 
-        private static UnityEngine.Vector2 tailScroll;
         private static int paintedFrame = -2;
         /// <summary>The frame <see cref="wasReady"/> went true - the tab was JUST selected and this frame's
         /// Repaint has not happened yet. Without it the very first press after switching to the Lifecycle
@@ -734,16 +733,9 @@ namespace Morgott.ContentTool.Dev
                 : owned ? StageText.Finishing(now.Stage) : null,
                 ctx.RestartRequired, blocked ? id : null);
             BenchUi.Hint(status);
-
-            // THE STEPPER: Check files -> Build -> Install -> Test in game, one line each - a pass/warn/fail
-            // mark, the step's plain name, the FIRST line of its own verdict, and a small Run for that step
-            // alone. Package is not a step of it: sharing is a separate act, drawn apart below.
             bool none = string.IsNullOrEmpty(root);
-            foreach (LifecycleView.Row r in view.Rows)
-            {
-                if (r.Stage == "Package") continue;
-                StageLine(r, owned, blocked, none, false);
-            }
+            // The stepper, the progress row and the log are the RIGHT pane's (Pane) - the bench shows no 3D
+            // scene on this screen.
 
             // THE ONE MAIN BUTTON. `All` minus Package, admitted exactly as `All` (so the session block
             // disables it for the reason `Run all` was disabled: the chain contains Apply).
@@ -759,7 +751,6 @@ namespace Morgott.ContentTool.Dev
             // grey Cancel. Decided on the LAYOUT pass and reused by the events after it: `now` is published
             // by a worker, and a row that appeared between Layout and Repaint is IMGUI's control-count throw.
             if (UnityEngine.Event.current.type == UnityEngine.EventType.Layout) progressShown = owned;
-            if (progressShown) ProgressRow(now);
             string said = owned && !now.Busy ? StageText.CancelUnavailable(now.Stage) : message;
             BenchUi.Hint(LifecycleView.OneLine(said), said);
             DrawShare(owned, blocked, none);
@@ -808,8 +799,9 @@ namespace Morgott.ContentTool.Dev
             GUI.enabled = true;
             openGroups--; GUILayout.EndHorizontal();
 
-            if (!BenchUi.Details("build/log", "Details and log")) return;
-            // ONE STEP AT A TIME, for finding out WHY a step failed: each step with its own Run.
+            if (!BenchUi.Details("build/log", "Details - run one step")) return;
+            // ONE STEP AT A TIME, for finding out WHY a step failed: each step with its own Run. The log
+            // itself is on the right pane, always open.
             foreach (LifecycleView.Row r in view.Rows)
             {
                 StageLine(r, owned, blocked, none, true);
@@ -817,9 +809,40 @@ namespace Morgott.ContentTool.Dev
                              LifecycleView.Word(r.Outcome) +
                              (string.IsNullOrEmpty(r.Installation) ? "" : ", " + r.Installation));
             }
-            tailScroll = GUILayout.BeginScrollView(tailScroll, GUILayout.Height(160f)); openScroll = true;
-            GUILayout.Label(string.IsNullOrEmpty(log) ? "(nothing has run yet)" : StageResult.Tail(log, 12));
-            openScroll = false; GUILayout.EndScrollView();
+        }
+
+        /// <summary>
+        /// The Build &amp; share screen's RIGHT pane, drawn by FitBench after <see cref="Draw"/> in the same pass:
+        /// THE STEPPER (Check files -> Build -> Install -> Test in game, one line each - a pass/warn/fail mark,
+        /// the step's plain name, the first line of its own verdict), the progress row while a run owns the job,
+        /// and the log. Package is not a step of it: sharing stays on the left, apart. Guarded like Draw.
+        /// </summary>
+        internal static void Pane(UnityEngine.Rect area)
+        {
+            GUILayout.BeginArea(area);
+            openGroups = 0; openScroll = false;
+            try
+            {
+                LifecycleRun.Snapshot now = LifecycleJob.Run.Latest;
+                bool owned = now.Busy || Pending(now), blocked = Route7.IsFailed(id), none = string.IsNullOrEmpty(root);
+                BenchUi.Title("Progress");
+                foreach (LifecycleView.Row r in view.Rows)
+                {
+                    if (r.Stage == "Package") continue;
+                    StageLine(r, owned, blocked, none, false);
+                }
+                // Decided on Draw's LAYOUT pass (progressShown), never here: see Body.
+                if (progressShown) ProgressRow(now);
+                BenchUi.Section("Log");
+                BenchUi.LogView("build/log", string.IsNullOrEmpty(log) ? null : StageResult.Tail(log, 200), log, 0f);
+            }
+            catch (Exception ex)
+            {
+                if (openScroll) GUILayout.EndScrollView();
+                while (openGroups-- > 0) GUILayout.EndHorizontal();
+                message = "lifecycle: " + ex.GetType().Name + ": " + ex.Message;
+            }
+            GUILayout.EndArea();
         }
 
         /// <summary>One step of the stepper: its mark, plain name, one line of its own verdict and its Run.

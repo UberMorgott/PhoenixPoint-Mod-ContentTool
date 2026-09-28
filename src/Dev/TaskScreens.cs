@@ -112,7 +112,7 @@ namespace Morgott.ContentTool.Dev
         {
             BenchUi.Hint(LifecycleView.OneLine(message), message);
             if (BenchUi.Details(key + "/log", "Details and log"))
-                GUILayout.Label(string.IsNullOrEmpty(log) ? "(nothing has run yet)" : StageResult.Tail(log, 30));
+                BenchUi.LogView(key + "/log", log, log, 200f);
         }
 
         /// <summary>A picked file's line: its name, or a dash, its Play/Stop (grey until there is a file), and the
@@ -153,11 +153,17 @@ namespace Morgott.ContentTool.Dev
             string wem = SoundReplace.LooseWem(id);
             if (wem != null) { SoundPreview.ToggleFile(key, wem); return; }
             string name = Extract.SoundNames.Name(id), bank;
+            byte[] embedded = SoundReplace.EmbeddedWem(id);
+            if (embedded != null) { SoundPreview.ToggleWem(key, embedded, name.Length > 0 ? name : id.ToString()); return; }
             uint ev;
             if (SoundReplace.EventForSound(name, out bank, out ev)) SoundPreview.ToggleEvent(key, bank, ev, name);
             else SoundPreview.Say("no preview for '" + name + "': it lives inside a game bank and no event of its " +
                                   "own name plays it");
         }
+
+        /// <summary>BenchNav's Back and step jump for a screen whose one sub-view is a file browser.</summary>
+        private static bool Hide(GlbFileBrowser b) { if (!b.Open) return false; b.Hide(); return true; }
+        private static bool Show(GlbFileBrowser b, string file) { if (!b.Open) b.Show(Dir(file)); return true; }
 
         private static string Dir(string path)
         {
@@ -193,6 +199,8 @@ namespace Morgott.ContentTool.Dev
                 }
                 if (soundItemsStale) { soundItems = Root == null ? soundItems : ProjectScaffold.Sounds(Root); soundItemsStale = false; }
             }
+            BenchNav.Handlers(() => Hide(audioBrowser), i => i == 1 && Show(audioBrowser, audioFile), 1,
+                              audioBrowser.Open ? "Pick your sound file" : null);
             if (audioBrowser.Open)
             {
                 string picked = audioBrowser.Draw(260f);
@@ -206,7 +214,6 @@ namespace Morgott.ContentTool.Dev
                          "new sound; no game file is changed.");
 
             VideoPreview.Stop();
-            BenchUi.Hint(SoundPreview.Said);
 
             BenchUi.Section("1  Your sound file");
             bool play;
@@ -240,9 +247,42 @@ namespace Morgott.ContentTool.Dev
                 next = () => AddSound(file, name, target);
             }
             Result("sounds");
+        }
 
+        // ---- the right-hand panes: what the screen shows where the 3D preview stands on model screens ------
+
+        private static Vector2 paneScroll;
+
+        /// <summary>The Sounds screen's right pane: the player (what plays, how far, Stop, volume) over the big
+        /// list of this mod's sounds and the other installed mods' ones, each with its length and Play/Stop.
+        /// Drawn after <see cref="Sounds"/> in the same pass, so a press here is drained on the next Layout.</summary>
+        internal static void SoundsPane(Rect area)
+        {
+            Wwise.SoundbankNames names = Extract.SoundNames;
+            GUILayout.BeginArea(area);
+            BenchUi.Title("Player");
+            string playing = SoundPreview.Playing;
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(playing == null ? "nothing playing" : "playing  " + playing);
+            GUILayout.FlexibleSpace();
+            GUI.enabled = playing != null;
+            if (GUILayout.Button("Stop", GUILayout.Width(70f))) next = SoundPreview.Stop;
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+            int at = SoundPreview.PositionMs(), of = SoundPreview.PlayingMs;
+            BenchUi.Bar(of > 0 && at >= 0 ? (float)at / of : 0f, 10f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(BenchUi.Clock(playing == null ? -1 : at) + " / " + BenchUi.Clock(of), GUILayout.Width(130f));
+            GUILayout.FlexibleSpace();
+            GUILayout.Label(new GUIContent("Volume", "the preview's own volume - no game setting changes"), GUILayout.Width(56f));
+            SoundPreview.Volume = GUILayout.HorizontalSlider(SoundPreview.Volume, 0f, 1f, GUILayout.Width(160f));
+            GUILayout.Label(Mathf.RoundToInt(SoundPreview.Volume * 100f) + "%", GUILayout.Width(40f));
+            GUILayout.EndHorizontal();
+            BenchUi.Hint(playing == null ? SoundPreview.Said : "");
+
+            paneScroll = GUILayout.BeginScrollView(paneScroll);
             BenchUi.Section("Sounds in " + Name);
-            if (soundItems.Count == 0) BenchUi.Hint("none yet");
+            if (soundItems.Count == 0) BenchUi.Hint("none yet - add one on the left");
             foreach (ProjectScaffold.SoundItem s in soundItems)
             {
                 GUILayout.BeginHorizontal();
@@ -254,6 +294,8 @@ namespace Morgott.ContentTool.Dev
                 if (SoundPreview.Button("file:" + src, "hear your file (built or not)"))
                     next = () => SoundPreview.ToggleFile("file:" + src, src);
                 GUILayout.Label(new GUIContent(names.Name(s.Media) + "  <-  " + s.File, "media id " + s.Media));
+                GUILayout.FlexibleSpace();
+                GUILayout.Label(SoundPreview.Length(src), GUILayout.Width(60f));
                 GUILayout.EndHorizontal();
             }
             if (soundItems.Count > 0 && GUILayout.Button(new GUIContent("Build all again", "ct_sound bake " + Name),
@@ -275,8 +317,50 @@ namespace Morgott.ContentTool.Dev
                         next = bank ? (Action)(() => PlayGameSound(id)) : () => SoundPreview.ToggleFile("file:" + path, path);
                     GUILayout.Label(new GUIContent(o.Key + ": " + (id != 0 && names.Name(id).Length > 0
                                                    ? names.Name(id) : Path.GetFileName(path)), path));
+                    GUILayout.FlexibleSpace();
+                    GUILayout.Label(bank ? "" : SoundPreview.Length(path), GUILayout.Width(60f));
                     GUILayout.EndHorizontal();
                 }
+            GUILayout.EndScrollView();
+            GUILayout.EndArea();
+        }
+
+        /// <summary>The Videos screen's right pane: a large player - the picture as big as the pane allows at
+        /// 16:9, the transport under it, and what is playing.</summary>
+        internal static void VideosPane(Rect area)
+        {
+            GUILayout.BeginArea(area);
+            BenchUi.Title("Player");
+            string playing = VideoPreview.Playing;
+            BenchUi.Hint(playing == null ? "press Play on a clip on the left" : "");
+            float w = area.width, h = Mathf.Min(Mathf.Round(w * 9f / 16f), area.height - 140f);
+            VideoPreview.Box(w, h);
+            VideoPreview.Transport();
+            BenchUi.Hint(VideoPreview.Said);
+            GUILayout.EndArea();
+        }
+
+        /// <summary>The home screen's right pane: what the bench is for in a few lines, and the author's mods
+        /// beside ContentTool - picking one makes it the mod the Sounds, Videos and Add-a-weapon screens write into.</summary>
+        internal static void HomePane(Rect area)
+        {
+            Drain();
+            GUILayout.BeginArea(area);
+            BenchUi.Title("Content bench");
+            BenchUi.Text("Pick a task on the left. Each one walks you through its steps and says what is missing " +
+                         "before its main button lights up.");
+            BenchUi.Hint("Replace a model and Fit a weapon show your model live here: middle-drag to orbit, " +
+                         "wheel to zoom, F to frame. Build & share turns a mod folder into an installed, tested mod " +
+                         "and a zip to share.");
+            BenchUi.Section("Your mods (" + mods.Length + ")");
+            BenchUi.Hint("the mod folders beside ContentTool with a ppcontent.json - pick one to work on it");
+            paneScroll = GUILayout.BeginScrollView(paneScroll);
+            foreach (string m in mods)
+                if (BenchUi.Pick(new GUIContent((m == Name ? "> " : "") + m, "Sounds, Videos and Add a weapon write into " + m)))
+                { string pick = m; next = () => modName = pick; }
+            GUILayout.EndScrollView();
+            if (GUILayout.Button("Look again", GUILayout.Width(100f))) modsStale = true;
+            GUILayout.EndArea();
         }
 
         private static bool IsLive(uint id)
@@ -344,6 +428,8 @@ namespace Morgott.ContentTool.Dev
                 }
                 if (videoRowsStale && Root != null) { videoRows = ProjectScaffold.Videos(Root, out videoPresent); videoRowsStale = false; }
             }
+            BenchNav.Handlers(() => Hide(videoBrowser), i => i == 1 && Show(videoBrowser, videoFile), 1,
+                              videoBrowser.Open ? "Pick your clip" : null);
             if (videoBrowser.Open)
             {
                 string picked = videoBrowser.Draw(260f);
@@ -358,8 +444,6 @@ namespace Morgott.ContentTool.Dev
                          "from your mod's folder; no game file is changed.");
 
             SoundPreview.Stop();
-            VideoPreview.Box(width - 8f);
-            BenchUi.Hint(VideoPreview.Said);
 
             BenchUi.Section("1  Your clip (.webm, .mp4 or .mov)");
             bool play;

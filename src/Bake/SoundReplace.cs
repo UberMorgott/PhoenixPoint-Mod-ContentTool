@@ -716,6 +716,59 @@ namespace Morgott.ContentTool.Bake
             return Directory.Exists(AudioRoot) ? WemPath(mediaId, out why) : null;
         }
 
+        /// <summary>
+        /// The bytes of a media EMBEDDED in a shipped bank (its DIDX+DATA), or null - the bench preview's
+        /// path for a sound with no loose .wem and no event of its own name (GUI_AbilityClick1 lives in
+        /// UI.bnk and is played only through the random container "AbilityClick"). Reads chunk headers
+        /// and the DIDX only, then the one slice of DATA; nothing is loaded into Wwise.
+        /// </summary>
+        internal static byte[] EmbeddedWem(uint mediaId)
+        {
+            if (!Directory.Exists(AudioRoot)) return null;
+            foreach (string rel in LooseFiles.Find(AudioRoot, ".bnk", null))
+            {
+                try
+                {
+                    byte[] got = FromBank(Path.Combine(AudioRoot, rel.Replace('/', Path.DirectorySeparatorChar)), mediaId);
+                    if (got != null) return got;
+                }
+                catch (IOException) { }
+            }
+            return null;
+        }
+
+        private static byte[] FromBank(string bank, uint mediaId)
+        {
+            using (var f = new FileStream(bank, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var r = new BinaryReader(f))
+            {
+                long offset = -1, size = 0;
+                while (f.Position + 8 <= f.Length)
+                {
+                    string tag = Encoding.ASCII.GetString(r.ReadBytes(4));
+                    uint len = r.ReadUInt32();
+                    long body = f.Position;
+                    if (tag == "DIDX")
+                    {
+                        for (uint i = 0; i + 12 <= len; i += 12)
+                        {
+                            uint id = r.ReadUInt32(), off = r.ReadUInt32(), sz = r.ReadUInt32();
+                            if (id == mediaId) { offset = off; size = sz; break; }
+                        }
+                        if (offset < 0) return null;     // this bank embeds other media only
+                    }
+                    else if (tag == "DATA")
+                    {
+                        if (offset < 0 || offset + size > len) return null;
+                        f.Position = body + offset;
+                        return r.ReadBytes((int)size);
+                    }
+                    f.Position = body + len;
+                }
+            }
+            return null;
+        }
+
         /// <summary>The shipped event that plays the sound called <paramref name="soundName"/> and a bank
         /// declaring it, by <see cref="EventFor"/>'s naming rule over the shipped &lt;bank&gt;.txt listings -
         /// the preview path for a sound that has no loose file. False when no bank names one.</summary>

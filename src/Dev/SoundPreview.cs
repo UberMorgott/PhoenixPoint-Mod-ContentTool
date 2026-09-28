@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using Morgott.ContentTool.Wwise;
@@ -24,8 +25,9 @@ namespace Morgott.ContentTool.Dev
         private sealed class Job
         {
             internal string Key, Path;
-            internal byte[] Bank;
+            internal byte[] Wem, Bank;
             internal string Error;
+            internal int Ms = -1;
             internal volatile bool Done;
         }
 
@@ -35,6 +37,91 @@ namespace Morgott.ContentTool.Dev
         private static volatile bool ended;
         private static GameObject emitter;
         private static bool bankLoaded;
+        private static string playingLabel;
+        private static int playingMs = -1;
+        private static float volume = 1f;
+
+        /// <summary>What is playing, in words, or null.</summary>
+        internal static string Playing { get { return playingKey == null ? null : playingLabel; } }
+        /// <summary>The playing sound's length in ms, -1 when not known (yet).</summary>
+        internal static int PlayingMs { get { return playingKey == null ? -1 : playingMs; } }
+
+        /// <summary>Where the playing sound is, in ms, or -1. Wwise tracks it only because the post asked
+        /// for AK_EnableGetSourcePlayPosition (AudioProbe.cs:23-27).</summary>
+        internal static int PositionMs()
+        {
+            if (playingId == 0) return -1;
+            try
+            {
+                int pos;
+                return AkSoundEngine.GetSourcePlayPosition(playingId, out pos) == AKRESULT.AK_Success ? pos : -1;
+            }
+            catch (Exception) { return -1; }
+        }
+
+        /// <summary>The preview's own loudness, 0..1 - the preview emitter's output-bus volume, so no game
+        /// sound and no mixer setting is touched. A null listener means every listener.</summary>
+        internal static float Volume
+        {
+            get { return volume; }
+            set
+            {
+                value = Mathf.Clamp01(value);
+                if (Mathf.Approximately(value, volume)) return;
+                volume = value;
+                ApplyVolume();
+            }
+        }
+
+        /// <summary>The last volume write's answer, for the pane and for a driver checking it took.</summary>
+        internal static string VolumeSaid { get; private set; } = "";
+
+        private static void ApplyVolume()
+        {
+            if (emitter == null) return;
+            try { VolumeSaid = AkSoundEngine.SetGameObjectOutputBusVolume(emitter, null, volume).ToString(); }
+            catch (Exception ex) { VolumeSaid = ex.Message; }
+        }
+
+        /// <summary>A file's length as m:ss.t for the list - measured once per file version off the main
+        /// thread by the same reader that plays it; "..." until then, "?" when it cannot be read.</summary>
+        internal static string Length(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "?";
+            string key;
+            try { key = path + "|" + File.GetLastWriteTimeUtc(path).Ticks; } catch (Exception) { return "?"; }
+            int ms;
+            lock (lengths)
+            {
+                if (!lengths.TryGetValue(key, out ms))
+                {
+                    lengths[key] = ms = -1;
+                    ThreadPool.QueueUserWorkItem(delegate { Measure(key, path); });
+                }
+            }
+            return ms >= 0 ? BenchUi.Clock(ms) : ms == -1 ? "..." : "?";
+        }
+
+        private static readonly Dictionary<string, int> lengths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        private static void Measure(string key, string path)
+        {
+            int ms = -2;
+            try
+            {
+                string why;
+                WwisePcm.Wav w = WwisePcm.ReadAudio(path, out why);
+                if (w != null) ms = MsOf(w);
+            }
+            catch (Exception) { }
+            lock (lengths) lengths[key] = ms;
+        }
+
+        private static int MsOf(WwisePcm.Wav w)
+        {
+            long frames = w.Channels <= 0 ? 0 : w.Pcm16.Length / 2 / w.Channels;
+            return w.SampleRate <= 0 ? -1 : (int)(frames * 1000L / w.SampleRate);
+        }
 
         /// <summary>The last thing the preview said ("playing ...", a decode refusal), for the screen's hint.</summary>
         internal static string Said { get; private set; } = "";
@@ -62,6 +149,18 @@ namespace Morgott.ContentTool.Dev
             var j = new Job { Key = key, Path = path };
             job = j;
             Said = "reading " + System.IO.Path.GetFileName(path) + "...";
+            ThreadPool.QueueUserWorkItem(delegate { Decode(j); });
+        }
+
+        /// <summary>Start (or stop) a shipped media EMBEDDED in a bank, handed over as its .wem bytes;
+        /// <paramref name="label"/> stands in for the file name.</summary>
+        internal static void ToggleWem(string key, byte[] wem, string label)
+        {
+            if (Active(key)) { Stop(); return; }
+            Stop();
+            var j = new Job { Key = key, Path = label + ".wem", Wem = wem };
+            job = j;
+            Said = "reading " + label + "...";
             ThreadPool.QueueUserWorkItem(delegate { Decode(j); });
         }
 
@@ -101,13 +200,14 @@ namespace Morgott.ContentTool.Dev
                 if (path.EndsWith(".wem", StringComparison.OrdinalIgnoreCase))
                 {
                     tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ct_preview_" + Guid.NewGuid().ToString("N") + ".wav");
-                    string no = WwiseWem.ToWav(File.ReadAllBytes(path), tmp);
+                    string no = WwiseWem.ToWav(j.Wem ?? File.ReadAllBytes(path), tmp);
                     if (no != null) { j.Error = no; return; }
                     path = tmp;
                 }
                 string why;
                 WwisePcm.Wav w = WwisePcm.ReadAudio(path, out why);
                 if (w == null) { j.Error = why; return; }
+                j.Ms = MsOf(w);
                 j.Bank = PreviewBank.Build(w.Pcm16, w.Channels, w.SampleRate);
             }
             catch (Exception ex) { j.Error = ex.Message; }
@@ -134,6 +234,7 @@ namespace Morgott.ContentTool.Dev
                     AudioProbe.LoadBank(j.Bank, PreviewBank.BankId, out loaded);
                     bankLoaded = true;
                     Post(j.Key, PreviewBank.EventId, System.IO.Path.GetFileName(j.Path));
+                    playingMs = j.Ms;
                 }
                 catch (Exception ex) { Said = "could not play: " + ex.Message; }
             }
@@ -149,16 +250,31 @@ namespace Morgott.ContentTool.Dev
                 AkSoundEngine.RegisterGameObj(emitter, "ct_bench_preview");
             }
             ended = false;
-            playingId = AkSoundEngine.PostEvent(eventId, emitter, (uint)AkCallbackType.AK_EndOfEvent, OnEnd, null);
+            ApplyVolume();
+            playingMs = -1;
+            playingId = AkSoundEngine.PostEvent(eventId, emitter, Flags, OnEnd, null);
             if (playingId == 0) { Said = "the game refused to play " + label; playingKey = null; return; }
             playingKey = key;
+            playingLabel = label;
             Said = "playing " + label;
         }
+
+        /// <summary>End and duration callbacks, and play-position tracking (AudioProbe.cs:23-27: without
+        /// that flag GetSourcePlayPosition answers AK_Fail).</summary>
+        private const uint Flags = (uint)(AkCallbackType.AK_EndOfEvent | AkCallbackType.AK_Duration |
+                                          AkCallbackType.AK_EnableGetSourcePlayPosition);
 
         private static void OnEnd(object cookie, AkCallbackType type, AkCallbackInfo info)
         {
             AkEventCallbackInfo e = info as AkEventCallbackInfo;
-            if (type == AkCallbackType.AK_EndOfEvent && e != null && e.playingID == playingId) ended = true;
+            if (e == null || e.playingID != playingId) return;
+            if (type == AkCallbackType.AK_EndOfEvent) ended = true;
+            // A shipped event's length arrives here; a file's was measured by its decode already.
+            else if (type == AkCallbackType.AK_Duration && playingMs < 0)
+            {
+                AkDurationCallbackInfo d = info as AkDurationCallbackInfo;
+                if (d != null) playingMs = (int)d.fDuration;
+            }
         }
 
         /// <summary>The bench closed: silence, and give the preview bank and emitter back.</summary>
