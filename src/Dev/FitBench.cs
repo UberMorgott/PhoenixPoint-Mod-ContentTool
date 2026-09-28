@@ -619,7 +619,7 @@ namespace Morgott.ContentTool.Dev
             return "ct_bench open (" + units.Count + " unit template(s), " + ourUnits.Count +
                    " of them built by a content mod and listed FIRST, " + weapons.Count +
                    " weapon(s), " + mine + " of them built by this mod and listed FIRST). " +
-                   HotkeyLabel + ", the RESET VIEW button, or 'ct_bench close' to leave.";
+                   HotkeyLabel + ", the Close button, or 'ct_bench close' to leave.";
         }
 
         /// <summary>Take the input lock, at most once - the count is the game's and an unbalanced
