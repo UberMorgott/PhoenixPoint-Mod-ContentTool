@@ -2336,11 +2336,10 @@ namespace Morgott.ContentTool.Tactical
 
         private static float Number(string json, string key)
         {
-            float v;
-            float.TryParse(CreatureManifest.TopLevel(json, key).Trim(),
+            // Absent or malformed key: 0, the default every caller treats as "not set".
+            return float.TryParse(CreatureManifest.TopLevel(json, key).Trim(),
                 System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out v);
-            return v;
+                System.Globalization.CultureInfo.InvariantCulture, out float v) ? v : 0f;
         }
     }
 

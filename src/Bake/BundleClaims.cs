@@ -15,19 +15,19 @@ namespace Morgott.ContentTool.Bake
         /// <summary>Absolute path of OUR patched private copy - what the transform func hands back.</summary>
         internal string Path;
         /// <summary>The catalog's IResourceLocation for that bundle, kept as object (see the class note).</summary>
-        internal object Location;
+        internal object Location { get; set; }
         /// <summary>Its AssetBundleRequestOptions, same reason.</summary>
-        internal object Options;
+        internal object Options { get; set; }
         /// <summary>The CRC the game shipped, so unregister can put it back exactly.</summary>
-        internal uint Crc;
+        internal uint Crc { get; set; }
         /// <summary>True while <see cref="Crc"/> is suppressed to 0 on the live options object.</summary>
-        internal bool CrcSuppressed;
+        internal bool CrcSuppressed { get; set; }
         /// <summary>The served copy is OLDER than <see cref="Path"/>: an install found the shipped bundle
         /// already loaded while this claim stood, so what Unity is serving predates this claim's current
         /// copy and only a restart replaces it. Written per target by <c>BundleLive.Install</c> from the
         /// same <c>wasResident</c> sample <c>Route7.ApplyDisposition.Resident</c> is decided from, so the
         /// console verb and the dashboard's <c>Admission.RestartRequired</c> answer ONE question.</summary>
-        internal bool Outdated;
+        internal bool Outdated { get; set; }
 
         public override string ToString()
         {
@@ -49,7 +49,7 @@ namespace Morgott.ContentTool.Bake
         /// <summary>The declared resource type's short name, e.g. "GameObject".</summary>
         internal string TypeName;
         /// <summary>The IResourceLocator we appended for this key, kept as object (see BundleClaims).</summary>
-        internal object Locator;
+        internal object Locator { get; set; }
 
         public override string ToString()
         {

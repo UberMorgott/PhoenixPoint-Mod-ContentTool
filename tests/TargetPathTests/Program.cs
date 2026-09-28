@@ -112,28 +112,28 @@ internal static class Program
 
         var s = new WeaponFlow.State();
         string label, why;
-        Check("WF-main-class", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why.Contains("kind") &&
+        Check("WF-main-class", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.None && why.Contains("kind") &&
               WeaponFlow.Step(s) == 0, why);
         s.ClassPicked = s.TemplatePicked = true;
         s.ModRefusal = "type a mod name first";
-        Check("WF-main-mod", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why == s.ModRefusal, why);
+        Check("WF-main-mod", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.None && why == s.ModRefusal, why);
         s.ModRefusal = null;
-        Check("WF-main-model", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why.Contains(".glb") &&
+        Check("WF-main-model", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.None && why.Contains(".glb") &&
               WeaponFlow.Step(s) == 1, why);
         s.HaveModel = true;
-        Check("WF-main-name", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why.Contains("name"), why);
+        Check("WF-main-name", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.None && why.Contains("name"), why);
         s.HaveName = true;
-        Check("WF-main-create", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.Create && why == null &&
+        Check("WF-main-create", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.Create && why == null &&
               label == "Create weapon", label);
         s.Created = true;
-        Check("WF-main-build", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.Build && why == null &&
+        Check("WF-main-build", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.Build && why == null &&
               WeaponFlow.Step(s) == 2, label);
         s.Live = true;
-        Check("WF-main-hold", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.Hold, label);
+        Check("WF-main-hold", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.Hold, label);
         s.InHand = true;
-        Check("WF-main-wait", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.None && why.Contains("wait"), why);
+        Check("WF-main-wait", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.None && why.Contains("wait"), why);
         s.Fitted = true; s.Dirty = true;
-        Check("WF-main-save", WeaponFlow.Main(s, out label, out why) == WeaponFlow.Act.Save && label == "Save fit *" &&
+        Check("WF-main-save", WeaponFlow.MainButton(s, out label, out why) == WeaponFlow.Act.Save && label == "Save fit *" &&
               WeaponFlow.Step(s) == 2, label);
         s.Dirty = false;
         Check("WF-step-moves", WeaponFlow.Step(s) == 3 && WeaponFlow.Steps.Length == 4, "saved fit -> moves");
@@ -179,18 +179,18 @@ internal static class Program
         // would pass every check above.
         TargetPath q;
         string why;
-        TargetPath.TryParse(forms[2], out q, out why);
+        bool parsed = TargetPath.TryParse(forms[2], out q, out why);
         Check("R0-fields",
-            q != null && q.Anchor == AnchorKind.Guid && q.Transform == "Root/Chest/Arm_R" &&
+            parsed && q != null && q.Anchor == AnchorKind.Guid && q.Transform == "Root/Chest/Arm_R" &&
             q.Component == "Renderer" && q.Field == "materials" && q.Index == 1 &&
             q.Qualifier == "tex" && q.Member == "_MainTex",
-            q == null ? "did not parse" : q.Anchor + " transform=" + q.Transform + " comp=" + q.Component +
+            !parsed || q == null ? "did not parse: " + why : q.Anchor + " transform=" + q.Transform + " comp=" + q.Component +
             " field=" + q.Field + " idx=" + q.Index + " qual=" + q.Qualifier + " member=" + q.Member);
 
         TargetPath root;
-        TargetPath.TryParse(forms[3], out root, out why);
-        Check("R0-emptytransform", root != null && root.Transform == "" && root.Member == "Idle_Rifle",
-            root == null ? "did not parse" : "transform='" + root.Transform + "' member=" + root.Member);
+        parsed = TargetPath.TryParse(forms[3], out root, out why);
+        Check("R0-emptytransform", parsed && root != null && root.Transform == "" && root.Member == "Idle_Rifle",
+            !parsed || root == null ? "did not parse: " + why : "transform='" + root.Transform + "' member=" + root.Member);
     }
 
     /// <summary>A malformed path is refused BY NAME - never a silent skip, never a fuzzy match.</summary>

@@ -537,7 +537,8 @@ namespace Morgott.ContentTool.Dev
             string why;
             if (!TargetPath.TryParse("guid:" + key + "#" + path + "@SkinnedMeshRenderer.mesh", out meshTarget, out why))
                 return log.Append("R3 FAIL target path: ").Append(why).ToString();
-            TargetPath.TryParse("guid:" + key + "#" + path + "@Renderer.materials[0].tex:_MainTex", out matTarget, out why);
+            if (!TargetPath.TryParse("guid:" + key + "#" + path + "@Renderer.materials[0].tex:_MainTex", out matTarget, out why))
+                return log.Append("R3 FAIL target path: ").Append(why).ToString();
 
             // ---- mesh (MeshReplacer.cs:1896-1901 skinned arm: assign, never touch the skeleton)
             Mesh ours = Quad();

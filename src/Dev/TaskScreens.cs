@@ -29,7 +29,6 @@ namespace Morgott.ContentTool.Dev
         private static bool modsStale = true;
         private static Action next;
         private static string message = "", log = "";
-        private static Vector2 listScroll;
 
         /// <summary>Runs the press recorded last pass. Called first in every screen's Draw.</summary>
         private static void Drain()
@@ -310,8 +309,8 @@ namespace Morgott.ContentTool.Dev
                     GUILayout.BeginHorizontal();
                     string path = o.Value;
                     bool bank = path.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase);
-                    uint id;
-                    uint.TryParse(Path.GetFileNameWithoutExtension(path), out id);
+                    // Not a numeric media-id file name: 0, which falls back to the plain file name below.
+                    uint id = uint.TryParse(Path.GetFileNameWithoutExtension(path), out uint parsed) ? parsed : 0u;
                     // A built bank with no source beside it: the game's own event, which plays whatever
                     // serves that sound now - the mod's version when that mod is switched on.
                     if (SoundPreview.Button(bank ? "media:" + id : "file:" + path,
@@ -635,7 +634,6 @@ namespace Morgott.ContentTool.Dev
                     Live = live,
                     InHand = inHand,
                     Fitted = fitKey != null && WeaponBuild.State(fitKey, out p, out e, out s, out o),
-                    ModName = Name,
                 };
             }
             // Back closes the innermost open picker (model browser, template list, class list); a done step
@@ -762,7 +760,7 @@ namespace Morgott.ContentTool.Dev
             // ---- the one main button ----
             GUILayout.Space(4f);
             string label, refusal;
-            WeaponFlow.Act act = WeaponFlow.Main(st, out label, out refusal);
+            WeaponFlow.Act act = WeaponFlow.MainButton(st, out label, out refusal);
             GUI.enabled = !(act == WeaponFlow.Act.Build && LifecycleDashboard.Busy);
             bool pressed = BenchUi.Main(label, refusal,
                 act == WeaponFlow.Act.Create ? "copies the model and writes the mod's publish + weapons rows (fit: auto)"

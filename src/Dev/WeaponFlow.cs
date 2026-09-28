@@ -133,7 +133,7 @@ namespace Morgott.ContentTool.Dev
         internal struct State
         {
             internal bool ClassPicked, TemplatePicked, HaveModel, HaveName, Created, Live, InHand, Fitted, Dirty;
-            internal string ModRefusal, ModName;
+            internal string ModRefusal;
         }
 
         internal enum Act { None, Create, Build, Hold, Save }
@@ -151,7 +151,7 @@ namespace Morgott.ContentTool.Dev
         /// The ONE main button: its label, its reason for being grey (null = pressable) and what it does.
         /// The reason is the next thing the author has to do, in plain words.
         /// </summary>
-        internal static Act Main(State s, out string label, out string refusal)
+        internal static Act MainButton(State s, out string label, out string refusal)
         {
             label = "Create weapon"; refusal = null;
             if (!s.ClassPicked) { refusal = "pick what kind of weapon it is (step 1)"; return Act.None; }
