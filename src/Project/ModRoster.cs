@@ -240,7 +240,9 @@ namespace Morgott.ContentTool.Project
                     !Bake.BundleClaims.PublishesBeforeInit(enable, __instance.Enabled,
                                                            HasContent(__instance.Directory))) return;
                 StringBuilder log = new StringBuilder();
-                __state = Reconciled(log, __instance.ID, __instance.Directory, true);
+                __state = Reconciled(log, __instance.ID, __instance.Directory, true,
+                                     "is being switched ON in the mod manager, so its live registrations " +
+                                     "were installed before it started.");
                 if (log.Length > 0) Dev.ChunkedLog.Say(log.ToString().TrimEnd());
             }
             catch (Exception ex) { Dev.ChunkedLog.Fail("ct_content pre-enable: " + ex); }
@@ -265,7 +267,7 @@ namespace Morgott.ContentTool.Project
             {
                 if (!__state || __instance == null || __instance.Enabled) return;
                 StringBuilder log = new StringBuilder();
-                Reconciled(log, __instance.ID, __instance.Directory, false);
+                Reconciled(log, __instance.ID, __instance.Directory, false, null);
                 Dev.ChunkedLog.Say("ct_content: '" + __instance.ID + "' FAILED to enable (its own load or " +
                                    "OnModEnabled threw - see the mod manager's error above), so the content " +
                                    "published for it ahead of that was taken back." +
@@ -299,19 +301,23 @@ namespace Morgott.ContentTool.Project
                 string what;
                 if (__instance.Enabled)
                 {
+                    // The Addressables routes are NOT repeated here: the prefix installed them before
+                    // the mod started (an ON flip always passes PublishesBeforeInit; an already-on mod
+                    // returns early from SetEnabled and has nothing to install). Repeating it printed
+                    // every refusal twice per enable.
                     StringBuilder log = new StringBuilder();
                     int failed = 0;
                     Bake.SoundLoad.LoadMod(dir, log, ref failed);
                     what = Join(Bake.VideoCatalog.LiveMod(dir), log.Length > 0 ? log.ToString().TrimEnd() : null);
                 }
-                else what = Join(Bake.VideoCatalog.UndoMod(dir), Bake.SoundLoad.UnloadMod(dir));
-
-                // The persistent half. Its own guard makes it a no-op unless the ledger disagrees
-                // with the checkbox, so the startup enable pass costs nothing. Caught here rather
-                // than left to the outer catch, so a bad ppcontent.json cannot swallow the sound and
-                // video lines above.
-                try { what = Join(what, Bake.Route7.Toggle(dir, __instance.Enabled)); }
-                catch (Exception ex) { what = Join(what, "ct_route7 toggle FAILED: " + ex.Message); }
+                else
+                {
+                    what = Join(Bake.VideoCatalog.UndoMod(dir), Bake.SoundLoad.UnloadMod(dir));
+                    // The persistent half. Caught here rather than left to the outer catch, so a bad
+                    // ppcontent.json cannot swallow the sound and video lines above.
+                    try { what = Join(what, Bake.Route7.Toggle(dir, false)); }
+                    catch (Exception ex) { what = Join(what, "ct_route7 toggle FAILED: " + ex.Message); }
+                }
 
                 if (what != null)
                     Dev.ChunkedLog.Say("ct_content: '" + __instance.ID + "' was switched " +
@@ -358,21 +364,28 @@ namespace Morgott.ContentTool.Project
 
             int skipped;
             foreach (string dir in ContentMods.Enabled(modDir, ContentMods.Manifest, roster, null, out skipped))
-                Reconciled(log, new DirectoryInfo(dir).Name, dir, true);
+                Reconciled(log, new DirectoryInfo(dir).Name, dir, true, AtStartup(true));
 
             if (m != null && m.CanUseMods)
                 foreach (ModEntry e in m.Mods)
                 {
                     if (e == null || e.Enabled) continue;
-                    Reconciled(log, e.ID, e.Directory, false);
+                    Reconciled(log, e.ID, e.Directory, false, AtStartup(false));
                 }
             return log.Length == 0 ? null : log.ToString().TrimEnd();
         }
 
+        private static string AtStartup(bool on)
+        {
+            return "is " + (on ? "ON" : "OFF") + " in the mod manager, so its live registrations were " +
+                   (on ? "installed" : "undone") + " at startup.";
+        }
+
         /// <summary>One mod put into the state the mod manager says it should be in, and the line for
         /// it. Silent when the routes were already there, which is the normal case. True when a
-        /// route actually moved - what the enable finalizer needs to know there is something to undo.</summary>
-        private static bool Reconciled(StringBuilder log, string who, string dir, bool on)
+        /// route actually moved - what the enable finalizer needs to know there is something to undo.
+        /// <paramref name="wrap"/> says WHEN it happened (null = no wrapper, the caller has its own).</summary>
+        private static bool Reconciled(StringBuilder log, string who, string dir, bool on, string wrap)
         {
             string what;
             try { what = Bake.Route7.Toggle(dir, on); }
@@ -382,10 +395,10 @@ namespace Morgott.ContentTool.Project
             // it must not get the "was applied"/"was undone" wrapper.
             if (what.StartsWith("REFUSED:"))
                 log.AppendLine("ct_content: '" + who + "' " + what);
+            else if (wrap == null)
+                log.AppendLine(what);
             else
-                log.AppendLine("ct_content: '" + who + "' is " + (on ? "ON" : "OFF") + " in the mod " +
-                               "manager, so its live registrations were " + (on ? "installed" : "undone") +
-                               " at startup." + Environment.NewLine + what);
+                log.AppendLine("ct_content: '" + who + "' " + wrap + Environment.NewLine + what);
             // ANY line means something MAY have moved - even a REFUSED one: Route7.Toggle refuses the
             // replace route over a legacy record and can still publish keys in the same call
             // (Route7.cs:209-233), and a FAILED one may have moved half. Undoing is guarded per route

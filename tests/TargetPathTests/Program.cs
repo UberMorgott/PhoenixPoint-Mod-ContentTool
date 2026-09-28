@@ -762,18 +762,17 @@ internal static class Program
             "switching a content mod ON publishes its keys before the game runs the mod's own " +
             "OnModEnabled (got " + string.Join(",", Names(on)) + ")");
 
-        // The second Publish is the postfix, which is kept because it is the only hook that sees the
-        // FINAL Enabled flag. It must cost nothing, or the mod would register its routes twice.
-        Check("S13-nodouble", on.Count == 3 && on[2] == BundleClaims.EnableStep.Publish
+        // ONE enable step: the postfix does not repeat the prefix's Publish (it printed every refusal
+        // - NOT RE-BAKED - a second time per enable).
+        Check("S13-nodouble", on.Count == 2 && on[1] == BundleClaims.EnableStep.Init
                               && !BundleClaims.RouteMoves(true, true, true),
-            "and the repeat that follows the mod's init is a no-op - a route already in the wanted " +
-            "state does not move");
+            "and switching ON publishes exactly once - no postfix repeat after the mod's init");
 
         // The prefix must not fire where there is no init to be early for, or it would publish for a
         // mod the game is about to refuse to load.
         Check("S13-already-on", !BundleClaims.PublishesBeforeInit(true, true, true)
-                                && BundleClaims.EnableSteps(true, true, true).Count == 1,
-            "a mod that is already enabled gets no second install, only the postfix's no-op");
+                                && BundleClaims.EnableSteps(true, true, true).Count == 0,
+            "a mod that is already enabled gets no second install");
         Check("S13-no-content", !BundleClaims.PublishesBeforeInit(true, false, false)
                                 && BundleClaims.EnableSteps(true, false, false).Count == 1
                                 && BundleClaims.EnableSteps(true, false, false)[0] == BundleClaims.EnableStep.Init,

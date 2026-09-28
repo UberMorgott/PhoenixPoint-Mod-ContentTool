@@ -389,17 +389,16 @@ namespace Morgott.ContentTool.Bake
         /// `ct_catalog verify` resolved the same three keys moments later. Hence the prefix, which is
         /// what the first line below is.
         ///
-        /// The trailing Publish/Undo is the postfix, kept because it is the only hook that sees the
-        /// FINAL Enabled flag (the engine sets it after the body, and returns early when it is
-        /// already what was asked for). It re-runs nothing: <see cref="RouteMoves"/> makes a route
-        /// already in the wanted state a no-op.
+        /// The trailing Undo is the postfix, the only hook that sees an OFF (including the startup
+        /// pass, where SetEnabled returns early). It no longer repeats Publish on ON: the prefix
+        /// already did that one step, and repeating it printed every refusal (NOT RE-BAKED) twice.
         /// </summary>
         internal static IList<EnableStep> EnableSteps(bool enable, bool wasEnabled, bool hasContent)
         {
             List<EnableStep> seq = new List<EnableStep>();
             if (PublishesBeforeInit(enable, wasEnabled, hasContent)) seq.Add(EnableStep.Publish);
             if (enable != wasEnabled) seq.Add(enable ? EnableStep.Init : EnableStep.Deinit);
-            if (hasContent) seq.Add(enable ? EnableStep.Publish : EnableStep.Undo);
+            if (hasContent && !enable) seq.Add(EnableStep.Undo);
             return seq;
         }
 
