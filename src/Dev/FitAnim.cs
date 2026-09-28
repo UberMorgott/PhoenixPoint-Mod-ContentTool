@@ -102,6 +102,26 @@ namespace Morgott.ContentTool.Dev
         /// <see cref="OverList"/> can refuse those pixels to the orbit.</summary>
         private static Rect listRect;
 
+        /// <summary>
+        /// The weapon class the guided flow is checking, or null (the Fit and Doctor screens): with one,
+        /// the list, the count and the arrows walk only that class's moves (<see cref="WeaponFlow.Visible"/>)
+        /// unless the author unticks it. Set by the bench; read here on the Layout pass only.
+        /// </summary>
+        internal static WeaponFlow.WeaponClass Focus;
+        private static bool focusAll;
+        /// <summary>The catalogue rows the strip walks - every row, or the class's moves. Recomputed at
+        /// bind and on a Layout pass whose filter changed, never mid-event (the list's button count).</summary>
+        private static List<int> shown = new List<int>();
+        private static WeaponFlow.WeaponClass shownFor;
+        private static bool shownAll;
+
+        private static void Reshow()
+        {
+            shownFor = Focus; shownAll = focusAll;
+            shown = WeaponFlow.Visible(Focus, names, focusAll);
+            if (chosen >= 0 && shown.Count > 0 && !shown.Contains(chosen)) Select(shown[0]);
+        }
+
         /// <summary>Whether the transport is currently driving the rig itself.</summary>
         internal static bool Driving { get { return chosen >= 0 && animator != null && rig != null; } }
 
@@ -154,12 +174,15 @@ namespace Morgott.ContentTool.Dev
             savedSpeed = animator.speed;
             Catalogue(actions, held, worn, fallback);
             Resolve(modClips);
+            shown.Clear();
             if (clips.Count == 0) return;
 
             chosen = was == null ? 0 : Math.Max(0, names.IndexOf(was));
+            Reshow();
             // Frame 0 and PAUSED for a clip we have not seen before: the workbench is a bench, and a
             // model that starts moving on its own is a model that has to be caught before it can be read.
-            if (was != null && names.IndexOf(was) >= 0) { t = wasT; playing = wasPlaying; }
+            // Only when the class filter kept that clip selected: Reshow may have moved to another one.
+            if (was != null && names.IndexOf(was) >= 0 && chosen == names.IndexOf(was)) { t = wasT; playing = wasPlaying; }
         }
 
         /// <summary>
@@ -323,7 +346,7 @@ namespace Morgott.ContentTool.Dev
         {
             Stop();
             builder = null; animator = null; rig = null; took = false;
-            names.Clear(); clips.Clear(); sampled.Clear(); source.Clear();
+            names.Clear(); clips.Clear(); sampled.Clear(); source.Clear(); shown.Clear();
             note = null;
             listOpen = false; listRect = new Rect(0f, 0f, 0f, 0f);
         }
@@ -398,7 +421,11 @@ namespace Morgott.ContentTool.Dev
         internal static void Draw(float panelWidth, ModelDoctor owner)
         {
             float w = Screen.width, h = Screen.height;
-            if (Event.current.type == EventType.Layout) doctor = owner;
+            if (Event.current.type == EventType.Layout)
+            {
+                doctor = owner;
+                if (clips.Count > 0 && (Focus != shownFor || focusAll != shownAll || shown.Count == 0)) Reshow();
+            }
             if (!BenchList.StripShown(w, h, panelWidth)) return;
 
             if (backdrop == null)
@@ -444,7 +471,7 @@ namespace Morgott.ContentTool.Dev
         {
             float wide = Mathf.Min(460f, Screen.width - panelWidth - 2f * BenchList.StripInset);
             if (wide < 120f) { listRect = new Rect(0f, 0f, 0f, 0f); return; }
-            float wanted = clips.Count * 22f + 12f;
+            float wanted = shown.Count * 22f + 12f;
             float high = Mathf.Min(wanted, Mathf.Max(66f, stripTop - 40f));
             listRect = new Rect(panelWidth + BenchList.StripInset, stripTop - high, wide, high);
 
@@ -461,7 +488,7 @@ namespace Morgott.ContentTool.Dev
                 // The marker is IN THE ROW, not only on the selected one: the whole point of opening a
                 // character whose animations were replaced is to see at a glance which of them actually
                 // came out of the mod's own bundle and which are still the donor's.
-                for (int i = 0; i < clips.Count; i++)
+                foreach (int i in shown)
                     if (GUILayout.Button((i == chosen ? "> " : "   ") + BenchList.Elide(names[i], 44) +
                                          Mark(i)))
                     { Select(i); listOpen = false; }
@@ -511,17 +538,24 @@ namespace Morgott.ContentTool.Dev
             Skeleton();
             // The same count that used to be a dead label is the handle that opens the whole catalogue,
             // and the arrows STAY beside it - they are one click for "the next one".
-            if (GUILayout.Button((listOpen ? "v " : "^ ") + (chosen + 1) + "/" + clips.Count,
+            if (GUILayout.Button((listOpen ? "v " : "^ ") + (shown.IndexOf(chosen) + 1) + "/" + shown.Count,
                                  GUILayout.Width(72f)))
                 listOpen = !listOpen;
             if (GUILayout.Button("<", GUILayout.Width(28f))) Hop(-1);
             if (GUILayout.Button(">", GUILayout.Width(28f))) Hop(1);
             // Loop belongs to this row per section 6; the row below it is the scrubber and the speed.
             loop = GUILayout.Toggle(loop, " loop", GUILayout.Width(60f));
+            // The guided flow's class filter: its moves only, or the whole catalogue. Drawn only when the
+            // flow set a class - latched in Draw on Layout, so the control count is stable.
+            if (shownFor != null)
+                focusAll = !GUILayout.Toggle(!focusAll, new GUIContent(" " + shownFor.Label + " moves",
+                    "only this weapon class's moves (idle, aim, shoot, reload, run...); untick for every clip"),
+                    GUILayout.Width(150f));
             // The name the DEF asked for, plus who answered it. [MOD] = the clip on screen came out of a
             // content mod's bundle; [game*] = the game itself swapped it (the weapon's hand count does
             // exactly that); nothing = the shipped clip, played as shipped.
-            GUILayout.Label(BenchList.Elide(names[chosen], 36) + Mark(chosen), GUILayout.Width(320f));
+            GUILayout.Label(BenchList.Elide(names[chosen], 36) + Mark(chosen),
+                            GUILayout.Width(shownFor != null ? 240f : 320f));
             // Whether the CLIP itself loops, off the asset - not the loop override below, which is what
             // the transport does when it reaches the end. A one-shot scrubbed round to 0 is the author's
             // choice; a clip that loops by design says so, because a fit is judged on the loop.
@@ -531,7 +565,9 @@ namespace Morgott.ContentTool.Dev
 
         private static void Hop(int by)
         {
-            Select(((chosen + by) % clips.Count + clips.Count) % clips.Count);
+            if (shown.Count == 0) return;
+            int at = Math.Max(0, shown.IndexOf(chosen));
+            Select(shown[((at + by) % shown.Count + shown.Count) % shown.Count]);
         }
 
         /// <summary>One selection, whichever control made it - a new clip lands PAUSED on its first

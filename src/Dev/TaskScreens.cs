@@ -5,6 +5,7 @@ using System.Text;
 using Morgott.ContentTool.Bake;
 using Morgott.ContentTool.Doctor;
 using Morgott.ContentTool.Project;
+using Morgott.ContentTool.Tactical;
 using UnityEngine;
 
 namespace Morgott.ContentTool.Dev
@@ -52,6 +53,7 @@ namespace Morgott.ContentTool.Dev
                 shownName = Name;
                 soundItemsStale = videoRowsStale = weaponRowsStale = true;
                 createdRoot = null;             // "Next: Build & share" belongs to the mod it was created in
+                current = null;                 // so does the weapon the flow is on
             }
             Action a = next;
             next = null;
@@ -533,40 +535,115 @@ namespace Morgott.ContentTool.Dev
                 : "applied - each clip's state is in Details; a served clip plays the next time that video starts";
         }
 
-        // ---- Add a weapon ---------------------------------------------------------------------------------
+        // ---- Add a weapon: the guided flow ----------------------------------------------------------------
+        //
+        // ONE screen from "what kind of weapon" to "it moves right in the hand": 1 class (+ the game weapon
+        // it copies), 2 model & name -> Create, 3 fit in the hand, 4 check its moves on the strip. The Fit
+        // screen stays for weapons a mod already ships; this one is the path for a new one. The class
+        // catalogue and its rules are WeaponFlow (engine-free, tested); the soldier, the catalogue and the
+        // fit are the bench's (FitBench.Flow.cs) - one Show(), one save path.
 
         private static readonly GlbFileBrowser modelBrowser = new GlbFileBrowser();
         private static bool modelBrowserWanted;
-        private static string modelFile, donorFilter = "", donorFilterShown, donor, weaponName = "";
-        private static List<string> donorHits = new List<string>();
-        private static int donorTotal;
+        private static string modelFile, weaponName = "";
+        private static WeaponFlow.WeaponClass flowClass;
+        private static string template, templateFilter = "", templateFilterShown;
+        private static bool classOpen = true, templateOpen;
+        private static List<KeyValuePair<WeaponFlow.WeaponClass, int>> classRows =
+            new List<KeyValuePair<WeaponFlow.WeaponClass, int>>();
+        private static List<string> templateHits = new List<string>();
+        private static int templateTotal;
         private static List<string[]> weaponRows = new List<string[]>();
         private static bool weaponRowsStale = true;
+        /// <summary>The weapon the flow is on: (id, name, template) - just created, or picked from the mod's list.</summary>
+        private static string[] current;
         private static string createdRoot;
-        private static readonly string[] WeaponSteps = { "Mod", "Start from", "Model", "Name", "Create" };
+        // Latched on Layout: everything that decides HOW MANY controls the flow draws.
+        private static WeaponFlow.State latched;
+        private static string fitKey;
+        private static List<bool> rowLive = new List<bool>();
+
+        /// <summary>The class the flow is on, for the clip strip's filter (null = no filter).</summary>
+        internal static WeaponFlow.WeaponClass FlowClass { get { return flowClass; } }
+
+        private static void PickClass(WeaponFlow.WeaponClass c)
+        {
+            flowClass = c;
+            template = WeaponFlow.DefaultTemplate(c, FitBench.TemplatesOf(c));
+            templateFilterShown = null;
+            classOpen = false;
+            if (current == null && template != null) FitBench.Hold(template);
+        }
+
+        private static void PickTemplate(string d)
+        {
+            template = d;
+            templateOpen = false;
+            if (current == null) FitBench.Hold(d);
+        }
+
+        /// <summary>Carry on with a weapon the mod already has: its class and template come off its clone,
+        /// and it goes in the hand when the game has it loaded (else its template stands in).</summary>
+        private static void PickRow(string[] row)
+        {
+            current = row;
+            template = row[2];
+            flowClass = FitBench.ClassOf(row[2]) ?? WeaponFlow.Other;
+            classOpen = templateOpen = false;
+            createdRoot = Root;
+            FitBench.Hold(FitBench.Loaded(row[0]) ? row[0] : row[2]);
+        }
 
         /// <summary>Returns true when the author asked to go on to Build &amp; share with the project just
         /// written (already bound there) - the bench moves the tab after EndArea.</summary>
-        internal static bool Weapon(float width, IList<string> donors, Func<string, string> word, Action<string> showDonor)
+        internal static bool Weapon(float width)
         {
             Drain();
+            string display = (weaponName ?? "").Trim();
+            string nameRefusal;
             if (Event.current.type == EventType.Layout)
             {
                 if (modelBrowserWanted && !modelBrowser.Open) modelBrowser.Show(Dir(modelFile));
                 modelBrowserWanted = false;
-                if (donorFilter != donorFilterShown)
+                classRows = FitBench.Classes();
+                if (flowClass != null && templateFilter != templateFilterShown)
                 {
-                    donorFilterShown = donorFilter;
+                    templateFilterShown = templateFilter;
                     var all = new List<string>();
-                    foreach (string d in donors)
-                        if (string.IsNullOrEmpty(donorFilter) ||
-                            d.IndexOf(donorFilter, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            word(d).IndexOf(donorFilter, StringComparison.OrdinalIgnoreCase) >= 0) all.Add(d);
-                    donorTotal = all.Count;
-                    donorHits = all.Count > 12 ? all.GetRange(0, 12) : all;
+                    foreach (string d in FitBench.TemplatesOf(flowClass))
+                        if (string.IsNullOrEmpty(templateFilter) ||
+                            d.IndexOf(templateFilter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            FitBench.WordOf(d).IndexOf(templateFilter, StringComparison.OrdinalIgnoreCase) >= 0) all.Add(d);
+                    templateTotal = all.Count;
+                    templateHits = all.Count > 12 ? all.GetRange(0, 12) : all;
                 }
                 if (weaponRowsStale && Root != null) { weaponRows = ProjectScaffold.Weapons(Root); weaponRowsStale = false; }
+                rowLive = new List<bool>();
+                foreach (string[] w in weaponRows) rowLive.Add(FitBench.Loaded(w[0]));
+
+                bool live = current != null && FitBench.Loaded(current[0]);
+                bool inHand = live && FitBench.Holding(current[0]);
+                fitKey = inHand ? FitBench.HeldFitKey(current[0]) : null;
+                Vector3 p, e, o; float s;
+                latched = new WeaponFlow.State
+                {
+                    ClassPicked = flowClass != null,
+                    TemplatePicked = template != null,
+                    HaveModel = modelFile != null,
+                    HaveName = display.Length > 0,
+                    Created = current != null,
+                    Live = live,
+                    InHand = inHand,
+                    Fitted = fitKey != null && WeaponBuild.State(fitKey, out p, out e, out s, out o),
+                    ModName = Name,
+                };
             }
+            // Back closes the innermost open picker (model browser, template list, class list); a done step
+            // re-opens its picker: 0 = the class list, 1 = the model browser while nothing is created yet.
+            BenchNav.Handlers(WeaponBack, WeaponJump, 1,
+                              modelBrowser.Open ? "Pick your model file"
+                              : templateOpen ? "Pick the game weapon"
+                              : classOpen && flowClass != null ? "Pick the kind" : null);
             if (modelBrowser.Open)
             {
                 string picked = modelBrowser.Draw(260f);
@@ -574,62 +651,185 @@ namespace Morgott.ContentTool.Dev
                 return false;
             }
 
-            string nameRefusal = ModRow("weapon");
-            string display = (weaponName ?? "").Trim();
-            BenchUi.Steps(WeaponSteps, nameRefusal != null ? 0 : donor == null ? 1 : modelFile == null ? 2
-                                       : display.Length == 0 ? 3 : 4);
-            BenchUi.Hint("A new weapon copies a game weapon's behaviour (how it is held, fired and reloaded) and " +
-                         "wears your model. Pick a game weapon of the same kind as yours.");
+            nameRefusal = ModRow("weapon");
+            WeaponFlow.State st = latched;
+            st.ModRefusal = nameRefusal;
+            st.HaveName = display.Length > 0;
+            st.Dirty = st.Fitted && WeaponBuild.Modified(fitKey);
+            BenchUi.Steps(WeaponFlow.Steps, WeaponFlow.Step(st));
+            BenchUi.Hint("A new weapon copies a game weapon of its kind - how it is held, fired and reloaded - and " +
+                         "wears your model. Whatever you pick stands in the soldier's hand on the right.");
 
-            BenchUi.Section("1  Start from a game weapon");
-            donorFilter = GUILayout.TextField(donorFilter ?? "", 80);
-            BenchUi.Hint(donorTotal + " weapon(s) match" + (donorTotal > donorHits.Count ? "; showing " + donorHits.Count : ""));
-            foreach (string d in donorHits)
-                if (BenchUi.Pick(new GUIContent((d == donor ? "> " : "") + word(d), d)))
-                { string pick = d; next = () => { donor = pick; showDonor(pick); }; }
-            BenchUi.Field("Start from", donor == null ? "-" : word(donor), donor);
-
-            BenchUi.Section("2  Your model");
-            bool unused;
-            if (FileRow("Model", modelFile, null, out unused)) modelBrowserWanted = true;
-            BenchUi.Hint("to check your model itself, open it in Replace a model - its preview shows any .glb");
-
-            BenchUi.Section("3  Its name in the game");
-            weaponName = GUILayout.TextField(weaponName ?? "", 40);
-            BenchUi.Hint(nameRefusal == null && display.Length > 0
-                         ? "def name " + ProjectScaffold.WeaponId(Name, display) : "", null);
-
-            GUILayout.Space(4f);
-            string refusal = nameRefusal ?? (donor == null ? "pick the game weapon to start from (step 1)"
-                             : modelFile == null ? "pick your .glb model (step 2)"
-                             : display.Length == 0 ? "type the weapon's name (step 3)" : null);
-            if (BenchUi.Main("Create weapon", refusal,
-                             "copies the model and writes the mod's publish + weapons rows (fit: auto)"))
+            // ---- 1: class and template ----
+            BenchUi.Section("1  What kind of weapon");
+            if (classOpen || flowClass == null)
             {
-                string file = modelFile, name = Name, from = donor, called = display;
-                next = () => CreateWeapon(file, name, from, called);
+                if (classRows.Count == 0) BenchUi.Hint("no weapons in the catalogue yet - put a soldier on the platform (Fit a weapon) first");
+                foreach (KeyValuePair<WeaponFlow.WeaponClass, int> c in classRows)
+                {
+                    WeaponFlow.WeaponClass pick = c.Key;
+                    if (BenchUi.Pick(new GUIContent((pick == flowClass ? "> " : "") + pick.Label + "   (" + c.Value + ")",
+                                                    pick.Tag == null ? "weapons with none of the class tags"
+                                                                     : "the game's " + pick.Tag)))
+                        next = () => PickClass(pick);
+                }
             }
+            else
+            {
+                GUILayout.BeginHorizontal();
+                BenchUi.Field("Kind", flowClass.Label, flowClass.Tag);
+                if (GUILayout.Button("Change...", GUILayout.Width(80f))) next = () => classOpen = true;
+                GUILayout.EndHorizontal();
+            }
+            if (flowClass != null && !classOpen)
+            {
+                GUILayout.BeginHorizontal();
+                string hands = FitBench.Hands(template);
+                BenchUi.Field("Copies", template == null ? "-" : FitBench.WordOf(template) + (hands == null ? "" : "  - " + hands),
+                              template);
+                GUI.enabled = current == null;
+                if (GUILayout.Button(templateOpen ? "Close" : "Change...", GUILayout.Width(80f)))
+                    next = () => templateOpen = !templateOpen;
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
+                if (templateOpen)
+                {
+                    GUI.SetNextControlName(FitBench.TypingPrefix + "template");
+                    templateFilter = GUILayout.TextField(templateFilter ?? "", 80);
+                    BenchUi.Hint(templateTotal + " " + flowClass.Label + " weapon(s)" +
+                                 (templateTotal > templateHits.Count ? "; showing " + templateHits.Count : ""));
+                    foreach (string d in templateHits)
+                        if (BenchUi.Pick(new GUIContent((d == template ? "> " : "") + FitBench.WordOf(d), d)))
+                        { string pick = d; next = () => PickTemplate(pick); }
+                }
+                BenchUi.Hint("its grip and its moves come with it - play them on the strip under the soldier before you create");
+            }
+
+            // ---- 2: model and name ----
+            BenchUi.Section("2  Your model and its name");
+            if (current == null)
+            {
+                bool unused;
+                if (FileRow("Model", modelFile, null, out unused)) modelBrowserWanted = true;
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Name", GUILayout.Width(84f));
+                GUI.SetNextControlName(FitBench.TypingPrefix + "name");
+                weaponName = GUILayout.TextField(weaponName ?? "", 40);
+                GUILayout.EndHorizontal();
+                BenchUi.Hint(nameRefusal == null && display.Length > 0
+                             ? "def name " + ProjectScaffold.WeaponId(Name, display) : "", null);
+            }
+            else
+            {
+                GUILayout.BeginHorizontal();
+                BenchUi.Field("Weapon", current[1] ?? "-", current[0]);
+                if (GUILayout.Button("Make another", GUILayout.Width(110f))) next = () => current = null;
+                GUILayout.EndHorizontal();
+            }
+
+            // ---- 3: fit ----
+            BenchUi.Section("3  Fit it in the hand");
+            if (st.Fitted)
+            {
+                BenchUi.Badge(st.Dirty ? Grade.Warn : Grade.Pass,
+                              st.Dirty ? "Changed - not saved yet." : "Saved - the file matches what you see.");
+                string said = FitBench.Tune(fitKey);
+                if (said != null) { message = "adjusted"; log = said; }
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button(new GUIContent("Revert", "back to what the file says; the disk is not touched"),
+                                     GUILayout.Width(90f)))
+                { log = WeaponBuild.Reload(fitKey); message = "reverted to the file"; }
+                if (GUILayout.Button(new GUIContent("Reset to automatic", "back to the measured fit, every override dropped"),
+                                     GUILayout.Width(150f)))
+                { log = WeaponBuild.Auto(fitKey); message = "back to the automatic fit - Save keeps it"; }
+                GUILayout.EndHorizontal();
+            }
+            else
+                BenchUi.Hint(!st.Created ? "comes after step 2"
+                             : !st.Live ? "the game loads a new weapon only when it starts: Build & share, switch " + Name +
+                                          " on in Mods, restart the game, open this screen and pick it under 'Weapons in " +
+                                          Name + "'. Until then its template stands in the hand."
+                             : !st.InHand ? "put it in the soldier's hand (the button below)"
+                             : "loading the weapon in the hand...");
+
+            // ---- 4: moves ----
+            BenchUi.Section("4  Check its moves");
+            BenchUi.Hint(flowClass == null ? "comes after step 1"
+                         : "the strip under the soldier plays " + flowClass.Label + " moves (idle, aim, shoot, reload, run...) " +
+                           "with " + (st.InHand ? "your weapon" : "the template") + " in the hand: pick a clip, PLAY / PAUSE, " +
+                           "loop, drag the bar to a frame. Untick '" + flowClass.Label + " moves' there for every clip.");
+
+            // ---- the one main button ----
+            GUILayout.Space(4f);
+            string label, refusal;
+            WeaponFlow.Act act = WeaponFlow.Main(st, out label, out refusal);
+            GUI.enabled = !(act == WeaponFlow.Act.Build && LifecycleDashboard.Busy);
+            bool pressed = BenchUi.Main(label, refusal,
+                act == WeaponFlow.Act.Create ? "copies the model and writes the mod's publish + weapons rows (fit: auto)"
+                : act == WeaponFlow.Act.Build ? "bake the model and install the mod"
+                : act == WeaponFlow.Act.Save ? "writes the fit into " + Name + "'s ppcontent.json (path in Details)" : null);
+            GUI.enabled = true;
+            bool onward = false;
+            if (pressed)
+                switch (act)
+                {
+                    case WeaponFlow.Act.Create:
+                        {
+                            string file = modelFile, name = Name, from = template, called = display;
+                            next = () => CreateWeapon(file, name, from, called);
+                        }
+                        break;
+                    case WeaponFlow.Act.Build: onward = true; break;
+                    case WeaponFlow.Act.Hold: { string id = current[0]; next = () => FitBench.Hold(id); } break;
+                    case WeaponFlow.Act.Save:
+                        log = FitBench.SaveFit(fitKey);
+                        message = log != null && log.IndexOf("ct_fit saved", StringComparison.Ordinal) >= 0
+                            ? "fit saved" : "not saved - see Details";
+                        break;
+                }
             Result("weapon");
 
+            // ---- the mod's weapons: carry on with one ----
             BenchUi.Section("Weapons in " + Name);
             if (weaponRows.Count == 0) BenchUi.Hint("none yet");
-            foreach (string[] w in weaponRows)
-                BenchUi.Field(w[1] ?? "-", "from " + word(w[2] ?? "-"), w[0]);
-            GUI.enabled = createdRoot != null && !LifecycleDashboard.Busy;
-            bool onward = GUILayout.Button(new GUIContent("Next: Build & share", "bake the model and install the mod"));
-            GUI.enabled = true;
-            BenchUi.Hint(createdRoot == null ? "" : "then restart the game and switch " + Path.GetFileName(createdRoot) +
-                         " on in Mods - the weapon appears in your base storage in a new campaign; fit it with 'Fit a weapon'");
+            for (int i = 0; i < weaponRows.Count; i++)
+            {
+                string[] w = weaponRows[i];
+                bool loaded = i < rowLive.Count && rowLive[i];
+                GUILayout.BeginHorizontal();
+                BenchUi.Mark(loaded ? "LOADED" : "-", loaded ? (Grade?)Grade.Pass : null,
+                             loaded ? "the game has it this session - it can be fitted" : "not loaded this session", 64f);
+                string[] row = w;
+                if (BenchUi.Pick(new GUIContent((current != null && current[0] == w[0] ? "> " : "") + (w[1] ?? "-") +
+                                                "   from " + FitBench.WordOf(w[2] ?? "-"), w[0])))
+                    next = () => PickRow(row);
+                GUILayout.EndHorizontal();
+            }
             if (!onward) return false;
-            string why = LifecycleDashboard.Select(createdRoot);
+            string why = LifecycleDashboard.Select(createdRoot ?? Root);
             if (why != null) { message = why; return false; }
             return true;
+        }
+
+        private static bool WeaponBack()
+        {
+            if (Hide(modelBrowser)) return true;
+            if (templateOpen) { templateOpen = false; return true; }
+            if (classOpen && flowClass != null) { classOpen = false; return true; }
+            return false;
+        }
+
+        private static bool WeaponJump(int i)
+        {
+            if (i == 0) { classOpen = true; templateOpen = false; return true; }
+            return i == 1 && current == null && Show(modelBrowser, modelFile);
         }
 
         private static void CreateWeapon(string file, string name, string from, string called)
         {
             ProjectScaffold.WeaponResult r = ProjectScaffold.AddWeapon(ContentToolMain.ModDir, name, file, from, called);
             createdRoot = r.Root;
+            current = new[] { r.WeaponId, called, from };
             modsStale = true;
             weaponRowsStale = true;
             log = "wrote " + r.WeaponId + " (clone of " + from + ") into " + Path.Combine(r.Root, ContentMods.Manifest) +
