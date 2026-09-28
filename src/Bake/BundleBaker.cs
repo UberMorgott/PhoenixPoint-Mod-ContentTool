@@ -1102,6 +1102,11 @@ namespace Morgott.ContentTool.Bake
             // (1.00x) - which is what makes a private copy of a 553 MB bundle affordable. Pack reads
             // from a written bundle, so the mutated one goes through a MemoryStream first.
             AssetBundleCompressionType comp = bunInst.file.GetCompressionType();
+            // A PATCHED COPY (bundleName null - identity kept) is written on the PLAYER'S enable path, so
+            // its LZ4HC source is repacked as LZ4Fast: measured 2026-09-28 (PERF.md section 2) 27.8 s -> 5.4 s
+            // for px_equipment, +11% disk. Unity reads both from the same block flags. The mod's OWN bundle
+            // ships in the package and keeps the source's ratio.
+            if (bundleName == null && comp == AssetBundleCompressionType.LZ4) comp = AssetBundleCompressionType.LZ4Fast;
             using (MemoryStream raw = new MemoryStream())
             {
                 using (AssetsFileWriter rw = new AssetsFileWriter(raw))
