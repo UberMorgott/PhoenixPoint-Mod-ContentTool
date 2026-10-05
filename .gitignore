@@ -57,6 +57,9 @@ tiffany_cox_idle_animation.glb
 # Claude Code session config (stop-hook etc.) - local only, as in Multiplayer2
 .claude/
 
+# Codex hook config written by agent-link (machine-specific exe paths + its backup) - local tool state
+.codex/
+
 # The owner's raw GLB drop beside the repo (binary exports plus its zip) - working material for a
 # replacement project, never part of the tool. Spelled as a glob because the folder's own name
 # carries a misspelling the spell-check would flag if it were written out here.
