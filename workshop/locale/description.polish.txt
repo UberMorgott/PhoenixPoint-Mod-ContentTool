@@ -1,0 +1,30 @@
+[h1]Content Tool[/h1]
+
+[b]Content Tool sam z siebie nie dodaje do gry niczego nowego.[/b] To narzędzie dla twórców modów. Inne mody używają go, aby dodawać lub zmieniać zasoby gry. Zainstalowany samodzielnie niczego nie zmienia.
+
+[b]Problemy i sugestie wyłącznie przez GitHub Issues:[/b] [url=https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/issues]github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/issues[/url]
+Komentarze na Steam nie służą do zgłaszania błędów ani próśb.
+
+[h2]Możliwości[/h2]
+[list]
+[*]Podmienia tekstury, siatki (.obj, .glb), wartości materiałów, skalowanie krzywych animacji i filmy z gry.
+[*]Podmienia dźwięki gry na własne pliki .wav, .ogg lub .mp3.
+[*]Dodaje nowe zasoby pod nowymi kluczami Addressables: tekstury, modele, siatki, materiały, klipy animacji. Dodaje nowe filmy.
+[*]Dodaje nowe bronie oparte na istniejących, stwory z własnymi modelami, nowe ciała postaci i grywalnych żołnierzy humanoidalnych.
+[*]Działa w pamięci podczas gry. Nigdy nie zapisuje niczego w katalogu instalacji gry.
+[*]Polecenia konsoli ct_*: import, wypiekanie i sprawdzanie projektu, wypiekanie banków dźwięku, przygotowanie folderu moda do publikacji.
+[*]Polecenia konsoli ct_*: wyszukiwanie paczek, zasobów, dźwięków, definicji, kości i właściwości materiałów gry; eksport tekstur, siatek, filmów i dźwięków z gry.
+[*]ct_fit: przesuwanie, obracanie i skalowanie broni w dłoni oraz zapis ustawienia w ppcontent.json moda.
+[*]Warsztat w grze (Ctrl+Alt+B na geoskapie): podmiana modelu ze sprawdzeniem kości, dopasowanie broni, dodanie broni, dźwięki, filmy, budowanie i udostępnianie.
+[*]package.ps1 buduje gotowy do publikacji folder moda przy zamkniętej grze.
+[*]Projekty demonstracyjne są na GitHubie, linki w dokumentacji.
+[/list]
+
+[h2]Dokumentacja[/h2]
+[url=https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/]ubermorgott.github.io/PhoenixPoint-Mod-ContentTool[/url]
+Kod źródłowy i README: [url=https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool]github.com/UberMorgott/PhoenixPoint-Mod-ContentTool[/url]
+
+[h2]Instalacja[/h2]
+Zasubskrybuj, otwórz Mods w menu głównym i włącz Content Tool. Mody, które go potrzebują, podają go jako zależność. Brak innych wymagań.
+
+Licencja: CC BY-NC 4.0. © 2026 Morgott.

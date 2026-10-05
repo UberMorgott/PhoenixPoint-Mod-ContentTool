@@ -1,0 +1,30 @@
+[h1]Content Tool[/h1]
+
+[b]Content Tool 本身不会为游戏添加任何新内容。[/b]它是给模组作者用的工具。其他模组用它来添加或修改游戏资源。单独安装时，它不会改变任何东西。
+
+[b]问题和建议只在 GitHub Issues 提交：[/b][url=https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/issues]github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/issues[/url]
+Steam 评论不用于报告错误或提出请求。
+
+[h2]功能[/h2]
+[list]
+[*]替换游戏自带的贴图、网格（.obj、.glb）、材质数值、动画曲线缩放和视频。
+[*]用你自己的 .wav、.ogg 或 .mp3 文件替换游戏音效。
+[*]以新的 Addressables 键添加新资源：贴图、模型、网格、材质、动画片段。添加新视频。
+[*]添加基于游戏现有武器的新武器、使用自定义模型的生物、新的角色身体和可操控的人形士兵。
+[*]在游戏运行时于内存中工作。从不写入游戏安装目录。
+[*]ct_* 控制台命令：导入、烘焙并检查内容项目，烘焙音频库，准备用于发布的模组文件夹。
+[*]ct_* 控制台命令：搜索游戏的资源包、资源、音效、定义、骨骼和材质属性；导出游戏的贴图、网格、视频和音效。
+[*]ct_fit：移动、旋转和缩放手中的武器，并把结果保存到模组的 ppcontent.json。
+[*]游戏内工作台（在地球视图按 Ctrl+Alt+B）：带骨骼检查的模型替换、武器调整、添加武器、音效、视频、构建与分享。
+[*]package.ps1 在游戏关闭时生成可发布的模组文件夹。
+[*]示例项目在 GitHub 上，文档中有链接。
+[/list]
+
+[h2]文档[/h2]
+[url=https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/]ubermorgott.github.io/PhoenixPoint-Mod-ContentTool[/url]
+源代码和 README：[url=https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool]github.com/UberMorgott/PhoenixPoint-Mod-ContentTool[/url]
+
+[h2]安装[/h2]
+订阅后，在主菜单打开 Mods 并启用 Content Tool。需要它的模组会把它列为依赖。没有其他要求。
+
+许可证：CC BY-NC 4.0。© 2026 Morgott。

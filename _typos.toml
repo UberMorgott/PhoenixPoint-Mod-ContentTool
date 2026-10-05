@@ -6,6 +6,14 @@
 extend-exclude = [
     "internal-docs/research/*.json",
     "data/*.json",
+    # Workshop page translations: not English, typos flags every foreign word.
+    "workshop/locale/*.french.txt",
+    "workshop/locale/*.german.txt",
+    "workshop/locale/*.italian.txt",
+    "workshop/locale/*.polish.txt",
+    "workshop/locale/*.russian.txt",
+    "workshop/locale/*.schinese.txt",
+    "workshop/locale/*.spanish.txt",
 ]
 
 [default.extend-identifiers]

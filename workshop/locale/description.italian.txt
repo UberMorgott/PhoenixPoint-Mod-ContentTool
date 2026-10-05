@@ -1,0 +1,30 @@
+[h1]Content Tool[/h1]
+
+[b]Content Tool da solo non aggiunge nulla di nuovo al gioco.[/b] È uno strumento per modder. Altre mod lo usano per aggiungere o modificare asset del gioco. Installato da solo, non cambia nulla.
+
+[b]Problemi e suggerimenti solo su GitHub Issues:[/b] [url=https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/issues]github.com/UberMorgott/PhoenixPoint-Mod-ContentTool/issues[/url]
+I commenti di Steam non vengono usati per segnalazioni di bug o richieste.
+
+[h2]Funzioni[/h2]
+[list]
+[*]Sostituisce texture, mesh (.obj, .glb), valori dei materiali, la scala delle curve di animazione e i video del gioco.
+[*]Sostituisce i suoni del gioco con file .wav, .ogg o .mp3 propri.
+[*]Aggiunge nuovi asset con nuove chiavi Addressables: texture, modelli, mesh, materiali, clip di animazione. Aggiunge nuovi video.
+[*]Aggiunge nuove armi basate su quelle del gioco, creature con modelli propri, nuovi corpi dei personaggi e soldati umanoidi giocabili.
+[*]Lavora in memoria mentre il gioco è in esecuzione. Non scrive mai nell'installazione del gioco.
+[*]Comandi console ct_*: importare, cuocere e verificare un progetto di contenuti, cuocere i banchi audio, preparare una cartella mod per la pubblicazione.
+[*]Comandi console ct_*: cercare bundle, asset, suoni, definizioni, ossa e proprietà dei materiali del gioco; esportare texture, mesh, video e suoni del gioco.
+[*]ct_fit: spostare, ruotare e scalare un'arma in mano e salvare la regolazione nel ppcontent.json della mod.
+[*]Banco di lavoro nel gioco (Ctrl+Alt+B sul geoscape): sostituire un modello con controllo delle ossa, adattare un'arma, aggiungere un'arma, suoni, video, compilare e condividere.
+[*]package.ps1 crea una cartella mod pronta da pubblicare a gioco chiuso.
+[*]I progetti dimostrativi sono su GitHub, collegati dalla documentazione.
+[/list]
+
+[h2]Documentazione[/h2]
+[url=https://ubermorgott.github.io/PhoenixPoint-Mod-ContentTool/]ubermorgott.github.io/PhoenixPoint-Mod-ContentTool[/url]
+Codice sorgente e README: [url=https://github.com/UberMorgott/PhoenixPoint-Mod-ContentTool]github.com/UberMorgott/PhoenixPoint-Mod-ContentTool[/url]
+
+[h2]Installazione[/h2]
+Iscriviti, apri Mods nel menu principale e attiva Content Tool. Le mod che ne hanno bisogno lo indicano come dipendenza. Nessun altro requisito.
+
+Licenza: CC BY-NC 4.0. © 2026 Morgott.
