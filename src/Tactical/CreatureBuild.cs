@@ -729,7 +729,7 @@ namespace Morgott.ContentTool.Tactical
                 " BEFORE bodypart aspects (\"health\" asked for " + man.Health.ToString("F0") + "). " +
                 "A zero here is Health 0/0, which is IsDead on the first frame.");
 
-            Melee(repo, c, donor, chassis, unit, animsClone, donorTag, shared);
+            Melee(repo, c, donor, chassis, unit, animsClone, donorTag, shared, rig);
             // The SECOND, RANGED attack - only when the manifest declares one. Every existing
             // creature stays on the melee-only path above, untouched.
             if (man.Ranged.Length > 0)
@@ -885,7 +885,7 @@ namespace Morgott.ContentTool.Tactical
         /// </summary>
         private static void Melee(DefRepository repo, Creature c, TacCharacterDef donor, AddonDef chassis,
                                   TacCharacterDef unit, TacActorAnimActionsDef anims,
-                                  GameTagDef donorTag, SharedGameTagsDataDef shared)
+                                  GameTagDef donorTag, SharedGameTagsDataDef shared, GameObject rig)
         {
             WeaponDef donorMelee = DonorMeleeBodypart(donor);
             if (donorMelee == null)
@@ -920,8 +920,18 @@ namespace Morgott.ContentTool.Tactical
             // destroyed" lines, C1-offered/attack PASS. The "List`1" errors once blamed on this were
             // the PROFILE's unlocked-cinematics list holding QuitCutscene's runtime video defs
             // (AchievementTracker "Cinematics"), written on every options save, tactical or not.
-            melee.SkinData = string.IsNullOrEmpty(bashPoint) ? null
-                : CreatureRanged.SynthSkin(repo, c, "BashPoint", "MeleeSkinDataDef", bashPoint);
+            //
+            // ...AND THE SHOT ORIGIN, when the weapon also carries a ShootAbility (the Swarmer's
+            // Strike_ShootAbilityDef). TacticalPerception.GetShotOrigin:503-539 looks up the payload's
+            // ProjectileOrigin by name on the same skinless addon, so it is synthesised in the SAME
+            // SynthSkin - the ranged recipe (CreatureRanged: default written back, then synthesised).
+            bool strikes = melee.Abilities != null && melee.Abilities.OfType<ShootAbilityDef>().Any();
+            if (strikes && string.IsNullOrEmpty(melee.DamagePayload.ProjectileOrigin))
+                melee.DamagePayload.ProjectileOrigin = "EXT_ShootPoint";
+            string[] points = new[] { bashPoint, strikes ? melee.DamagePayload.ProjectileOrigin : null }
+                .Where(n => !string.IsNullOrEmpty(n)).Distinct().ToArray();
+            melee.SkinData = points.Length == 0 ? null
+                : CreatureRanged.SynthSkin(repo, c, "BashPoint", "MeleeSkinDataDef", points);
             c.Say("ct_creature " + (string.IsNullOrEmpty(bashPoint) ? "WARN" : "PASS") + " melee bash point " +
                   (string.IsNullOrEmpty(bashPoint)
                        ? "NOT DECLARED by '" + (bashDef == null ? "(no BashAbilityDef)" : bashDef.name) +
@@ -950,12 +960,47 @@ namespace Morgott.ContentTool.Tactical
                 // (see EventContexts), so it is the one anchor that cannot be missing, and it sits at
                 // the body - the right place for a bash to originate.
                 chassis.ProvidedSlots[0].AttachmentPointName = EventContexts[0];
+                // ...BUT EXT_MainContext IS AN EMPTY AT THE RIG ROOT - ON THE FLOOR. A bash does not
+                // care; a Strike does. MEASURED 2026-10-19 (Instance3, spider beside a crabman):
+                // GetShotOrigin returned the actor's own feet (27.5, 0.004, 39.5), every
+                // CheckLineOfEffect from there answered false, CheckShootTarget false x12 ->
+                // Strike_ShootAbilityDef NoValidTarget while the spit (muzzle on a bone) was usable.
+                // So a striking weapon hangs on the same body bone the ranged muzzle uses.
+                if (strikes)
+                {
+                    Transform bone = rig == null ? null : CreatureRanged.ShootBone(c, rig);
+                    if (bone != null) chassis.ProvidedSlots[0].AttachmentPointName = bone.name;
+                    c.Say("ct_creature " + (bone != null ? "PASS" : "WARN") + " melee shot origin '" +
+                          melee.DamagePayload.ProjectileOrigin + "' hangs at '" +
+                          chassis.ProvidedSlots[0].AttachmentPointName + "'" + (bone != null
+                              ? " - a body bone, so GetShotOrigin is not on the floor"
+                              : " - NO bone found, the origin stays at the rig root (floor level) and " +
+                                "the Strike line of effect may never clear"));
+                }
             }
             unit.Data.BodypartItems = new ItemDef[] { melee };
             // The game's OWN predicate for "will this bodypart attach to that parent", asked at build
             // time instead of discovered as an empty Equipments list in a live mission.
             bool fits = chassis.ProvidesCompatibleSlotFor(melee);
             AlsoAccept(repo, c, anims, donorMelee, melee);
+            // GetShotOrigin dereferences the matched shoot action's ShootPose with NO null check
+            // (TacticalPerception.cs:511), the same trap CreatureRanged guards. A Strike this creature
+            // cannot animate is dropped, loudly, rather than left as an NRE or a dead button.
+            if (strikes)
+            {
+                TacActorShootAnimActionDef shootAction = (anims.AnimActions ?? new TacActorAnimActionBaseDef[0])
+                    .OfType<TacActorShootAnimActionDef>()
+                    .FirstOrDefault(s => (s.Equipments != null && s.Equipments.Contains(melee)) ||
+                                         (s.EquipmentList != null && s.EquipmentList.Equipments != null &&
+                                          s.EquipmentList.Equipments.Contains(melee)));
+                bool posed = shootAction != null && shootAction.ShootPose != null;
+                if (!posed)
+                    melee.Abilities = melee.Abilities.Where(a => !(a is ShootAbilityDef)).ToArray();
+                c.Say("ct_creature " + (posed ? "PASS" : "FAIL") + " melee Strike " + (posed
+                          ? "animates through '" + shootAction.name + "' (ShootPose '" + shootAction.ShootPose.name + "')"
+                          : "DROPPED: no TacActorShootAnimActionDef with a ShootPose accepts '" + melee.name +
+                            "' - GetShotOrigin:511 would NRE; the bash stays"));
+            }
             BashAbilityDef bash = donorMelee.Abilities.OfType<BashAbilityDef>().FirstOrDefault();
             c.Say("ct_creature " + (bash != null && fits ? "PASS" : "FAIL") + " melee '" + donorMelee.name +
                   "' -> '" + melee.name + "' (SkinData nulled, " + donorMelee.SubAddons.Length +

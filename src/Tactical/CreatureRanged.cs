@@ -374,7 +374,7 @@ namespace Morgott.ContentTool.Tactical
         /// ponytail: furthest-forward is a naive heuristic (a long tail curled forward would win);
         /// the "shootBone" manifest key is the override for exactly that model.
         /// </summary>
-        private static Transform ShootBone(Creature c, GameObject rig)
+        internal static Transform ShootBone(Creature c, GameObject rig)
         {
             if (c.Man.ShootBone.Length > 0)
             {
