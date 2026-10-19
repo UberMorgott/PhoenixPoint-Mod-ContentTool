@@ -176,6 +176,23 @@ def read_description(path: str) -> str:
     return text
 
 
+def read_title(lang_code: str) -> str:
+    """Store title for one language: workshop/locale/title.<lang>.txt, else TITLE.
+
+    Steam caps a title at 128 characters (k_cchPublishedDocumentTitleMax - 1).
+    """
+    path = os.path.join(LOCALE_DIR, f"title.{lang_code}.txt")
+    if not os.path.exists(path):
+        return TITLE
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read().strip()
+    if not text:
+        raise SystemExit(f"{os.path.basename(path)} is empty.")
+    if len(text.encode("utf-8")) > 128:
+        raise SystemExit(f"{os.path.basename(path)} is over Steam's 128-byte title limit.")
+    return text
+
+
 def pump_until(steam, holder: dict, timeout: float, label: str) -> dict:
     """Pump RunCallbacks until `holder` is populated by the async callback."""
     deadline = time.time() + timeout
@@ -216,7 +233,7 @@ def submit_update(steam, published_file_id: int, description: str, preview: str,
     handle = steam.Workshop.StartItemUpdate(APP_ID, published_file_id)
     print(f"[update] StartItemUpdate handle={handle}")
 
-    steam.Workshop.SetItemTitle(handle, TITLE)
+    steam.Workshop.SetItemTitle(handle, read_title("english"))
     steam.Workshop.SetItemDescription(handle, description)
     steam.Workshop.SetItemContent(handle, CONTENT_FOLDER)
     steam.Workshop.SetItemPreview(handle, preview)
@@ -269,7 +286,7 @@ def submit_description_for_language(steam, published_file_id: int, lang_code: st
     SetItemUpdateLanguage makes EVERY field on that update per-language, so a
     handle that sets only the description writes an EMPTY title for that language
     and the store page heading comes out blank for those players. Setting the
-    same global TITLE on every pass is what keeps the name on all of them. (Paid
+    language's title (title.<lang>.txt, else TITLE) on every pass keeps the name. (Paid
     for once already on another mod - do not "simplify" this line away.)
 
     Content, preview and visibility are deliberately untouched, so nothing is
@@ -277,7 +294,7 @@ def submit_description_for_language(steam, published_file_id: int, lang_code: st
     """
     handle = steam.Workshop.StartItemUpdate(APP_ID, published_file_id)
     steam.Workshop.SetItemUpdateLanguage(handle, lang_code)
-    steam.Workshop.SetItemTitle(handle, TITLE)
+    steam.Workshop.SetItemTitle(handle, read_title(lang_code))
     steam.Workshop.SetItemDescription(handle, description)
     if tags:
         ok = steam.Workshop.SetItemTags(handle, tags)
@@ -380,6 +397,8 @@ def main() -> int:
     else:
         for _, p in locale_descriptions():
             read_description(p)
+    for lang, _ in locale_descriptions():
+        read_title(lang)
 
     load_steamworks(args.runtime)
     if not args.localize_descriptions:
