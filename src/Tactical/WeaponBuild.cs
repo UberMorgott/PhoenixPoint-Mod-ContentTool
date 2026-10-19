@@ -1094,6 +1094,14 @@ namespace Morgott.ContentTool.Tactical
             internal float[] euler;
             internal float scale;
 
+            /// <summary>Is <see cref="scale"/> the author's own number (the manifest declared it, or it
+            /// was changed in the bench) rather than the auto solve? On an auto fit a size NOT hand-set
+            /// is a function of the turn: every rotation change re-solves it (<see cref="Refit"/>), and
+            /// SAVE leaves the "scale" key out so a reload solves it fresh. Cleared only by
+            /// <see cref="Auto"/>. Measured: VAR solved 0.2865 at rotate -45, turned back to 0 it kept
+            /// 0.2865 where the solve gives 0.5528 - and SAVE froze the stale size into the file.</summary>
+            internal bool scaleHand;
+
             /// <summary>The last three numbers that were READ FROM or WRITTEN TO the manifest. Nothing
             /// else in this class knows the difference between "this is what the file says" and "this
             /// is what I have been nudging for ten minutes", and that difference is the only thing
@@ -1101,6 +1109,7 @@ namespace Morgott.ContentTool.Tactical
             internal Vector3 savedOffset;
             internal float[] savedEuler;
             internal float savedScale;
+            internal bool savedScaleHand;
 
             /// <summary>NOT-auto only: the turn and size the baked prefab had before any manifest key
             /// touched it - what an omitted "rotate" / "scale" stands for on reload.</summary>
@@ -1112,6 +1121,7 @@ namespace Morgott.ContentTool.Tactical
                 savedOffset = offset;
                 savedEuler = new[] { euler[0], euler[1], euler[2] };
                 savedScale = scale;
+                savedScaleHand = scaleHand;
             }
         }
 
@@ -1136,7 +1146,8 @@ namespace Morgott.ContentTool.Tactical
                 solved = solved,
                 offset = e.offset,
                 euler = new[] { euler[0], euler[1], euler[2] },
-                scale = scale
+                scale = scale,
+                scaleHand = e.scale > 0f
             };
             // Straight off the manifest, so a fit nobody has touched reads SAVED rather than MODIFIED.
             f.MarkSaved();
@@ -1157,7 +1168,11 @@ namespace Morgott.ContentTool.Tactical
             // Two reused triples, not two new arrays: the bench asks this every frame it draws.
             nowOffset[0] = f.offset.x; nowOffset[1] = f.offset.y; nowOffset[2] = f.offset.z;
             savedOffset[0] = f.savedOffset.x; savedOffset[1] = f.savedOffset.y; savedOffset[2] = f.savedOffset.z;
-            return !Dev.BenchList.Same(f.scale, f.euler, nowOffset, f.savedScale, f.savedEuler, savedOffset, 1e-5f);
+            // An unfrozen auto size moves with the turn, so it is equal to the saved one whenever the
+            // turn is - no false MODIFIED from a re-solve. The flag itself is compared because flipping
+            // it changes what SAVE writes (the "scale" key appears or goes away).
+            return f.scaleHand != f.savedScaleHand ||
+                   !Dev.BenchList.Same(f.scale, f.euler, nowOffset, f.savedScale, f.savedEuler, savedOffset, 1e-5f);
         }
 
         /// <summary>Scratch for <see cref="Modified"/> - main thread only, like every caller of it.</summary>
@@ -1196,24 +1211,67 @@ namespace Morgott.ContentTool.Tactical
             if (why != null) return why;
             f.offset += dPosition;
             f.euler[0] += dEuler.x; f.euler[1] += dEuler.y; f.euler[2] += dEuler.z;
-            f.scale = Mathf.Max(0.0001f, f.scale + dScale);
-            return Applied(key, f);
+            if (dScale != 0f)
+            {
+                f.scale = Mathf.Max(0.0001f, f.scale + dScale);
+                f.scaleHand = true;
+            }
+            return Refit(f) + Applied(key, f);
         }
 
         /// <summary>The same three channels, ABSOLUTE. Position is where the mesh child is to sit;
-        /// the "offset" the manifest will carry is derived from it, never the other way round.</summary>
+        /// the "offset" the manifest will carry is derived from it, never the other way round.
+        ///
+        /// A <paramref name="scale"/> equal to the current one, or &lt;= 0, is NOT a size edit: the size
+        /// stays the fit's (re-solved for the new turn when it is an unfrozen auto size). Only a
+        /// different positive value is the author's own and freezes it.</summary>
         public static string Set(string key, Vector3 position, Vector3 euler, float scale)
         {
             Dialled f;
             string why = Dial(key, out f);
             if (why != null) return why;
             f.euler = new[] { euler.x, euler.y, euler.z };
-            f.scale = Mathf.Max(0.0001f, scale);
+            if (scale > 0f && Mathf.Abs(scale - f.scale) > 1e-6f)
+            {
+                f.scale = Mathf.Max(0.0001f, scale);
+                f.scaleHand = true;
+            }
+            string note = Refit(f);
             // The turn and the size are applied FIRST, because on an auto fit they move the solved
             // centre - and "put it here" has to mean here, not here-before-the-solve-moved.
             Resolve(f);
             f.offset = position - f.solved;
-            return Applied(key, f);
+            return note + Applied(key, f);
+        }
+
+        /// <summary>
+        /// THE AUTO SIZE FOLLOWS THE TURN. An auto fit's size is solved for ONE orientation; turn the
+        /// gun and the same number no longer fills the donor's box (VAR: 0.2865 at rotate -45, 0.5528
+        /// at 0). So unless the author set the size himself, it is re-solved through the turn now on
+        /// the record - the same <see cref="FitBox.Solve"/> a fresh load runs. Returns "" or a note.
+        /// </summary>
+        private static string Refit(Dialled f)
+        {
+            if (!f.auto || f.scaleHand) return "";
+            float scale; string why;
+            if (!AutoScale(f, f.euler, out scale, out why))
+                return "ct_fit: auto size NOT re-solved for this turn (" + why + "); kept " +
+                       f.scale.ToString("0.0000", CultureInfo.InvariantCulture) + "\n";
+            f.scale = scale;
+            return "";
+        }
+
+        /// <summary>The auto fit's size for one turn, from the two boxes on the record.</summary>
+        private static bool AutoScale(Dialled f, float[] euler, out float scale, out string why)
+        {
+            Matrix4x4 rm = Matrix4x4.Rotate(Quaternion.Euler(euler[0], euler[1], euler[2]));
+            float[] rot = { rm.m00, rm.m01, rm.m02, rm.m10, rm.m11, rm.m12, rm.m20, rm.m21, rm.m22 };
+            float[] unused;
+            return FitBox.Solve(new[] { f.src.center.x, f.src.center.y, f.src.center.z },
+                                new[] { f.src.extents.x, f.src.extents.y, f.src.extents.z },
+                                new[] { f.dst.center.x, f.dst.center.y, f.dst.center.z },
+                                new[] { f.dst.extents.x, f.dst.extents.y, f.dst.extents.z }, rot,
+                                out scale, out unused, out why);
         }
 
         private static string Dial(string key, out Dialled f)
@@ -1276,7 +1334,11 @@ namespace Morgott.ContentTool.Tactical
             string held = Dial(key, out f);
             if (held != null) return held;
             string why;
-            string wrote = WeaponManifest.Save(f.manifest, f.entry.id, f.scale, f.euler,
+            // AN UNFROZEN AUTO SIZE IS NOT WRITTEN: 0 drops the "scale" key, so a reload or REVERT
+            // solves it fresh for whatever turn the file says - the 51fbc38 meaning of an omitted key.
+            // Writing it froze a size solved for one turn into a file that may later carry another.
+            float writeScale = f.auto && !f.scaleHand ? 0f : f.scale;
+            string wrote = WeaponManifest.Save(f.manifest, f.entry.id, writeScale, f.euler,
                                                new[] { f.offset.x, f.offset.y, f.offset.z }, out why);
             if (wrote == null)
                 return "ct_fit save REFUSED for '" + f.entry.id + "': " + why + " -> " + f.manifest;
@@ -1314,17 +1376,13 @@ namespace Morgott.ContentTool.Tactical
 
             float[] se = { f.src.extents.x, f.src.extents.y, f.src.extents.z };
             float[] euler = FitBox.RotationToZ(FitBox.LongAxis(se), f.entry.flip);
-            Matrix4x4 rm = Matrix4x4.Rotate(Quaternion.Euler(euler[0], euler[1], euler[2]));
-            float[] rot = { rm.m00, rm.m01, rm.m02, rm.m10, rm.m11, rm.m12, rm.m20, rm.m21, rm.m22 };
-            float scale; float[] offset; string why;
-            if (!FitBox.Solve(new[] { f.src.center.x, f.src.center.y, f.src.center.z }, se,
-                              new[] { f.dst.center.x, f.dst.center.y, f.dst.center.z },
-                              new[] { f.dst.extents.x, f.dst.extents.y, f.dst.extents.z }, rot,
-                              out scale, out offset, out why))
+            float scale; string why;
+            if (!AutoScale(f, euler, out scale, out why))
                 return "ct_fit auto REFUSED for '" + f.entry.id + "': " + why;
 
             f.euler = euler;
             f.scale = scale;
+            f.scaleHand = false;                     // the size is the solve's again, and follows the turn
             f.offset = Vector3.zero;                 // "offset" IS the manual nudge; auto has none
             return "ct_fit '" + f.entry.id + "' reset to the AUTOMATIC solve - every manual override " +
                    "(offset, rotate, scale) discarded. NOTHING was written: " + f.manifest +
@@ -1369,14 +1427,8 @@ namespace Morgott.ContentTool.Tactical
             else if (f.auto)
             {
                 // The same solve Fit runs for an undeclared scale, through the turn just chosen.
-                Matrix4x4 rm = Matrix4x4.Rotate(Quaternion.Euler(euler[0], euler[1], euler[2]));
-                float[] rot = { rm.m00, rm.m01, rm.m02, rm.m10, rm.m11, rm.m12, rm.m20, rm.m21, rm.m22 };
-                float[] unused; string why;
-                if (!FitBox.Solve(new[] { f.src.center.x, f.src.center.y, f.src.center.z },
-                                  new[] { f.src.extents.x, f.src.extents.y, f.src.extents.z },
-                                  new[] { f.dst.center.x, f.dst.center.y, f.dst.center.z },
-                                  new[] { f.dst.extents.x, f.dst.extents.y, f.dst.extents.z }, rot,
-                                  out scale, out unused, out why))
+                string why;
+                if (!AutoScale(f, euler, out scale, out why))
                     return "ct_fit reload REFUSED for '" + fresh.id + "': " + why;
             }
             else scale = f.bakedScale > 0f ? f.bakedScale : f.scale;
@@ -1384,6 +1436,7 @@ namespace Morgott.ContentTool.Tactical
             f.entry = fresh;
             f.euler = euler;
             f.scale = scale;
+            f.scaleHand = fresh.scale > 0f;
             f.offset = fresh.offset;
             // What is on screen is now what the file says, so the panel reads SAVED again.
             f.MarkSaved();

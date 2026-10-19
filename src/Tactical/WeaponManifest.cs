@@ -145,7 +145,9 @@ namespace Morgott.ContentTool.Tactical
             }
 
             string row = hit.Text;
-            row = Set(row, "scale", scale.ToString("0.0000", CultureInfo.InvariantCulture));
+            // scale <= 0 = "not the author's number": the key is REMOVED, so a reload re-solves it.
+            row = scale > 0f ? Set(row, "scale", scale.ToString("0.0000", CultureInfo.InvariantCulture))
+                             : Drop(row, "scale");
             row = Set(row, "rotate", Xyz(rotate, "0.###"));
             row = Set(row, "offset", Xyz(offset, "0.####"));
             return json.Substring(0, hit.Start) + row + json.Substring(hit.Start + hit.Text.Length);
@@ -169,6 +171,40 @@ namespace Morgott.ContentTool.Tactical
             return nl == null
                 ? row.Substring(0, brace + 1) + " " + pair + row.Substring(brace + 1)
                 : row.Substring(0, brace + 1) + nl + Indent(row, nl) + pair + row.Substring(brace + 1);
+        }
+
+        /// <summary>One key taken out of a row, with its comma, so the row stays valid JSON: a key on
+        /// its own line takes the whole line; the LAST key takes the comma before it. Absent = no-op.</summary>
+        private static string Drop(string row, string name)
+        {
+            Match at = Regex.Match(row, "\"" + name + "\"\\s*:\\s*(\"[^\"]*\"|[^,}\\s]+)");
+            if (!at.Success) return row;
+            int start = at.Index, end = at.Index + at.Length;
+            int after = end;
+            while (after < row.Length && char.IsWhiteSpace(row[after])) after++;
+            if (after < row.Length && row[after] == ',')
+            {
+                end = after + 1;
+                // Own line: back over the indent and the line break before it, so no blank line stays.
+                int b = start;
+                while (b > 0 && (row[b - 1] == ' ' || row[b - 1] == '\t')) b--;
+                if (b > 0 && row[b - 1] == '\n')
+                {
+                    b--;
+                    if (b > 0 && row[b - 1] == '\r') b--;
+                    start = b;
+                }
+                else
+                    while (end < row.Length && (row[end] == ' ' || row[end] == '\t')) end++;
+            }
+            else
+            {
+                // The last key: the comma that separated it from the one before goes with it.
+                int b = start;
+                while (b > 0 && char.IsWhiteSpace(row[b - 1])) b--;
+                if (b > 0 && row[b - 1] == ',') start = b - 1;
+            }
+            return row.Substring(0, start) + row.Substring(end);
         }
 
         /// <summary>The row's own leading whitespace on its second line - so an inserted key lines up

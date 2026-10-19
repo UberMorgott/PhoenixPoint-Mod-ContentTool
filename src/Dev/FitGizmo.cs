@@ -703,7 +703,9 @@ namespace Morgott.ContentTool.Dev
             }
             Vector3 local = ring == 0 ? Vector3.right : ring == 1 ? Vector3.up : Vector3.forward;
             Quaternion turned = Quaternion.AngleAxis(degrees, local) * Quaternion.Euler(startEuler);
-            Last = WeaponBuild.Set(dragKey, startPos, turned.eulerAngles, startScale);
+            // Scale 0 = "not a size edit": an unfrozen auto size re-solves for the turn, a hand-set one
+            // stays. Passing startScale here froze the press-time size as if the author had typed it.
+            Last = WeaponBuild.Set(dragKey, startPos, turned.eulerAngles, 0f);
         }
 
         /// <summary>Escape, right-click, or anything that pulls the gizmo's footing out from under it:
@@ -712,7 +714,8 @@ namespace Morgott.ContentTool.Dev
         private static void Cancel()
         {
             if (active >= 0 && dragKey != null)
-                try { Last = WeaponBuild.Set(dragKey, startPos, startEuler, startScale); }
+                // 0 again: back at startEuler an auto size re-solves to exactly startScale.
+                try { Last = WeaponBuild.Set(dragKey, startPos, startEuler, 0f); }
                 catch (Exception) { }
             if (owner != 0 && GUIUtility.hotControl == owner) GUIUtility.hotControl = 0;
             active = -1; hover = -1; owner = 0; dragKey = null;
