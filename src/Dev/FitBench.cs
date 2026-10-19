@@ -1176,10 +1176,11 @@ namespace Morgott.ContentTool.Dev
             // The muted volumes back to the weight they had. A volume Unity has since destroyed (the
             // lighting re-applied) is nothing to put back and its row simply goes.
             List<KeyValuePair<Component, float>> stuck = new List<KeyValuePair<Component, float>>();
+            Component restored = null;
             foreach (KeyValuePair<Component, float> m in muted)
             {
                 if (m.Key == null) continue;
-                try { VolumeWeight(m.Key, m.Value); }
+                try { VolumeWeight(m.Key, m.Value); restored = m.Key; }
                 catch (Exception)
                 {
                     stuck.Add(m);
@@ -1188,6 +1189,36 @@ namespace Morgott.ContentTool.Dev
             }
             muted.Clear();
             muted.AddRange(stuck);
+            if (restored != null) InvalidatePostProcess(restored);
+        }
+
+        /// <summary>
+        /// A volume weight change alone is not seen: PostProcessManager.UpdateSettings blends volumes only
+        /// while the static <c>NeedUpdateSettings</c> is set (PostProcessManager.cs:239-242), and the game
+        /// sets it only from LightingManager (LightingManager.cs:67/167). A bench opened where that
+        /// lighting is already active (Edit Soldier - SetLighting returns early, LightingManager.cs:131-133)
+        /// kept the cached DoF/Bloom at weight 0. Set by reflection off the volume's own assembly, because
+        /// the post-processing assembly is not referenced.
+        /// </summary>
+        private static void InvalidatePostProcess(Component volume)
+        {
+            try
+            {
+                Type manager = volume.GetType().Assembly.GetType("UnityEngine.Rendering.PostProcessing.PostProcessManager");
+                FieldInfo need = manager == null ? null : manager.GetField("NeedUpdateSettings",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (need == null)
+                {
+                    Debug.LogWarning("[ContentTool] ct_bench: PostProcessManager.NeedUpdateSettings not found - " +
+                                     "the post-process change may not show until the lighting is re-applied");
+                    return;
+                }
+                need.SetValue(null, true);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[ContentTool] ct_bench: could not refresh post-process settings: " + e.Message);
+            }
         }
 
         private const string VolumeType = "UnityEngine.Rendering.PostProcessing.PostProcessVolume";
@@ -1210,6 +1241,7 @@ namespace Morgott.ContentTool.Dev
                     BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
                 Transform root = rootField == null ? null : rootField.GetValue(lighting) as Transform;
                 if (root == null) return;
+                Component changed = null;
                 foreach (Component c in root.GetComponentsInChildren<Component>(true))
                 {
                     if (c == null || c.GetType().FullName != VolumeType) continue;
@@ -1222,7 +1254,9 @@ namespace Morgott.ContentTool.Dev
                     if (weight <= 0f) continue;
                     w.SetValue(c, 0f);
                     muted.Add(new KeyValuePair<Component, float>(c, weight));
+                    changed = c;
                 }
+                if (changed != null) InvalidatePostProcess(changed);
             }
             catch (Exception e)
             {
