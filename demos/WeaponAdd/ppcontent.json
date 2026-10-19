@@ -33,6 +33,7 @@
       "model":  "c7a9f1d24b6e4a3c8f5b7d1e9a2c4b61",
       "fit":    "auto",
       "offset": "0,-0.07,0",
+      "rotate": "-45,0,0",
       "projectile": "Crabman_Head_Spitter_WeaponDef",
       "tint":   "#4CFF5A",
       "damage": "45",
@@ -60,8 +61,8 @@
       "clips":  "10"
     },
     {
-      "offset": "-0.01,0,-0.062",
-      "rotate": "0,-10,0",
+      "offset": "-0.01,0,-0.0727",
+      "rotate": "353.526,353.55,353.038",
       "scale": "0.2416",
       "id":     "Morgott_VultureSidearm_WeaponDef",
       "name":   "Vulture Sidearm",
