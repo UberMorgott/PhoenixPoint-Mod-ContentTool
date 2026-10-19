@@ -1044,6 +1044,10 @@ namespace Morgott.ContentTool.Tactical
             // no solve here, so "offset" nudges that, which is the same rule either way. It is read
             // BEFORE the nudge so that re-reading the manifest lands in the same place twice.
             Vector3 baseline = node.localPosition;
+            // What the prefab carried BEFORE any key - what a manifest that omits "rotate" or "scale"
+            // means, so Reload has something to go back to once the eye has turned it (#4).
+            Vector3 bakedEuler = node.localEulerAngles;
+            float bakedScale = node.localScale.x;
             if (e.declaresRotate) node.localRotation = Quaternion.Euler(e.rotate.x, e.rotate.y, e.rotate.z);
             if (e.scale > 0f) node.localScale = new Vector3(e.scale, e.scale, e.scale);
             node.localPosition = baseline + e.offset;
@@ -1054,6 +1058,9 @@ namespace Morgott.ContentTool.Tactical
                 ? new[] { e.rotate.x, e.rotate.y, e.rotate.z }
                 : new[] { node.localEulerAngles.x, node.localEulerAngles.y, node.localEulerAngles.z };
             Remember(e, prefab, node, false, new Bounds(), new Bounds(), baseline, euler, node.localScale.x);
+            Dialled f = dialled[Key(e)];
+            f.bakedEuler = new[] { bakedEuler.x, bakedEuler.y, bakedEuler.z };
+            f.bakedScale = bakedScale;
         }
 
         // ---------------------------------------------------------------- dialling a fit in, LIVE
@@ -1091,6 +1098,11 @@ namespace Morgott.ContentTool.Tactical
             internal Vector3 savedOffset;
             internal float[] savedEuler;
             internal float savedScale;
+
+            /// <summary>NOT-auto only: the turn and size the baked prefab had before any manifest key
+            /// touched it - what an omitted "rotate" / "scale" stands for on reload.</summary>
+            internal float[] bakedEuler;
+            internal float bakedScale;
 
             internal void MarkSaved()
             {
@@ -1340,12 +1352,35 @@ namespace Morgott.ContentTool.Tactical
             if (fresh == null)
                 return "ct_fit reload REFUSED: '" + f.entry.id + "' is no longer in " + f.manifest;
 
+            // AN OMITTED KEY IS A VALUE TOO (#4). "rotate" / "scale" absent means what a fresh load
+            // gives - the auto solve, or the baked prefab's own - never "whatever is on screen": that
+            // kept a nudged turn through REVERT, and MarkSaved below then called it SAVED.
+            float[] euler;
+            if (fresh.declaresRotate) euler = new[] { fresh.rotate.x, fresh.rotate.y, fresh.rotate.z };
+            else if (f.auto)
+                euler = FitBox.RotationToZ(FitBox.LongAxis(new[] { f.src.extents.x, f.src.extents.y, f.src.extents.z }),
+                                           fresh.flip);
+            else euler = f.bakedEuler != null ? (float[])f.bakedEuler.Clone() : f.euler;
+            float scale;
+            if (fresh.scale > 0f) scale = fresh.scale;
+            else if (f.auto)
+            {
+                // The same solve Fit runs for an undeclared scale, through the turn just chosen.
+                Matrix4x4 rm = Matrix4x4.Rotate(Quaternion.Euler(euler[0], euler[1], euler[2]));
+                float[] rot = { rm.m00, rm.m01, rm.m02, rm.m10, rm.m11, rm.m12, rm.m20, rm.m21, rm.m22 };
+                float[] unused; string why;
+                if (!FitBox.Solve(new[] { f.src.center.x, f.src.center.y, f.src.center.z },
+                                  new[] { f.src.extents.x, f.src.extents.y, f.src.extents.z },
+                                  new[] { f.dst.center.x, f.dst.center.y, f.dst.center.z },
+                                  new[] { f.dst.extents.x, f.dst.extents.y, f.dst.extents.z }, rot,
+                                  out scale, out unused, out why))
+                    return "ct_fit reload REFUSED for '" + fresh.id + "': " + why;
+            }
+            else scale = f.bakedScale > 0f ? f.bakedScale : f.scale;
+
             f.entry = fresh;
-            // ponytail: an undeclared scale or rotation keeps what is on screen rather than re-running
-            // FitBox against the donor - after any save the manifest declares all three, so this only
-            // ever holds for a reload of an entry that was never dialled. Re-enable the mod for that.
-            if (fresh.declaresRotate) f.euler = new[] { fresh.rotate.x, fresh.rotate.y, fresh.rotate.z };
-            if (fresh.scale > 0f) f.scale = fresh.scale;
+            f.euler = euler;
+            f.scale = scale;
             f.offset = fresh.offset;
             // What is on screen is now what the file says, so the panel reads SAVED again.
             f.MarkSaved();
