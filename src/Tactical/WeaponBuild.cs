@@ -702,9 +702,26 @@ namespace Morgott.ContentTool.Tactical
             if (!reference.RuntimeKeyIsValid())
                 return "REFUSED key '" + e.model + "' is not a valid Addressables runtime key";
 
-            AsyncOperationHandle<GameObject> handle = reference.LoadAssetAsync<GameObject>();
+            // ============ OUR OWN HANDLE, NEVER THE DEF'S REFERENCE ============
+            // The load used to go through reference.LoadAssetAsync - i.e. it lived INSIDE the very
+            // AssetReference the game's AssetsManager ref-counts. The geoscape's "Characters & Items"
+            // pass counts every def's AssetReference (AssetsManager.cs:86-102; an already-valid one is
+            // counted but not loaded, :115-127), and leaving the geoscape releases them
+            // (ReleaseDependencies :249-252 -> reference.ReleaseAsset()). That release killed OUR
+            // load: MEASURED 2026-10-18 on D:\PP-Instance2 - Asset 'ar181' valid in the geoscape,
+            // Asset null / IsValid false in the next tactical mission. A weapon put in a hand after
+            // that (no preload) attached nothing - invisible, no EXT_ShootPoint, shoot NoValidTarget -
+            // and a weapon the game DID re-acquire came back from a fresh bundle load without the
+            // sockets fitted below. So the load is a separate Addressables handle that the game never
+            // sees and never releases (it keeps the bundle, and with it this prefab and its sockets,
+            // alive for the session), and GetPrefabAsset falls back to it whenever the reference
+            // itself is not loaded (HoldPrefab / PrefabAssetPostfix).
+            InstallPrefabFallback();
+            AsyncOperationHandle<GameObject> handle = Addressables.LoadAssetAsync<GameObject>(e.model);
             handle.Completed += op =>
             {
+                if (op.Status == AsyncOperationStatus.Succeeded && op.Result != null)
+                    HeldPrefabs[reference.AssetGUID] = op.Result;
                 if (op.Status != AsyncOperationStatus.Succeeded || op.Result == null)
                 {
                     Dev.ChunkedLog.Fail("[ContentTool] ct_weapon FAIL key '" + e.model + "' did not load (" +
@@ -775,6 +792,46 @@ namespace Morgott.ContentTool.Tactical
                 catch (Exception ex) { Dev.ChunkedLog.Fail("[ContentTool] ct_weapon socket fit threw " + ex); }
             };
             return "load started for key " + e.model;
+        }
+
+        /// <summary>Every mod weapon prefab, by its AssetGUID, held through our own handle.</summary>
+        private static readonly Dictionary<string, GameObject> HeldPrefabs = new Dictionary<string, GameObject>();
+        private static HarmonyLib.Harmony prefabHarmony;
+
+        /// <summary>
+        /// One postfix on AddonSkinDataBase.GetPrefabAsset (AddonSkinDataBase.cs:19-29), patched
+        /// explicitly (no [HarmonyPatch] attribute, so CreatureBuild's PatchAll cannot add a second
+        /// copy). It changes NOTHING the game resolved itself: only a null result for one of OUR keys
+        /// is answered with the prefab our handle holds.
+        /// </summary>
+        private static void InstallPrefabFallback()
+        {
+            if (prefabHarmony != null) return;
+            System.Reflection.MethodInfo target =
+                HarmonyLib.AccessTools.Method(typeof(PhoenixPoint.Common.Entities.Addons.AddonSkinDataBase), "GetPrefabAsset");
+            if (target == null)
+            {
+                Dev.ChunkedLog.Fail("[ContentTool] ct_weapon FAIL AddonSkinDataBase.GetPrefabAsset not found - " +
+                                    "a mod weapon will hold nothing once the game releases its reference");
+                return;
+            }
+            HarmonyLib.Harmony h = new HarmonyLib.Harmony("com.morgott.ContentTool.WeaponPrefab");
+            h.Patch(target, postfix: new HarmonyLib.HarmonyMethod(
+                HarmonyLib.AccessTools.Method(typeof(WeaponBuild), nameof(PrefabAssetPostfix))));
+            prefabHarmony = h;
+        }
+
+        private static void PrefabAssetPostfix(AssetReferenceGameObject assetReference, ref GameObject __result)
+        {
+            if (__result != null || assetReference == null || HeldPrefabs.Count == 0) return;
+            try
+            {
+                GameObject held;
+                string guid = assetReference.AssetGUID;
+                if (!string.IsNullOrEmpty(guid) && HeldPrefabs.TryGetValue(guid, out held) && held != null)
+                    __result = held;
+            }
+            catch { /* every character in the game resolves through here - never throw out of it */ }
         }
 
         /// <summary>
