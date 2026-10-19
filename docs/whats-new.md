@@ -1,5 +1,16 @@
 # What’s new
 
+## 1.4.1 (released 2026-10-20)
+
+### Fixed
+
+- Mod weapons stay visible and fire in tactical missions after leaving the geoscape; before, they could come back invisible or without their fitted shoot point (`NoValidTarget`).
+- Creatures built from a model file shoot from their weapon's muzzle; before, the shot started up to ~0.8 m off the barrel.
+- A creature's melee Strike finds its targets, including when the Strike comes from an inherited animation set (it used to always answer `NoValidTarget`).
+- The bench 3D view no longer renders black with post-processing upscalers such as Renderforge DLAA enabled.
+- [Add a weapon](bench/add-weapon.md): `Revert` restores the weapon's rotation and size when `ppcontent.json` leaves them out; auto scale re-solves after a turn and stays automatic on `Save fit`; the paste-ready fit report no longer writes the auto scale as a fixed value.
+- Replacing a model works on ContentTool creatures whose mesh lives on the rig.
+
 ## 1.4.0 (released 2026-09-28)
 
 ### New
