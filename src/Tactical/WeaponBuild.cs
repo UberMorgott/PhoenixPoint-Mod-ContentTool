@@ -1559,9 +1559,14 @@ namespace Morgott.ContentTool.Tactical
                 // reloaded as a different gun from the one on screen. Everything printed here is now
                 // the same three values Save writes and Resolve applies.
                 Vector3 off = f.offset;
-                sb.Append(kv.Key).Append("\n")
-                  .Append("  \"scale\": \"").Append(f.scale.ToString("0.0000", CultureInfo.InvariantCulture)).Append("\",\n")
-                  .Append("  \"rotate\": \"").Append(f.euler[0].ToString("0.###", CultureInfo.InvariantCulture)).Append(",")
+                // Same rule as Save: an unfrozen auto size is NOT paste-ready - pasting it would freeze
+                // a size solved for this one turn. It is still shown, outside the block, as a note.
+                bool autoScale = f.auto && !f.scaleHand;
+                string sc = f.scale.ToString("0.0000", CultureInfo.InvariantCulture);
+                sb.Append(kv.Key).Append("\n");
+                if (autoScale) sb.Append("  (scale ").Append(sc).Append(" = auto solve for this turn, not written)\n");
+                else sb.Append("  \"scale\": \"").Append(sc).Append("\",\n");
+                sb.Append("  \"rotate\": \"").Append(f.euler[0].ToString("0.###", CultureInfo.InvariantCulture)).Append(",")
                   .Append(f.euler[1].ToString("0.###", CultureInfo.InvariantCulture)).Append(",")
                   .Append(f.euler[2].ToString("0.###", CultureInfo.InvariantCulture)).Append("\",\n")
                   .Append("  \"offset\": \"").Append(Xyz(off)).Append("\"\n")
