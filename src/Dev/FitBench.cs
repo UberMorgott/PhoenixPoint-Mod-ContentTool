@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 using Base.Cameras;
 using Base.Core;
 using Base.Defs;
@@ -495,15 +496,14 @@ namespace Morgott.ContentTool.Dev
             /// inherits the background's, which is exactly the "soft and washed out off the body" the
             /// user sees. Bloom then adds the wash.
             ///
-            /// The fix is the game's OWN lever: PostProcessLayer.enabled, which is what
-            /// ForcedPostProcessLayerSettings' 'dbg_toggle_post_processing' console command toggles
-            /// (:20-31). One Behaviour flag on the bench's camera, remembered here and put back by
-            /// <see cref="ReleaseCamera"/> next to the brain - and a bench with no bloom and no DOF is
-            /// the right picture anyway, because a fit is judged on an edge. Fetched BY NAME for the
-            /// same reason the brain is: the post-processing assembly is not referenced by this mod and
-            /// does not need to be for one bool.
+            /// The first fix switched the camera's PostProcessLayer off. That broke issue #3: an upscaler
+            /// that owns the camera (Renderforge DLSS/DLAA sets cam.targetTexture and feeds its output
+            /// from a postfix on PostProcessLayer.OnPreCull) never gets its frame with the layer off,
+            /// and the bench 3D view goes BLACK. So the layer now stays on, and the blur is taken away
+            /// at its SOURCE instead: the bench lighting's own PostProcessVolume(s) get weight 0 - see
+            /// <see cref="MuteBenchVolumes"/> and <see cref="muted"/>. Nothing here knows Renderforge;
+            /// the camera's render path is simply left as the game built it.
             /// </summary>
-            internal Behaviour post;
             /// <summary>Its near plane before <see cref="BenchList.NearClip"/> was written over it.
             /// The geoscape's own near plane is authored for a planet, and at the close range the zoom
             /// clamp now allows it clipped the weapon away.</summary>
@@ -513,6 +513,10 @@ namespace Morgott.ContentTool.Dev
             internal bool enabled;
         }
         private static readonly List<Held> cameras = new List<Held>();
+        /// <summary>The bench lighting's PostProcessVolumes this bench muted, each with the weight it
+        /// had when found. A volume already on the ledger is never re-recorded, so a re-take (every
+        /// screen change, RESET VIEW) can't remember our own 0 as the original.</summary>
+        private static readonly List<KeyValuePair<Component, float>> muted = new List<KeyValuePair<Component, float>>();
         private static Vector3 framePos; private static Quaternion frameRot;
         private static bool framed;
         /// <summary>The lift knob, remembered for the session and nowhere else. Framing is an eyeball
@@ -608,6 +612,7 @@ namespace Morgott.ContentTool.Dev
             hidden.Clear();
             masks.Clear();
             cameras.Clear();
+            muted.Clear();
             try
             {
                 // FIRST of all the mutations: while the bench is up, the game must not answer input at
@@ -1077,6 +1082,10 @@ namespace Morgott.ContentTool.Dev
             if (cam == null) cam = Camera.main;
             if (cam == null) { message = "ct_bench: no camera to frame with."; return; }
 
+            // Before the early return below: the lighting may have been re-applied since the last take,
+            // and a freshly instantiated volume is at full weight again.
+            MuteBenchVolumes();
+
             // Already on the ledger? Then it is already standing where WE put it, and recording it a
             // second time would make Close restore our own pose instead of the game's.
             foreach (Held h in cameras) if (h.camera == cam) return;
@@ -1095,14 +1104,8 @@ namespace Morgott.ContentTool.Dev
                 if (b != null && b.enabled) { b.enabled = false; row.brain = b; }
             }
             catch (Exception) { }
-            // See Held.post: post-processing is what blurs the handles wherever they fall on the
-            // background, because they are drawn into the colour target before it runs.
-            try
-            {
-                Behaviour p = cam.GetComponent("PostProcessLayer") as Behaviour;
-                if (p != null && p.enabled) { p.enabled = false; row.post = p; }
-            }
-            catch (Exception) { }
+            // The PostProcessLayer is deliberately LEFT ON (issue #3, see the WHY comment in Held):
+            // MuteBenchVolumes above removed the bench's DOF/bloom at the volume instead.
             try { if (cam.nearClipPlane > BenchList.NearClip) cam.nearClipPlane = BenchList.NearClip; }
             catch (Exception) { }
             cameras.Add(row);
@@ -1120,8 +1123,6 @@ namespace Morgott.ContentTool.Dev
                 bool ok = true;
                 try { if (h.brain != null) h.brain.enabled = true; }
                 catch (Exception) { ok = false; }
-                try { if (h.post != null) h.post.enabled = true; }
-                catch (Exception) { ok = false; }
                 try
                 {
                     if (h.camera != null)
@@ -1136,11 +1137,73 @@ namespace Morgott.ContentTool.Dev
                 if (ok) continue;
                 left.Add(h);
                 if (failed != null)
-                    failed.Add("camera '" + (h.camera == null ? "?" : h.camera.name) + "' (pose/brain/post-processing/near plane)");
+                    failed.Add("camera '" + (h.camera == null ? "?" : h.camera.name) + "' (pose/brain/near plane)");
             }
             cameras.Clear();
             cameras.AddRange(left);
             cam = null; framed = false;
+
+            // The muted volumes back to the weight they had. A volume Unity has since destroyed (the
+            // lighting re-applied) is nothing to put back and its row simply goes.
+            List<KeyValuePair<Component, float>> stuck = new List<KeyValuePair<Component, float>>();
+            foreach (KeyValuePair<Component, float> m in muted)
+            {
+                if (m.Key == null) continue;
+                try { VolumeWeight(m.Key, m.Value); }
+                catch (Exception)
+                {
+                    stuck.Add(m);
+                    if (failed != null) failed.Add("post-process volume '" + m.Key.name + "' (weight)");
+                }
+            }
+            muted.Clear();
+            muted.AddRange(stuck);
+        }
+
+        private const string VolumeType = "UnityEngine.Rendering.PostProcessing.PostProcessVolume";
+
+        /// <summary>
+        /// Every PostProcessVolume under the lighting's CURRENT lights root (the bench lighting,
+        /// level.View.EditSolderLightingSettings, instantiated there by LightingSettingsDef.ApplyTo:22)
+        /// gets weight 0 - the volume LightingManager.ApplyPostProcessOptions:168-178 turns DOF and
+        /// bloom on in. Each original weight goes on <see cref="muted"/> once. Idempotent: a volume
+        /// already on the ledger, or already at 0, is left alone. The root is the protected
+        /// <c>_currentLightsRoot</c>, read by reflection; the volume type and its public
+        /// <c>weight</c> field BY NAME, because the post-processing assembly is not referenced.
+        /// </summary>
+        private static void MuteBenchVolumes()
+        {
+            try
+            {
+                if (lighting == null) return;
+                FieldInfo rootField = typeof(LightingManager).GetField("_currentLightsRoot",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                Transform root = rootField == null ? null : rootField.GetValue(lighting) as Transform;
+                if (root == null) return;
+                foreach (Component c in root.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null || c.GetType().FullName != VolumeType) continue;
+                    bool known = false;
+                    foreach (KeyValuePair<Component, float> m in muted) if (m.Key == c) { known = true; break; }
+                    if (known) continue;
+                    FieldInfo w = c.GetType().GetField("weight", BindingFlags.Instance | BindingFlags.Public);
+                    if (w == null) continue;
+                    float weight = (float)w.GetValue(c);
+                    if (weight <= 0f) continue;
+                    w.SetValue(c, 0f);
+                    muted.Add(new KeyValuePair<Component, float>(c, weight));
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[ContentTool] ct_bench: could not mute the bench post-process volume: " + e.Message);
+            }
+        }
+
+        private static void VolumeWeight(Component volume, float weight)
+        {
+            FieldInfo w = volume.GetType().GetField("weight", BindingFlags.Instance | BindingFlags.Public);
+            if (w != null) w.SetValue(volume, weight);
         }
 
         /// <summary>The rotation this camera had BEFORE the workbench took it, off the ledger - never
