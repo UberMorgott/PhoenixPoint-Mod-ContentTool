@@ -963,6 +963,13 @@ namespace Morgott.ContentTool.Dev
 
             Dictionary<string, KeyValuePair<Addon, SkinnedMeshRenderer>> live = LiveSlots();
             Transform root = bay.CharacterBuilder.transform;
+            // A CONTENT MOD'S CREATURE HAS NO SLOT MESHES: CreatureBuild clones the chassis tree without
+            // its skin and the whole body is the ONE SkinnedMeshRenderer on the rig the mod ships
+            // (AddonsManagerDef.Rig, instantiated by AddonsManager.SetupRig as RigRoot). Without this every
+            // slot came back "slot visual unavailable" and the picker could never Replace. Ours() only -
+            // a vanilla unit keeps the strict slot-renderer rule above.
+            TacCharacterDef rep = harvest == null ? null : harvest.Representative(variant.RepresentativeCharacter);
+            SkinnedMeshRenderer rigMesh = Ours(rep) ? RigMesh() : null;
             // ONE open per shipped .bundle for the whole pass, not one per slot: the BundleBaker ctor
             // DECOMPRESSES the archive on the main thread, and the slots of one prototype name the same few
             // bundles over and over. Every one of them is closed in the finally, whatever a slot does.
@@ -986,6 +993,15 @@ namespace Morgott.ContentTool.Dev
                         // in this rebuild still gets its target.
                         ShippedTarget.Resolve(made.Key, made.Value, target, bakers);
                     }
+                    else if (rigMesh != null)
+                    {
+                        target.Live = ModelDoctor.Snapshot(rigMesh, SeamSwap.RelativePath(root, rigMesh.transform));
+                        // No ShippedTarget.Resolve: that walks a game addon's bundles, and this mesh is in
+                        // no game bundle at all. Check and preview work; Build says why it cannot.
+                        target.TargetRefusal = "this creature comes from a content mod: its mesh is the mod's " +
+                            "own rig, not a game file, so Build has nothing to replace - the check and preview " +
+                            "work; to ship a new body, change the model in that mod's creature entry";
+                    }
                     else
                         target.Unavailable = "slot visual unavailable";
                     slotTargets.Add(target);
@@ -998,6 +1014,20 @@ namespace Morgott.ContentTool.Dev
                     if (baker != null)
                         try { baker.Dispose(); } catch (Exception ex) { Dev.ChunkedLog.Warn("[ContentTool] Retarget: " + ex); }
             }
+        }
+
+        /// <summary>The skinned mesh on the instantiated rig itself (AddonsManager.RigRoot), or null.</summary>
+        private static SkinnedMeshRenderer RigMesh()
+        {
+            try
+            {
+                AddonsManager manager = bay.CharacterBuilder.AddonsManager;
+                if (manager == null || manager.RigRoot == null) return null;
+                foreach (SkinnedMeshRenderer smr in manager.RigRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                    if (smr != null && smr.sharedMesh != null) return smr;
+            }
+            catch (Exception ex) { Dev.ChunkedLog.Warn("[ContentTool] Retarget: rig mesh - " + ex.Message); }
+            return null;
         }
 
         /// <summary>Slot def name -&gt; the renderer THIS rebuild produced for it, WITH the addon that owns
