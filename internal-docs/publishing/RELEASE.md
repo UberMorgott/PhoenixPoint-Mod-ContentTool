@@ -87,19 +87,12 @@ Mods that need it list it as a dependency and enable it for you. On its own it c
 
 (first line 105 chars, inside the ~110 the list row shows).
 
-### Still blocking a submission
+### Status: published
 
-1. **Preview image — does not exist yet.** Steam requires one and the tooling refuses without it.
-   Constraint verified from our own publish tooling: **≤ 1 MB**, JPG or PNG. The de-facto shape used
-   by the other mods is `1024x1024` JPG (`PerkOracle\image\steam_preview.jpg`, 292 KB). Target
-   `ContentTool\image\steam_preview.jpg`.
-2. **No publish tooling here.** `PerkOracle\workshop\` holds the whole rig — `pack-dist.ps1`,
-   `oracle.vdf` (SteamCMD item descriptor), `steamugc\publish_ugc.py`, `update.ps1`. Copy and retarget
-   when the time comes; the content folder must be the **packaged** mod (`ContentTool.dll` +
-   `meta.json`), never the repo.
-3. **First publish is GUI-only.** The `publishedfileid` is created by SnapshotGames' PPWorkshopTool;
-   SteamCMD / `publish_ugc.py` only UPDATE an existing id afterwards.
-4. **Per-language gotcha** (bit both other mods): after `SetItemUpdateLanguage` you must also call
-   `SetItemTitle` again, or the non-English pages publish with an empty heading.
-5. GitHub release first — the README's install instructions point at
-   `releases/latest`, which has to exist.
+- Workshop item **3814069959** (PUBLIC), <https://steamcommunity.com/sharedfiles/filedetails/?id=3814069959>.
+  Created 2026-10-05 with 1.4.0 through IssueWatcher; 1.4.1 uploaded 2026-10-19 (IssueWatcher
+  publish task `0cbe60cbca09165e`, 2,668,585 B), 8-language page + preview + tag `Gameplay`.
+- Runbook: `workshop\WORKSHOP.md` (IssueWatcher Steam project 73 / code project 34; `pack-dist.ps1`
+  builds `workshop\Dist`; `contenttool.vdf` carries the id).
+- Still true: GitHub release first (README install points at `releases/latest`); per-language
+  gotcha — after `SetItemUpdateLanguage` also `SetItemTitle`, or that page's heading is blank.

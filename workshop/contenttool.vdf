@@ -5,8 +5,9 @@
 //   (workshop\update.ps1 does this for you.)
 //
 // publishedfileid:
-//   "PUBLISHEDFILEID_PLACEHOLDER" -> NOTHING HAS BEEN PUBLISHED YET. update.ps1 refuses to run.
-//   "<real id>"                   -> UPDATE that existing item.
+//   "3814069959" = the ContentTool item (public, created 2026-10-05):
+//   https://steamcommunity.com/sharedfiles/filedetails/?id=3814069959
+//   "PUBLISHEDFILEID_PLACEHOLDER" would mean nothing published yet; update.ps1 refuses that.
 // Never paste an id from another mod here: SteamCMD would upload ContentTool over that item.
 //
 //   contentfolder = the assembled workshop\Dist (run workshop\pack-dist.ps1 first).
@@ -20,7 +21,7 @@
 "workshopitem"
 {
 	"appid"           "839770"
-	"publishedfileid" "PUBLISHEDFILEID_PLACEHOLDER"
+	"publishedfileid" "3814069959"
 	"contentfolder"   "E:\DEV\PhoenixPoint\ContentTool\workshop\Dist"
 	"previewfile"     "E:\DEV\PhoenixPoint\ContentTool\workshop\image\steam_preview.jpg"
 	"changenote"      "Update ContentTool."

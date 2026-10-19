@@ -3,8 +3,28 @@
 Everything needed to put **ContentTool** on the Steam Workshop for **Phoenix Point**
 (appid **839770**), and to update it afterwards.
 
-> **This rig has never been run.** No Workshop item exists, no id has been recorded, nothing has
-> been uploaded. It was written offline so that you can read it first and run it yourself.
+> **The item exists and is PUBLIC:** id **3814069959**,
+> <https://steamcommunity.com/sharedfiles/filedetails/?id=3814069959> (created 2026-10-05 with
+> 1.4.0 through IssueWatcher; 1.4.1 uploaded 2026-10-19 the same way). Sections 1-2 below are
+> history - never create a second item.
+>
+> **Current upload path = IssueWatcher** (running Steam client, no password), Steam page = its
+> project **73**, code project = **34**:
+>
+> ```powershell
+> cd E:\IssueWatcher
+> .\issuewatcher-cli.exe workshop status --app-id 839770        # running + loggedOn
+> .\workshop\pack-dist.ps1                                      # (from the ContentTool root) build Dist
+> .\issuewatcher-cli.exe publish 73 --path E:\DEV\PhoenixPoint\ContentTool\workshop\Dist --version X.Y.Z --changelog-file <bbcode notes> --dry-run
+> .\issuewatcher-cli.exe publish 73 ... --wait                  # same args, real: content + change note only
+> .\issuewatcher-cli.exe workshop page 34 --item 3814069959 --app-id 839770 --locale-dir workshop/locale --preview workshop/image/steam_preview.jpg --tags Gameplay [--dry-run]
+> ```
+>
+> `workshop page` writes title.<lang>.txt + description.<lang>.txt for all 8 languages, preview and
+> tags; paths are relative to the mod folder (absolute ones are refused). Neither command changes
+> visibility. Build `Dist` from the committed release, not a dirty tree (temp `git worktree`).
+> `publish_ugc.py` failed `SteamNotRunningException` on 2026-10-19 while IssueWatcher's helper
+> saw Steam signed in (`HKCU\Software\Valve\Steam\ActiveProcess` pid 0).
 
 ## Two rules that shape this whole folder
 
@@ -146,8 +166,9 @@ out blank for players in that language.
 `submit_description_for_language()` therefore calls `SetItemTitle` on **every** language pass.
 That line looks redundant; it is not, and it has already been paid for once on another mod.
 
-Today only `description.english.txt` exists, so the trap cannot fire yet. Adding a translation is
-dropping `description.<language>.txt` into `locale\` — the script discovers the files, pushes
+`locale\` holds 8 languages, each `title.<language>.txt` + `description.<language>.txt`; both
+`publish_ugc.py` and IssueWatcher's `workshop page` set that language's own title. Adding a
+translation is dropping the two files into `locale\` — the script discovers them, pushes
 english first (Steam's fallback), and sets the tags once on that english pass because tags are
 item-global.
 
@@ -159,9 +180,9 @@ item-global.
 |---|---|
 | `pack-dist.ps1` | Build Release, assemble `Dist\` from `bin\Release\ContentTool` minus the `.pdb`. |
 | `Dist\` | Generated upload folder. Git-ignored. |
-| `contenttool.vdf` | SteamCMD descriptor. Holds the placeholder until the item exists. |
+| `contenttool.vdf` | SteamCMD descriptor. `publishedfileid` = 3814069959. |
 | `update.ps1` | SteamCMD update path: check, pack, stamp the note, upload. |
-| `locale\description.english.txt` | The store description, BBCode, ≤ 8000 bytes. |
+| `locale\` | `title.<lang>.txt` + `description.<lang>.txt`, 8 languages, BBCode, ≤ 8000 bytes. |
 | `steamugc\publish_ugc.py` | Headless create / update / description publisher. |
 | `steamugc\README.md` | The SteamworksPy runtime, and how to recreate it. |
-| `..\image\steam_preview.png` | **Missing on purpose.** ≤ 1 MB, 1024×1024, JPG or PNG. |
+| `image\steam_preview.jpg` | Store preview, ≤ 1 MB, 1024×1024. |
