@@ -988,11 +988,19 @@ namespace Morgott.ContentTool.Tactical
             // cannot animate is dropped, loudly, rather than left as an NRE or a dead button.
             if (strikes)
             {
-                TacActorShootAnimActionDef shootAction = (anims.AnimActions ?? new TacActorAnimActionBaseDef[0])
-                    .OfType<TacActorShootAnimActionDef>()
-                    .FirstOrDefault(s => (s.Equipments != null && s.Equipments.Contains(melee)) ||
-                                         (s.EquipmentList != null && s.EquipmentList.Equipments != null &&
-                                          s.EquipmentList.Equipments.Contains(melee)));
+                // The game's own search order (TacActorAnimActions.SearchAnimActionInDef:134-146): this
+                // level's AnimActions first, then down the BaseAnimActions chain - an action the donor
+                // INHERITS is as reachable as one it declares. The game's lookup itself needs a live
+                // ShootContext, so the walk is mirrored here; the guard stops a cyclic chain.
+                TacActorShootAnimActionDef shootAction = null;
+                var seen = new HashSet<TacActorAnimActionsDef>();
+                for (TacActorAnimActionsDef level = anims; level != null && shootAction == null && seen.Add(level);
+                     level = level.BaseAnimActions)
+                    shootAction = (level.AnimActions ?? new TacActorAnimActionBaseDef[0])
+                        .OfType<TacActorShootAnimActionDef>()
+                        .FirstOrDefault(s => (s.Equipments != null && s.Equipments.Contains(melee)) ||
+                                             (s.EquipmentList != null && s.EquipmentList.Equipments != null &&
+                                              s.EquipmentList.Equipments.Contains(melee)));
                 bool posed = shootAction != null && shootAction.ShootPose != null;
                 if (!posed)
                     melee.Abilities = melee.Abilities.Where(a => !(a is ShootAbilityDef)).ToArray();
