@@ -2419,6 +2419,8 @@ namespace Morgott.ContentTool.Tactical
         /// <summary>Our cloned addons manager, so the SetupRig postfix can tell OUR rig from every
         /// other rig the game instantiates through that same one method.</summary>
         internal AddonsManagerDef Manager;
+        /// <summary>Built once, lazily, by <see cref="CreatureDummyCanPose"/> - see there.</summary>
+        internal Avatar PoseAvatar;
         internal Vector3 Up = Vector3.up;
         internal float Scale = 1f;
         /// <summary>Every clip name the rig's animator controller CONTAINS - which is the honest answer
@@ -2630,6 +2632,54 @@ namespace Morgott.ContentTool.Tactical
                 CreatureBuild.Orient(c, __instance.RigRoot, "SetupRig/" + __instance.GetType().Name);
             }
             catch (Exception ex) { ContentToolMain.Say("ct_creature FAIL rig scale " + ex); }
+        }
+    }
+
+    /// <summary>
+    /// ============ THE RULER NEVER TOOK THE SHOOTING POSE ============
+    /// The ruler above is the right SIZE, and it still measured the wrong muzzle: it never moved.
+    /// CharacterTargetDummy:92 builds its PosingModel with the rig's Animator.avatar, and
+    /// PosingModel's ctor creates its clip overrider ONLY when that avatar is non-null; SamplePose
+    /// then calls clip.SampleAnimation ONLY when the overrider exists. A model-file rig has no avatar
+    /// (nothing here builds one - it plays its generic clips by path without one), so every
+    /// PlaceForClip was a silent no-op and the dummy kept whatever pose it last held: the rest pose,
+    /// or the live actor's pose copied in by PlaceForCurrentPose. ShootOriginsCache then caches THAT
+    /// muzzle per weapon+rig+clip for the whole mission.
+    /// MEASURED 2026-10-19 (Instance3, humanoid demo, Vulture AR): dummy _clipOverrider null, both
+    /// avatars null; the flash spawned at 0.68 m height beside her, nowhere near the barrel. With
+    /// this patch: ruler muzzle vs her LIVE muzzle sampled in the same clip at ShootShot = 0.000 m
+    /// (spider spit 0.017 m - its lift, which PlaceForClip overwrites on the ruler).
+    ///
+    /// The avatar is only a GATE here - SampleAnimation binds by path and needs none - so a generic
+    /// avatar off the rig itself opens it. Handed to PosingModel only, never to the live Animator, so
+    /// the creature's own playback (walk, root motion) is untouched; the dummy's Animator is disabled.
+    /// Identified by the addons manager, NOT the mesh: the dummy ctor strips every renderer off the
+    /// rig before it builds the PosingModel (FilterInComponents), so a mesh test never matches there.
+    /// MEASURED: a PosingModel-ctor prefix keyed on the mesh ran (traced) and changed nothing.
+    /// ponytail: one avatar per creature, built off the first dummy rig and reused (paths are the same
+    /// on every instance of the one template).
+    /// </summary>
+    [HarmonyPatch(typeof(CharacterTargetDummy), MethodType.Constructor, new[] { typeof(TacticalActor) })]
+    internal static class CreatureDummyCanPose
+    {
+        private static readonly AccessTools.FieldRef<PosingModel, AnimatorClipOverrides> Overrider =
+            AccessTools.FieldRefAccess<PosingModel, AnimatorClipOverrides>("_clipOverrider");
+
+        private static void Postfix(CharacterTargetDummy __instance)
+        {
+            try
+            {
+                AddonsManager addons = __instance.AddonsManager;
+                Creature c = addons == null ? null : CreatureBuild.ByManager(addons.AddonsManagerDef);
+                if (c == null || __instance.PosingModel == null || Overrider(__instance.PosingModel) != null) return;
+                GameObject rig = addons.RigRoot.gameObject;
+                if (c.PoseAvatar == null) c.PoseAvatar = AvatarBuilder.BuildGenericAvatar(rig, "");
+                Traverse.Create(__instance).Property("PosingModel").SetValue(new PosingModel(rig, c.PoseAvatar));
+                bool posed = Overrider(__instance.PosingModel) != null;
+                c.Say("ct_creature " + (posed ? "PASS" : "FAIL") + " shooting ruler can " + (posed ? "" : "NOT ") +
+                      "take the shot pose (generic avatar valid=" + c.PoseAvatar.isValid + ")");
+            }
+            catch (Exception ex) { ContentToolMain.Say("ct_creature FAIL dummy pose avatar " + ex); }
         }
     }
 
