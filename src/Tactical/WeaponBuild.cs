@@ -730,6 +730,9 @@ namespace Morgott.ContentTool.Tactical
                                    "apply and nothing to restart: either the key is not declared in " +
                                    "this mod's \"publish\" block, or its bundle was never baked " +
                                    "('ct_project <mod>'). 'ct_catalog status' lists what IS published.");
+                    // A failed load is never held, so nothing else will ever release it: drop the
+                    // handle here, or the failed operation (and any bundle it half-acquired) leaks.
+                    Addressables.Release(op);
                     return;
                 }
                 try
